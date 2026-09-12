@@ -16,6 +16,16 @@ const SOU_STAT = {
   TE: ["rcy", "receiving yards"],
 };
 const QB_WEIGHT = 1.25;
+// Build-a-player: roll a real player at the assigned position, take exactly one of these raw
+// stats from him, repeat until every category is filled, then the assembled player fills that
+// position's slot for a normal draft. Only raw counting stats (not derived ones like yds/carry
+// or QB rating) are pickable, since those can't be assembled piecemeal.
+const BUILD_CATEGORIES = {
+  QB: [["py", "Pass yards"], ["ptd", "Pass TD"], ["int", "INT"], ["ry", "Rush yards"]],
+  RB: [["ry", "Rush yards"], ["rtd", "Rush TD"], ["rec", "Receptions"], ["rcy", "Rec yards"]],
+  WR: [["rcy", "Rec yards"], ["rctd", "Rec TD"], ["rec", "Receptions"], ["ry", "Rush yards"]],
+  TE: [["rcy", "Rec yards"], ["rctd", "Rec TD"], ["rec", "Receptions"], ["fl", "Fumbles lost"]],
+};
 
 const TEAMS = {
   ARI: ["Cardinals", "Arizona", "#97233F", "#FFB612"], ATL: ["Falcons", "Atlanta", "#A71930", "#1B1B1B"],
@@ -1359,6 +1369,7 @@ export default function PerfectSeason() {
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
   const [souRound, setSouRound] = useState(null); // { name, pos, teams, statLabel, trueValue, line, guess, correct }
   const [souScore, setSouScore] = useState({ right: 0, wrong: 0 });
+  const [bap, setBap] = useState(null); // { pos, filled: {stat: value}, contributors: [player], remaining: [stat], roll: player }
   const [wip, setWip] = useState({});               // unfinished drafts, by mode
   // Counts in-flight clearDraft() calls per mode. clearDraft is fire-and-forget (overwrite,
   // then delete - see clearDraft below), so a refreshWip() read can land before it's done and
@@ -1538,15 +1549,18 @@ export default function PerfectSeason() {
   const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history) && s.history.length > 0
     && BOARDS[`${s.spin.team}|${s.spin.w}`] && s.history.every((h) => findPlayer(h.key, h.id, h.season));
 
-  function startDraft(m) {
+  // presetRoster (Build-a-player) pre-fills one slot before the sequence is walked, so boardAt
+  // correctly treats that position as already spoken for from the very first board.
+  function startDraft(m, presetRoster) {
     const seed = m.kind === "daily" ? `daily-${m.date}` : m.code;
     const list = seededSequence(seed);
+    const initialRoster = presetRoster || {};
     setMode({ ...m, seed }); setSeq(list);
-    setRoster({}); setHistory([]); setUsed([]); setSelected(null); setResult(null);
+    setRoster(initialRoster); setHistory([]); setUsed([]); setSelected(null); setResult(null);
     setShown(0); setPo({ idx: 0, stage: "pre" }); setRerolls({ team: 1, years: 1 });
     setPending(null); setNotice(""); setResumed(false); setConfirmReset(false);
     setShare({ state: "idle", text: "" });
-    const i = boardAt(list, 0, {});
+    const i = boardAt(list, 0, initialRoster);
     setSeqIdx(i);
     const [t, w] = list[i].split("|");
     animateTo({ team: t, w: Number(w) });
@@ -1732,6 +1746,44 @@ export default function PerfectSeason() {
     setSouScore((s) => (correct ? { ...s, right: s.right + 1 } : { ...s, wrong: s.wrong + 1 }));
   }
 
+  // Build-a-player: assigns a random position, then rolls real players at that position one at
+  // a time so you can pick a single stat category from each until every category is filled.
+  function rollBapCandidate(pos) {
+    const keys = Object.keys(BOARDS);
+    for (let tries = 0; tries < 50; tries++) {
+      const pool = BOARDS[keys[Math.floor(Math.random() * keys.length)]].filter((p) => p.pos === pos);
+      if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
+    }
+    return null;
+  }
+
+  function startBuild() {
+    const pos = POS[Math.floor(Math.random() * POS.length)];
+    setView("buildplayer");
+    setBap({ pos, filled: {}, contributors: [], remaining: BUILD_CATEGORIES[pos].map(([k]) => k), roll: rollBapCandidate(pos) });
+  }
+
+  function pickBapStat(catKey) {
+    const filled = { ...bap.filled, [catKey]: bap.roll[catKey] };
+    const contributors = [...bap.contributors, bap.roll];
+    const remaining = bap.remaining.filter((k) => k !== catKey);
+    if (!remaining.length) { finishBuild(bap.pos, filled, contributors); return; }
+    setBap({ pos: bap.pos, filled, contributors, remaining, roll: rollBapCandidate(bap.pos) });
+  }
+
+  // The custom player's rating is the average of whoever he was assembled from - not a real
+  // grade (nothing like it exists for a Frankenstein stat line), just enough to slot him into
+  // the same team-score math every other player uses.
+  function finishBuild(pos, filled, contributors) {
+    const rating = Math.round((contributors.reduce((a, p) => a + p.rating, 0) / contributors.length) * 10) / 10;
+    const s = { cmp: 0, att: 0, py: 0, ptd: 0, int: 0, car: 0, ry: 0, rtd: 0, rec: 0, rcy: 0, rctd: 0, fl: 0, ...filled };
+    const ppr = Math.max(0, Math.round((s.py / 25 + s.ptd * 4 - s.int * 2 + s.ry / 10 + s.rtd * 6 + s.rec + s.rcy / 10 + s.rctd * 6 - s.fl * 2) * 10) / 10);
+    const customPlayer = { id: `custom-${Date.now()}`, name: `Your custom ${POS_NAME[pos].replace(/s$/, "")}`, pos, season: "Custom", g: 16, team: contributors[0].team, w: 0, ...s, ppr, rating };
+    setBap(null);
+    setView("play");
+    startDraft({ kind: "free", code: newCode(), build: true }, { [pos]: customPlayer });
+  }
+
   // Today's daily always picks up where it left off: you get one run at it, not one per visit.
   async function startDaily() {
     setView("play");
@@ -1914,6 +1966,12 @@ export default function PerfectSeason() {
               <button className="mode" onClick={() => { setView("statsou"); if (!souRound) newSouRound(); }}>
                 <div className="mt"><span className="mn">Stats O/U</span>{(souScore.right + souScore.wrong) > 0 && <span className="pill">{souScore.right}–{souScore.wrong}</span>}</div>
                 <p>Guess over or under a player's stat line. No drafting, just know your football.</p>
+                <span className="go">Play</span>
+              </button>
+
+              <button className="mode" onClick={startBuild}>
+                <div className="mt"><span className="mn">Build-a-player</span></div>
+                <p>Roll real players and take one stat from each to stitch together a custom season, then draft the rest and sim it.</p>
                 <span className="go">Play</span>
               </button>
 
@@ -2417,6 +2475,37 @@ export default function PerfectSeason() {
                 <button className="btn" onClick={loadLeaderboard} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
               </>
             )}
+          </>
+        )}
+
+        {/* ---------------- BUILD-A-PLAYER ---------------- */}
+        {view === "buildplayer" && bap && (
+          <>
+            <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
+            <p className="note" style={{ marginTop: 0 }}>Roll a real player, then take one of his stats for your build. {bap.remaining.length} categor{bap.remaining.length === 1 ? "y" : "ies"} left.</p>
+            <div className="panel">
+              <h3 style={{ marginTop: 0 }}>{bap.roll.name}</h3>
+              <p className="note" style={{ marginTop: 0 }}>{bap.roll.season} {teamLabel(bap.roll.team, bap.roll.season)}, {bap.roll.g} games</p>
+              <div className="cells">
+                {statCells(bap.roll).map(([n, l]) => (<div className="cell" key={l}><div className="n">{n}</div><div className="l">{l}</div></div>))}
+              </div>
+              <div className="frow" style={{ marginTop: 10, flexWrap: "wrap" }}>
+                {BUILD_CATEGORIES[bap.pos].filter(([k]) => bap.remaining.includes(k)).map(([k, label]) => (
+                  <button key={k} className="btn solid" onClick={() => pickBapStat(k)}>Take his {label} ({bap.roll[k].toLocaleString()})</button>
+                ))}
+              </div>
+            </div>
+            {Object.keys(bap.filled).length > 0 && (
+              <>
+                <h3 className="h" style={{ marginTop: 18 }}>Locked in so far</h3>
+                <div className="recap">
+                  {Object.entries(bap.filled).map(([k, v]) => (
+                    <div className="rc" key={k}><div className="bd">{BUILD_CATEGORIES[bap.pos].find(([ck]) => ck === k)[1]}</div><div className="tk">{v.toLocaleString()}</div></div>
+                  ))}
+                </div>
+              </>
+            )}
+            <button className="btn" style={{ marginTop: 12 }} onClick={() => { setBap(null); setView("home"); }}>Cancel</button>
           </>
         )}
 
