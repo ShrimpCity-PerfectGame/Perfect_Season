@@ -1921,7 +1921,12 @@ export default function PerfectSeason() {
     const totalWeight = SLOTS.reduce((t, s) => t + (s === "QB" ? QB_WEIGHT : 1), 0);
     const share = (bap.pos === "QB" ? QB_WEIGHT : 1) / totalWeight;
     const BASELINE = 80; // scaleStat's own midpoint (a roughly average real starter) - see BAP_ATTRS above
-    const adjustedScore = opp.rec + (customScore - BASELINE) * share;
+    // opp.rec is a display-only figure (shown next to an opponent's name in the UI, see
+    // tagOpp/oppRec) - NOT a team-strength rating. opp.reg is the actual same-scale-as-score
+    // rating gameResult()/simulateSeason() use for every other opponent in the game; using rec
+    // here instead was a real bug (a near-guaranteed 0-17, regardless of the build - rec's
+    // numeric range isn't remotely the same scale winProb()/SPREAD expect).
+    const adjustedScore = opp.reg + (customScore - BASELINE) * share;
     const sim = simulateSeason(adjustedScore);
     setBap({ stage: "result", pos: bap.pos, filled: bap.filled, opp, sim, shown: reducedMotion() ? sim.games.length : 0 });
   }
