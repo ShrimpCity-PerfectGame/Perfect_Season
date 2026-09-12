@@ -147,15 +147,17 @@ Don't hand-edit `data.json`; change the scripts and regenerate.
    leaderboard live in `window.storage`, which means the game only runs inside its host and the
    leaderboard can be tampered with. Plan: a small backend (Supabase or Firebase) with real auth, a
    `runs` table, and server-side leaderboard queries; replace the `sget`/`sset` helpers with API
-   calls. Game logic carries over unchanged.
+   calls. Game logic carries over unchanged. Also the blocker for a real concurrent-online-players
+   counter — a local-only version would just be fake, so that's on hold until this lands.
 2. **Player index** — browse the full pool by team and era, see which boards are loaded.
 3. **Hall of fame** — highest-scoring lineups ever drafted, most-drafted players.
-4. **Hard mode** — stats hidden; draft on name and year alone.
-5. **Scoring modes** — standard and half-PPR alongside the current full PPR.
-6. **Housekeeping** — final name and domain (add the URL to the share text), 2026 season data once
+4. **Scoring modes** — standard and half-PPR alongside the current full PPR.
+5. **Housekeeping** — final name and domain (add the URL to the share text), 2026 season data once
    it's played, an accessibility pass (position colors currently carry meaning on their own).
 
-Also requested but not yet started: four new game modes (GM mode with a salary cap, Genius mode
-with names only, a Stats Over/Under guessing mode, Build-a-player), a concurrent-online-players
-counter, and a front-page graphic of aggregate drafts/players — all depend on goal 1 (a real
-backend) to be more than a local-only demo.
+**Done:** "Hard mode" (goal 4 above, in earlier versions of this list) shipped as **Genius mode** —
+same draft, player cards hide every stat cell. Also shipped: **GM mode** (salary cap, derived from
+`p.rating` so era doesn't affect price — see `playerSalary()`), **Stats O/U** (career-stat
+over/under guessing), **Build-a-player** (roll real players, take one stat from each to assemble a
+custom season), and a **Sitewide** stats panel on the home screen. See `AdminPanel`, `SOU_STAT`,
+`BUILD_CATEGORIES`, and `GM_CAP`/`playerSalary()` in the source.
