@@ -1,0 +1,20 @@
+{
+  "name": "perfect-season",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "check": "esbuild perfect-season.jsx --bundle --format=esm --platform=node --jsx=automatic --outfile=build/app.js --external:react --external:react-dom",
+    "build": "esbuild entry.jsx --bundle --format=iife --jsx=automatic --outfile=build/page.js --define:process.env.NODE_ENV=\"'production'\"",
+    "test": "node tests/test-accounts.mjs && node tests/test-daily.mjs && node tests/test-nav.mjs",
+    "test:difficulty": "node tests/test-difficulty.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "jsdom": "^25.0.1"
+  }
+}
