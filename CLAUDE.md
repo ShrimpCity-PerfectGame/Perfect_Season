@@ -21,15 +21,20 @@ targeted `offset`/`limit` reads or grep instead).
 npx esbuild perfect-season.jsx --bundle --format=esm --platform=node \
   --jsx=automatic --outfile=build/app.js --external:react --external:react-dom
 
-# Build a runnable page for browser testing (entry.jsx mounts the app + a window.storage shim)
-npx esbuild entry.jsx --bundle --format=iife --jsx=automatic \
-  --outfile=build/page.js --define:process.env.NODE_ENV='"production"'
-# then open page.html, which loads build/page.js
+# Build a runnable page for browser testing (entry.jsx mounts the app; storage.js's getClient()
+# falls back to a real @supabase/supabase-js client built from SUPABASE_URL/SUPABASE_ANON_KEY,
+# injected at build time - use build.mjs, NOT a raw esbuild CLI call, or those come back
+# undefined and every auth/leaderboard call throws at page load)
+SUPABASE_URL=... SUPABASE_ANON_KEY=... node build.mjs
+# then open public/page.html, which loads public/page.js
 
-# Headless DOM tests (jsdom + react-dom/client, drive the real UI via tests/helpers.mjs)
+# Headless DOM tests (jsdom + react-dom/client, drive the real UI via tests/helpers.mjs) - these
+# never touch a real Supabase project; window.__ps_supabase__ is a mock (see makeMockAuth in
+# tests/helpers.mjs), installed the same way window.storage is
 node tests/test-accounts.mjs      # signup, login, stats persistence
 node tests/test-daily.mjs         # seeded boards, daily lock, challenge codes
 node tests/test-nav.mjs           # landing page, mode switching, draft resume
+node tests/test-mode-switch.mjs   # switching Unlimited/Genius/GM mid-draft starts fresh, doesn't resume the wrong variant
 node tests/test-wip-race.mjs      # end-of-draft storage race (see pendingClears below)
 node tests/test-board-order.mjs   # board section reordering timing
 node tests/test-reroll-pool.mjs   # reroll can't repeat an already-used team+era
@@ -61,17 +66,33 @@ upstream source data; don't assume the pipeline is present without checking.
 `bestAvailable`, `RosterRows`, `AuthPanel`, `AdminPanel`, etc.) is module scope — plain functions and
 consts, not hooks — so they're usable from tests or other components without touching React state.
 
-**Storage is a remote KV store, not local state.** `window.storage.{get,set,delete,list}(key,
-shared)` is the only persistence primitive (an artifact-host API in this environment; `entry.jsx`
-provides a localStorage-backed shim for standalone/browser use, `tests/helpers.mjs` provides an
-in-memory one for tests). `shared=true` keys are sitewide (accounts `acct:`, stats `stats:`,
-daily-leaderboard `daily:<date>:`); `shared=false` keys are per-device (session, draft-in-progress
-snapshots). All reads/writes go through `sget`/`sset`/`sdel`/`clearDraft`, which swallow errors and
-return null — **assume this API has no read-after-write ordering guarantee.** A read that starts
-after a write can still resolve first. The `pendingClears` ref-counter in the main component (guards
-`refreshWip()` against a stale read landing while `clearDraft()` is still in flight) is the pattern
-to follow for any future bug in this class — don't try to fix it with `await` ordering, since the
-race is between two independent async calls that don't share a promise chain.
+**Storage is split across two real backends, both behind `storage.js`.** Personal, per-device
+data (draft-in-progress snapshots, the howto-seen flag) goes through `window.storage.{get,set,
+delete,list}(key, shared)` — a localStorage-backed shim in `entry.jsx` for the browser, an
+in-memory one in `tests/helpers.mjs`. Everything sitewide (accounts, stats, the leaderboard, daily
+runs) goes through a Supabase client instead: `storage.js`'s `getClient()` returns
+`window.__ps_supabase__` when a test/dev override is installed, otherwise a real
+`@supabase/supabase-js` client built from `SUPABASE_URL`/`SUPABASE_ANON_KEY` (injected at build
+time by `build.mjs` — see Build/Run Commands above). Auth, profile reads/writes, and leaderboard/
+daily queries all go through named functions in `storage.js` (`authSignUp`, `fetchProfile`,
+`fetchLeaderboardTop`, `upsertDailyRun`, etc.) — never call `getClient()` directly from
+`perfect-season.jsx`. Personal-key reads/writes still go through `sget`/`sset`/`sdel`/
+`clearDraft`, which swallow errors and return null — **assume this half of the API has no
+read-after-write ordering guarantee** (Supabase's Postgres-backed half doesn't have this problem).
+A read that starts after a write can still resolve first. The `pendingClears` ref-counter in the
+main component (guards `refreshWip()` against a stale read landing while `clearDraft()` is still
+in flight) is the pattern to follow for any future bug in this class — don't try to fix it with
+`await` ordering, since the race is between two independent async calls that don't share a promise
+chain.
+
+**Row Level Security, not app code, is the write gate.** `supabase/schema.sql` defines `profiles`
+and `daily_runs` with public SELECT and `auth.uid()`-gated writes; a `handle_new_user` trigger
+creates a profile row atomically when `auth.users` gets a new row (reading the username from
+`signUp()`'s `options.data.username`), so there's no separate client-side insert that could leave
+an orphaned auth user. **Known limitation**: an authenticated client can still write any
+`best_score`/`recent` payload for their own row — RLS proves who is writing, not that the number is
+truthful. Real tamper-resistance needs server-side score recomputation from a signed roster+seed;
+worth doing before tying money to leaderboard rank.
 
 **Everything seeded runs through `mulberry32(hashStr(seed))`.** Board sequences
 (`seededSequence`), reroll picks, and the season simulation (`simulateSeason`, wrapped by
@@ -143,21 +164,21 @@ Don't hand-edit `data.json`; change the scripts and regenerate.
 
 ## Immediate Next Goals
 
-1. **Stand up a server.** This is the blocker for going public. Right now accounts, stats, and the
-   leaderboard live in `window.storage`, which means the game only runs inside its host and the
-   leaderboard can be tampered with. Plan: a small backend (Supabase or Firebase) with real auth, a
-   `runs` table, and server-side leaderboard queries; replace the `sget`/`sset` helpers with API
-   calls. Game logic carries over unchanged. Also the blocker for a real concurrent-online-players
-   counter — a local-only version would just be fake, so that's on hold until this lands.
-2. **Player index** — browse the full pool by team and era, see which boards are loaded.
-3. **Hall of fame** — highest-scoring lineups ever drafted, most-drafted players.
-4. **Scoring modes** — standard and half-PPR alongside the current full PPR.
-5. **Housekeeping** — final name and domain (add the URL to the share text), 2026 season data once
-   it's played, an accessibility pass (position colors currently carry meaning on their own).
+1. **Player index** — browse the full pool by team and era, see which boards are loaded.
+2. **Hall of fame** — highest-scoring lineups ever drafted, most-drafted players.
+3. **Scoring modes** — standard and half-PPR alongside the current full PPR.
+4. **A real concurrent-online-players counter** — was on hold pending a real backend; that
+   blocker is gone (see below), so this is buildable now (e.g. Supabase Realtime presence).
+5. **Housekeeping** — custom domain (currently a free `*.vercel.app` subdomain; add the URL to
+   the share text once one exists), 2026 season data once it's played, an accessibility pass
+   (position colors currently carry meaning on their own).
 
-**Done:** "Hard mode" (goal 4 above, in earlier versions of this list) shipped as **Genius mode** —
-same draft, player cards hide every stat cell. Also shipped: **GM mode** (salary cap, derived from
-`p.rating` so era doesn't affect price — see `playerSalary()`), **Stats O/U** (career-stat
-over/under guessing), **Build-a-player** (roll real players, take one stat from each to assemble a
-custom season), and a **Sitewide** stats panel on the home screen. See `AdminPanel`, `SOU_STAT`,
-`BUILD_CATEGORIES`, and `GM_CAP`/`playerSalary()` in the source.
+**Done:** the game is a real public product now, not a local-only demo. Accounts/stats/leaderboard
+run on Supabase (Postgres + Auth, RLS-gated — see Architecture above) instead of `window.storage`,
+and it's deployed on Vercel (`vercel.json` + `build.mjs`). "Hard mode" (an earlier version of this
+list) shipped as **Genius mode** — same draft, player cards hide every stat cell. Also shipped:
+**GM mode** (salary cap, derived from `p.rating` so era doesn't affect price — see
+`playerSalary()`), **Stats O/U** (career-stat over/under guessing), **Build-a-player** (roll real
+players, take one stat from each to assemble a custom season), and a **Sitewide** stats panel on
+the home screen. See `AdminPanel`, `SOU_STAT`, `BUILD_CATEGORIES`, and `GM_CAP`/`playerSalary()`
+in the source.

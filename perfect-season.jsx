@@ -992,17 +992,34 @@ h2.h{font-family:var(--display);font-weight:800;font-size:24px;color:var(--ink);
 .mode:active:not(.static){transform:translateY(2px)}
 .mode.static{cursor:default}
 .mode.daily{background:radial-gradient(ellipse 70% 130% at 0% 0%,rgba(247,179,43,.22),transparent 60%),linear-gradient(160deg,var(--surface2),var(--surface));border-color:rgba(247,179,43,.5)}
-.mode .mt{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mode .mt{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .mode .mn{font-family:var(--display);font-weight:800;font-size:27px;line-height:1}
 .mode p{margin:6px 0 10px;color:var(--muted);font-size:14.5px;max-width:58ch}
-.mode .go{font-weight:700;font-size:14px;color:var(--lamp)}
+.mode .icon{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  font-size:21px;line-height:1;flex:0 0 auto;background:var(--lampsoft);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.mode .go{font-weight:800;font-size:13.5px;color:#241704;background:var(--lamp);border-radius:999px;padding:7px 14px 7px 16px;
+  display:inline-flex;align-items:center;gap:6px;box-shadow:0 2px 10px rgba(245,179,36,.25);transition:transform .08s,filter .12s}
+.mode .go::after{content:'\\2192';font-weight:900}
+.mode:hover:not(.static) .go{filter:brightness(1.08)}
+.mode:active:not(.static) .go{transform:translateY(1px)}
+.mode.m-unlimited .icon{background:rgba(90,169,255,.18);color:#5AA9FF}
+.mode.m-unlimited .go{background:#5AA9FF;color:#0A1526;box-shadow:0 2px 10px rgba(90,169,255,.25)}
+.mode.m-genius .icon{background:rgba(177,140,255,.18);color:#B18CFF}
+.mode.m-genius .go{background:#B18CFF;color:#1A1030;box-shadow:0 2px 10px rgba(177,140,255,.25)}
+.mode.m-gm .icon{background:rgba(74,222,128,.18);color:#4ADE80}
+.mode.m-gm .go{background:#4ADE80;color:#08210F;box-shadow:0 2px 10px rgba(74,222,128,.25)}
+.mode.m-sou .icon{background:rgba(242,85,122,.18);color:#F2557A}
+.mode.m-sou .go{background:#F2557A;color:#2B0710;box-shadow:0 2px 10px rgba(242,85,122,.25)}
+.mode.m-bap .icon{background:rgba(47,211,198,.18);color:#2FD3C6}
+.mode.m-bap .go{background:#2FD3C6;color:#04211E;box-shadow:0 2px 10px rgba(47,211,198,.25)}
+.mode.static .icon{background:rgba(147,168,155,.14);color:var(--muted)}
 .mode .pill{font-size:12px;font-weight:700;color:#241704;background:var(--lamp);border-radius:20px;padding:2px 9px}
 .hometiles{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:14px}
 .hometiles .n{font-size:26px}
 .whoami{font-weight:600;font-size:14px;color:var(--ink)}
 .nav .hdr-links{margin-left:auto;margin-top:0;align-items:center;padding-bottom:6px}
 .nav{align-items:center}
-@media (max-width:640px){.modes{gap:8px}.mode{padding:14px}.mode .mn{font-size:24px}}
+@media (max-width:640px){.modes{gap:8px}.mode{padding:14px}.mode .mn{font-size:24px}.mode .icon{width:36px;height:36px;font-size:18px;border-radius:10px}}
 @media (max-width:640px){.btn.reset{margin-left:0}.rc{grid-template-columns:24px 1fr}.rc .alt{grid-column:2}.cells{display:grid;grid-template-columns:repeat(4,1fr);width:100%;gap:8px 6px}.cell{width:auto}.sticky .in{padding:6px 12px 7px 18px;gap:4px 8px}.sticky .tm{font-size:24px}.chip{padding:2px 4px;font-size:10.5px}.sticky .btn.sm{padding:4px 8px;font-size:11.5px}.sticky .pk{display:none}.roster{grid-template-columns:repeat(3,1fr)}.title{font-size:36px}.tiles{grid-template-columns:repeat(2,1fr)}.lb .hide{display:none}.rr{grid-template-columns:56px 56px 1fr}.rr .sc2{display:none}.sticky .sp{margin-left:auto}.brk{display:block;flex-basis:100%;height:0}}
 @media (prefers-reduced-motion:reduce){.g,.flash,.ball{animation:none}.ball,.trail{transition:none}.sticky{transition:none}}
 `;
@@ -1891,6 +1908,7 @@ export default function PerfectSeason() {
             <div className="modes">
               <button className="mode daily" onClick={startDaily}>
                 <div className="mt">
+                  <span className="icon" aria-hidden="true">📅</span>
                   <span className="mn">Daily challenge</span>
                   {stats?.dailyStreak && stats.dailyLast === todayKey() ? <span className="pill">{stats.dailyStreak} day streak</span> : null}
                   {dailyPicks > 0 && <span className="pill">{dailyPicks} of 6 picked</span>}
@@ -1899,38 +1917,44 @@ export default function PerfectSeason() {
                 <span className="go">{dailyDone ? "See today's result" : dailyPicks > 0 ? "Finish today's daily" : "Play today's daily"}</span>
               </button>
 
-              <button className="mode" onClick={() => openFree()}>
-                <div className="mt"><span className="mn">Unlimited</span>{freePicks > 0 && <span className="pill">{freePicks} of 6 picked</span>}</div>
+              <button className="mode m-unlimited" onClick={() => openFree()}>
+                <div className="mt">
+                  <span className="icon" aria-hidden="true">♾️</span>
+                  <span className="mn">Unlimited</span>{freePicks > 0 && <span className="pill">{freePicks} of 6 picked</span>}
+                </div>
                 <p>Draft as many teams as you like. Random boards every time, resets allowed.</p>
                 <span className="go">{freePicks > 0 ? "Back to your draft" : "Start a draft"}</span>
               </button>
 
-              <button className="mode" onClick={() => openFree({ genius: true })}>
-                <div className="mt"><span className="mn">Genius mode</span></div>
+              <button className="mode m-genius" onClick={() => openFree({ genius: true })}>
+                <div className="mt"><span className="icon" aria-hidden="true">🧠</span><span className="mn">Genius mode</span></div>
                 <p>Same draft, no stats shown. Just name, team, and year - know your football. Shares your Unlimited progress slot.</p>
                 <span className="go">Start a draft</span>
               </button>
 
-              <button className="mode" onClick={() => openFree({ gm: true })}>
-                <div className="mt"><span className="mn">GM mode</span></div>
+              <button className="mode m-gm" onClick={() => openFree({ gm: true })}>
+                <div className="mt"><span className="icon" aria-hidden="true">💼</span><span className="mn">GM mode</span></div>
                 <p>Draft against a ${GM_CAP}M salary cap. Elite seasons cost a lot more. Shares your Unlimited progress slot.</p>
                 <span className="go">Start a draft</span>
               </button>
 
-              <button className="mode" onClick={() => { setView("statsou"); if (!souRound) newSouRound(); }}>
-                <div className="mt"><span className="mn">Stats O/U</span>{(souScore.right + souScore.wrong) > 0 && <span className="pill">{souScore.right}–{souScore.wrong}</span>}</div>
+              <button className="mode m-sou" onClick={() => { setView("statsou"); if (!souRound) newSouRound(); }}>
+                <div className="mt">
+                  <span className="icon" aria-hidden="true">📊</span>
+                  <span className="mn">Stats O/U</span>{(souScore.right + souScore.wrong) > 0 && <span className="pill">{souScore.right}–{souScore.wrong}</span>}
+                </div>
                 <p>Guess over or under a player's stat line. No drafting, just know your football.</p>
                 <span className="go">Play</span>
               </button>
 
-              <button className="mode" onClick={startBuild}>
-                <div className="mt"><span className="mn">Build-a-player</span></div>
+              <button className="mode m-bap" onClick={startBuild}>
+                <div className="mt"><span className="icon" aria-hidden="true">🧩</span><span className="mn">Build-a-player</span></div>
                 <p>Roll real players and take one stat from each to stitch together a custom season, then draft the rest and sim it.</p>
                 <span className="go">Play</span>
               </button>
 
               <div className="mode static">
-                <div className="mt"><span className="mn">Challenge a friend</span></div>
+                <div className="mt"><span className="icon" aria-hidden="true">🔗</span><span className="mn">Challenge a friend</span></div>
                 <p>Enter a code to draft the exact same boards someone else had.</p>
                 <div className="frow">
                   <input className="inp" value={codeInput} maxLength={8} placeholder="Code, e.g. K3F9QZ" aria-label="Challenge code"
