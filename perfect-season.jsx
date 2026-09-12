@@ -1745,13 +1745,26 @@ export default function PerfectSeason() {
   }
 
   // Unlimited: pick up the half-finished one if there is one, otherwise deal a fresh board.
-  // Genius/GM mode are the same free-draft slot with a flag that changes how it's played.
+  // Genius/GM mode are the same free-draft slot with a flag that changes how it's played - but
+  // tapping a variant that doesn't match what's actually saved there (e.g. a Genius draft is
+  // half-finished and you tap GM mode) must not silently resume it under the wrong flags. Treat
+  // that as abandoning the old variant (a DNF, same as any other abandoned unlimited draft) and
+  // dealing a fresh board in the variant actually requested.
   async function openFree(extra) {
     setView("play");
-    if (mode && mode.kind === "free" && !result && history.length > 0) return;
+    const sameVariant = (m) => !!m?.genius === !!extra?.genius && !!m?.gm === !!extra?.gm;
+    if (mode && mode.kind === "free" && sameVariant(mode) && !result && history.length > 0) return;
     const saved = await sget(FREE_PROGRESS, false);
-    if (validDraft(saved) && saved.mode.kind === "free") { restoreDraft(saved); return; }
-    restart(extra);
+    if (validDraft(saved) && saved.mode.kind === "free") {
+      if (sameVariant(saved.mode)) { restoreDraft(saved); return; }
+      // Use the saved history length (not live state) so the DNF is recorded correctly even if
+      // this draft was started in an earlier session and never loaded back into memory.
+      if (user && stats) saveStats(applyDnf(stats, saved.history.length));
+      clearDraftTracked("free", FREE_PROGRESS);
+      setWip((w) => ({ ...w, free: 0 }));
+    }
+    clearDraft(DRAFT_KEY);
+    startDraft({ kind: "free", code: newCode(), ...extra });
   }
 
   function startCode(raw) {
