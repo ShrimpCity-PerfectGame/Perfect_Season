@@ -1,11 +1,12 @@
 // Flex slots must grade on raw production alone: whichever Flex pick has more PPR points
 // should never grade lower than the other Flex pick, regardless of position (a TE and a WR
 // in Flex are on equal footing - no positional curve should be able to flip that order).
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 async function draftOneSeason() {
   setupDom();
   window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
   const { container } = await mount();
   await flush();
   await click(findButtonByText(container, "Start a draft"));

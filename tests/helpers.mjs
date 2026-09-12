@@ -11,6 +11,106 @@ import * as esbuild from "esbuild";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const root = path.resolve(__dirname, "..");
 
+// In-memory mock of the Supabase client surface storage.js actually calls: auth (signUp,
+// signInWithPassword, signOut, getSession, onAuthStateChange) and .from("profiles"/"daily_runs")
+// with the specific chains storage.js uses (.select().eq().single(), .select().not().order()
+// .limit(), .update().eq(), .insert()). Not a general Postgres emulator - just enough surface
+// for these exact call shapes. Install as window.__ps_supabase__ so storage.js's getClient()
+// picks it up instead of a real network client.
+export function makeMockAuth() {
+  const authUsers = new Map(); // email -> {id, email, password}
+  const profiles = new Map(); // id -> row (snake_case, matches the real schema)
+  const dailyRuns = new Map(); // "date:userId" -> row
+  let session = null;
+  const listeners = [];
+  const notify = (event) => listeners.forEach((cb) => cb(event, session));
+
+  function from(table) {
+    const store = table === "profiles" ? profiles : dailyRuns;
+    return {
+      select() {
+        const state = { filters: [], order: null, limit: null };
+        const run = () => {
+          let out = [...store.values()].filter((r) => state.filters.every((f) => f(r)));
+          if (state.order) out = out.sort((a, b) => (state.order.asc ? a[state.order.col] - b[state.order.col] : b[state.order.col] - a[state.order.col]));
+          if (state.limit != null) out = out.slice(0, state.limit);
+          return out;
+        };
+        const builder = {
+          eq(col, val) { state.filters.push((r) => r[col] === val); return builder; },
+          not(col, _op, val) { state.filters.push((r) => r[col] !== val); return builder; },
+          order(col, opts) { state.order = { col, asc: opts?.ascending !== false }; return builder; },
+          limit(n) { state.limit = n; return builder; },
+          single() {
+            const rows = run();
+            return Promise.resolve(rows[0] ? { data: rows[0], error: null } : { data: null, error: { message: "no rows" } });
+          },
+          then(resolve, reject) { return Promise.resolve({ data: run(), error: null }).then(resolve, reject); },
+        };
+        return builder;
+      },
+      update(patch) {
+        return {
+          eq(col, val) {
+            for (const row of store.values()) if (row[col] === val) Object.assign(row, patch);
+            return Promise.resolve({ error: null });
+          },
+        };
+      },
+      insert(row) {
+        if (table === "profiles") {
+          if ([...profiles.values()].some((r) => r.username === row.username)) {
+            return Promise.resolve({ error: { code: "23505", message: 'duplicate key value violates unique constraint "profiles_username_key"' } });
+          }
+          profiles.set(row.id, { runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, ...row });
+        } else {
+          dailyRuns.set(`${row.date}:${row.user_id}`, row);
+        }
+        return Promise.resolve({ error: null });
+      },
+    };
+  }
+
+  return {
+    from,
+    _profiles: profiles, // test-only escape hatch for setup/assertions
+    auth: {
+      async signUp({ email, password, options }) {
+        if (authUsers.has(email)) return { data: null, error: { message: "User already registered" } };
+        const username = options?.data?.username;
+        if ([...profiles.values()].some((r) => r.username === username)) {
+          return { data: null, error: { code: "23505", message: 'duplicate key value violates unique constraint "profiles_username_key"' } };
+        }
+        const id = `user-${authUsers.size + 1}`;
+        authUsers.set(email, { id, email, password });
+        profiles.set(id, { id, username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0 });
+        session = { user: { id, email } };
+        notify("SIGNED_IN");
+        return { data: { user: { id, email } }, error: null };
+      },
+      async signInWithPassword({ email, password }) {
+        const u = authUsers.get(email);
+        if (!u || u.password !== password) return { data: null, error: { message: "Invalid login credentials" } };
+        session = { user: { id: u.id, email } };
+        notify("SIGNED_IN");
+        return { data: { user: { id: u.id, email } }, error: null };
+      },
+      async signOut() {
+        session = null;
+        notify("SIGNED_OUT");
+        return { error: null };
+      },
+      async getSession() {
+        return { data: { session } };
+      },
+      onAuthStateChange(cb) {
+        listeners.push(cb);
+        return { data: { subscription: { unsubscribe() { const i = listeners.indexOf(cb); if (i >= 0) listeners.splice(i, 1); } } } };
+      },
+    },
+  };
+}
+
 export function setupDom(url = "http://localhost/") {
   const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", { url });
   const { window } = dom;
@@ -128,14 +228,11 @@ export async function mount() {
   return { container, reactRoot };
 }
 
-// Account signup/login hashes passwords with 150k-iteration PBKDF2 (hashPassword() in
-// perfect-season.jsx), which takes real wall-clock time - long enough that flush()'s
-// single-tick waits resolve before it's done. Use this after any auth submit.
+// Auth now runs through the mock Supabase client (no client-side PBKDF2 delay to wait out),
+// but call sites still call this after a signup/login submit - kept as a thin flush() alias
+// rather than touched at every call site.
 export async function waitForCrypto() {
-  const act = await getAct();
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 500));
-  });
+  await flush();
 }
 
 export async function flush(rounds = 3) {

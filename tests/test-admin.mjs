@@ -1,9 +1,10 @@
 // Admin tools: gated to the "admin" account, can jump to any board, force a specific player
 // into a slot, and force a scripted season ending for testing win/loss animations.
-import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
 
@@ -14,7 +15,8 @@ await runTest("a regular account sees no admin panel", async () => {
   await flush();
   await click(findButtonByText(panel(), "Create account"));
   await flush();
-  const [u, p, p2] = [...panel().querySelectorAll("input")];
+  const [e, u, p, p2] = [...panel().querySelectorAll("input")];
+  await type(e, "regularuser@test.com");
   await type(u, "regularuser");
   await type(p, "Password1");
   await type(p2, "Password1");
@@ -38,7 +40,8 @@ await runTest("logging in as admin shows the admin panel", async () => {
 
   await click(findButtonByText(panel(), "Create account"));
   await flush();
-  const [u, p, p2] = [...panel().querySelectorAll("input")];
+  const [e, u, p, p2] = [...panel().querySelectorAll("input")];
+  await type(e, "admin@test.com");
   await type(u, "admin");
   await type(p, "AdminPass1");
   await type(p2, "AdminPass1");

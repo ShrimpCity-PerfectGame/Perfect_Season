@@ -1,8 +1,9 @@
 // Landing page, mode switching, and draft resume.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
 

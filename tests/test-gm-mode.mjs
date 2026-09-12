@@ -1,9 +1,10 @@
 // GM mode: a player's salary is shown before selecting them, doesn't change based on which
 // slot (named or Flex) they'd fill, and the "Draft to X" cost matches what was shown up front.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Got it, let's draft"));

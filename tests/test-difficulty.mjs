@@ -2,13 +2,14 @@
 // and reports average wins / perfect-season rate. This is a floor, not the tuning benchmark:
 // CLAUDE.md's ~15 avg wins / 2-4% perfect rate is measured against a "fantasy-savvy" drafter
 // that picks the best available player, not merely the first eligible one.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, makeMockAuth } from "./helpers.mjs";
 
 const N = Number(process.argv[2]) || 15;
 
 async function draftOneSeason() {
   setupDom();
   window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
   const { container } = await mount();
   await flush();
   await click(findButtonByText(container, "Start a draft"));

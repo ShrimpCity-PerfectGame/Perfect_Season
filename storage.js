@@ -1,10 +1,11 @@
-// Thin persistence seam. shared=true keys are sitewide (leaderboard-visible - accounts, stats,
-// daily-challenge results); shared=false keys are per-device only (session, draft-in-progress
-// snapshots, the howto-seen flag). In tests and local dev, `window.storage` is a mock/shim
-// (tests/helpers.mjs's makeStorage(), or entry.jsx's localStorage shim); in production,
-// entry.jsx installs a real Supabase-backed implementation here instead. Nothing in this file
-// or its callers needs to know which backend is actually behind window.storage - that's the
-// point of the seam.
+// Two independent seams:
+//  - window.storage (get/set/delete): personal, per-device data only (draft-in-progress
+//    snapshots, the daily-done flag, the howto-seen flag). Backed by localStorage in
+//    production (entry.jsx), an in-memory mock in tests (tests/helpers.mjs's makeStorage()).
+//  - the Supabase client (auth + "profiles"/"daily_runs" tables): all sitewide/shared data -
+//    accounts, stats, the leaderboard. Backed by a real @supabase/supabase-js client in
+//    production, an in-memory mock in tests (tests/helpers.mjs's makeMockAuth()), reached via
+//    window.__ps_supabase__ so tests never need a real network call or project.
 export async function sget(key, shared) {
   try { const r = await window.storage.get(key, shared); return r && r.value ? JSON.parse(r.value) : null; }
   catch (e) { return null; }
@@ -23,53 +24,91 @@ export async function clearDraft(key) {
   await sdel(key, false);
 }
 
-// ---------- Leaderboard / daily-board queries ----------
-// For now these still list-then-fetch-everything against window.storage, exactly like the code
-// they replaced - same cost, same behavior, just given real names. Once a real Supabase backend
-// is wired in, only these four functions' internals change to real targeted SQL queries; every
-// caller in perfect-season.jsx already expects this shape and won't need to change again.
-const STATS_PREFIX = "stats:";
-const DAILY_PREFIX = (date) => `daily:${date}:`;
+// ---------- Supabase client seam ----------
+let _client = null;
+function getClient() {
+  if (typeof window !== "undefined" && window.__ps_supabase__) return window.__ps_supabase__;
+  return _client; // wired to a real @supabase/supabase-js client once a real project exists
+}
 
-async function fetchAllStats() {
-  const res = await window.storage.list(STATS_PREFIX, true);
-  const keys = (res?.keys || []).map((k) => (typeof k === "string" ? k : k.key)).filter(Boolean);
-  const rows = [];
-  for (let i = 0; i < keys.length; i += 10) {
-    const batch = await Promise.all(keys.slice(i, i + 10).map(async (k) => {
-      const v = await sget(k, true);
-      return v ? { ...v, id: k.slice(STATS_PREFIX.length) } : null;
-    }));
-    rows.push(...batch.filter(Boolean));
-  }
-  return rows;
+// ---------- Auth ----------
+export async function authSignUp(email, password, username) {
+  return getClient().auth.signUp({ email, password, options: { data: { username } } });
+}
+export async function authSignIn(email, password) {
+  return getClient().auth.signInWithPassword({ email, password });
+}
+export async function authSignOut() {
+  return getClient().auth.signOut();
+}
+export async function authGetSession() {
+  return getClient().auth.getSession();
+}
+export function authOnChange(cb) {
+  return getClient().auth.onAuthStateChange(cb);
+}
+// Maps a Supabase-shaped error to the same friendly copy the old PBKDF2 flow used to show.
+export function mapAuthError(error) {
+  if (!error) return "Something went wrong. Try again.";
+  if (error.code === "23505" || /username/i.test(error.message || "")) return "That username is taken. Try another one.";
+  if (/already registered|already exists/i.test(error.message || "")) return "An account with that email already exists.";
+  return "The account couldn't be created. Check your connection and try again.";
+}
+
+// ---------- Profiles (stats) and daily runs ----------
+// DB columns are snake_case; the rest of the app works with the same camelCase shape
+// blankStats() always produced, so every profile row is translated at this boundary.
+function rowToProfile(row) {
+  if (!row) return null;
+  return {
+    username: row.username, runs: row.runs || 0, dnf: row.dnf || 0, wins: row.wins || 0, losses: row.losses || 0,
+    champs: row.champs || 0, perfect: row.perfect || 0, playoffs: row.playoffs || 0,
+    bestScore: row.best_score ?? null, bestRun: row.best_run ?? null, bestRecord: row.best_record ?? null,
+    recent: row.recent || [], dailyStreak: row.daily_streak || 0, dailyLast: row.daily_last ?? null,
+    dailyBestStreak: row.daily_best_streak || 0, id: row.id,
+  };
+}
+function profileToRow(s) {
+  return {
+    username: s.username, runs: s.runs, dnf: s.dnf, wins: s.wins, losses: s.losses,
+    champs: s.champs, perfect: s.perfect, playoffs: s.playoffs,
+    best_score: s.bestScore, best_run: s.bestRun, best_record: s.bestRecord, recent: s.recent || [],
+    daily_streak: s.dailyStreak, daily_last: s.dailyLast, daily_best_streak: s.dailyBestStreak,
+  };
+}
+
+export async function fetchProfile(userId) {
+  const { data } = await getClient().from("profiles").select("*").eq("id", userId).single();
+  return rowToProfile(data);
+}
+export async function updateProfile(userId, s) {
+  const { error } = await getClient().from("profiles").update(profileToRow(s)).eq("id", userId);
+  return !error;
 }
 
 export async function fetchLeaderboardTop(limit = 10) {
-  const rows = await fetchAllStats();
-  return rows.filter((q) => q.bestScore != null).sort((a, b) => b.bestScore - a.bestScore).slice(0, limit);
+  const { data, error } = await getClient().from("profiles").select("*").not("best_score", "is", null).order("best_score", { ascending: false }).limit(limit);
+  if (error || !data) return [];
+  return data.map(rowToProfile);
 }
-
 // How many players sit strictly above this score - callers add 1 for a 1-based rank.
 export async function fetchOwnRank(score) {
-  const rows = await fetchAllStats();
-  return rows.filter((q) => q.bestScore != null && q.bestScore > score).length;
+  const { data, error } = await getClient().from("profiles").select("*");
+  if (error || !data) return 0;
+  return data.filter((r) => r.best_score != null && r.best_score > score).length;
 }
-
 export async function fetchSiteTotals() {
-  const rows = await fetchAllStats();
-  const totals = rows.reduce((t, q) => ({ runs: t.runs + (q.runs || 0) + (q.dnf || 0), perfect: t.perfect + (q.perfect || 0) }), { runs: 0, perfect: 0 });
+  const { data, error } = await getClient().from("profiles").select("*");
+  const rows = error || !data ? [] : data;
+  const totals = rows.reduce((t, r) => ({ runs: t.runs + (r.runs || 0) + (r.dnf || 0), perfect: t.perfect + (r.perfect || 0) }), { runs: 0, perfect: 0 });
   return { ...totals, players: rows.length };
 }
-
 export async function fetchDailyTop(date, limit = 10) {
-  const res = await window.storage.list(DAILY_PREFIX(date), true);
-  const keys = (res?.keys || []).map((k) => (typeof k === "string" ? k : k.key)).filter(Boolean);
-  const rows = [];
-  for (let i = 0; i < keys.length; i += 10) {
-    const batch = await Promise.all(keys.slice(i, i + 10).map((k) => sget(k, true)));
-    rows.push(...batch.filter(Boolean));
-  }
-  rows.sort((a, b) => b.score - a.score);
-  return rows.slice(0, limit);
+  const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).order("score", { ascending: false }).limit(limit);
+  if (error || !data) return [];
+  return data.map((r) => ({ username: r.username, w: r.w, l: r.l, score: r.score, outcome: r.outcome }));
+}
+export async function upsertDailyRun(date, userId, row) {
+  const { error } = await getClient().from("daily_runs").insert({ date, user_id: userId, username: row.username, w: row.w, l: row.l, score: row.score, outcome: row.outcome });
+  return !error;
 }

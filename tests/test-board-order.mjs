@@ -1,10 +1,11 @@
 // Board section ordering: a position should only sink to the bottom once it's truly
 // unfillable (no open slot fits it anymore), not just because its own named slot filled while
 // a FLEX slot could still take it.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Start a draft"));

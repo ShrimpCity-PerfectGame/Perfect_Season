@@ -1,5 +1,5 @@
 // Seeded boards, the daily lock, and challenge codes.
-import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 function boardOf(container) {
   const team = container.querySelector(".reel .team")?.textContent;
@@ -22,6 +22,7 @@ function localTodayKey() {
 await runTest("today's daily deals the same board to two independent players", async () => {
   setupDom();
   window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
   const a = await mount();
   await flush();
   await click(findButtonByText(a.container, "Play today's daily"));
@@ -29,6 +30,7 @@ await runTest("today's daily deals the same board to two independent players", a
 
   setupDom();
   window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
   const b = await mount();
   await flush();
   await click(findButtonByText(b.container, "Play today's daily"));
@@ -42,6 +44,7 @@ await runTest("today's daily deals the same board to two independent players", a
 await runTest("a finished daily can't be replayed", async () => {
   setupDom();
   window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
   // Seed a completed daily result directly, as if this player already finished today's run.
   const todayKey = localTodayKey();
   await window.storage.set(`ps-daily:${todayKey}`, JSON.stringify({
@@ -63,6 +66,7 @@ await runTest("a finished daily can't be replayed", async () => {
 await runTest("a challenge code deals the same board to whoever enters it", async () => {
   setupDom();
   window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
   const host = await mount();
   await flush();
   await click(findButtonByText(host.container, "Start a draft"));
@@ -73,6 +77,7 @@ await runTest("a challenge code deals the same board to whoever enters it", asyn
 
   setupDom();
   window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
   const guest = await mount();
   await flush();
   const codeInput = guest.container.querySelector('input[aria-label="Challenge code"]');

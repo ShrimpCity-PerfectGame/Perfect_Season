@@ -1,12 +1,14 @@
 // Signup, login, and stats persistence across a simulated reload.
-import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
 
 let { container, reactRoot } = await mount();
 await flush();
 
+const EMAIL = "testuser1@example.com";
 const USERNAME = "testuser1";
 const PASSWORD = "Password1";
 
@@ -27,7 +29,8 @@ await runTest("Account nav shows the auth panel", async () => {
 await runTest("sign up creates an account with a blank record", async () => {
   await click(findButtonByText(panel(), "Create account"));
   await flush();
-  const [uInput, pInput, p2Input] = inputs();
+  const [emailInput, uInput, pInput, p2Input] = inputs();
+  await type(emailInput, EMAIL);
   await type(uInput, USERNAME);
   await type(pInput, PASSWORD);
   await type(p2Input, PASSWORD);
@@ -45,8 +48,8 @@ await runTest("logging out returns to the auth panel", async () => {
 });
 
 await runTest("wrong password is rejected", async () => {
-  const [uInput, pInput] = inputs();
-  await type(uInput, USERNAME);
+  const [emailInput, pInput] = inputs();
+  await type(emailInput, EMAIL);
   await type(pInput, "wrongpassword");
   await click(submitButton("Log in"));
   await waitForCrypto();
@@ -54,8 +57,8 @@ await runTest("wrong password is rejected", async () => {
 });
 
 await runTest("logging back in restores the same account", async () => {
-  const [uInput, pInput] = inputs();
-  await type(uInput, USERNAME);
+  const [emailInput, pInput] = inputs();
+  await type(emailInput, EMAIL);
   await type(pInput, PASSWORD);
   await click(submitButton("Log in"));
   await waitForCrypto();

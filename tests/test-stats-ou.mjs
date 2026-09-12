@@ -1,9 +1,10 @@
 // Stats O/U: every round must resolve to a real player without recursing forever (a random
 // pick that only ever samples ids never placed on any board would retry indefinitely).
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Got it, let's draft"));

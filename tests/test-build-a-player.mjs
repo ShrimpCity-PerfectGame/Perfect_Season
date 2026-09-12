@@ -1,9 +1,10 @@
 // Build-a-player: roll real players, take one stat category from each until the assigned
 // position is fully assembled, then the custom player pre-fills that slot for a normal draft.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Got it, let's draft"));
