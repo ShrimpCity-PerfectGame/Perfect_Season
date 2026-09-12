@@ -54,19 +54,25 @@ await runTest("choosing a position rolls a team and player, then lets you build 
   assert(rows.every((r) => r.querySelector(".alt")?.textContent.includes("from ")), "expected each attribute to name the real player it came from");
 });
 
-await runTest("giving him his shot animates a standalone sim against a real historical team, no roster involved", async () => {
+await runTest("giving him his shot shows a scoreboard-style reveal (live record + game log), no roster involved", async () => {
   await click(findButtonByText(container, "Give him his shot"));
   await flush();
 
-  assert(container.querySelector("h2.h")?.textContent === "The verdict", "expected the result screen after simming");
-  // Let the game-by-game reveal (90ms/tick) play out rather than skipping, to prove it's animated.
+  // setupDom() simulates prefers-reduced-motion for every test (see helpers.mjs), so this and
+  // the earlier roll animation resolve to their final state immediately rather than ticking in
+  // real time - correct, deliberate behavior (respecting reduced-motion), not a shortcut around
+  // testing it. The animated pacing itself is a manual/browser concern; here we confirm the
+  // scoreboard-style markup (live record, game log) is what actually renders once resolved,
+  // replacing the old plain W-L tile grid.
   for (let i = 0; i < 60 && !findButtonByText(container, "Build another"); i++) {
     await new Promise((r) => setTimeout(r, 60));
     await flush(1);
   }
   assert(findButtonByText(container, "Build another"), "expected the reveal to finish and show the final record");
+  assert(container.querySelector(".result-hero .led"), "expected a scoreboard-style live record display, not the old plain tile grid");
   const t = text(container);
   assert(/\d+–\d+/.test(t), "expected a W-L record in the result, got: " + t.slice(0, 300));
+  assert(container.querySelectorAll(".log .g").length >= 17, "expected a full game log (17 regular season games, plus any playoffs) once finished, got " + container.querySelectorAll(".log .g").length);
   assert(!container.querySelector(".roster"), "the sim result must not involve the normal roster");
 });
 

@@ -2731,39 +2731,48 @@ export default function PerfectSeason() {
           </>
         )}
 
-        {view === "buildplayer" && bap && bap.stage === "result" && (
-          <>
-            <h2 className="h">The verdict</h2>
-            <p className="note" style={{ marginTop: 0 }}>
-              Your {POS_NAME[bap.pos].replace(/s$/, "").toLowerCase()} took over for the {bap.opp.season} {TEAMS[bap.opp.team][0]}.
-            </p>
-            <div className="panel">
-              <div className="cells" style={{ marginBottom: 10 }}>
+        {view === "buildplayer" && bap && bap.stage === "result" && (() => {
+          const bapDone = bap.shown >= bap.sim.games.length;
+          return (
+            <>
+              <h2 className="h">The verdict</h2>
+              <p className="note" style={{ marginTop: 0 }}>
+                Your {POS_NAME[bap.pos].replace(/s$/, "").toLowerCase()} took over for the {bap.opp.season} {TEAMS[bap.opp.team][0]}.
+              </p>
+              {bapDone && (bap.sim.perfect || bap.sim.champ) && (
+                <div className={`cel ${bap.sim.perfect ? "perfect" : ""}`}>
+                  <Confetti n={bap.sim.perfect ? 34 : 22} />
+                  <div className="big">{bap.sim.perfect ? "20–0" : "Champions"}</div>
+                  <div className="sml">{bap.sim.perfect ? "A perfect season. Nobody touched you." : `You won it all at ${bap.sim.w}–${bap.sim.l}.`}</div>
+                </div>
+              )}
+              <div className="result-hero" aria-live="polite">
+                <div className="rec led-wrap"><span className="led">
+                  {bap.sim.games.slice(0, bap.shown).filter((g) => g.win).length}–{bap.sim.games.slice(0, bap.shown).filter((g) => !g.win).length}
+                </span></div>
+                <div className="outcome">{bapDone ? bap.sim.outcome : "Playing the season…"}</div>
+              </div>
+              <h2 className="h">Season</h2>
+              <div className="log">
                 {bap.sim.games.slice(0, bap.shown).map((g, i) => (
-                  <div className="cell" key={i}>
-                    <div className="n" style={{ color: g.win ? "var(--win)" : "var(--loss)" }}>{g.win ? "W" : "L"}</div>
-                    <div className="l">{g.playoff ? g.label : `Wk ${i + 1}`} · {g.oppShort}</div>
+                  <div key={i} className={`g ${g.win ? "win" : "loss"} ${g.playoff ? "po" : ""}`}>
+                    <div className="o">{g.label}</div>
+                    <div className="w">{g.win ? "W" : "L"} {g.us}–{g.them}</div>
+                    <div className="o">{g.playoff || g.home ? "vs" : "at"} {g.opp}</div>
                   </div>
                 ))}
               </div>
-              {bap.shown < bap.sim.games.length ? (
-                <button className="btn" onClick={() => setBap((b) => ({ ...b, shown: b.sim.games.length }))}>Skip to the result</button>
+              {!bapDone ? (
+                <button className="btn" style={{ marginTop: 12 }} onClick={() => setBap((b) => ({ ...b, shown: b.sim.games.length }))}>Skip to the result</button>
               ) : (
-                <>
-                  <h3 style={{ marginTop: 0 }}>{bap.sim.w}–{bap.sim.l}</h3>
-                  <p className="note">{bap.sim.outcome}</p>
-                  {bap.sim.champ && <p><b>You won the chip.</b></p>}
-                </>
+                <div className="frow" style={{ marginTop: 12 }}>
+                  <button className="btn solid" onClick={openBuildPicker}>Build another</button>
+                  <button className="btn" onClick={cancelBap}>Done</button>
+                </div>
               )}
-            </div>
-            {bap.shown >= bap.sim.games.length && (
-              <div className="frow" style={{ marginTop: 12 }}>
-                <button className="btn solid" onClick={openBuildPicker}>Build another</button>
-                <button className="btn" onClick={cancelBap}>Done</button>
-              </div>
-            )}
-          </>
-        )}
+            </>
+          );
+        })()}
 
         {/* ---------------- STATS O/U ---------------- */}
         {view === "statsou" && souRound && (
