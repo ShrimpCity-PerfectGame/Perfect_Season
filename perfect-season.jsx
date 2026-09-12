@@ -291,6 +291,75 @@ function simulateSeason(score) {
   return { games, w, l, outcome, playoffs, champ, perfect: w === 20 && l === 0 };
 }
 
+// ---------- Admin testing tools ----------
+// Same scoring shape as gameResult, but the win/loss is dictated rather than rolled - lets the
+// admin panel jump straight to a specific season outcome to check its ending animation/banner.
+function forcedGameResult(win) {
+  const lo = pick(LOSER_PTS);
+  let m = pick(MARGINS);
+  if (lo === 0 && m < 3) m = 3;
+  return win ? { win, us: lo + m, them: lo } : { win, us: lo, them: lo + m };
+}
+const FORCED_SCENARIOS = {
+  perfect: { regWins: 17, rounds: ["Divisional", "Conference", "Championship"], loseRound: null },
+  champ: { regWins: 15, rounds: ["Wild Card", "Divisional", "Conference", "Championship"], loseRound: null },
+  lostWildCard: { regWins: 10, rounds: ["Wild Card", "Divisional", "Conference", "Championship"], loseRound: 0 },
+  lostDivisional: { regWins: 13, rounds: ["Divisional", "Conference", "Championship"], loseRound: 0 },
+  lostConference: { regWins: 13, rounds: ["Divisional", "Conference", "Championship"], loseRound: 1 },
+  lostChampionship: { regWins: 13, rounds: ["Divisional", "Conference", "Championship"], loseRound: 2 },
+  missedPlayoffs: { regWins: 7, rounds: [], loseRound: null },
+};
+function forceSeason(scenarioKey) {
+  const cfg = FORCED_SCENARIOS[scenarioKey];
+  const games = [];
+  const regOpps = shuffle(OPPS).slice(0, 17);
+  let w = 0, l = 0;
+  regOpps.forEach((o, i) => {
+    const win = i < cfg.regWins;
+    const g = tagOpp(forcedGameResult(win), o);
+    g.label = `Wk ${i + 1}`;
+    g.home = Math.random() < 0.5;
+    games.push(g);
+    win ? w++ : l++;
+  });
+  let outcome;
+  if (!cfg.rounds.length) {
+    outcome = "Missed the playoffs";
+  } else {
+    const poOpps = shuffle(PLAYOFF_OPPS).slice(0, cfg.rounds.length);
+    outcome = null;
+    for (let i = 0; i < cfg.rounds.length; i++) {
+      const win = cfg.loseRound === null || i < cfg.loseRound;
+      const g = tagOpp(forcedGameResult(win), poOpps[i]);
+      g.label = cfg.rounds[i];
+      g.playoff = true;
+      g.plays = buildTimeline(g.us, g.them, g.win);
+      games.push(g);
+      if (win) w++;
+      else { l++; outcome = `Lost to the ${g.opp} in the ${cfg.rounds[i].toLowerCase()} round`; break; }
+    }
+    if (!outcome) outcome = w === 20 ? "Perfect season. 20–0." : `Won the championship after a ${w - cfg.rounds.length}–${l} regular season`;
+  }
+  const playoffs = games.some((g) => g.playoff);
+  const champ = playoffs && games[games.length - 1].label === "Championship" && games[games.length - 1].win;
+  return { games, w, l, outcome, playoffs, champ, perfect: w === 20 && l === 0 };
+}
+// Case-insensitive substring search for the admin "force a player" tool, across every board.
+function adminSearchPlayers(query) {
+  if (!query || query.length < 2) return [];
+  const q = query.toLowerCase();
+  const results = [];
+  for (const key of Object.keys(BOARDS)) {
+    for (const p of BOARDS[key]) {
+      if (p.name.toLowerCase().includes(q)) {
+        results.push(p);
+        if (results.length >= 8) return results;
+      }
+    }
+  }
+  return results;
+}
+
 // ---------- Playoff game timeline ----------
 // Break a final score into scoring plays: TD 7, FG 3, TD + two-point try 8, TD with missed PAT 6, safety 2.
 // Safeties only show up when nothing else can make the number (2, 4, 5).
@@ -990,6 +1059,59 @@ const topPct = (rank, total) => {
 const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const USER_RE = /^[a-zA-Z0-9_]{3,16}$/;
 
+const OUTCOME_BUTTONS = [
+  ["perfect", "Force 20–0 (perfect)"],
+  ["champ", "Force championship win"],
+  ["lostWildCard", "Force loss: Wild Card"],
+  ["lostDivisional", "Force loss: Divisional"],
+  ["lostConference", "Force loss: Conference"],
+  ["lostChampionship", "Force loss: Championship"],
+  ["missedPlayoffs", "Force missed playoffs"],
+];
+
+// Admin-only testing panel: jump straight to any board, force a specific player into a slot,
+// or force a scripted season ending, all without touching real stats or storage.
+function AdminPanel({ openSlots, onForceBoard, onForcePlayer, onForceOutcome }) {
+  const [team, setTeam] = useState(TEAM_CODES[0]);
+  const [w, setW] = useState(0);
+  const [query, setQuery] = useState("");
+  const matches = adminSearchPlayers(query);
+  return (
+    <div className="panel">
+      <h3>Admin tools</h3>
+      <div className="frow" style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <select className="inp" value={team} onChange={(e) => setTeam(e.target.value)}>
+          {TEAM_CODES.map((t) => <option key={t} value={t}>{TEAMS[t][0]}</option>)}
+        </select>
+        <select className="inp" value={w} onChange={(e) => setW(Number(e.target.value))}>
+          {WINDOWS.map((win, i) => <option key={i} value={i}>{win[0]}–{win[1]}</option>)}
+        </select>
+        <button className="btn sm" onClick={() => onForceBoard(team, w)}>Jump to board</button>
+      </div>
+      <div className="frow" style={{ marginTop: 8 }}>
+        <input className="inp" placeholder="Force a player by name" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </div>
+      {matches.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          {matches.map((p) => (
+            <div key={`${p.id}-${p.season}-${p.team}`} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "4px 0" }}>
+              <span style={{ fontSize: 13 }}>{p.name} - {p.season} {TEAMS[p.team][0]} ({p.pos})</span>
+              {openSlots.filter((s) => fits(p.pos, s)).map((s) => (
+                <button key={s} className="btn sm" onClick={() => onForcePlayer(p, s)}>{SLOT_LABEL[s]}</button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="frow" style={{ marginTop: 8, flexWrap: "wrap", gap: 8 }}>
+        {OUTCOME_BUTTONS.map(([key, label]) => (
+          <button key={key} className="btn sm" onClick={() => onForceOutcome(key)}>{label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function RosterRows({ roster }) {
   return (
     <div className="reveal">
@@ -1437,8 +1559,10 @@ export default function PerfectSeason() {
     setRerolls({ ...rerolls, [kind]: rerolls[kind] - 1 });
   }
 
-  function draft(player, slot) {
-    const key = `${spin.team}|${spin.w}`;
+  // keyOverride lets the admin panel force-draft a player from a board other than the one
+  // currently spinning, without waiting on setSpin() to commit first.
+  function draft(player, slot, keyOverride) {
+    const key = keyOverride || `${spin.team}|${spin.w}`;
     const best = bestAvailable(key, [...drafted], open);
     setHistory((hs) => [...hs, { key, id: player.id, season: player.season, slot, bestId: best ? best.id : player.id, bestSeason: best ? best.season : player.season }]);
     setResumed(false);
@@ -1451,47 +1575,88 @@ export default function PerfectSeason() {
     else advance(next, seqIdx + 1);
   }
 
-  function finish(r) {
+  // forcedScenario (admin-only) skips the real simulation for a scripted ending, and skips
+  // every persistence side effect below so testing an animation never touches real stats,
+  // the leaderboard, or daily/draft progress.
+  function finish(r, forcedScenario) {
     let tot = 0, wt = 0;
     for (const s of SLOTS) { const k = s === "QB" ? QB_WEIGHT : 1; tot += effectiveRating(s, r[s]) * k; wt += k; }
     const score = Math.round((tot / wt) * 10) / 10;
     const lineup = SLOTS.map((s) => `${r[s].id}${r[s].season}`).join("|");
-    const sim = withSeed(`${mode.seed}#${lineup}`, () => simulateSeason(score));
+    const sim = forcedScenario ? forceSeason(forcedScenario) : withSeed(`${mode.seed}#${lineup}`, () => simulateSeason(score));
     sim.score = score;
     const run = {
       w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, perfect: sim.perfect, playoffs: sim.playoffs, date: Date.now(),
       roster: SLOTS.map((s) => ({ slot: s, name: r[s].name, team: r[s].team, season: r[s].season, ppr: r[s].ppr, rating: effectiveRating(s, r[s]) })),
     };
     const siteBest = lb.players.reduce((m, q) => Math.max(m, q.bestScore || 0), 0);
-    sim.newSiteBest = !!user && lb.players.length > 0 && score > siteBest;
+    sim.newSiteBest = !forcedScenario && !!user && lb.players.length > 0 && score > siteBest;
     setNotice("");
     run.mode = mode.kind;
     run.code = mode.code;
-    if (mode.kind === "daily") {
-      const rec = { date: mode.date, w: sim.w, l: sim.l, score, outcome: sim.outcome, roster: run.roster };
-      setDailyDone(rec);
-      sset(DAILY_KEY(mode.date), rec, false);
-      if (user) sset(DAILY_SHARED(mode.date, user.toLowerCase()), { username: user, w: sim.w, l: sim.l, score, outcome: sim.outcome }, true);
-    }
-    if (user && stats) {
-      sim.newBestScore = stats.bestScore == null || score > stats.bestScore;
-      let s = applyRun(stats, run);
+    if (!forcedScenario) {
       if (mode.kind === "daily") {
-        const st = nextStreak(s, mode.date);
-        s = { ...s, dailyLast: mode.date, dailyStreak: st, dailyBestStreak: Math.max(st, s.dailyBestStreak || 0) };
+        const rec = { date: mode.date, w: sim.w, l: sim.l, score, outcome: sim.outcome, roster: run.roster };
+        setDailyDone(rec);
+        sset(DAILY_KEY(mode.date), rec, false);
+        if (user) sset(DAILY_SHARED(mode.date, user.toLowerCase()), { username: user, w: sim.w, l: sim.l, score, outcome: sim.outcome }, true);
       }
-      saveStats(s);
-    } else {
-      setPending(run);
+      if (user && stats) {
+        sim.newBestScore = stats.bestScore == null || score > stats.bestScore;
+        let s = applyRun(stats, run);
+        if (mode.kind === "daily") {
+          const st = nextStreak(s, mode.date);
+          s = { ...s, dailyLast: mode.date, dailyStreak: st, dailyBestStreak: Math.max(st, s.dailyBestStreak || 0) };
+        }
+        saveStats(s);
+      } else {
+        setPending(run);
+      }
+      loadLeaderboard(); // fresh numbers for the sitewide ranking
+      clearDraft(DRAFT_KEY);
+      clearDraftTracked(mode.kind, mode.kind === "daily" ? DAILY_PROGRESS(mode.date) : FREE_PROGRESS);
+      setWip((w) => ({ ...w, [mode.kind]: 0 }));
     }
-    loadLeaderboard(); // fresh numbers for the sitewide ranking
-    clearDraft(DRAFT_KEY);
-    clearDraftTracked(mode.kind, mode.kind === "daily" ? DAILY_PROGRESS(mode.date) : FREE_PROGRESS);
-    setWip((w) => ({ ...w, [mode.kind]: 0 }));
     setShare({ state: "idle", text: "" });
     setResult(sim);
     setPo({ idx: 0, stage: "pre" });
     setShown(reducedMotion() ? sim.games.filter((g) => !g.playoff).length : 0);
+  }
+
+  // ---------- Admin testing tools ----------
+  const isAdmin = user && user.toLowerCase() === "admin";
+
+  function adminForceBoard(team, w) {
+    if (!mode) return;
+    const key = `${team}|${w}`;
+    if (!BOARDS[key] || !BOARDS[key].length) return;
+    const n = [...seq]; n.splice(seqIdx + 1, 0, key);
+    setSeq(n); setSeqIdx(seqIdx + 1);
+    clearInterval(timer.current);
+    setSpinning(false);
+    setSelected(null);
+    setSpin({ team, w }); setDisplay({ team, w });
+  }
+
+  function adminForcePlayer(player, slot) {
+    adminForceBoard(player.team, player.w);
+    draft(player, slot, `${player.team}|${player.w}`);
+  }
+
+  // Fills any still-open slots with the first eligible player found (admin doesn't need a
+  // "real" roster to check an ending animation), then jumps straight to the scripted result.
+  function adminForceOutcome(scenarioKey) {
+    const next = { ...roster };
+    const ids = new Set(Object.values(next).map((p) => p.id));
+    for (const s of SLOTS) {
+      if (next[s]) continue;
+      for (const key of Object.keys(BOARDS)) {
+        const cand = BOARDS[key].find((p) => !ids.has(p.id) && fits(p.pos, s));
+        if (cand) { next[s] = cand; ids.add(cand.id); break; }
+      }
+    }
+    setRoster(next);
+    finish(next, scenarioKey);
   }
 
   useEffect(() => {
@@ -1725,6 +1890,10 @@ export default function PerfectSeason() {
                   <span className="seedline">Code <code>{mode.code}</code></span>
                 )}
               </div>
+            )}
+
+            {isAdmin && mode && !result && (
+              <AdminPanel openSlots={open} onForceBoard={adminForceBoard} onForcePlayer={adminForcePlayer} onForceOutcome={adminForceOutcome} />
             )}
 
             {mode && mode.kind === "daily" && dailyDone && !result && (
