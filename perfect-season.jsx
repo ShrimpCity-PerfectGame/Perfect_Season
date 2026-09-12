@@ -8,6 +8,13 @@ const POS = ["QB", "RB", "WR", "TE"];
 const POS_NAME = { QB: "Quarterbacks", RB: "Running backs", WR: "Wide receivers", TE: "Tight ends" };
 const SLOTS = ["QB", "RB", "WR", "TE", "FLEX1", "FLEX2"];
 const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
+// Stats O/U: the one headline counting stat each position gets quizzed on.
+const SOU_STAT = {
+  QB: ["py", "passing yards"],
+  RB: ["ry", "rushing yards"],
+  WR: ["rcy", "receiving yards"],
+  TE: ["rcy", "receiving yards"],
+};
 const QB_WEIGHT = 1.25;
 
 const TEAMS = {
@@ -63,6 +70,10 @@ for (const [key, arr] of Object.entries(DATA.b)) {
     return lx.localeCompare(ly);
   });
 }
+// Every player id that actually appears on a board, for Stats O/U's random pick - DATA.n (the
+// id->name lookup) may include ids that never qualified for any board, so sampling from it
+// directly risks never landing on a usable one.
+const SOU_PLAYER_IDS = [...new Set(Object.values(BOARDS).flat().map((p) => p.id))];
 
 // Flex slots score on raw production alone, not position-relative grading: `rating` grades
 // RB/WR/TE against their OWN position's peers, so a modest-for-a-WR season can outrank a
@@ -1346,6 +1357,8 @@ export default function PerfectSeason() {
   const [dailyDone, setDailyDone] = useState(null); // today's finished daily, if any
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
+  const [souRound, setSouRound] = useState(null); // { name, pos, teams, statLabel, trueValue, line, guess, correct }
+  const [souScore, setSouScore] = useState({ right: 0, wrong: 0 });
   const [wip, setWip] = useState({});               // unfinished drafts, by mode
   // Counts in-flight clearDraft() calls per mode. clearDraft is fire-and-forget (overwrite,
   // then delete - see clearDraft below), so a refreshWip() read can land before it's done and
@@ -1695,6 +1708,30 @@ export default function PerfectSeason() {
     startDraft({ kind: "free", code: newCode(), ...extra });
   }
 
+  // Stats O/U: "career" here means the sum of a player's appearances across every board he
+  // qualified for (at most one season per team per era window) - a real but partial slice of
+  // his career, not his true full stat line, since only qualifying seasons make the boards.
+  function newSouRound() {
+    const id = SOU_PLAYER_IDS[Math.floor(Math.random() * SOU_PLAYER_IDS.length)];
+    const appearances = [];
+    for (const key of Object.keys(BOARDS)) {
+      for (const p of BOARDS[key]) if (p.id === id) appearances.push(p);
+    }
+    const [statKey, statLabel] = SOU_STAT[appearances[0].pos];
+    const trueValue = appearances.reduce((sum, p) => sum + (p[statKey] || 0), 0);
+    let line = Math.round((trueValue * (0.8 + Math.random() * 0.4)) / 25) * 25;
+    if (line === trueValue) line += 25;
+    const teams = [...new Set(appearances.map((p) => TEAMS[p.team][0]))];
+    setSouRound({ name: appearances[0].name, pos: appearances[0].pos, teams, statLabel, trueValue, line, guess: null });
+  }
+
+  function souGuess(dir) {
+    if (souRound.guess) return;
+    const correct = dir === "over" ? souRound.trueValue > souRound.line : souRound.trueValue < souRound.line;
+    setSouRound({ ...souRound, guess: dir, correct });
+    setSouScore((s) => (correct ? { ...s, right: s.right + 1 } : { ...s, wrong: s.wrong + 1 }));
+  }
+
   // Today's daily always picks up where it left off: you get one run at it, not one per visit.
   async function startDaily() {
     setView("play");
@@ -1872,6 +1909,12 @@ export default function PerfectSeason() {
                 <div className="mt"><span className="mn">GM mode</span></div>
                 <p>Draft against a ${GM_CAP}M salary cap. Elite seasons cost a lot more. Shares your Unlimited progress slot.</p>
                 <span className="go">Start a draft</span>
+              </button>
+
+              <button className="mode" onClick={() => { setView("statsou"); if (!souRound) newSouRound(); }}>
+                <div className="mt"><span className="mn">Stats O/U</span>{(souScore.right + souScore.wrong) > 0 && <span className="pill">{souScore.right}–{souScore.wrong}</span>}</div>
+                <p>Guess over or under a player's stat line. No drafting, just know your football.</p>
+                <span className="go">Play</span>
               </button>
 
               <div className="mode static">
@@ -2374,6 +2417,35 @@ export default function PerfectSeason() {
                 <button className="btn" onClick={loadLeaderboard} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
               </>
             )}
+          </>
+        )}
+
+        {/* ---------------- STATS O/U ---------------- */}
+        {view === "statsou" && souRound && (
+          <>
+            <h2 className="h">Stats O/U</h2>
+            <p className="note" style={{ marginTop: 0 }}>
+              Record: {souScore.right}–{souScore.wrong}. "Career" here means seasons that made our boards (best season per team per era) - a real slice of a career, not the whole thing.
+            </p>
+            <div className="panel">
+              <h3 style={{ marginTop: 0 }}>{souRound.name}</h3>
+              <p className="note" style={{ marginTop: 0 }}>{POS_NAME[souRound.pos]} · played for {souRound.teams.join(", ")}</p>
+              <p style={{ fontSize: 18, margin: "10px 0" }}>Career {souRound.statLabel}: <b>{souRound.line.toLocaleString()}</b></p>
+              {!souRound.guess ? (
+                <div className="frow">
+                  <button className="btn solid" onClick={() => souGuess("over")}>Over</button>
+                  <button className="btn solid" onClick={() => souGuess("under")}>Under</button>
+                </div>
+              ) : (
+                <>
+                  <p className={souRound.correct ? "ok" : "err"} style={{ margin: "0 0 10px" }}>
+                    {souRound.correct ? "Correct!" : "Wrong."} Actual: {souRound.trueValue.toLocaleString()} {souRound.statLabel}.
+                  </p>
+                  <button className="btn solid" onClick={newSouRound}>Next player</button>
+                </>
+              )}
+            </div>
+            <button className="btn" style={{ marginTop: 12 }} onClick={() => setView("home")}>Back to modes</button>
           </>
         )}
       </div>
