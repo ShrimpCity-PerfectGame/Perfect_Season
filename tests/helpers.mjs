@@ -45,7 +45,15 @@ export function setupDom(url = "http://localhost/") {
 // a "shared" namespace (leaderboard/account rows, visible to everyone) vs "personal" (this
 // device only). Mirrors entry.jsx's shim but plain-object backed instead of localStorage,
 // so each test's storage.data can be reset or preloaded directly.
-export function makeStorage() {
+// delayKeys: optional list of substrings - a delete() whose key matches always resolves after
+// a real delay, and a set() whose key matches AND whose value looks like clearDraft's
+// "cleared" marker also delays (ordinary progress-saving writes to the same key are left
+// fast). This isolates "the clear operation is slow" from "every write to this key is slow" -
+// a caller that fires a slow clear (finish()'s fire-and-forget clearDraft) and a concurrent
+// fast read from elsewhere (refreshWip()) can then be made to interleave deterministically:
+// the read lands before the slow clear does, reproducing a real remote-storage's lack of
+// read-after-write ordering.
+export function makeStorage(delayKeys = [], delayMs = 30) {
   const data = {};
   const nsKey = (shared, key) => `${shared ? "shared" : "personal"}:${key}`;
   const storage = {
@@ -55,10 +63,14 @@ export function makeStorage() {
       return Object.prototype.hasOwnProperty.call(data, k) ? { value: data[k] } : null;
     },
     async set(key, value, shared) {
+      if (delayKeys.some((k) => key.includes(k)) && value.includes('"cleared":true')) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
       data[nsKey(shared, key)] = value;
       return true;
     },
     async delete(key, shared) {
+      if (delayKeys.some((k) => key.includes(k))) await new Promise((r) => setTimeout(r, delayMs));
       delete data[nsKey(shared, key)];
     },
     async list(prefix, shared) {

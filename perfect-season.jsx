@@ -172,6 +172,20 @@ function gameResult(s, o) {
 const OPPS = OPP_DATA.map(([season, team, rec, reg, po]) => ({ season, team, rec, reg, po }));
 const PLAYOFF_OPPS = OPPS.filter((o) => o.po != null);
 const shuffle = (a) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
+// Shuffles only within fixed-size windows, so the array keeps its overall order (weakest to
+// strongest) while still varying week to week within each window - a schedule ramp, not a
+// hard ladder.
+const windowedShuffle = (a, windowSize) => {
+  const b = [...a];
+  for (let start = 0; start < b.length; start += windowSize) {
+    const end = Math.min(start + windowSize, b.length);
+    for (let i = end - 1; i > start; i--) {
+      const j = start + Math.floor(Math.random() * (i - start + 1));
+      [b[i], b[j]] = [b[j], b[i]];
+    }
+  }
+  return b;
+};
 function tagOpp(g, o) {
   g.opp = `${o.season} ${TEAMS[o.team][0]}`;
   g.oppShort = TEAMS[o.team][0];
@@ -190,7 +204,11 @@ function withSeed(seed, fn) {
 
 function simulateSeason(score) {
   const games = [];
-  const schedule = shuffle(OPPS).slice(0, 17);
+  // Same random 17-team draw as before, just reordered so difficulty trends easy-to-hard
+  // across the season instead of pure random placement - a strong team's rare loss should
+  // come late against a real threat, not out of nowhere in week 2.
+  const drawn = shuffle(OPPS).slice(0, 17);
+  const schedule = windowedShuffle([...drawn].sort((a, b) => a.reg - b.reg), 5);
   const usedOpp = new Set(schedule);
   let w = 0, l = 0;
   schedule.forEach((o, i) => {
@@ -205,8 +223,19 @@ function simulateSeason(score) {
     outcome = "Missed the playoffs";
   } else {
     const rounds = w >= 13 ? ["Divisional", "Conference", "Championship"] : ["Wild Card", "Divisional", "Conference", "Championship"];
-    // playoff opponents get tougher each round
-    const field = shuffle(PLAYOFF_OPPS.filter((o) => !usedOpp.has(o))).slice(0, rounds.length).sort((x, y) => x.po - y.po);
+    // Playoff opponents get tougher each round. Draw a wide field before banding by round
+    // (rather than sorting a tiny 3-4 team sample) so the same handful of extreme dynasty
+    // teams don't end up as the championship opponent every time - just because a team is the
+    // toughest of a tiny random sample doesn't mean it should always be the same few teams.
+    const CANDIDATE_POOL_SIZE = 12;
+    const remaining = shuffle(PLAYOFF_OPPS.filter((o) => !usedOpp.has(o)));
+    const sample = remaining.slice(0, Math.min(CANDIDATE_POOL_SIZE, remaining.length)).sort((x, y) => x.po - y.po);
+    const field = rounds.map((_, i) => {
+      const lo = Math.floor((i / rounds.length) * sample.length);
+      const hi = Math.floor(((i + 1) / rounds.length) * sample.length);
+      const band = sample.slice(lo, Math.max(hi, lo + 1));
+      return band[Math.floor(Math.random() * band.length)];
+    });
     outcome = null;
     for (let i = 0; i < rounds.length; i++) {
       const g = tagOpp(gameResult(score, field[i].po), field[i]);
@@ -1012,6 +1041,41 @@ function bestAvailable(key, draftedIds, openSlots) {
   return c.reduce((a, p) => (!a || p.rating > a.rating ? p : a), null);
 }
 
+function permute(arr) {
+  if (arr.length <= 1) return [arr];
+  const out = [];
+  for (let i = 0; i < arr.length; i++) {
+    const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+    for (const p of permute(rest)) out.push([arr[i], ...p]);
+  }
+  return out;
+}
+
+// Retrospective best possible roster: given the 6 boards actually seen this draft (fixed,
+// not choosable), find the board-to-slot assignment that maximizes team score. Unlike
+// bestAvailable (which is greedy and pick-order-dependent - "best player on this board given
+// whatever slots happened to still be open at that exact moment"), this considers all 720
+// board/slot pairings so a QB taken early only because it was the lone option doesn't hide a
+// much better QB seen later on a board whose player ended up elsewhere.
+function bestOrderFor(history) {
+  const boardKeys = history.map((h) => h.key);
+  let best = null;
+  for (const order of permute(SLOTS)) {
+    let total = 0, ok = true;
+    const assignment = {};
+    for (let i = 0; i < boardKeys.length; i++) {
+      const slot = order[i], key = boardKeys[i];
+      const top = (BOARDS[key] || []).filter((p) => fits(p.pos, slot))
+        .reduce((a, p) => (!a || p.rating > a.rating ? p : a), null);
+      if (!top) { ok = false; break; }
+      total += top.rating * (slot === "QB" ? QB_WEIGHT : 1);
+      assignment[slot] = { key, player: top };
+    }
+    if (ok && (!best || total > best.totalRating)) best = { slotAssignment: assignment, totalRating: total };
+  }
+  return best;
+}
+
 // streak = consecutive calendar days with a finished daily
 function nextStreak(stats, date) {
   const prev = stats.dailyLast;
@@ -1110,6 +1174,15 @@ export default function PerfectSeason() {
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
   const [wip, setWip] = useState({});               // unfinished drafts, by mode
+  // Counts in-flight clearDraft() calls per mode. clearDraft is fire-and-forget (overwrite,
+  // then delete - see clearDraft below), so a refreshWip() read can land before it's done and
+  // return the stale pre-clear snapshot; while a clear is pending for a mode, refreshWip()
+  // leaves that mode's wip alone instead of trusting the read.
+  const pendingClears = useRef({ free: 0, daily: 0 });
+  function clearDraftTracked(kind, key) {
+    pendingClears.current[kind]++;
+    clearDraft(key).finally(() => { pendingClears.current[kind]--; });
+  }
   const sentinel = useRef(null);
   const draftTop = useRef(null);
   const [stuck, setStuck] = useState(false);
@@ -1224,7 +1297,10 @@ export default function PerfectSeason() {
     setUser(null); setStats(null); setNotice("");
   }
 
-  function animateTo(target) {
+  // pin holds one axis fixed at target's value during the animation - used by reroll() so
+  // re-spinning the team doesn't also visibly cycle the years reel, and vice versa. null
+  // (a fresh board reveal) spins both.
+  function animateTo(target, pin = null) {
     clearInterval(timer.current);
     setSelected(null);
     if (reducedMotion()) { setSpin(target); setDisplay(target); return; }
@@ -1232,7 +1308,10 @@ export default function PerfectSeason() {
     let n = 0;
     timer.current = setInterval(() => {
       n++;
-      setDisplay({ team: pick(TEAM_CODES), w: Math.floor(Math.random() * WINDOWS.length) });
+      setDisplay({
+        team: pin === "team" ? target.team : pick(TEAM_CODES),
+        w: pin === "years" ? target.w : Math.floor(Math.random() * WINDOWS.length),
+      });
       if (n >= 14) { clearInterval(timer.current); setSpin(target); setDisplay(target); setSpinning(false); }
     }, 65);
   }
@@ -1249,7 +1328,12 @@ export default function PerfectSeason() {
   // Both an unlimited draft and the daily can sit half-finished at once; each keeps its own slot.
   async function refreshWip() {
     const [f, d] = await Promise.all([sget(FREE_PROGRESS, false), sget(DAILY_PROGRESS(todayKey()), false)]);
-    setWip({ free: validDraft(f) ? f.history.length : 0, daily: validDraft(d) ? d.history.length : 0 });
+    setWip((w) => {
+      const next = { ...w };
+      if (pendingClears.current.free === 0) next.free = validDraft(f) ? f.history.length : 0;
+      if (pendingClears.current.daily === 0) next.daily = validDraft(d) ? d.history.length : 0;
+      return next;
+    });
   }
 
   function restoreDraft(saved) {
@@ -1292,25 +1376,26 @@ export default function PerfectSeason() {
   // A re-spin keeps one half of the board fixed and pulls the next matching alternate.
   function reroll(kind) {
     if (!spin || spinning || rerolls[kind] < 1) return;
-    const cur = `${spin.team}|${spin.w}`;
     const d = new Set(Object.values(roster).map((p) => p.id));
     const o = SLOTS.filter((s) => !roster[s]);
+    // Every board already shown OR still queued later in this draft's planned sequence is off
+    // the table for a reroll - once a team+years pair is anywhere in the plan, it's used up.
+    // (This also rules out reusing an entry from seq's own remaining tail: doing so would
+    // insert a second copy without removing the original, so that board would resurface again
+    // later when sequential advancement reaches its old spot.)
+    const shown = new Set(seq);
     const match = (key) => {
       const [t, w] = key.split("|");
-      return key !== cur && (kind === "team" ? Number(w) === spin.w : t === spin.team) && boardHasOption(key, d, o);
+      return !shown.has(key) && (kind === "team" ? Number(w) === spin.w : t === spin.team) && boardHasOption(key, d, o);
     };
-    let next = seq.slice(seqIdx + 1).find(match) || seq.find(match);
-    if (!next) {
-      // nothing left in the sequence fits: pick deterministically from the whole pool
-      const rng = mulberry32(hashStr(`${mode.seed}-reroll-${kind}-${seqIdx}`));
-      const pool = Object.keys(BOARDS).filter(match);
-      if (!pool.length) return;
-      next = pool[Math.floor(rng() * pool.length)];
-    }
+    const rng = mulberry32(hashStr(`${mode.seed}-reroll-${kind}-${seqIdx}`));
+    const pool = Object.keys(BOARDS).filter(match);
+    if (!pool.length) return;
+    const next = pool[Math.floor(rng() * pool.length)];
     const n = [...seq]; n.splice(seqIdx + 1, 0, next);
     setSeq(n); setSeqIdx(seqIdx + 1); setUsed([...used, next]);
     const [t, w] = next.split("|");
-    animateTo({ team: t, w: Number(w) });
+    animateTo({ team: t, w: Number(w) }, kind === "team" ? "years" : "team");
     setRerolls({ ...rerolls, [kind]: rerolls[kind] - 1 });
   }
 
@@ -1363,7 +1448,7 @@ export default function PerfectSeason() {
     }
     loadLeaderboard(); // fresh numbers for the sitewide ranking
     clearDraft(DRAFT_KEY);
-    clearDraft(mode.kind === "daily" ? DAILY_PROGRESS(mode.date) : FREE_PROGRESS);
+    clearDraftTracked(mode.kind, mode.kind === "daily" ? DAILY_PROGRESS(mode.date) : FREE_PROGRESS);
     setWip((w) => ({ ...w, [mode.kind]: 0 }));
     setShare({ state: "idle", text: "" });
     setResult(sim);
@@ -1381,7 +1466,7 @@ export default function PerfectSeason() {
   // Ending an unlimited draft early is a DNF; the draft itself is cleared.
   function abandonCurrent() {
     if (mode && mode.kind === "free" && !result && history.length > 0 && user && stats) saveStats(applyDnf(stats, history.length));
-    clearDraft(FREE_PROGRESS);
+    clearDraftTracked("free", FREE_PROGRESS);
     setWip((w) => ({ ...w, free: 0 }));
   }
 
@@ -1671,7 +1756,9 @@ export default function PerfectSeason() {
                 </div>
                 <div ref={sentinel} aria-hidden="true" />
 
-                {!spinning && [...POS].sort((a, b) => secState(a) - secState(b)).map((pos) => {
+                {/* Only a truly-done position (state 2) sinks to the bottom - a filled named
+                    slot that's still flex-eligible (state 1) stays put next to open ones. */}
+                {!spinning && [...POS].sort((a, b) => (secState(a) === 2 ? 1 : 0) - (secState(b) === 2 ? 1 : 0)).map((pos) => {
                   const list = board.filter((p) => p.pos === pos);
                   if (!list.length) return null;
                   const st = secState(pos);
@@ -1799,6 +1886,8 @@ export default function PerfectSeason() {
                         return { i, took, best, gotIt: took.rating >= best.rating - 0.05, board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
                       });
                       const hits = rows.filter((r) => r.gotIt).length;
+                      const optimal = bestOrderFor(history);
+                      const totalWeight = SLOTS.reduce((t, s) => t + (s === "QB" ? QB_WEIGHT : 1), 0);
                       return (
                         <>
                           <h2 className="h" style={{ marginTop: 22 }}>Draft recap</h2>
@@ -1814,6 +1903,19 @@ export default function PerfectSeason() {
                             ))}
                           </div>
                           <p className="note">"Best available" means the highest-graded player you could still fit into an open spot on that board.</p>
+
+                          {optimal && (
+                            <>
+                              <h3 className="h" style={{ marginTop: 18 }}>Best possible order</h3>
+                              <p className="recap-sum">The best team score you could have built from these same six boards, slotted differently: <b>{(optimal.totalRating / totalWeight).toFixed(1)}</b> vs. your {result.score.toFixed(1)}.</p>
+                              <RosterRows roster={SLOTS.map((s) => {
+                                const a = optimal.slotAssignment[s];
+                                const [tm, w] = a.key.split("|");
+                                return { slot: s, ...a.player, board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
+                              })} />
+                              <p className="note recap-optimal">This assumes hindsight of all six boards you saw - it's what the ideal slot assignment would have scored, not a board you missed.</p>
+                            </>
+                          )}
                         </>
                       );
                     })()}
