@@ -1124,6 +1124,14 @@ h2.h{font-family:var(--display);font-weight:800;font-size:24px;color:var(--ink);
 .mode.m-bap .go{background:#2FD3C6;color:#04211E;box-shadow:0 2px 10px rgba(47,211,198,.25)}
 .mode.static .icon{background:rgba(147,168,155,.14);color:var(--muted)}
 .mode .pill{font-size:12px;font-weight:700;color:#241704;background:var(--lamp);border-radius:20px;padding:2px 9px}
+.sou-hud{display:flex;align-items:center;gap:16px;margin-bottom:12px}
+.sou-hearts{font-size:28px;line-height:1;letter-spacing:3px}
+.sou-score{font-family:var(--display);font-weight:800;font-size:19px;color:var(--ink)}
+.sou-timer{font-family:var(--display);font-weight:900;font-size:36px;color:var(--lamp);min-width:56px;text-align:center;
+  text-shadow:0 0 14px rgba(245,179,36,.4);transition:color .15s}
+.sou-timer.danger{color:var(--loss);text-shadow:0 0 14px rgba(240,123,107,.5);animation:sou-pulse .5s ease-in-out infinite}
+@keyframes sou-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.22)}}
+@media (prefers-reduced-motion:reduce){.sou-timer.danger{animation:none}}
 .hometiles{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:14px}
 .hometiles .n{font-size:26px}
 .whoami{font-weight:600;font-size:14px;color:var(--ink)}
@@ -1449,9 +1457,10 @@ export default function PerfectSeason() {
   const [dailyDone, setDailyDone] = useState(null); // today's finished daily, if any
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
-  // Stats O/U's daily game state while playing:
+  // Over/Under's daily game state while playing:
   // { date, roundIndex, lives, score, round, guess, correct, deadline, timeLeft }
   const [sou, setSou] = useState(null);
+  const [souIntro, setSouIntro] = useState(null); // rules screen pending a confirm - { date, roundIndex, lives, score }, the timer doesn't start until this is accepted
   const [souDone, setSouDone] = useState(null); // today's finished record, if any: { score }
   const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
@@ -1861,17 +1870,26 @@ export default function PerfectSeason() {
     setSou({ ...sou, guess: dir, correct, lives: correct ? sou.lives : sou.lives - 1, score: correct ? sou.score + 1 : sou.score });
   }
 
+  // The clock shouldn't start the instant you land on the screen - openSou always stops at a
+  // rules/confirm screen first (souIntro); beginSou is what actually deals round one (or
+  // resumes) and starts the timer.
   async function openSou() {
     setView("statsou");
     if (souDone) { loadSouBoard(todayKey()); return; }
     const date = todayKey();
     const wip = await sget(SOU_PROGRESS(date), false);
-    if (wip) startSouRound(date, wip.roundIndex, wip.lives, wip.score);
-    else startSouRound(date, 0, SOU_LIVES, 0);
+    setSouIntro(wip ? { date, ...wip } : { date, roundIndex: 0, lives: SOU_LIVES, score: 0 });
+  }
+
+  function beginSou() {
+    const { date, roundIndex, lives, score } = souIntro;
+    setSouIntro(null);
+    startSouRound(date, roundIndex, lives, score);
   }
 
   function leaveSou() {
     clearInterval(souTimer.current);
+    setSouIntro(null);
     setView("home");
   }
 
@@ -1882,11 +1900,15 @@ export default function PerfectSeason() {
   useEffect(() => {
     if (!sou || !sou.guess) return;
     if (sou.lives > 0) { sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex, lives: sou.lives, score: sou.score }, false); return; }
-    sset(SOU_DONE_KEY(sou.date), { score: sou.score }, false);
-    sdel(SOU_PROGRESS(sou.date), false);
-    if (user && userId) upsertSouRun(sou.date, userId, { username: user, score: sou.score });
-    setSouDone({ score: sou.score });
-    loadSouBoard(sou.date);
+    (async () => {
+      await sset(SOU_DONE_KEY(sou.date), { score: sou.score }, false);
+      await sdel(SOU_PROGRESS(sou.date), false);
+      // Wait for the leaderboard write to actually land before re-fetching it, or the read can
+      // race ahead of the write and show a board that's missing the score that was just saved.
+      if (user && userId) await upsertSouRun(sou.date, userId, { username: user, score: sou.score });
+      setSouDone({ score: sou.score });
+      loadSouBoard(sou.date);
+    })();
   }, [sou]);
 
   // Build-a-player: you pick the position, then roll real players at that position one at a
@@ -2193,7 +2215,7 @@ export default function PerfectSeason() {
               <button className="mode m-sou" onClick={openSou}>
                 <div className="mt">
                   <span className="icon" aria-hidden="true">📊</span>
-                  <span className="mn">Stats O/U</span>{souDone && <span className="pill">Done · {souDone.score}</span>}
+                  <span className="mn">Over/Under</span>{souDone && <span className="pill">Done · {souDone.score}</span>}
                 </div>
                 <p>One shared daily set, {SOU_ROUND_SECONDS}s a guess, three lives - how many can you get right today?</p>
                 <span className="go">{souDone ? "See today's result" : "Play"}</span>
@@ -2846,17 +2868,32 @@ export default function PerfectSeason() {
           );
         })()}
 
-        {/* ---------------- STATS O/U ---------------- */}
+        {/* ---------------- OVER/UNDER ---------------- */}
+        {view === "statsou" && souIntro && (
+          <>
+            <h2 className="h">Over/Under</h2>
+            <div className="panel">
+              <p style={{ marginTop: 0 }}>
+                The same rounds for everyone today, {prettyDate(souIntro.date)}. You'll see a real player's career stat line and guess over or under a number.
+              </p>
+              <p><b>Three lives</b> - miss three and the day is over.</p>
+              <p><b>{SOU_ROUND_SECONDS} seconds per guess</b> - the clock starts the moment a player appears, so no looking anything up. Running out of time counts as a miss.</p>
+              <p className="note" style={{ marginBottom: 0 }}>"Career" here means seasons that made our boards (best season per team per era) - a real slice of a career, not the whole thing.</p>
+            </div>
+            <div className="frow" style={{ marginTop: 12 }}>
+              <button className="btn solid" onClick={beginSou}>{souIntro.roundIndex > 0 ? "Resume - start the clock" : "I'm ready - start the clock"}</button>
+              <button className="btn" onClick={leaveSou}>Cancel</button>
+            </div>
+          </>
+        )}
+
         {view === "statsou" && sou && (
           <>
-            <h2 className="h">Stats O/U</h2>
-            <p className="note" style={{ marginTop: 0 }}>
-              The same rounds for everyone today, {prettyDate(sou.date)}. Three lives, {SOU_ROUND_SECONDS}s per guess - "career" means seasons that made our boards (best season per team per era), a real slice of a career, not the whole thing.
-            </p>
-            <div className="frow" style={{ marginBottom: 10 }}>
-              <span className="pill">{"❤".repeat(Math.max(0, sou.lives))}{"🖤".repeat(Math.max(0, SOU_LIVES - sou.lives))}</span>
-              <span className="pill">Score {sou.score}</span>
-              {!sou.guess && <span className="pill">{sou.timeLeft}s</span>}
+            <h2 className="h">Over/Under</h2>
+            <div className="sou-hud">
+              <span className="sou-hearts">{"❤️".repeat(Math.max(0, sou.lives))}{"🖤".repeat(Math.max(0, SOU_LIVES - sou.lives))}</span>
+              <span className="sou-score">Score {sou.score}</span>
+              {!sou.guess && <span className={`sou-timer ${sou.timeLeft <= 3 ? "danger" : ""}`}>{sou.timeLeft}</span>}
             </div>
             <div className="panel">
               <h3 style={{ marginTop: 0 }}>{sou.round.name}</h3>
@@ -2884,10 +2921,10 @@ export default function PerfectSeason() {
           </>
         )}
 
-        {view === "statsou" && !sou && souDone && (
+        {view === "statsou" && !sou && !souIntro && souDone && (
           <>
-            <h2 className="h">Stats O/U</h2>
-            <p className="note" style={{ marginTop: 0 }}>Today's Stats O/U, {prettyDate(todayKey())}, is done. Come back tomorrow for a new set.</p>
+            <h2 className="h">Over/Under</h2>
+            <p className="note" style={{ marginTop: 0 }}>Today's Over/Under, {prettyDate(todayKey())}, is done. Come back tomorrow for a new set.</p>
             <div className="panel">
               <h3 style={{ marginTop: 0 }}>Your score: {souDone.score}</h3>
               {!user && <p className="note">Log in to put your score on tomorrow's leaderboard.</p>}
