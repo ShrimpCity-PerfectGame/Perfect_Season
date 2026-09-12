@@ -189,8 +189,12 @@ function grade(r) {
 const LOSER_PTS = [0, 3, 6, 7, 9, 10, 10, 13, 13, 14, 16, 17, 17, 20, 20, 21, 23, 24, 27];
 const MARGINS = [1, 2, 3, 3, 3, 4, 5, 6, 7, 7, 7, 8, 10, 10, 11, 13, 14, 14, 17, 21];
 // Difficulty. Opponents are on the same scale as your team score.
-const UPSET = 8;             // higher = more upsets both ways
-const winProb = (s, o) => 1 / (1 + Math.exp(-(s - o) / UPSET));
+// Win probability scales linearly with the score gap and is fully deterministic (0% or 100%)
+// once the gap passes SPREAD - a real lead should basically never be upset, rather than
+// carrying a small forever-upset chance no matter how dominant the team is (the old sigmoid
+// approached but never reached certainty). Smaller SPREAD = fewer upsets, more linear/decisive.
+const SPREAD = 20;
+const winProb = (s, o) => Math.max(0, Math.min(1, 0.5 + (s - o) / (2 * SPREAD)));
 
 function gameResult(s, o) {
   const win = Math.random() < winProb(s, o);
