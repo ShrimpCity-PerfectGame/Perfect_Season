@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, updateProfile,
 } from "./storage.js";
@@ -147,6 +147,27 @@ for (const [key, arr] of Object.entries(DATA.b)) {
 // id->name lookup) may include ids that never qualified for any board, so sampling from it
 // directly risks never landing on a usable one.
 const SOU_PLAYER_IDS = [...new Set(Object.values(BOARDS).flat().map((p) => p.id))];
+const SOU_LIVES = 3;
+const SOU_ROUND_SECONDS = 7;
+// Stats O/U is a daily leaderboard, not open-ended practice: everyone gets the same seeded
+// sequence of rounds that day (seed "sou-<date>"), one round per index, deterministic - same
+// pattern as the roster daily's seededSequence. "Career" here means the sum of a player's
+// appearances across every board he qualified for (at most one season per team per era window) -
+// a real but partial slice of his career, not his true full stat line.
+function souRoundFor(seed, n) {
+  const rng = mulberry32(hashStr(`${seed}-${n}`));
+  const id = SOU_PLAYER_IDS[Math.floor(rng() * SOU_PLAYER_IDS.length)];
+  const appearances = [];
+  for (const key of Object.keys(BOARDS)) {
+    for (const p of BOARDS[key]) if (p.id === id) appearances.push(p);
+  }
+  const [statKey, statLabel] = SOU_STAT[appearances[0].pos];
+  const trueValue = appearances.reduce((sum, p) => sum + (p[statKey] || 0), 0);
+  let line = Math.round((trueValue * (0.8 + rng() * 0.4)) / 25) * 25;
+  if (line === trueValue) line += 25;
+  const teams = [...new Set(appearances.map((p) => TEAMS[p.team][0]))];
+  return { name: appearances[0].name, pos: appearances[0].pos, teams, statLabel, trueValue, line };
+}
 
 // Build-a-player rolls only from last season, not any era - the most recent real year the data
 // covers. Boards only keep a player's single best season within each 5-year window, so this is
@@ -1283,6 +1304,8 @@ const DAILY_KEY = (d) => `ps-daily:${d}`;
 const DAILY_PROGRESS = (d) => `ps-daily-wip:${d}`;
 const FREE_PROGRESS = "ps-free-wip";
 const HOWTO_KEY = "ps-howto-seen";
+const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
+const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
 const findPlayer = (key, id, season) => (BOARDS[key] || []).find((p) => p.id === id && p.season === season);
 const shortYr = (y) => `'${String(y).slice(2)}`;
 
@@ -1413,6 +1436,7 @@ export default function PerfectSeason() {
   const timer = useRef(null);
   const recentSpins = useRef([]);
   const bapTimer = useRef(null);
+  const souTimer = useRef(null);
   const [history, setHistory] = useState([]); // one entry per pick, for the recap and for resuming
   const [draftReady, setDraftReady] = useState(false);
   const [resumed, setResumed] = useState(false);
@@ -1425,8 +1449,11 @@ export default function PerfectSeason() {
   const [dailyDone, setDailyDone] = useState(null); // today's finished daily, if any
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
-  const [souRound, setSouRound] = useState(null); // { name, pos, teams, statLabel, trueValue, line, guess, correct }
-  const [souScore, setSouScore] = useState({ right: 0, wrong: 0 });
+  // Stats O/U's daily game state while playing:
+  // { date, roundIndex, lives, score, round, guess, correct, deadline, timeLeft }
+  const [sou, setSou] = useState(null);
+  const [souDone, setSouDone] = useState(null); // today's finished record, if any: { score }
+  const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
   // stage "build": { stage, pos, filled: {attr: {score, fromName, fromTeam, fromSeason}}, remaining: [attr], seen: [playerId], team, player }
   // "seen" is every player id already rolled this build, so the same real player never comes up twice.
@@ -1468,6 +1495,7 @@ export default function PerfectSeason() {
     loadLeaderboard();
     (async () => {
       setDailyDone(await sget(DAILY_KEY(todayKey()), false));
+      setSouDone(await sget(SOU_DONE_KEY(todayKey()), false));
       const saved = await sget(DRAFT_KEY, false);
       const ok = saved && saved.spin && BOARDS[`${saved.spin.team}|${saved.spin.w}`] && Array.isArray(saved.history)
         && saved.history.every((h) => findPlayer(h.key, h.id, h.season));
@@ -1796,26 +1824,70 @@ export default function PerfectSeason() {
   // Stats O/U: "career" here means the sum of a player's appearances across every board he
   // qualified for (at most one season per team per era window) - a real but partial slice of
   // his career, not his true full stat line, since only qualifying seasons make the boards.
-  function newSouRound() {
-    const id = SOU_PLAYER_IDS[Math.floor(Math.random() * SOU_PLAYER_IDS.length)];
-    const appearances = [];
-    for (const key of Object.keys(BOARDS)) {
-      for (const p of BOARDS[key]) if (p.id === id) appearances.push(p);
-    }
-    const [statKey, statLabel] = SOU_STAT[appearances[0].pos];
-    const trueValue = appearances.reduce((sum, p) => sum + (p[statKey] || 0), 0);
-    let line = Math.round((trueValue * (0.8 + Math.random() * 0.4)) / 25) * 25;
-    if (line === trueValue) line += 25;
-    const teams = [...new Set(appearances.map((p) => TEAMS[p.team][0]))];
-    setSouRound({ name: appearances[0].name, pos: appearances[0].pos, teams, statLabel, trueValue, line, guess: null });
+  async function loadSouBoard(date) {
+    setSouBoard({ loading: true, rows: [] });
+    try {
+      const rows = await fetchSouTop(date, 10);
+      setSouBoard({ loading: false, rows });
+    } catch (e) { setSouBoard({ loading: false, rows: [] }); }
   }
 
-  function souGuess(dir) {
-    if (souRound.guess) return;
-    const correct = dir === "over" ? souRound.trueValue > souRound.line : souRound.trueValue < souRound.line;
-    setSouRound({ ...souRound, guess: dir, correct });
-    setSouScore((s) => (correct ? { ...s, right: s.right + 1 } : { ...s, wrong: s.wrong + 1 }));
+  // Deals round `roundIndex` of today's seeded sequence and starts its 7-second clock ticking -
+  // a real wall-clock deadline (Date.now() + 7s), not just a countdown of ticks, so pausing the
+  // tab or dev-tools can't stretch the window (resolveSou double-checks the deadline too).
+  function startSouRound(date, roundIndex, lives, score) {
+    clearInterval(souTimer.current);
+    const round = souRoundFor(`sou-${date}`, roundIndex);
+    const deadline = Date.now() + SOU_ROUND_SECONDS * 1000;
+    setSou({ date, roundIndex, lives, score, round, guess: null, correct: undefined, deadline, timeLeft: SOU_ROUND_SECONDS });
+    souTimer.current = setInterval(() => {
+      setSou((s) => {
+        if (!s || s.guess) return s;
+        const left = Math.max(0, Math.ceil((s.deadline - Date.now()) / 1000));
+        if (left > 0) return s.timeLeft === left ? s : { ...s, timeLeft: left };
+        clearInterval(souTimer.current);
+        return { ...s, guess: "timeout", correct: false, timeLeft: 0, lives: s.lives - 1 };
+      });
+    }, 200);
   }
+
+  // A guess only counts if it lands before the deadline - a click already in flight when time
+  // expires is treated as a timeout, not a lucky last-second answer.
+  function souGuess(dir) {
+    if (!sou || sou.guess) return;
+    if (Date.now() > sou.deadline) return; // the timer's own tick will resolve this as a timeout
+    clearInterval(souTimer.current);
+    const correct = dir === "over" ? sou.round.trueValue > sou.round.line : sou.round.trueValue < sou.round.line;
+    setSou({ ...sou, guess: dir, correct, lives: correct ? sou.lives : sou.lives - 1, score: correct ? sou.score + 1 : sou.score });
+  }
+
+  async function openSou() {
+    setView("statsou");
+    if (souDone) { loadSouBoard(todayKey()); return; }
+    const date = todayKey();
+    const wip = await sget(SOU_PROGRESS(date), false);
+    if (wip) startSouRound(date, wip.roundIndex, wip.lives, wip.score);
+    else startSouRound(date, 0, SOU_LIVES, 0);
+  }
+
+  function leaveSou() {
+    clearInterval(souTimer.current);
+    setView("home");
+  }
+
+  // Once a round resolves (correct, wrong, or timeout), save progress; once lives run out,
+  // finalize the day - write the personal "already played today" record, clear the resumable
+  // wip snapshot, and (if logged in) put the score on the shared daily leaderboard. Guests can
+  // still play, they just don't appear on the board.
+  useEffect(() => {
+    if (!sou || !sou.guess) return;
+    if (sou.lives > 0) { sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex, lives: sou.lives, score: sou.score }, false); return; }
+    sset(SOU_DONE_KEY(sou.date), { score: sou.score }, false);
+    sdel(SOU_PROGRESS(sou.date), false);
+    if (user && userId) upsertSouRun(sou.date, userId, { username: user, score: sou.score });
+    setSouDone({ score: sou.score });
+    loadSouBoard(sou.date);
+  }, [sou]);
 
   // Build-a-player: you pick the position, then roll real players at that position one at a
   // time so you can take a single attribute from each until every attribute is filled.
@@ -2118,13 +2190,13 @@ export default function PerfectSeason() {
                 <span className="go">Start a draft</span>
               </button>
 
-              <button className="mode m-sou" onClick={() => { setView("statsou"); if (!souRound) newSouRound(); }}>
+              <button className="mode m-sou" onClick={openSou}>
                 <div className="mt">
                   <span className="icon" aria-hidden="true">📊</span>
-                  <span className="mn">Stats O/U</span>{(souScore.right + souScore.wrong) > 0 && <span className="pill">{souScore.right}–{souScore.wrong}</span>}
+                  <span className="mn">Stats O/U</span>{souDone && <span className="pill">Done · {souDone.score}</span>}
                 </div>
-                <p>Guess over or under a player's stat line. No drafting, just know your football.</p>
-                <span className="go">Play</span>
+                <p>One shared daily set, {SOU_ROUND_SECONDS}s a guess, three lives - how many can you get right today?</p>
+                <span className="go">{souDone ? "See today's result" : "Play"}</span>
               </button>
 
               <button className="mode m-bap" onClick={openBuildPicker}>
@@ -2775,31 +2847,67 @@ export default function PerfectSeason() {
         })()}
 
         {/* ---------------- STATS O/U ---------------- */}
-        {view === "statsou" && souRound && (
+        {view === "statsou" && sou && (
           <>
             <h2 className="h">Stats O/U</h2>
             <p className="note" style={{ marginTop: 0 }}>
-              Record: {souScore.right}–{souScore.wrong}. "Career" here means seasons that made our boards (best season per team per era) - a real slice of a career, not the whole thing.
+              The same rounds for everyone today, {prettyDate(sou.date)}. Three lives, {SOU_ROUND_SECONDS}s per guess - "career" means seasons that made our boards (best season per team per era), a real slice of a career, not the whole thing.
             </p>
+            <div className="frow" style={{ marginBottom: 10 }}>
+              <span className="pill">{"❤".repeat(Math.max(0, sou.lives))}{"🖤".repeat(Math.max(0, SOU_LIVES - sou.lives))}</span>
+              <span className="pill">Score {sou.score}</span>
+              {!sou.guess && <span className="pill">{sou.timeLeft}s</span>}
+            </div>
             <div className="panel">
-              <h3 style={{ marginTop: 0 }}>{souRound.name}</h3>
-              <p className="note" style={{ marginTop: 0 }}>{POS_NAME[souRound.pos]} · played for {souRound.teams.join(", ")}</p>
-              <p style={{ fontSize: 18, margin: "10px 0" }}>Career {souRound.statLabel}: <b>{souRound.line.toLocaleString()}</b></p>
-              {!souRound.guess ? (
+              <h3 style={{ marginTop: 0 }}>{sou.round.name}</h3>
+              <p className="note" style={{ marginTop: 0 }}>{POS_NAME[sou.round.pos]} · played for {sou.round.teams.join(", ")}</p>
+              <p style={{ fontSize: 18, margin: "10px 0" }}>Career {sou.round.statLabel}: <b>{sou.round.line.toLocaleString()}</b></p>
+              {!sou.guess ? (
                 <div className="frow">
                   <button className="btn solid" onClick={() => souGuess("over")}>Over</button>
                   <button className="btn solid" onClick={() => souGuess("under")}>Under</button>
                 </div>
               ) : (
                 <>
-                  <p className={souRound.correct ? "ok" : "err"} style={{ margin: "0 0 10px" }}>
-                    {souRound.correct ? "Correct!" : "Wrong."} Actual: {souRound.trueValue.toLocaleString()} {souRound.statLabel}.
+                  <p className={sou.correct ? "ok" : "err"} style={{ margin: "0 0 10px" }}>
+                    {sou.guess === "timeout" ? "Too slow." : sou.correct ? "Correct!" : "Wrong."} Actual: {sou.round.trueValue.toLocaleString()} {sou.round.statLabel}.
                   </p>
-                  <button className="btn solid" onClick={newSouRound}>Next player</button>
+                  {sou.lives > 0 ? (
+                    <button className="btn solid" onClick={() => startSouRound(sou.date, sou.roundIndex + 1, sou.lives, sou.score)}>Next round</button>
+                  ) : (
+                    <button className="btn solid" onClick={() => setSou(null)}>See today's result</button>
+                  )}
                 </>
               )}
             </div>
-            <button className="btn" style={{ marginTop: 12 }} onClick={() => setView("home")}>Back to modes</button>
+            <button className="btn" style={{ marginTop: 12 }} onClick={leaveSou}>Back to modes</button>
+          </>
+        )}
+
+        {view === "statsou" && !sou && souDone && (
+          <>
+            <h2 className="h">Stats O/U</h2>
+            <p className="note" style={{ marginTop: 0 }}>Today's Stats O/U, {prettyDate(todayKey())}, is done. Come back tomorrow for a new set.</p>
+            <div className="panel">
+              <h3 style={{ marginTop: 0 }}>Your score: {souDone.score}</h3>
+              {!user && <p className="note">Log in to put your score on tomorrow's leaderboard.</p>}
+            </div>
+            <h2 className="h">Today's leaderboard</h2>
+            {souBoard.rows.length === 0 ? (
+              <p className="note" style={{ marginTop: 0 }}>{souBoard.loading ? "Loading today's scores…" : "No finished rounds yet today."}</p>
+            ) : (
+              <table className="lb">
+                <thead><tr><th></th><th>Player</th><th className="r">Score</th></tr></thead>
+                <tbody>
+                  {souBoard.rows.map((q, i) => (
+                    <tr key={i} className={user && q.username === user ? "me" : ""}>
+                      <td className="rk">{i + 1}</td><td>{q.username}</td><td className="r">{q.score}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <button className="btn" style={{ marginTop: 12 }} onClick={leaveSou}>Back to modes</button>
           </>
         )}
       </div>

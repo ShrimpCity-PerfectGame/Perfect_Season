@@ -178,7 +178,11 @@ run on Supabase (Postgres + Auth, RLS-gated — see Architecture above) instead 
 and it's deployed on Vercel (`vercel.json` + `build.mjs`). "Hard mode" (an earlier version of this
 list) shipped as **Genius mode** — same draft, player cards hide every stat cell. Also shipped:
 **GM mode** (salary cap, derived from `p.rating` so era doesn't affect price — see
-`playerSalary()`), **Stats O/U** (career-stat over/under guessing), **Build-a-player** (standalone
+`playerSalary()`), **Stats O/U** (a daily leaderboard, not open-ended practice: one seeded
+sequence of rounds shared by everyone that day — `souRoundFor(seed, n)`, seed `sou-<date>` — three
+lives, a real-wall-clock 7-second timer per guess (`SOU_ROUND_SECONDS`) to discourage looking
+answers up, score = correct guesses before your third miss, posted to the `sou_runs` table via
+`upsertSouRun`/`fetchSouTop`), **Build-a-player** (standalone
 — no roster, no 6-slot draft: pick a position, roll a team then their active player from last
 season, take one letter-graded attribute from him at a time via `BAP_ATTRS`/`scaleStat` until the
 build is complete, then roll any real historical team-season from `OPPS` and sim whether your

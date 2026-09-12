@@ -21,12 +21,13 @@ export function makeMockAuth() {
   const authUsers = new Map(); // email -> {id, email, password}
   const profiles = new Map(); // id -> row (snake_case, matches the real schema)
   const dailyRuns = new Map(); // "date:userId" -> row
+  const souRuns = new Map(); // "date:userId" -> row
   let session = null;
   const listeners = [];
   const notify = (event) => listeners.forEach((cb) => cb(event, session));
 
   function from(table) {
-    const store = table === "profiles" ? profiles : dailyRuns;
+    const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : dailyRuns;
     return {
       select() {
         const state = { filters: [], order: null, limit: null };
@@ -64,7 +65,7 @@ export function makeMockAuth() {
           }
           profiles.set(row.id, { runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, ...row });
         } else {
-          dailyRuns.set(`${row.date}:${row.user_id}`, row);
+          store.set(`${row.date}:${row.user_id}`, row);
         }
         return Promise.resolve({ error: null });
       },

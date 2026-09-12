@@ -38,8 +38,22 @@ create table if not exists public.daily_runs (
 );
 create index if not exists daily_runs_date_score_idx on public.daily_runs (date, score desc);
 
+-- Stats O/U's daily leaderboard: one seeded sequence of rounds per day, shared by everyone
+-- (mode.seed = "sou-<date>", same pattern as the roster daily's "daily-<date>"), three lives,
+-- score = correct guesses before your third miss.
+create table if not exists public.sou_runs (
+  date        text not null,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  username    text not null,
+  score       integer not null,
+  created_at  timestamptz not null default now(),
+  primary key (date, user_id)
+);
+create index if not exists sou_runs_date_score_idx on public.sou_runs (date, score desc);
+
 alter table public.profiles enable row level security;
 alter table public.daily_runs enable row level security;
+alter table public.sou_runs enable row level security;
 
 -- Public, sitewide-readable (matches the game's existing fully-open leaderboard semantics -
 -- there was never a read restriction before this migration).
@@ -48,6 +62,9 @@ create policy "profiles are publicly readable" on public.profiles for select usi
 
 drop policy if exists "daily_runs are publicly readable" on public.daily_runs;
 create policy "daily_runs are publicly readable" on public.daily_runs for select using (true);
+
+drop policy if exists "sou_runs are publicly readable" on public.sou_runs;
+create policy "sou_runs are publicly readable" on public.sou_runs for select using (true);
 
 -- Writes restricted to the row's own owner. No client-side INSERT policy on profiles - profile
 -- rows are created only by the trigger below, as part of auth.users insert.
@@ -61,6 +78,14 @@ create policy "users insert their own daily run" on public.daily_runs
 
 drop policy if exists "users update their own daily run" on public.daily_runs;
 create policy "users update their own daily run" on public.daily_runs
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "users insert their own sou run" on public.sou_runs;
+create policy "users insert their own sou run" on public.sou_runs
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "users update their own sou run" on public.sou_runs;
+create policy "users update their own sou run" on public.sou_runs
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Known, accepted limitation: public SELECT + auth.uid()-gated writes means an authenticated

@@ -1,10 +1,14 @@
-// Stats O/U: every round must resolve to a real player without recursing forever (a random
-// pick that only ever samples ids never placed on any board would retry indefinitely).
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+// Stats O/U is a shared daily leaderboard: everyone gets the same seeded sequence of rounds each
+// day, three lives, a 7-second clock per guess. Verify: rounds resolve to real players without
+// ever breaking (a random pick that only ever samples ids never placed on any board would retry
+// indefinitely), the daily/lives framing shows up, running out of lives locks the day and
+// surfaces the leaderboard, and reopening afterward shows the same finished result rather than
+// letting you replay.
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
-  window.__ps_supabase__ = makeMockAuth();
+window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Got it, let's draft"));
@@ -12,21 +16,36 @@ await flush();
 await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Stats O/U").closest("button"));
 await flush();
 
-await runTest("many rounds resolve without error and update the running score", async () => {
-  for (let i = 0; i < 40; i++) {
+await runTest("guessing until lives run out locks today's game and shows the leaderboard", async () => {
+  assert(text(container).includes("Three lives"), "expected the daily/lives framing, got: " + text(container).slice(0, 300));
+
+  for (let i = 0; i < 30 && !text(container).includes("is done"); i++) {
     const panel = container.querySelector(".panel");
     assert(panel?.querySelector("h3")?.textContent, `round ${i}: expected a player name`);
-    const guessBtn = findButtonByText(panel, "Over") || findButtonByText(panel, "Under");
-    assert(guessBtn, `round ${i}: expected Over/Under buttons`);
+    const guessBtn = findButtonByText(panel, "Over");
+    assert(guessBtn, `round ${i}: expected an Over button`);
     await click(guessBtn);
     await flush();
-    assert(/Correct!|Wrong\./.test(panel.textContent), `round ${i}: expected a reveal after guessing`);
-    const nextBtn = findButtonByText(container, "Next player");
+    assert(/Correct!|Wrong\.|Too slow\./.test(panel.textContent), `round ${i}: expected a reveal after guessing`);
+    const nextBtn = findButtonByText(container, "Next round") || findButtonByText(container, "See today's result");
+    assert(nextBtn, `round ${i}: expected a way to continue`);
     await click(nextBtn);
     await flush();
   }
-  const record = container.querySelector(".note")?.textContent;
-  assert(/Record: \d+–\d+/.test(record), "expected a running record, got: " + record);
+
+  assert(text(container).includes("is done"), "expected the day to lock after 3 misses within 30 rounds (astronomically unlikely not to happen)");
+  assert(container.querySelector("h2.h")?.textContent === "Stats O/U", "expected to land on the finished Stats O/U summary");
+  assert(/Your score: \d+/.test(text(container)), "expected a final score, got: " + text(container).slice(0, 300));
+  assert(text(container).includes("Today's leaderboard"), "expected today's leaderboard section");
+});
+
+await runTest("reopening after finishing shows the same result instead of letting you replay", async () => {
+  await click(findButtonByText(container, "Back to modes"));
+  await flush();
+  assert(findButtonByText(container, "See today's result"), "expected the home card to reflect today's finished game");
+  await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Stats O/U").closest("button"));
+  await flush();
+  assert(/Your score: \d+/.test(text(container)), "expected the same finished summary on reopen, not a fresh game");
 });
 
 console.log("test-stats-ou.mjs done");

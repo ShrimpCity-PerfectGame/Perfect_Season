@@ -2,7 +2,7 @@
 //  - window.storage (get/set/delete): personal, per-device data only (draft-in-progress
 //    snapshots, the daily-done flag, the howto-seen flag). Backed by localStorage in
 //    production (entry.jsx), an in-memory mock in tests (tests/helpers.mjs's makeStorage()).
-//  - the Supabase client (auth + "profiles"/"daily_runs" tables): all sitewide/shared data -
+//  - the Supabase client (auth + "profiles"/"daily_runs"/"sou_runs" tables): all sitewide/shared data -
 //    accounts, stats, the leaderboard. Backed by a real @supabase/supabase-js client in
 //    production, an in-memory mock in tests (tests/helpers.mjs's makeMockAuth()), reached via
 //    window.__ps_supabase__ so tests never need a real network call or project.
@@ -117,5 +117,15 @@ export async function fetchDailyTop(date, limit = 10) {
 }
 export async function upsertDailyRun(date, userId, row) {
   const { error } = await getClient().from("daily_runs").insert({ date, user_id: userId, username: row.username, w: row.w, l: row.l, score: row.score, outcome: row.outcome });
+  return !error;
+}
+
+export async function fetchSouTop(date, limit = 10) {
+  const { data, error } = await getClient().from("sou_runs").select("*").eq("date", date).order("score", { ascending: false }).limit(limit);
+  if (error || !data) return [];
+  return data.map((r) => ({ username: r.username, score: r.score }));
+}
+export async function upsertSouRun(date, userId, row) {
+  const { error } = await getClient().from("sou_runs").insert({ date, user_id: userId, username: row.username, score: row.score });
   return !error;
 }
