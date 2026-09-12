@@ -1,4 +1,5 @@
 node_modules/
 build/
+public/
 *.log
 .claude/scheduled_tasks.lock

@@ -25,10 +25,17 @@ export async function clearDraft(key) {
 }
 
 // ---------- Supabase client seam ----------
+// SUPABASE_URL/SUPABASE_ANON_KEY are bare identifiers, textually replaced at build time by
+// build.mjs's esbuild `define` (same mechanism as the existing NODE_ENV define) - never read
+// from process.env directly here, since this module is bundled for the browser. The real
+// client is only ever constructed lazily (not at module load) so tests - which always install
+// window.__ps_supabase__ before mounting - never hit this branch or need the identifiers defined.
+import { createClient } from "@supabase/supabase-js";
 let _client = null;
 function getClient() {
   if (typeof window !== "undefined" && window.__ps_supabase__) return window.__ps_supabase__;
-  return _client; // wired to a real @supabase/supabase-js client once a real project exists
+  if (!_client) _client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return _client;
 }
 
 // ---------- Auth ----------
