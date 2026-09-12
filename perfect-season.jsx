@@ -64,6 +64,40 @@ for (const [key, arr] of Object.entries(DATA.b)) {
   });
 }
 
+// Flex slots score on raw production alone, not position-relative grading: `rating` grades
+// RB/WR/TE against their OWN position's peers, so a modest-for-a-WR season can outrank a
+// dominant-for-a-TE season even though the TE outproduced everyone at his own spot - fine for
+// the named slots, wrong for a slot that's explicitly position-agnostic. Renormalize ppr
+// across the combined RB/WR/TE pool per era window, then rescale onto the numeric range
+// `rating` already occupies for that same combined pool, so team-score math (calibrated
+// against opponent difficulty on the rating scale) doesn't need to change - only which
+// player comes out on top for a Flex spot.
+const FLEX_POS = ["RB", "WR", "TE"];
+const flexStatsByEra = WINDOWS.map((_, w) => {
+  const pool = [];
+  for (const key of Object.keys(BOARDS)) {
+    if (Number(key.split("|")[1]) !== w) continue;
+    for (const p of BOARDS[key]) if (FLEX_POS.includes(p.pos)) pool.push(p);
+  }
+  const mean = (xs) => xs.reduce((a, x) => a + x, 0) / xs.length;
+  const std = (xs, m) => Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / xs.length) || 1;
+  const pprMean = mean(pool.map((p) => p.ppr));
+  const ratingMean = mean(pool.map((p) => p.rating));
+  return {
+    pprMean, pprStd: std(pool.map((p) => p.ppr), pprMean),
+    ratingMean, ratingStd: std(pool.map((p) => p.rating), ratingMean),
+  };
+});
+function flexRating(p) {
+  const s = flexStatsByEra[p.w];
+  return s.ratingMean + ((p.ppr - s.pprMean) / s.pprStd) * s.ratingStd;
+}
+// The rating a player should count as in team-score math for the slot they're in: their
+// normal positional grade for a named slot, or their stats-only flexRating for a Flex spot.
+function effectiveRating(slot, p) {
+  return slot.startsWith("FLEX") ? flexRating(p) : p.rating;
+}
+
 // Seeded randomness, so a daily or a challenge code gives everyone the same draft.
 function hashStr(s) {
   let h = 2166136261;
@@ -1066,9 +1100,9 @@ function bestOrderFor(history) {
     for (let i = 0; i < boardKeys.length; i++) {
       const slot = order[i], key = boardKeys[i];
       const top = (BOARDS[key] || []).filter((p) => fits(p.pos, slot))
-        .reduce((a, p) => (!a || p.rating > a.rating ? p : a), null);
+        .reduce((a, p) => (!a || effectiveRating(slot, p) > effectiveRating(slot, a) ? p : a), null);
       if (!top) { ok = false; break; }
-      total += top.rating * (slot === "QB" ? QB_WEIGHT : 1);
+      total += effectiveRating(slot, top) * (slot === "QB" ? QB_WEIGHT : 1);
       assignment[slot] = { key, player: top };
     }
     if (ok && (!best || total > best.totalRating)) best = { slotAssignment: assignment, totalRating: total };
@@ -1133,7 +1167,7 @@ function HowTo({ onClose }) {
           <li>Play <b>unlimited</b> drafts any time, or take the <b>daily</b> — one draft a day, the same boards for everyone.</li>
           <li>Your six are graded, then your team plays <b>17 games against real NFL teams</b> and, if you're good enough, the playoffs. Win them all for a <b>perfect 20–0 season</b>.</li>
         </ol>
-        <p className="small">Grades are based on PPR fantasy points compared to the top players at that position in the same era, with a bump for efficiency (QB rating, completion %, yards per carry). Your QB counts a little more than the others.</p>
+        <p className="small">Grades are based on PPR fantasy points compared to the top players at that position in the same era, with a bump for efficiency (QB rating, completion %, yards per carry). Flex is graded on raw production instead, with no positional comparison. Your QB counts a little more than the others.</p>
         <button ref={btn} className="btn solid" onClick={onClose}>Got it, let's draft</button>
       </div>
     </div>
@@ -1415,14 +1449,14 @@ export default function PerfectSeason() {
 
   function finish(r) {
     let tot = 0, wt = 0;
-    for (const s of SLOTS) { const k = s === "QB" ? QB_WEIGHT : 1; tot += r[s].rating * k; wt += k; }
+    for (const s of SLOTS) { const k = s === "QB" ? QB_WEIGHT : 1; tot += effectiveRating(s, r[s]) * k; wt += k; }
     const score = Math.round((tot / wt) * 10) / 10;
     const lineup = SLOTS.map((s) => `${r[s].id}${r[s].season}`).join("|");
     const sim = withSeed(`${mode.seed}#${lineup}`, () => simulateSeason(score));
     sim.score = score;
     const run = {
       w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, perfect: sim.perfect, playoffs: sim.playoffs, date: Date.now(),
-      roster: SLOTS.map((s) => ({ slot: s, name: r[s].name, team: r[s].team, season: r[s].season, ppr: r[s].ppr, rating: r[s].rating })),
+      roster: SLOTS.map((s) => ({ slot: s, name: r[s].name, team: r[s].team, season: r[s].season, ppr: r[s].ppr, rating: effectiveRating(s, r[s]) })),
     };
     const siteBest = lb.players.reduce((m, q) => Math.max(m, q.bestScore || 0), 0);
     sim.newSiteBest = !!user && lb.players.length > 0 && score > siteBest;
@@ -1876,8 +1910,8 @@ export default function PerfectSeason() {
                 {finished && (
                   <>
                     <h2 className="h">Your roster, graded</h2>
-                    <RosterRows roster={SLOTS.map((s) => ({ slot: s, ...roster[s] }))} />
-                    <p className="note">Grades compare each season to the top fantasy finishers at that position in the same era, with 17-game seasons scaled to 16. QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Team score averages the six, with the QB counting 1.25 times.</p>
+                    <RosterRows roster={SLOTS.map((s) => ({ slot: s, ...roster[s], rating: effectiveRating(s, roster[s]) }))} />
+                    <p className="note">Grades compare each season to the top fantasy finishers at that position in the same era, with 17-game seasons scaled to 16. QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Flex is graded on production alone, not position - no positional bump either way. Team score averages the six, with the QB counting 1.25 times.</p>
                     {history.length === 6 && (() => {
                       const rows = history.map((h, i) => {
                         const took = findPlayer(h.key, h.id, h.season);
@@ -1911,7 +1945,7 @@ export default function PerfectSeason() {
                               <RosterRows roster={SLOTS.map((s) => {
                                 const a = optimal.slotAssignment[s];
                                 const [tm, w] = a.key.split("|");
-                                return { slot: s, ...a.player, board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
+                                return { slot: s, ...a.player, rating: effectiveRating(s, a.player), board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
                               })} />
                               <p className="note recap-optimal">This assumes hindsight of all six boards you saw - it's what the ideal slot assignment would have scored, not a board you missed.</p>
                             </>
