@@ -26,12 +26,69 @@ const QB_WEIGHT = 1.25;
 // stats from him, repeat until every category is filled, then the assembled player fills that
 // position's slot for a normal draft. Only raw counting stats (not derived ones like yds/carry
 // or QB rating) are pickable, since those can't be assembled piecemeal.
-const BUILD_CATEGORIES = {
-  QB: [["py", "Pass yards"], ["ptd", "Pass TD"], ["int", "INT"], ["ry", "Rush yards"]],
-  RB: [["ry", "Rush yards"], ["rtd", "Rush TD"], ["rec", "Receptions"], ["rcy", "Rec yards"]],
-  WR: [["rcy", "Rec yards"], ["rctd", "Rec TD"], ["rec", "Receptions"], ["ry", "Rush yards"]],
-  TE: [["rcy", "Rec yards"], ["rctd", "Rec TD"], ["rec", "Receptions"], ["fl", "Fumbles lost"]],
+// Build-a-player attributes: each is [key, label, category, calc(player) -> a number on the
+// same rough scale as `rating` (see grade() below)]. No real scouting data (arm strength,
+// blocking grades, etc.) exists in this dataset, so every formula is a deliberate proxy built
+// only from the counting stats each player actually has - a flavorful approximation, not a
+// scientific one. Kept separate per position since the same real box score means something
+// different for a passer than a receiver.
+const clamp = (x, lo = 0, hi = 140) => Math.max(lo, Math.min(hi, x));
+// Maps a raw stat value onto the same numeric scale grade() reads (40=D floor, 120=A+ anchor,
+// clamped 0-140) given a rough [replacement-level, elite] range for that specific metric - so
+// every attribute lands on a comparable scale by construction, no matter how different the
+// underlying stat's natural units/range are (a completion% and a raw yardage total would
+// otherwise produce wildly mismatched numbers). lo > hi is fine and just inverts the slope,
+// for metrics where less is better (fumbles, interceptions).
+const scaleStat = (v, lo, hi) => clamp(40 + ((v - lo) / (hi - lo)) * 80);
+const BAP_ATTRS = {
+  QB: [
+    ["build", "Build", "Physical", (p) => scaleStat(p.g, 6, 17)],
+    ["arm", "Arm Strength", "Physical", (p) => scaleStat(p.att ? p.py / p.att : 0, 6, 8.3)],
+    ["legs", "Legs", "Physical", (p) => scaleStat(p.ry + p.rtd * 40, 0, 650)],
+    ["leadership", "Leadership", "Mental", (p) => scaleStat(p.ptd - p.int, -5, 28)],
+    ["vision", "Vision", "Mental", (p) => scaleStat(p.py / p.g, 150, 290)],
+    ["processing", "Processing", "Mental", (p) => scaleStat(p.att ? 1 - p.int / p.att : 0.97, 0.955, 0.99)],
+    ["accuracy", "Accuracy", "Skill", (p) => scaleStat(p.att ? p.cmp / p.att : 0, 0.58, 0.72)],
+    ["playmaking", "Playmaking", "Skill", (p) => scaleStat((p.ptd + p.rtd) / p.g, 0.9, 2.3)],
+    ["pocket", "Pocket Presence", "Skill", (p) => scaleStat(passerRating(p), 75, 125)],
+  ],
+  RB: [
+    ["build", "Build", "Physical", (p) => scaleStat(p.car / p.g, 8, 20)],
+    ["speed", "Speed", "Physical", (p) => scaleStat(p.car ? p.ry / p.car : 0, 3.6, 5.4)],
+    ["power", "Power", "Physical", (p) => scaleStat(p.rtd, 1, 14)],
+    ["vision", "Vision", "Mental", (p) => scaleStat(p.ry / p.g, 35, 95)],
+    ["patience", "Patience", "Mental", (p) => scaleStat((p.car ? p.ry / p.car : 0) - p.fl * 0.3, 3.3, 5.3)],
+    ["discipline", "Discipline", "Mental", (p) => scaleStat(p.fl, 4, 0)],
+    ["elusiveness", "Elusiveness", "Skill", (p) => scaleStat((p.ry + p.rcy) / Math.max(1, p.car + p.rec), 3.7, 6.2)],
+    ["receiving", "Receiving", "Skill", (p) => scaleStat(p.rec, 15, 70)],
+    ["playmaking", "Playmaking", "Skill", (p) => scaleStat(p.rtd + p.rctd, 2, 18)],
+  ],
+  WR: [
+    ["build", "Build", "Physical", (p) => scaleStat(p.g, 8, 17)],
+    ["speed", "Speed", "Physical", (p) => scaleStat(p.rec ? p.rcy / p.rec : 0, 9.5, 16)],
+    ["hands", "Hands", "Physical", (p) => scaleStat(p.rec / p.g, 2, 7)],
+    ["routeiq", "Route IQ", "Mental", (p) => scaleStat(p.rcy / p.g, 30, 95)],
+    ["awareness", "Field Awareness", "Mental", (p) => scaleStat(p.rctd / Math.max(1, p.rec), 0.03, 0.15)],
+    ["discipline", "Discipline", "Mental", (p) => scaleStat(p.fl, 3, 0)],
+    ["routerun", "Route Running", "Skill", (p) => scaleStat(p.rec, 25, 105)],
+    ["separation", "Separation", "Skill", (p) => scaleStat(p.rcy, 450, 1400)],
+    ["playmaking", "Playmaking", "Skill", (p) => scaleStat(p.rctd + p.rtd, 1, 14)],
+  ],
+  TE: [
+    ["build", "Build", "Physical", (p) => scaleStat(p.g, 8, 17)],
+    // No blocking data exists in this dataset - games played (staying on the field) is the
+    // closest available proxy, a deliberately weak one.
+    ["blocking", "Blocking", "Physical", (p) => scaleStat(p.g, 8, 17)],
+    ["hands", "Hands", "Physical", (p) => scaleStat(p.rec / p.g, 1.5, 5.5)],
+    ["routeiq", "Route IQ", "Mental", (p) => scaleStat(p.rcy / p.g, 20, 70)],
+    ["awareness", "Field Awareness", "Mental", (p) => scaleStat(p.rctd / Math.max(1, p.rec), 0.05, 0.22)],
+    ["discipline", "Discipline", "Mental", (p) => scaleStat(p.fl, 3, 0)],
+    ["routerun", "Route Running", "Skill", (p) => scaleStat(p.rec, 20, 90)],
+    ["redzone", "Red Zone Threat", "Skill", (p) => scaleStat(p.rctd, 1, 10)],
+    ["playmaking", "Playmaking", "Skill", (p) => scaleStat(p.rctd + p.rtd, 1, 11)],
+  ],
 };
+const BAP_CATS = ["Physical", "Mental", "Skill"];
 
 const TEAMS = {
   ARI: ["Cardinals", "Arizona", "#97233F", "#FFB612"], ATL: ["Falcons", "Atlanta", "#A71930", "#1B1B1B"],
@@ -90,6 +147,34 @@ for (const [key, arr] of Object.entries(DATA.b)) {
 // id->name lookup) may include ids that never qualified for any board, so sampling from it
 // directly risks never landing on a usable one.
 const SOU_PLAYER_IDS = [...new Set(Object.values(BOARDS).flat().map((p) => p.id))];
+
+// Build-a-player rolls only from last season, not any era - the most recent real year the data
+// covers. Boards only keep a player's single best season within each 5-year window, so this is
+// necessarily a partial slice of the real league that year (a player whose best 2021-2025 season
+// was actually 2022 won't show up here even though he also played last season) - the same
+// "partial, not the whole picture" caveat Stats O/U already makes about its own "career" numbers.
+const LAST_SEASON = Math.max(...Object.values(BOARDS).flat().map((p) => p.season));
+const bapPoolCache = {};
+function bapPool(pos) {
+  if (!bapPoolCache[pos]) {
+    bapPoolCache[pos] = Object.values(BOARDS).flat().filter((p) => p.pos === pos && p.season === LAST_SEASON);
+  }
+  return bapPoolCache[pos];
+}
+// Every distinct player who's ever appeared at this position for this team, any era - cosmetic
+// only (the roll animation's flicker, so a "Texans QB" spin has more than one real name to
+// cycle through even when last season alone only has a single qualifying entry for them). The
+// actual result is still decided by bapPool/rollBapPair, which stay last-season-only.
+function teamPosPlayers(team, pos) {
+  const seen = new Set();
+  const out = [];
+  for (let w = 0; w < WINDOWS.length; w++) {
+    for (const p of BOARDS[`${team}|${w}`] || []) {
+      if (p.pos === pos && !seen.has(p.id)) { seen.add(p.id); out.push(p); }
+    }
+  }
+  return out;
+}
 
 // Flex slots score on raw production alone, not position-relative grading: `rating` grades
 // RB/WR/TE against their OWN position's peers, so a modest-for-a-WR season can outrank a
@@ -224,6 +309,10 @@ function grade(r) {
   for (const [v, g] of t) if (r >= v) return g;
   return "F";
 }
+const bapOverallScore = (filled) => {
+  const scores = Object.values(filled).map((f) => f.score);
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
+};
 
 // ---------- Season simulation ----------
 const LOSER_PTS = [0, 3, 6, 7, 9, 10, 10, 13, 13, 14, 16, 17, 17, 20, 20, 21, 23, 24, 27];
@@ -1323,6 +1412,7 @@ export default function PerfectSeason() {
   const [lb, setLb] = useState({ loading: true, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1 });
   const timer = useRef(null);
   const recentSpins = useRef([]);
+  const bapTimer = useRef(null);
   const [history, setHistory] = useState([]); // one entry per pick, for the recap and for resuming
   const [draftReady, setDraftReady] = useState(false);
   const [resumed, setResumed] = useState(false);
@@ -1337,7 +1427,12 @@ export default function PerfectSeason() {
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
   const [souRound, setSouRound] = useState(null); // { name, pos, teams, statLabel, trueValue, line, guess, correct }
   const [souScore, setSouScore] = useState({ right: 0, wrong: 0 });
-  const [bap, setBap] = useState(null); // { pos, filled: {stat: value}, contributors: [player], remaining: [stat], roll: player }
+  // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
+  // stage "build": { stage, pos, filled: {attr: {score, fromName, fromTeam, fromSeason}}, remaining: [attr], seen: [playerId], team, player }
+  // "seen" is every player id already rolled this build, so the same real player never comes up twice.
+  // stage "done":  { stage, pos, filled }
+  // stage "result": { stage, pos, filled, opp, sim }
+  const [bap, setBap] = useState(null);
   const [wip, setWip] = useState({});               // unfinished drafts, by mode
   // Counts in-flight clearDraft() calls per mode. clearDraft is fire-and-forget (overwrite,
   // then delete - see clearDraft below), so a refreshWip() read can land before it's done and
@@ -1675,6 +1770,15 @@ export default function PerfectSeason() {
     return () => clearTimeout(t);
   }, [result, shown]);
 
+  // Build-a-player's own game-by-game reveal - simpler than the main draft's (no interactive
+  // per-round playoff suspense, just a steady tick through every game including playoffs), since
+  // this is a standalone what-if, not a real tracked run.
+  useEffect(() => {
+    if (!bap || bap.stage !== "result" || bap.shown >= bap.sim.games.length) return;
+    const t = setTimeout(() => setBap((b) => (b && b.stage === "result" ? { ...b, shown: b.shown + 1 } : b)), 90);
+    return () => clearTimeout(t);
+  }, [bap]);
+
   // Ending an unlimited draft early is a DNF; the draft itself is cleared.
   function abandonCurrent() {
     if (mode && mode.kind === "free" && !result && history.length > 0 && user && stats) saveStats(applyDnf(stats, history.length));
@@ -1713,42 +1817,113 @@ export default function PerfectSeason() {
     setSouScore((s) => (correct ? { ...s, right: s.right + 1 } : { ...s, wrong: s.wrong + 1 }));
   }
 
-  // Build-a-player: assigns a random position, then rolls real players at that position one at
-  // a time so you can pick a single stat category from each until every category is filled.
-  function rollBapCandidate(pos) {
-    const keys = Object.keys(BOARDS);
-    for (let tries = 0; tries < 50; tries++) {
-      const pool = BOARDS[keys[Math.floor(Math.random() * keys.length)]].filter((p) => p.pos === pos);
-      if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
-    }
-    return null;
+  // Build-a-player: you pick the position, then roll real players at that position one at a
+  // time so you can take a single attribute from each until every attribute is filled.
+  // One roll gives both "which team" and "which active player" at once (a real player only
+  // belongs to one team last season), rather than rolling a team first and hoping it has
+  // someone at this position in the pool - see bapPool's LAST_SEASON note above.
+  // Excludes every player already rolled earlier in this same build, so a 9-attribute build
+  // never draws the same real player twice - falls back to allowing a repeat only if a
+  // position's whole last-season pool has somehow already been exhausted.
+  function rollBapPair(pos, seenIds = []) {
+    const pool = bapPool(pos);
+    if (!pool.length) return null;
+    const fresh = pool.filter((p) => !seenIds.includes(p.id));
+    const candidates = fresh.length ? fresh : pool;
+    const player = candidates[Math.floor(Math.random() * candidates.length)];
+    return { team: player.team, player };
   }
 
-  function startBuild() {
-    const pos = POS[Math.floor(Math.random() * POS.length)];
+  function openBuildPicker() {
     setView("buildplayer");
-    setBap({ pos, filled: {}, contributors: [], remaining: BUILD_CATEGORIES[pos].map(([k]) => k), roll: rollBapCandidate(pos) });
+    setBap({ stage: "pickpos" });
   }
 
-  function pickBapStat(catKey) {
-    const filled = { ...bap.filled, [catKey]: bap.roll[catKey] };
-    const contributors = [...bap.contributors, bap.roll];
-    const remaining = bap.remaining.filter((k) => k !== catKey);
-    if (!remaining.length) { finishBuild(bap.pos, filled, contributors); return; }
-    setBap({ pos: bap.pos, filled, contributors, remaining, roll: rollBapCandidate(bap.pos) });
-  }
-
-  // The custom player's rating is the average of whoever he was assembled from - not a real
-  // grade (nothing like it exists for a Frankenstein stat line), just enough to slot him into
-  // the same team-score math every other player uses.
-  function finishBuild(pos, filled, contributors) {
-    const rating = Math.round((contributors.reduce((a, p) => a + p.rating, 0) / contributors.length) * 10) / 10;
-    const s = { cmp: 0, att: 0, py: 0, ptd: 0, int: 0, car: 0, ry: 0, rtd: 0, rec: 0, rcy: 0, rctd: 0, fl: 0, ...filled };
-    const ppr = Math.max(0, Math.round((s.py / 25 + s.ptd * 4 - s.int * 2 + s.ry / 10 + s.rtd * 6 + s.rec + s.rcy / 10 + s.rctd * 6 - s.fl * 2) * 10) / 10);
-    const customPlayer = { id: `custom-${Date.now()}`, name: `Your custom ${POS_NAME[pos].replace(/s$/, "")}`, pos, season: "Custom", g: 16, team: contributors[0].team, w: 0, ...s, ppr, rating };
+  // Clears any in-flight roll animation timer before leaving, so a pending tick can't land
+  // after Cancel and resurrect a build the user just backed out of.
+  function cancelBap() {
+    clearTimeout(bapTimer.current);
     setBap(null);
-    setView("play");
-    startDraft({ kind: "free", code: newCode(), build: true }, { [pos]: customPlayer });
+    setView("home");
+  }
+
+  // Team spins first, then the player who plays that position for them - same "reel settles"
+  // feel as the main draft's team+era spin, but on its own timer ref so it can never collide
+  // with an in-progress normal draft's animation.
+  // Ticks get slower on approach (a real wheel decelerating, not a flat-speed flicker) so
+  // landing on the team, then the player, each reads as a distinct beat instead of a blur -
+  // recursive setTimeout rather than setInterval, since each tick's delay is different.
+  const BAP_TEAM_DELAYS = [60, 70, 85, 100, 120, 145, 175, 210, 250, 300];
+  const BAP_TEAM_HOLD = 650;
+  const BAP_PLAYER_DELAYS = [60, 75, 95, 120, 150, 185, 225, 270];
+  const BAP_PLAYER_HOLD = 550;
+  function rollBapRound(pos, filled, remaining, seen) {
+    const final = rollBapPair(pos, seen);
+    clearTimeout(bapTimer.current);
+    if (!final || reducedMotion()) { setBap({ stage: "build", pos, filled, remaining, seen: [...seen, final.player.id], ...final }); return; }
+    // The player-phase flicker only cycles through candidates who actually play THIS position
+    // for the team just rolled - showing some other team's QB while "Texans" sits above it
+    // would read as a mistake, not a spin. Draw from every era that team has had at this
+    // position (teamPosPlayers), not just last season - almost every team's had more than one
+    // real name here across the years, so the flicker has more than a single name to bounce
+    // between even though the actual pick is still last-season-only.
+    const playerPool = teamPosPlayers(final.team, pos);
+    setBap({ stage: "rolling", pos, filled, remaining, seen, spinPhase: "team", displayTeam: TEAM_CODES[Math.floor(Math.random() * TEAM_CODES.length)] });
+
+    const stepPlayer = (i) => {
+      if (i >= BAP_PLAYER_DELAYS.length) {
+        setBap((b) => ({ ...b, spinPhase: "player", displayPlayer: final.player.name }));
+        bapTimer.current = setTimeout(() => setBap({ stage: "build", pos, filled, remaining, seen: [...seen, final.player.id], ...final }), BAP_PLAYER_HOLD);
+        return;
+      }
+      bapTimer.current = setTimeout(() => {
+        setBap((b) => ({ ...b, spinPhase: "player", displayPlayer: playerPool[Math.floor(Math.random() * playerPool.length)].name }));
+        stepPlayer(i + 1);
+      }, BAP_PLAYER_DELAYS[i]);
+    };
+    const stepTeam = (i) => {
+      if (i >= BAP_TEAM_DELAYS.length) {
+        setBap((b) => ({ ...b, displayTeam: final.team }));
+        bapTimer.current = setTimeout(() => stepPlayer(0), BAP_TEAM_HOLD);
+        return;
+      }
+      bapTimer.current = setTimeout(() => {
+        setBap((b) => ({ ...b, displayTeam: TEAM_CODES[Math.floor(Math.random() * TEAM_CODES.length)] }));
+        stepTeam(i + 1);
+      }, BAP_TEAM_DELAYS[i]);
+    };
+    stepTeam(0);
+  }
+
+  function pickBapPos(pos) {
+    rollBapRound(pos, {}, BAP_ATTRS[pos].map(([k]) => k), []);
+  }
+
+  function pickBapAttr(key) {
+    const def = BAP_ATTRS[bap.pos].find(([k]) => k === key);
+    const filled = { ...bap.filled, [key]: { score: def[3](bap.player), fromName: bap.player.name, fromTeam: bap.team, fromSeason: bap.player.season } };
+    const remaining = bap.remaining.filter((k) => k !== key);
+    if (!remaining.length) { setBap({ stage: "done", pos: bap.pos, filled }); return; }
+    rollBapRound(bap.pos, filled, remaining, bap.seen);
+  }
+
+  // Build-a-player stands apart from every other mode: no roster, no draft, and this result
+  // never touches stats or the leaderboard - it's a standalone "what if" answer, not a real run.
+  // Roll any real team-season (any year - the same OPPS pool the normal sim draws opponents
+  // from, not last-season-only like the build itself) and see if swapping your build in at his
+  // position would have helped them win it all.
+  function playBapSim() {
+    const customScore = bapOverallScore(bap.filled);
+    const opp = OPPS[Math.floor(Math.random() * OPPS.length)];
+    // The same fractional share of team score this position carries in a real 6-man roster
+    // (QB is weighted higher - see QB_WEIGHT) - swapping in one player should only nudge an
+    // otherwise-unmodeled real team's rating, not replace it outright.
+    const totalWeight = SLOTS.reduce((t, s) => t + (s === "QB" ? QB_WEIGHT : 1), 0);
+    const share = (bap.pos === "QB" ? QB_WEIGHT : 1) / totalWeight;
+    const BASELINE = 80; // scaleStat's own midpoint (a roughly average real starter) - see BAP_ATTRS above
+    const adjustedScore = opp.rec + (customScore - BASELINE) * share;
+    const sim = simulateSeason(adjustedScore);
+    setBap({ stage: "result", pos: bap.pos, filled: bap.filled, opp, sim, shown: reducedMotion() ? sim.games.length : 0 });
   }
 
   // Today's daily always picks up where it left off: you get one run at it, not one per visit.
@@ -1947,9 +2122,9 @@ export default function PerfectSeason() {
                 <span className="go">Play</span>
               </button>
 
-              <button className="mode m-bap" onClick={startBuild}>
+              <button className="mode m-bap" onClick={openBuildPicker}>
                 <div className="mt"><span className="icon" aria-hidden="true">🧩</span><span className="mn">Build-a-player</span></div>
-                <p>Roll real players and take one stat from each to stitch together a custom season, then draft the rest and sim it.</p>
+                <p>Roll a team, roll their active player, and take one attribute from each until your build is complete - then see if he'd have won a real team the chip.</p>
                 <span className="go">Play</span>
               </button>
 
@@ -2456,33 +2631,132 @@ export default function PerfectSeason() {
         )}
 
         {/* ---------------- BUILD-A-PLAYER ---------------- */}
-        {view === "buildplayer" && bap && (
+        {view === "buildplayer" && bap && bap.stage === "pickpos" && (
+          <>
+            <h2 className="h">Build-a-player</h2>
+            <p className="note" style={{ marginTop: 0 }}>
+              Choose a position. You'll roll a team, then their active player from last season, and take one attribute from him at a time until your build is complete.
+            </p>
+            <div className="frow" style={{ flexWrap: "wrap" }}>
+              {POS.map((p) => (
+                <button key={p} className="btn solid" onClick={() => pickBapPos(p)}>{POS_NAME[p]}</button>
+              ))}
+            </div>
+            <button className="btn" style={{ marginTop: 12 }} onClick={cancelBap}>Cancel</button>
+          </>
+        )}
+
+        {view === "buildplayer" && bap && bap.stage === "rolling" && (
           <>
             <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
-            <p className="note" style={{ marginTop: 0 }}>Roll a real player, then take one of his stats for your build. {bap.remaining.length} categor{bap.remaining.length === 1 ? "y" : "ies"} left.</p>
+            <div className="panel" style={{ textAlign: "center" }}>
+              <p className="note" style={{ marginTop: 0 }}>{bap.spinPhase === "team" ? "Rolling a team..." : "Rolling their player..."}</p>
+              <h1 key={bap.displayTeam} className="title" style={{ margin: "10px 0", animation: "pop .15s ease-out" }}>{TEAMS[bap.displayTeam][0]}</h1>
+              {bap.spinPhase === "player" && <h3 key={bap.displayPlayer} style={{ margin: 0, animation: "pop .15s ease-out" }}>{bap.displayPlayer}</h3>}
+            </div>
+            <button className="btn" style={{ marginTop: 12 }} onClick={cancelBap}>Cancel</button>
+          </>
+        )}
+
+        {view === "buildplayer" && bap && bap.stage === "build" && (
+          <>
+            <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
+            <p className="note" style={{ marginTop: 0 }}>
+              Take one of his attributes for your build. {bap.remaining.length} attribute{bap.remaining.length === 1 ? "" : "s"} left.
+            </p>
             <div className="panel">
-              <h3 style={{ marginTop: 0 }}>{bap.roll.name}</h3>
-              <p className="note" style={{ marginTop: 0 }}>{bap.roll.season} {teamLabel(bap.roll.team, bap.roll.season)}, {bap.roll.g} games</p>
+              <h3 style={{ marginTop: 0 }}>{bap.player.name} - {teamLabel(bap.team, bap.player.season)}</h3>
+              <p className="note" style={{ marginTop: 0 }}>{bap.player.season}, {bap.player.g} games</p>
               <div className="cells">
-                {statCells(bap.roll).map(([n, l]) => (<div className="cell" key={l}><div className="n">{n}</div><div className="l">{l}</div></div>))}
+                {statCells(bap.player).map(([n, l]) => (<div className="cell" key={l}><div className="n">{n}</div><div className="l">{l}</div></div>))}
               </div>
-              <div className="frow" style={{ marginTop: 10, flexWrap: "wrap" }}>
-                {BUILD_CATEGORIES[bap.pos].filter(([k]) => bap.remaining.includes(k)).map(([k, label]) => (
-                  <button key={k} className="btn solid" onClick={() => pickBapStat(k)}>Take his {label} ({bap.roll[k].toLocaleString()})</button>
-                ))}
-              </div>
+              {BAP_CATS.map((cat) => {
+                const attrs = BAP_ATTRS[bap.pos].filter(([k, , c]) => c === cat && bap.remaining.includes(k));
+                if (!attrs.length) return null;
+                return (
+                  <div key={cat} style={{ marginTop: 10 }}>
+                    <p className="note" style={{ margin: "0 0 4px" }}>{cat}</p>
+                    <div className="frow" style={{ flexWrap: "wrap" }}>
+                      {attrs.map(([k, label, , calc]) => (
+                        <button key={k} className="btn solid" onClick={() => pickBapAttr(k)}>Take his {label} ({grade(calc(bap.player))})</button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             {Object.keys(bap.filled).length > 0 && (
               <>
                 <h3 className="h" style={{ marginTop: 18 }}>Locked in so far</h3>
                 <div className="recap">
-                  {Object.entries(bap.filled).map(([k, v]) => (
-                    <div className="rc" key={k}><div className="bd">{BUILD_CATEGORIES[bap.pos].find(([ck]) => ck === k)[1]}</div><div className="tk">{v.toLocaleString()}</div></div>
-                  ))}
+                  {BAP_CATS.flatMap((cat) => BAP_ATTRS[bap.pos].filter(([k, , c]) => c === cat && bap.filled[k]).map(([k, label]) => (
+                    <div className="rc" key={k}><div className="n"> </div><div><div className="bd">{label}</div><div className="tk">{grade(bap.filled[k].score)}</div></div><div className="alt">{bap.filled[k].fromName}</div></div>
+                  )))}
                 </div>
               </>
             )}
-            <button className="btn" style={{ marginTop: 12 }} onClick={() => { setBap(null); setView("home"); }}>Cancel</button>
+            <button className="btn" style={{ marginTop: 12 }} onClick={cancelBap}>Cancel</button>
+          </>
+        )}
+
+        {view === "buildplayer" && bap && bap.stage === "done" && (
+          <>
+            <h2 className="h">Build complete - {POS_NAME[bap.pos]}</h2>
+            <p className="note" style={{ marginTop: 0 }}>
+              Assembled from {new Set(Object.values(bap.filled).map((f) => f.fromName)).size} different real players' last-season attributes. Overall: <b>{grade(bapOverallScore(bap.filled))}</b>
+            </p>
+            <div className="panel">
+              {BAP_CATS.map((cat) => (
+                <div key={cat} style={{ marginBottom: 10 }}>
+                  <h3 style={{ marginTop: 0 }}>{cat}</h3>
+                  <div className="recap">
+                    {BAP_ATTRS[bap.pos].filter(([, , c]) => c === cat).map(([k, label]) => (
+                      <div className="rc" key={k}>
+                        <div className="n"> </div>
+                        <div><div className="bd">{label}</div><div className="tk">{grade(bap.filled[k].score)}</div></div>
+                        <div className="alt">from {bap.filled[k].fromName} <span style={{ opacity: 0.7 }}>({TEAMS[bap.filled[k].fromTeam][0]})</span></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <button className="btn solid" onClick={playBapSim}>Give him his shot at a ring</button>
+            </div>
+            <button className="btn" style={{ marginTop: 12 }} onClick={cancelBap}>Cancel</button>
+          </>
+        )}
+
+        {view === "buildplayer" && bap && bap.stage === "result" && (
+          <>
+            <h2 className="h">The verdict</h2>
+            <p className="note" style={{ marginTop: 0 }}>
+              Your {POS_NAME[bap.pos].replace(/s$/, "").toLowerCase()} took over for the {bap.opp.season} {TEAMS[bap.opp.team][0]}.
+            </p>
+            <div className="panel">
+              <div className="cells" style={{ marginBottom: 10 }}>
+                {bap.sim.games.slice(0, bap.shown).map((g, i) => (
+                  <div className="cell" key={i}>
+                    <div className="n" style={{ color: g.win ? "var(--win)" : "var(--loss)" }}>{g.win ? "W" : "L"}</div>
+                    <div className="l">{g.playoff ? g.label : `Wk ${i + 1}`} · {g.oppShort}</div>
+                  </div>
+                ))}
+              </div>
+              {bap.shown < bap.sim.games.length ? (
+                <button className="btn" onClick={() => setBap((b) => ({ ...b, shown: b.sim.games.length }))}>Skip to the result</button>
+              ) : (
+                <>
+                  <h3 style={{ marginTop: 0 }}>{bap.sim.w}–{bap.sim.l}</h3>
+                  <p className="note">{bap.sim.outcome}</p>
+                  {bap.sim.champ && <p><b>You won the chip.</b></p>}
+                </>
+              )}
+            </div>
+            {bap.shown >= bap.sim.games.length && (
+              <div className="frow" style={{ marginTop: 12 }}>
+                <button className="btn solid" onClick={openBuildPicker}>Build another</button>
+                <button className="btn" onClick={cancelBap}>Done</button>
+              </div>
+            )}
           </>
         )}
 

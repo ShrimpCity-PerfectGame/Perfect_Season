@@ -178,7 +178,10 @@ run on Supabase (Postgres + Auth, RLS-gated — see Architecture above) instead 
 and it's deployed on Vercel (`vercel.json` + `build.mjs`). "Hard mode" (an earlier version of this
 list) shipped as **Genius mode** — same draft, player cards hide every stat cell. Also shipped:
 **GM mode** (salary cap, derived from `p.rating` so era doesn't affect price — see
-`playerSalary()`), **Stats O/U** (career-stat over/under guessing), **Build-a-player** (roll real
-players, take one stat from each to assemble a custom season), and a **Sitewide** stats panel on
-the home screen. See `AdminPanel`, `SOU_STAT`, `BUILD_CATEGORIES`, and `GM_CAP`/`playerSalary()`
+`playerSalary()`), **Stats O/U** (career-stat over/under guessing), **Build-a-player** (standalone
+— no roster, no 6-slot draft: pick a position, roll a team then their active player from last
+season, take one letter-graded attribute from him at a time via `BAP_ATTRS`/`scaleStat` until the
+build is complete, then roll any real historical team-season from `OPPS` and sim whether your
+build would have helped them win it — see `rollBapRound`/`playBapSim`), and a **Sitewide** stats
+panel on the home screen. See `AdminPanel`, `SOU_STAT`, `BAP_ATTRS`, and `GM_CAP`/`playerSalary()`
 in the source.

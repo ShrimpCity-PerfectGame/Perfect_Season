@@ -1,10 +1,13 @@
-// Build-a-player: roll real players, take one stat category from each until the assigned
-// position is fully assembled, then the custom player pre-fills that slot for a normal draft.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+// Build-a-player is standalone: no roster, no 6-slot draft. You choose the position, then roll
+// a team + their active player from last season (with a brief animated reveal), take one
+// attribute (graded F-A+ off his real stats) from him, repeat until every attribute is filled,
+// then roll a random real team-season (any year) and watch an animated sim of whether swapping
+// your build into their lineup would have helped them win it all.
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
-  window.__ps_supabase__ = makeMockAuth();
+window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Got it, let's draft"));
@@ -12,48 +15,59 @@ await flush();
 await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Build-a-player").closest("button"));
 await flush();
 
-let pos = null;
+// The team-then-player roll animation is a deliberately slow, decelerating reveal (~4s: a team
+// spin, a hold, a player spin, a hold) rather than react-act's synchronous test helpers, so wait
+// it out with real timers instead of flush().
+async function waitForBuildStage() {
+  for (let i = 0; i < 100; i++) {
+    await new Promise((r) => setTimeout(r, 60));
+    await flush(1);
+    if (container.querySelector(".panel .frow button")) return;
+  }
+  throw new Error("attribute-pick buttons never appeared after the roll animation");
+}
 
-await runTest("rolling and picking stats fills every category then drops into a draft", async () => {
+await runTest("choosing a position rolls a team and player, then lets you build without ever starting a draft", async () => {
+  assert(container.querySelector("h2.h")?.textContent === "Build-a-player", "expected the position-choice screen first");
+  const posBtn = [...container.querySelectorAll(".frow button")].find((b) => ["Quarterbacks", "Running backs", "Wide receivers", "Tight ends"].includes(b.textContent));
+  assert(posBtn, "expected a position choice button");
+  await click(posBtn);
+  await flush();
+
+  await waitForBuildStage();
   const heading = container.querySelector("h2.h")?.textContent;
-  assert(/^Build-a-player - /.test(heading), "expected the build screen heading, got: " + heading);
-  pos = { Quarterbacks: "QB", "Running backs": "RB", "Wide receivers": "WR", "Tight ends": "TE" }[heading.replace("Build-a-player - ", "")];
-  assert(pos, "expected a recognizable position in the heading: " + heading);
+  assert(/^Build-a-player - /.test(heading), "expected the build screen heading after the roll animation, got: " + heading);
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 9; i++) {
     const btn = container.querySelector(".panel .frow button");
-    assert(btn, `round ${i}: expected a stat-pick button`);
+    assert(btn, `round ${i}: expected an attribute-pick button, only got: ` + text(container).slice(0, 200));
     await click(btn);
-    await flush();
+    if (i < 8) await waitForBuildStage(); // the 9th pick goes straight to "done", no reroll/animation
+    else await flush();
   }
 
-  await flush(3);
-  assert(container.querySelector(".pickno span")?.textContent === "Pick 2 of 6", "expected the draft to start at pick 2 (slot pre-filled), got: " + container.querySelector(".pickno span")?.textContent);
-  const slot = container.querySelector(`.roster .slot.pos-${pos}`);
-  assert(slot.classList.contains("filled") && slot.querySelector(".v").textContent.includes("custom"), "expected the assigned position's slot to already hold the custom player");
+  assert(container.querySelector("h2.h")?.textContent.startsWith("Build complete"), "expected the build-complete summary after 9 attributes, got: " + container.querySelector("h2.h")?.textContent);
+  assert(!container.querySelector(".roster"), "Build-a-player must never open the normal 6-slot roster/draft");
+  assert(!text(container).includes("Pick 1 of 6"), "Build-a-player must never start a normal draft");
+  const rows = [...container.querySelectorAll(".panel .rc")];
+  assert(rows.length === 9, "expected 9 graded attributes in the summary, got " + rows.length);
+  assert(rows.every((r) => r.querySelector(".alt")?.textContent.includes("from ")), "expected each attribute to name the real player it came from");
 });
 
-await runTest("the custom player carries through to the finished roster", async () => {
-  for (let pick = 0; pick < 5; pick++) {
-    let card = null;
-    for (let i = 0; i < 10 && !card; i++) {
-      await flush(1);
-      card = [...container.querySelectorAll(".card")].find((c) => !c.classList.contains("off"));
-    }
-    if (!card) throw new Error(`no draftable player found on pick ${pick + 1}`);
-    await click(card.querySelector("button.hit"));
-    await flush();
-    await click(card.querySelector(".drafts button.btn.solid"));
-    await flush();
-  }
-  for (let i = 0; i < 20 && !findButtonByText(container, "Draft a new team"); i++) {
-    const skip = findButtonByText(container, "Skip to the result");
-    if (skip) { await click(skip); continue; }
-    await new Promise((r) => setTimeout(r, 150));
+await runTest("giving him his shot animates a standalone sim against a real historical team, no roster involved", async () => {
+  await click(findButtonByText(container, "Give him his shot"));
+  await flush();
+
+  assert(container.querySelector("h2.h")?.textContent === "The verdict", "expected the result screen after simming");
+  // Let the game-by-game reveal (90ms/tick) play out rather than skipping, to prove it's animated.
+  for (let i = 0; i < 60 && !findButtonByText(container, "Build another"); i++) {
+    await new Promise((r) => setTimeout(r, 60));
     await flush(1);
   }
-  const rows = [...container.querySelectorAll(".reveal .rv")];
-  assert(rows.some((r) => r.textContent.includes("Your custom")), "expected the custom player in the graded roster");
+  assert(findButtonByText(container, "Build another"), "expected the reveal to finish and show the final record");
+  const t = text(container);
+  assert(/\d+–\d+/.test(t), "expected a W-L record in the result, got: " + t.slice(0, 300));
+  assert(!container.querySelector(".roster"), "the sim result must not involve the normal roster");
 });
 
 console.log("test-build-a-player.mjs done");
