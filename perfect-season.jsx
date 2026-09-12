@@ -98,6 +98,19 @@ function effectiveRating(slot, p) {
   return slot.startsWith("FLEX") ? flexRating(p) : p.rating;
 }
 
+// ---------- GM mode (salary cap) ----------
+// No real salary data exists, so this derives a price from the player's own positional rating
+// - a player costs what he costs regardless of which slot (named or Flex) ends up using him,
+// same as a real contract doesn't change based on where he lines up on a given play. Curved
+// rather than linear so elite seasons cost more per rating point than average ones, but capped
+// low enough that even the best single season in the game (rating ~120) tops out around a
+// quarter of GM_CAP - one all-timer shouldn't eat half your budget by itself.
+const GM_CAP = 150; // in $M, for a 6-man "roster"
+function playerSalary(p) {
+  const r = Math.max(0, p.rating - 35);
+  return Math.max(1, Math.round(0.0055 * r * r));
+}
+
 // Seeded randomness, so a daily or a challenge code gives everyone the same draft.
 function hashStr(s) {
   let h = 2166136261;
@@ -1350,6 +1363,8 @@ export default function PerfectSeason() {
 
   const drafted = useMemo(() => new Set(Object.values(roster).map((p) => p.id)), [roster]);
   const open = SLOTS.filter((s) => !roster[s]);
+  const capUsed = SLOTS.reduce((sum, s) => sum + (roster[s] ? playerSalary(roster[s]) : 0), 0);
+  const capRemaining = GM_CAP - capUsed;
 
   useEffect(() => {
     (async () => {
@@ -1673,11 +1688,11 @@ export default function PerfectSeason() {
     setWip((w) => ({ ...w, free: 0 }));
   }
 
-  function restart() {
+  function restart(extra) {
     abandonCurrent();
     clearDraft(DRAFT_KEY);
     setView("play");
-    startDraft({ kind: "free", code: newCode() });
+    startDraft({ kind: "free", code: newCode(), ...extra });
   }
 
   // Today's daily always picks up where it left off: you get one run at it, not one per visit.
@@ -1691,12 +1706,13 @@ export default function PerfectSeason() {
   }
 
   // Unlimited: pick up the half-finished one if there is one, otherwise deal a fresh board.
-  async function openFree() {
+  // Genius/GM mode are the same free-draft slot with a flag that changes how it's played.
+  async function openFree(extra) {
     setView("play");
     if (mode && mode.kind === "free" && !result && history.length > 0) return;
     const saved = await sget(FREE_PROGRESS, false);
     if (validDraft(saved) && saved.mode.kind === "free") { restoreDraft(saved); return; }
-    restart();
+    restart(extra);
   }
 
   function startCode(raw) {
@@ -1768,6 +1784,11 @@ export default function PerfectSeason() {
   const ranked = [...lb.players].filter((q) => q.bestScore != null).sort((a, b) => b.bestScore - a.bestScore);
   const totals = lb.players.reduce((t, q) => ({ runs: t.runs + draftsOf(q), perfect: t.perfect + (q.perfect || 0) }), { runs: 0, perfect: 0 });
   const siteBest = ranked[0];
+  // Approximate, not exact: only each player's single best run is stored, so a real player
+  // drafted only in someone's non-best runs won't be counted here.
+  const distinctPlayersDrafted = new Set();
+  lb.players.forEach((q) => q.bestRun?.roster?.forEach((r) => distinctPlayersDrafted.add(`${r.name}-${r.season}`)));
+  const perfectPct = totals.runs > 0 ? Math.round((100 * totals.perfect) / totals.runs) : 0;
   const myKey = user ? user.toLowerCase() : null;
   const myRank = myKey ? ranked.findIndex((q) => q.id === myKey) : -1;
   const regGames = result ? result.games.filter((g) => !g.playoff) : [];
@@ -1835,10 +1856,22 @@ export default function PerfectSeason() {
                 <span className="go">{dailyDone ? "See today's result" : dailyPicks > 0 ? "Finish today's daily" : "Play today's daily"}</span>
               </button>
 
-              <button className="mode" onClick={openFree}>
+              <button className="mode" onClick={() => openFree()}>
                 <div className="mt"><span className="mn">Unlimited</span>{freePicks > 0 && <span className="pill">{freePicks} of 6 picked</span>}</div>
                 <p>Draft as many teams as you like. Random boards every time, resets allowed.</p>
                 <span className="go">{freePicks > 0 ? "Back to your draft" : "Start a draft"}</span>
+              </button>
+
+              <button className="mode" onClick={() => openFree({ genius: true })}>
+                <div className="mt"><span className="mn">Genius mode</span></div>
+                <p>Same draft, no stats shown. Just name, team, and year - know your football. Shares your Unlimited progress slot.</p>
+                <span className="go">Start a draft</span>
+              </button>
+
+              <button className="mode" onClick={() => openFree({ gm: true })}>
+                <div className="mt"><span className="mn">GM mode</span></div>
+                <p>Draft against a ${GM_CAP}M salary cap. Elite seasons cost a lot more. Shares your Unlimited progress slot.</p>
+                <span className="go">Start a draft</span>
               </button>
 
               <div className="mode static">
@@ -1857,6 +1890,26 @@ export default function PerfectSeason() {
               <div className="tile"><div className="n">{user && stats?.bestRecord ? `${stats.bestRecord.w}–${stats.bestRecord.l}` : "–"}</div><div className="l">Your best record</div></div>
               <div className="tile"><div className="n">{siteBest ? siteBest.bestScore.toFixed(1) : "–"}</div><div className="l">Best score sitewide</div></div>
             </div>
+
+            {!lb.loading && lb.players.length > 0 && (
+              <div className="panel" style={{ marginTop: 14 }}>
+                <h3 style={{ marginTop: 0 }}>Sitewide</h3>
+                <div className="hometiles">
+                  <div className="tile"><div className="n">{totals.runs.toLocaleString()}</div><div className="l">Drafts played</div></div>
+                  <div className="tile"><div className="n">{lb.players.length.toLocaleString()}</div><div className="l">Players</div></div>
+                  <div className="tile"><div className="n">{distinctPlayersDrafted.size.toLocaleString()}</div><div className="l">NFL players drafted</div></div>
+                  <div className="tile"><div className="n">{totals.perfect.toLocaleString()}</div><div className="l">Perfect seasons</div></div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>
+                    <span>Drafts that went 20–0</span><span>{perfectPct}%</span>
+                  </div>
+                  <div style={{ height: 8, borderRadius: 4, background: "var(--surface2)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${Math.max(perfectPct, totals.perfect > 0 ? 2 : 0)}%`, background: "var(--lamp)", borderRadius: 4 }} />
+                  </div>
+                </div>
+              </div>
+            )}
             {!user && authReady && (
               <p className="note">Playing as a guest. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> to save your drafts, keep a daily streak, and get on the leaderboard.</p>
             )}
@@ -1870,7 +1923,7 @@ export default function PerfectSeason() {
             <p className="note" style={{ marginTop: 0 }}>Pick a mode to start one.</p>
             <div className="frow" style={{ marginTop: 10 }}>
               <button className="btn solid" onClick={startDaily}>Play today's daily</button>
-              <button className="btn" onClick={openFree}>Unlimited draft</button>
+              <button className="btn" onClick={() => openFree()}>Unlimited draft</button>
             </div>
           </div>
         )}
@@ -1887,7 +1940,7 @@ export default function PerfectSeason() {
                 {mode.kind === "daily" ? (
                   <span className="seedline">{prettyDate(mode.date)} · same boards for everyone</span>
                 ) : (
-                  <span className="seedline">Code <code>{mode.code}</code></span>
+                  <span className="seedline">{mode.genius && "Genius mode · "}{mode.gm && "GM mode · "}Code <code>{mode.code}</code></span>
                 )}
               </div>
             )}
@@ -1910,6 +1963,12 @@ export default function PerfectSeason() {
 
             {!(mode && mode.kind === "daily" && dailyDone && !result) && (
             <>
+            {mode.gm && !result && (
+              <div className="frow" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <span style={{ fontSize: 13, color: "var(--muted)" }}>Salary cap</span>
+                <span style={{ fontWeight: 700, color: capRemaining < 0 ? "var(--loss)" : "var(--ink)" }}>${capUsed}M / ${GM_CAP}M</span>
+              </div>
+            )}
             <div className="roster" aria-label="Your roster" ref={draftTop} style={{ scrollMarginTop: 12 }}>
               {SLOTS.map((s) => {
                 const p = roster[s];
@@ -1990,17 +2049,34 @@ export default function PerfectSeason() {
                             <button className="hit" disabled={off} onClick={() => setSelected(isSel ? null : p)} aria-expanded={isSel}>
                               <div className="row">
                                 <div>
-                                  <div className="nm-row"><span className="pp">{p.pos}</span><span className="nm">{p.name}</span></div>
+                                  <div className="nm-row">
+                                    <span className="pp">{p.pos}</span><span className="nm">{p.name}</span>
+                                    {mode.gm && (
+                                      <span className="pill" style={{ marginLeft: 8, color: playerSalary(p) > capRemaining ? "var(--loss)" : undefined }}>
+                                        ${playerSalary(p)}M
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="meta"><span className="tdot" style={teamVars(p.team)} />{p.season} {teamLabel(p.team, p.season)}, {p.g} games{drafted.has(p.id) ? ", already on your roster" : !slotsFor.length ? ", no open slot" : ""}</div>
                                 </div>
-                                <div className="cells">
-                                  {statCells(p).map(([n, l]) => (<div className="cell" key={l}><div className="n">{n}</div><div className="l">{l}</div></div>))}
-                                </div>
+                                {!mode.genius && (
+                                  <div className="cells">
+                                    {statCells(p).map(([n, l]) => (<div className="cell" key={l}><div className="n">{n}</div><div className="l">{l}</div></div>))}
+                                  </div>
+                                )}
                               </div>
                             </button>
                             {isSel && (
                               <div className="drafts">
-                                {slotsFor.map((s) => (<button key={s} className="btn solid" onClick={() => draft(p, s)}>Draft to {SLOT_LABEL[s]}</button>))}
+                                {slotsFor.map((s) => {
+                                  const cost = mode.gm ? playerSalary(p) : 0;
+                                  const tooExpensive = mode.gm && cost > capRemaining;
+                                  return (
+                                    <button key={s} className="btn solid" disabled={tooExpensive} onClick={() => draft(p, s)}>
+                                      Draft to {SLOT_LABEL[s]}{mode.gm && ` - $${cost}M${tooExpensive ? " (over cap)" : ""}`}
+                                    </button>
+                                  );
+                                })}
                                 <button className="btn" onClick={() => setSelected(null)}>Cancel</button>
                               </div>
                             )}
