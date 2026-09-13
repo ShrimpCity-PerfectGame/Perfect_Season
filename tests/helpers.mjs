@@ -22,14 +22,15 @@ export function makeMockAuth() {
   const profiles = new Map(); // id -> row (snake_case, matches the real schema)
   const dailyRuns = new Map(); // "date:userId" -> row
   const souRuns = new Map(); // "date:userId" -> row
+  const builds = new Map(); // id -> row - no natural key (unlike daily/sou), so a generated uuid like the real table
   let session = null;
   const listeners = [];
   const notify = (event) => listeners.forEach((cb) => cb(event, session));
 
   function from(table) {
-    const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : dailyRuns;
+    const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : table === "builds" ? builds : dailyRuns;
     return {
-      select() {
+      select(_cols, opts) {
         const state = { filters: [], order: null, limit: null };
         const run = () => {
           let out = [...store.values()].filter((r) => state.filters.every((f) => f(r)));
@@ -37,6 +38,9 @@ export function makeMockAuth() {
           if (state.limit != null) out = out.slice(0, state.limit);
           return out;
         };
+        // fetchBuildCount's `.select("*", { count: "exact", head: true })` - awaited directly,
+        // no further chaining, so a plain resolved promise matches the real call shape.
+        if (opts?.count) return Promise.resolve({ count: run().length, error: null });
         const builder = {
           eq(col, val) { state.filters.push((r) => r[col] === val); return builder; },
           not(col, _op, val) { state.filters.push((r) => r[col] !== val); return builder; },
@@ -64,6 +68,9 @@ export function makeMockAuth() {
             return Promise.resolve({ error: { code: "23505", message: 'duplicate key value violates unique constraint "profiles_username_key"' } });
           }
           profiles.set(row.id, { runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, ...row });
+        } else if (table === "builds") {
+          const id = webcrypto.randomUUID();
+          builds.set(id, { id, created_at: new Date().toISOString(), ...row });
         } else {
           store.set(`${row.date}:${row.user_id}`, row);
         }
@@ -108,6 +115,7 @@ export function makeMockAuth() {
     channel,
     removeChannel() {},
     _profiles: profiles, // test-only escape hatch for setup/assertions
+    _builds: builds, // test-only escape hatch for setup/assertions
     _channels: channels, // test-only escape hatch, e.g. auth._channels.get("site-activity").send({event:"draft_finished", payload:{}})
     auth: {
       async signUp({ email, password, options }) {

@@ -51,6 +51,12 @@ auth._profiles.set("bob-id", {
   ],
 });
 
+// Build-a-player results live in their own table, unrelated to profiles - seed a couple directly
+// the same way logBuild would insert them, to test the Stats screen's read side independent of
+// running the actual slow multi-round build flow (see test-build-a-player.mjs for that).
+auth._builds.set("build-1", { id: "build-1", username: "carol", pos: "QB", overall: 132.4, filled: {} });
+auth._builds.set("build-2", { id: "build-2", username: "alice", pos: "RB", overall: 88.0, filled: {} });
+
 const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Stats"));
@@ -98,6 +104,20 @@ await runTest("best GM-mode score is drawn only from runs tagged run.gm", async 
   const t = text(container);
   assert(t.includes("Best GM-mode score"), "expected a GM-mode section");
   assert(t.includes("88.3"), "expected alice's tagged GM run (score 88.3), got: " + t.slice(0, 1500));
+});
+
+await runTest("created players count and the highest-OVR leaderboard come from the separate builds table", async () => {
+  const tile = [...container.querySelectorAll(".tile")].find((el) => el.textContent.includes("Created players"));
+  assert(tile, "expected a created-players tile on the Sitewide panel");
+  assert(tile.querySelector(".n")?.textContent === "2", "expected the tile to count both seeded builds, got: " + tile.textContent);
+
+  const t = text(container);
+  assert(t.includes("Highest-OVR created player"), "expected a highest-OVR leaderboard");
+  const section = t.slice(t.indexOf("Highest-OVR created player"));
+  const carolIdx = section.indexOf("carol");
+  const aliceIdxInSection = section.indexOf("alice");
+  assert(carolIdx >= 0 && carolIdx < aliceIdxInSection, "expected carol (overall 132.4) ranked above alice (88.0), got: " + section.slice(0, 300));
+  assert(section.includes("QB") && section.includes("132.4"), "expected carol's build details, got: " + section.slice(0, 300));
 });
 
 console.log("test-stats.mjs done");

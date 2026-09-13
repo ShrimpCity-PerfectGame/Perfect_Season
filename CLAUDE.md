@@ -164,12 +164,11 @@ Don't hand-edit `data.json`; change the scripts and regenerate.
 
 ## Immediate Next Goals
 
-1. **Player index** — browse the full pool by team and era, see which boards are loaded.
-2. **Hall of fame** — highest-scoring lineups ever drafted, most-drafted players.
-3. **Scoring modes** — standard and half-PPR alongside the current full PPR.
-4. **A real concurrent-online-players counter** — was on hold pending a real backend; that
-   blocker is gone (see below), so this is buildable now (e.g. Supabase Realtime presence).
-5. **Housekeeping** — custom domain (currently a free `*.vercel.app` subdomain; add the URL to
+1. **Scoring modes** — standard and half-PPR alongside the current full PPR. Blocked: this needs
+   re-deriving player ratings, which normally runs through `scripts/*.py` (the nflverse/PFR
+   pipeline), and that pipeline doesn't exist in this checkout — don't start this without the
+   real upstream source data.
+2. **Housekeeping** — custom domain (currently a free `*.vercel.app` subdomain; add the URL to
    the share text once one exists), 2026 season data once it's played, an accessibility pass
    (position colors currently carry meaning on their own).
 
@@ -187,6 +186,14 @@ answers up, score = correct guesses before your third miss, posted to the `sou_r
 — no roster, no 6-slot draft: pick a position, roll a team then their active player from last
 season, take one letter-graded attribute from him at a time via `BAP_ATTRS`/`scaleStat` until the
 build is complete, then roll any real historical team-season from `OPPS` and sim whether your
-build would have helped them win it — see `rollBapRound`/`playBapSim`), and a **Sitewide** stats
-panel on the home screen. See `AdminPanel`, `SOU_STAT`, `BAP_ATTRS`, and `GM_CAP`/`playerSalary()`
-in the source.
+build would have helped them win it — see `rollBapRound`/`playBapSim`), a **Player index**
+(browse the full pool by team and era — `PlayerIndex`, its own nav tab, entirely client-side over
+`BOARDS`), a live **online-players + total-drafts pill** in the home hero (`subscribeSiteActivity`
+— one Realtime channel, Presence for the online count and a broadcast for the drafts count so
+every open tab ticks up the instant anyone finishes a season), and a **Stats** screen (its own nav
+tab — sitewide totals plus leaderboards for best lineups ever, most-drafted players, position
+records, career wins/championships/playoff appearances, longest daily streak, best win percentage,
+best GM-mode score, and Build-a-player's sitewide "created players" tally/highest-OVR build — one
+consolidated `fetchStatsProfiles` fetch plus the separate `builds` table, see `computeSiteStats`
+and `logBuild`). See `AdminPanel`, `SOU_STAT`, `BAP_ATTRS`, and `GM_CAP`/`playerSalary()` in the
+source.

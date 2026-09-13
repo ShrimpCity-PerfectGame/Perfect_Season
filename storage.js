@@ -130,6 +130,23 @@ export async function upsertSouRun(date, userId, row) {
   return !error;
 }
 
+// Build-a-player is stat-free for the player's own account (see playBapSim's own comment in
+// perfect-season.jsx) - this is a separate, additive, sitewide-only tally logged once a build
+// completes, purely for the Stats screen's "created players" count and "highest-OVR" leaderboard.
+export async function logBuild(userId, { username, pos, overall, filled }) {
+  const { error } = await getClient().from("builds").insert({ user_id: userId, username, pos, overall, filled });
+  return !error;
+}
+export async function fetchTopBuilds(limit = 10) {
+  const { data, error } = await getClient().from("builds").select("*").order("overall", { ascending: false }).limit(limit);
+  if (error || !data) return [];
+  return data.map((r) => ({ username: r.username, pos: r.pos, overall: r.overall, filled: r.filled }));
+}
+export async function fetchBuildCount() {
+  const { count, error } = await getClient().from("builds").select("*", { count: "exact", head: true });
+  return error || count == null ? 0 : count;
+}
+
 // The Stats screen's one data source: every leaderboard there (best lineups, most-drafted
 // players, most wins/championships/playoffs, longest streak, win %, position records, best
 // GM-mode score) is a different client-side sort/aggregation over this same fetched array,

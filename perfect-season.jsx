@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
   fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchStatsProfiles, subscribeSiteActivity,
+  logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, updateProfile,
 } from "./storage.js";
@@ -1608,7 +1609,7 @@ export default function PerfectSeason() {
   const [dailyDone, setDailyDone] = useState(null); // today's finished daily, if any
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
-  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, profiles: [] });
+  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, profiles: [], buildCount: 0, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
   const siteActivity = useRef(null); // { unsubscribe, broadcastDraftFinished } from subscribeSiteActivity - finish() reaches it to announce a completed draft
@@ -1714,16 +1715,17 @@ export default function PerfectSeason() {
     }
   }
 
-  // Lazy - only fetched once the Stats tab is actually opened. Every leaderboard on that screen
-  // (see the Stats view below) is a different client-side sort/aggregation over this one fetch -
-  // see fetchStatsProfiles for why a single bounded query can feed all of them.
+  // Lazy - only fetched once the Stats tab is actually opened. Every profile-based leaderboard on
+  // that screen (see the Stats view below) is a different client-side sort/aggregation over
+  // fetchStatsProfiles's one fetch; builds live in their own table (Build-a-player results never
+  // touch a profile row), so the created-players count/leaderboard are their own small fetch.
   async function loadSiteStats() {
     setSiteStats((s) => ({ ...s, loading: true }));
     try {
-      const profiles = await fetchStatsProfiles(300);
-      setSiteStats({ loading: false, loaded: true, profiles });
+      const [profiles, buildCount, topBuilds] = await Promise.all([fetchStatsProfiles(300), fetchBuildCount(), fetchTopBuilds(10)]);
+      setSiteStats({ loading: false, loaded: true, profiles, buildCount, topBuilds });
     } catch (e) {
-      setSiteStats({ loading: false, loaded: true, profiles: [] });
+      setSiteStats({ loading: false, loaded: true, profiles: [], buildCount: 0, topBuilds: [] });
     }
   }
 
@@ -2173,7 +2175,15 @@ export default function PerfectSeason() {
     const def = BAP_ATTRS[bap.pos].find(([k]) => k === key);
     const filled = { ...bap.filled, [key]: { score: def[3](bap.player), fromName: bap.player.name, fromTeam: bap.team, fromSeason: bap.player.season } };
     const remaining = bap.remaining.filter((k) => k !== key);
-    if (!remaining.length) { setBap({ stage: "done", pos: bap.pos, filled }); return; }
+    if (!remaining.length) {
+      setBap({ stage: "done", pos: bap.pos, filled });
+      // Sitewide-only tally for the Stats screen's "created players" count and highest-OVR
+      // leaderboard - doesn't touch this account's own stats/leaderboard position (see
+      // playBapSim's comment below for Build-a-player's stat-free promise), and only for
+      // logged-in users, matching the existing daily/sou_runs convention.
+      if (user && userId) logBuild(userId, { username: user, pos: bap.pos, overall: bapOverallScore(filled), filled });
+      return;
+    }
     rollBapRound(bap.pos, filled, remaining, bap.seen);
   }
 
@@ -2926,6 +2936,7 @@ export default function PerfectSeason() {
                   <div className="tile"><div className="n">{(liveDrafts ?? totals.runs).toLocaleString()}</div><div className="l">Drafts</div></div>
                   <div className="tile"><div className="n">{totals.perfect}</div><div className="l">Perfect seasons</div></div>
                   <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
+                  <div className="tile"><div className="n">{siteStats.buildCount}</div><div className="l">Created players</div></div>
                 </div>
                 <p className="note">Leaderboards below draw from the 300 most recently active accounts, not everyone who's ever played.</p>
                 <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>
@@ -3002,6 +3013,10 @@ export default function PerfectSeason() {
 
                 <h2 className="h" style={{ marginTop: 22 }}>Best GM-mode score</h2>
                 <RankRows rows={site.bestGm} empty="No GM-mode runs yet." value={(q) => q.score.toFixed(1)} />
+
+                <h2 className="h" style={{ marginTop: 22 }}>Highest-OVR created player</h2>
+                <p className="note" style={{ marginTop: 0 }}>Build-a-player results, sitewide - doesn't touch anyone's own stats or leaderboard rank.</p>
+                <RankRows rows={siteStats.topBuilds} empty="No builds yet." value={(b) => `${b.pos} · ${grade(b.overall)} (${b.overall.toFixed(1)})`} />
               </>
             )}
           </>

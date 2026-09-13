@@ -51,9 +51,26 @@ create table if not exists public.sou_runs (
 );
 create index if not exists sou_runs_date_score_idx on public.sou_runs (date, score desc);
 
+-- Build-a-player never touches a real roster/leaderboard - it's a standalone "what if" (see
+-- playBapSim's own comment in perfect-season.jsx). This table exists only for the Stats screen's
+-- "created players" count and "highest-OVR created player" leaderboard, logged once a build
+-- completes (pickBapAttr's stage -> "done" transition) - purely additive, doesn't change
+-- Build-a-player's stat-free promise for the player's own account.
+create table if not exists public.builds (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  username    text not null,
+  pos         text not null,
+  overall     numeric not null,
+  filled      jsonb not null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists builds_overall_idx on public.builds (overall desc);
+
 alter table public.profiles enable row level security;
 alter table public.daily_runs enable row level security;
 alter table public.sou_runs enable row level security;
+alter table public.builds enable row level security;
 
 -- Public, sitewide-readable (matches the game's existing fully-open leaderboard semantics -
 -- there was never a read restriction before this migration).
@@ -65,6 +82,9 @@ create policy "daily_runs are publicly readable" on public.daily_runs for select
 
 drop policy if exists "sou_runs are publicly readable" on public.sou_runs;
 create policy "sou_runs are publicly readable" on public.sou_runs for select using (true);
+
+drop policy if exists "builds are publicly readable" on public.builds;
+create policy "builds are publicly readable" on public.builds for select using (true);
 
 -- Writes restricted to the row's own owner. No client-side INSERT policy on profiles - profile
 -- rows are created only by the trigger below, as part of auth.users insert.
@@ -87,6 +107,10 @@ create policy "users insert their own sou run" on public.sou_runs
 drop policy if exists "users update their own sou run" on public.sou_runs;
 create policy "users update their own sou run" on public.sou_runs
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "users insert their own build" on public.builds;
+create policy "users insert their own build" on public.builds
+  for insert with check (auth.uid() = user_id);
 
 -- Known, accepted limitation: public SELECT + auth.uid()-gated writes means an authenticated
 -- client can still write any best_score/recent payload for their OWN row - RLS proves who is

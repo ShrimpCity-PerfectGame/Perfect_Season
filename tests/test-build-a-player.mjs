@@ -3,11 +3,12 @@
 // attribute (graded F-A+ off his real stats) from him, repeat until every attribute is filled,
 // then roll a random real team-season (any year) and watch an animated sim of whether swapping
 // your build into their lineup would have helped them win it all.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
-window.__ps_supabase__ = makeMockAuth();
+const auth = makeMockAuth();
+window.__ps_supabase__ = auth;
 const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Got it, let's draft"));
@@ -52,6 +53,7 @@ await runTest("choosing a position rolls a team and player, then lets you build 
   const rows = [...container.querySelectorAll(".panel .rc")];
   assert(rows.length === 9, "expected 9 graded attributes in the summary, got " + rows.length);
   assert(rows.every((r) => r.querySelector(".alt")?.textContent.includes("from ")), "expected each attribute to name the real player it came from");
+  assert(auth._builds.size === 0, "a guest's build must not be logged sitewide (no account to attribute it to)");
 });
 
 await runTest("giving him his shot shows a scoreboard-style reveal (live record + game log), no roster involved", async () => {
@@ -74,6 +76,43 @@ await runTest("giving him his shot shows a scoreboard-style reveal (live record 
   assert(/\d+–\d+/.test(t), "expected a W-L record in the result, got: " + t.slice(0, 300));
   assert(container.querySelectorAll(".log .g").length >= 17, "expected a full game log (17 regular season games, plus any playoffs) once finished, got " + container.querySelectorAll(".log .g").length);
   assert(!container.querySelector(".roster"), "the sim result must not involve the normal roster");
+});
+
+await runTest("completing a build while logged in logs it sitewide for the Stats screen's created-players tally", async () => {
+  await click(findButtonByText(container, "Account"));
+  await flush();
+  const panel = () => container.querySelector(".panel");
+  await click(findButtonByText(panel(), "Create account"));
+  await flush();
+  const [emailInput, uInput, pInput, p2Input] = [...panel().querySelectorAll("input")];
+  await type(emailInput, "bapuser1@example.com");
+  await type(uInput, "bapuser1");
+  await type(pInput, "Password1");
+  await type(p2Input, "Password1");
+  await click([...panel().querySelectorAll("button")].find((b) => !b.hasAttribute("role") && b.textContent.includes("Create account")));
+  await waitForCrypto();
+
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Build-a-player").closest("button"));
+  await flush();
+
+  const posBtn = [...container.querySelectorAll(".frow button")].find((b) => ["Quarterbacks", "Running backs", "Wide receivers", "Tight ends"].includes(b.textContent));
+  await click(posBtn);
+  await flush();
+  await waitForBuildStage();
+  for (let i = 0; i < 9; i++) {
+    const btn = container.querySelector(".panel .frow button");
+    await click(btn);
+    if (i < 8) await waitForBuildStage();
+    else await flush();
+  }
+
+  assert(auth._builds.size === 1, "expected exactly one logged build after a logged-in completion, got " + auth._builds.size);
+  const build = [...auth._builds.values()][0];
+  assert(build.username === "bapuser1", "expected the build attributed to the logged-in account, got: " + build.username);
+  assert(["QB", "RB", "WR", "TE"].includes(build.pos), "expected a real position, got: " + build.pos);
+  assert(typeof build.overall === "number" && build.overall > 0, "expected a numeric overall score, got: " + build.overall);
 });
 
 console.log("test-build-a-player.mjs done");
