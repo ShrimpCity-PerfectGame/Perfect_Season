@@ -208,6 +208,12 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+- **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
+  `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
+  on while production has it off, so signup worked in production and silently failed on staging
+  with a generic "couldn't be created". If something works in one environment and not the other and
+  the schema matches, compare the project config
+  (`GET /v1/projects/<ref>/config/auth` via the Management API) before digging into app code.
 - **Version + changelog**: bump `version` in `package.json` (minor for features, patch for fixes),
   add a `CHANGELOG.md` entry under that version, and tag the release (`git tag v1.2.0`). The
   version is baked into the bundle by `build.mjs` and shown in the app's header, so you can always
