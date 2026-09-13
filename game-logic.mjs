@@ -146,6 +146,74 @@ export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, dr
   return pool[Math.floor(rng() * pool.length)];
 }
 
+// Server-side roster legality: replays a submitted draft trace against the seed's own deterministic
+// sequence and confirms it's something the client could actually have produced - never trusts a
+// client-computed roster/score directly. `seq` is the final board sequence the client ended up with
+// (seededSequence(seed)'s base entries, plus 0-2 reroll insertions spliced in - see reroll() in
+// perfect-season.jsx); `history` is the ordered list of picks, each `{key, id, season, slot}`.
+//
+// A reroll-inserted board is never one of seededSequence's own entries (reroll's own match()
+// excludes anything in `shown`, which starts as the full base sequence - see rerollCandidate), so
+// diffing `seq` against `base` position-by-position unambiguously identifies where insertions
+// happened, with no risk of a coincidental collision. Walking both together left to right also
+// naturally reconstructs the roster/drafted state at each point, since picks and reroll insertions
+// occur in the same real-time order they appear in `seq`.
+export function replayDraft(seed, history, seq) {
+  const fail = (reason) => ({ ok: false, reason });
+  if (!Array.isArray(history) || !Array.isArray(seq) || history.length !== SLOTS.length) return fail("wrong shape");
+
+  const base = seededSequence(seed);
+  const roster = {};
+  const drafted = new Set();
+  const shown = new Set(base); // reroll() always treats every base entry as already "shown", even ones not yet reached
+  let basePtr = 0;
+  const rerollsUsed = { team: 0, years: 0 };
+  let histPtr = 0;
+  let prevKey = null;
+
+  for (let si = 0; si < seq.length; si++) {
+    if (SLOTS.every((s) => roster[s])) break; // roster already complete - nothing left to validate
+    const key = seq[si];
+    const open = SLOTS.filter((s) => !roster[s]);
+
+    if (key === base[basePtr]) {
+      basePtr++;
+    } else {
+      if (prevKey == null) return fail("a reroll can't happen before any board was shown");
+      const [prevTeam, prevW] = prevKey.split("|");
+      const [team, w] = key.split("|");
+      let kind;
+      if (Number(w) === Number(prevW) && team !== prevTeam) kind = "team";
+      else if (team === prevTeam && Number(w) !== Number(prevW)) kind = "years";
+      else return fail("reroll insertion doesn't share a team or era with the board it replaced");
+      if (rerollsUsed[kind] >= 1) return fail(`more than one ${kind} reroll used`);
+      const expected = rerollCandidate({ seed, kind, seqIdx: si - 1, spinTeam: prevTeam, spinW: Number(prevW), shown, drafted, open });
+      if (expected !== key) return fail("reroll result doesn't match what this seed would produce");
+      rerollsUsed[kind]++;
+      shown.add(key);
+    }
+
+    if (!boardHasOption(key, drafted, open)) { prevKey = key; continue; } // client would have skipped this board too
+
+    if (histPtr < history.length && history[histPtr].key === key) {
+      const h = history[histPtr];
+      const player = (BOARDS[key] || []).find((p) => p.id === h.id && p.season === h.season);
+      if (!player) return fail("picked player not found on this board");
+      if (!fits(player.pos, h.slot)) return fail("player doesn't fit the claimed slot");
+      if (roster[h.slot]) return fail("slot already filled");
+      if (drafted.has(player.id)) return fail("player drafted twice");
+      roster[h.slot] = player;
+      drafted.add(player.id);
+      histPtr++;
+    }
+    prevKey = key;
+  }
+
+  if (histPtr !== history.length) return fail("not every submitted pick was consumed");
+  if (!SLOTS.every((s) => roster[s])) return fail("roster incomplete");
+  return { ok: true, roster };
+}
+
 // ---------- Grading ----------
 // Flex slots score on raw production alone, not position-relative grading: `rating` grades
 // RB/WR/TE against their OWN position's peers, so a modest-for-a-WR season can outrank a
@@ -297,7 +365,25 @@ export function simulateSeason(score) {
   return { games, w, l, outcome, playoffs, champ, perfect: w === 20 && l === 0 };
 }
 
+// streak = consecutive calendar days with a finished daily. Shared with the server (submit-run
+// applies this same bookkeeping when persisting a daily run) and the client (the profile view
+// uses it read-only, to know whether a locally-cached streak has gone stale).
+export function nextStreak(stats, date) {
+  const prev = stats.dailyLast;
+  if (prev === date) return stats.dailyStreak || 1;
+  const y = new Date(date + "T00:00:00"); y.setDate(y.getDate() - 1);
+  const yk = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, "0")}-${String(y.getDate()).padStart(2, "0")}`;
+  return prev === yk ? (stats.dailyStreak || 0) + 1 : 1;
+}
+
 // ---------- Profile merge ----------
+// A reset draft is a DNF: it counts as a draft but has no record or score. No roster to replay
+// here, so submit-run applies this directly (a fabricated DNF count only makes an account's own
+// stats look worse, not a leaderboard-integrity issue) - but it's still the server, not the
+// client, that owns the profiles row from here on, so it goes through the same shared function.
+export function applyDnf(prev, picks) {
+  return { ...prev, dnf: (prev.dnf || 0) + 1, recent: [{ dnf: true, picks, date: Date.now() }, ...(prev.recent || [])].slice(0, 10), updated: Date.now() };
+}
 const betterRecord = (a, b) => !b || a.w > b.w || (a.w === b.w && a.l < b.l);
 export function applyRun(prev, run) {
   const s = {

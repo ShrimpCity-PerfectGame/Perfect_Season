@@ -1,17 +1,17 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchStatsProfiles, subscribeSiteActivity,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchStatsProfiles, subscribeSiteActivity,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
-  fetchProfile, updateProfile,
+  fetchProfile, submitRun, submitDnf,
 } from "./storage.js";
 import gameData from "./data/players.json";
 import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
   hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, rerollCandidate,
   flexRating, effectiveRating, winProb, shuffle, windowedShuffle, tagOpp, buildTimeline, simulateSeason,
-  applyRun, LOSER_PTS, MARGINS,
+  applyDnf, LOSER_PTS, MARGINS, nextStreak,
 } from "./game-logic.mjs";
 initGameData(gameData.players, gameData.opponents);
 
@@ -916,10 +916,6 @@ function blankStats(username) {
   return { username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0,
     bestScore: null, bestRun: null, bestRecord: null, recent: [], created: Date.now() };
 }
-// A reset draft is a DNF: it counts as a draft but has no record or score
-function applyDnf(prev, picks) {
-  return { ...prev, dnf: (prev.dnf || 0) + 1, recent: [{ dnf: true, picks, date: Date.now() }, ...(prev.recent || [])].slice(0, 10), updated: Date.now() };
-}
 const draftsOf = (s) => (s.runs || 0) + (s.dnf || 0);
 
 const topPct = (rank, total) => {
@@ -1249,15 +1245,6 @@ function bestOrderFor(history) {
   return best;
 }
 
-// streak = consecutive calendar days with a finished daily
-function nextStreak(stats, date) {
-  const prev = stats.dailyLast;
-  if (prev === date) return stats.dailyStreak || 1;
-  const y = new Date(date + "T00:00:00"); y.setDate(y.getDate() - 1);
-  const yk = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, "0")}-${String(y.getDate()).padStart(2, "0")}`;
-  return prev === yk ? (stats.dailyStreak || 0) + 1 : 1;
-}
-
 function Confetti({ n = 26 }) {
   const bits = useMemo(() => Array.from({ length: n }, (_, i) => ({
     left: `${(i * 97) % 100}%`, delay: `${(i % 9) * 0.12}s`,
@@ -1469,17 +1456,40 @@ export default function PerfectSeason() {
     }
   }
 
-  async function saveStats(s) {
-    setStats(s);
-    const ok = await updateProfile(userId, s);
-    setSaveError(!ok);
+  // profiles is no longer client-writable at all (see supabase/schema.sql) - a DNF applies
+  // optimistically to local state for instant UI feedback (same shape the server will also
+  // compute, via the same shared applyDnf), then confirms through submit-run in the background.
+  function recordDnf(picks) {
+    if (!user || !stats) return;
+    setStats(applyDnf(stats, picks));
+    submitDnf(picks).then((ok) => setSaveError(!ok));
+  }
+
+  // Submits a draft trace to submit-run and, once the server has independently replayed and
+  // recomputed it, re-fetches the account's real profile so stats/leaderboard reflect what
+  // actually landed - never the client's own (untrusted) computation. `uid` is taken as a
+  // parameter rather than closing over the `userId` state, since callers right after a fresh
+  // login (onAuthed) run before that state has committed.
+  async function submitAndSync(uid, trace) {
+    const res = await submitRun(trace);
+    if (res.ok) {
+      const fresh = await fetchProfile(uid);
+      if (fresh) setStats(fresh);
+    }
+    setSaveError(!res.ok);
+    return res;
   }
 
   async function onAuthed(uid, username, isNew) {
     let s = (await fetchProfile(uid)) || blankStats(username);
     const notes = [];
     if (isNew) {
-      // bring over seasons played on this device before accounts existed
+      // Bring over seasons played on this device before accounts existed - display-only now:
+      // profiles isn't client-writable at all (see supabase/schema.sql), and this legacy,
+      // pre-Supabase local-stats path predates every current account, so it's not worth a
+      // dedicated server endpoint just to persist a migration nothing realistically still
+      // triggers. (If a pending run below also applies, its server-confirmed fetch will
+      // supersede this local-only merge - an acceptable, extremely narrow gap.)
       const old = await sget(OLD_PROFILE, false);
       if (old && old.runs > 0) {
         s = { ...s, runs: s.runs + old.runs, wins: s.wins + (old.wins || 0), losses: s.losses + (old.losses || 0),
@@ -1490,19 +1500,18 @@ export default function PerfectSeason() {
         notes.push(`${old.runs} earlier season${old.runs > 1 ? "s were" : " was"} added to your account.`);
       }
     }
-    if (pending) {
-      s = applyRun(s, pending);
-      notes.push("Your last season was saved.");
-      setPending(null);
-    }
     setUserId(uid);
     setUser(username);
-    setNotice(notes.join(" "));
-    // Not saveStats(s) here - that closes over the `userId` state, which hasn't committed yet
-    // in this same synchronous pass (setUserId above is async). Use the fresh `uid` directly.
+    // Not closing over the `userId` state here - it hasn't committed yet in this same
+    // synchronous pass (setUserId above is async). Use the fresh `uid` directly throughout.
     setStats(s);
-    const ok = await updateProfile(uid, s);
-    setSaveError(!ok);
+    if (pending) {
+      const trace = pending;
+      setPending(null);
+      const res = await submitAndSync(uid, trace);
+      if (res.ok) notes.push("Your last season was saved.");
+    }
+    setNotice(notes.join(" "));
   }
 
   async function logOut() {
@@ -1627,36 +1636,32 @@ export default function PerfectSeason() {
     const lineup = SLOTS.map((s) => `${r[s].id}${r[s].season}`).join("|");
     const sim = forcedScenario ? forceSeason(forcedScenario) : withSeed(`${mode.seed}#${lineup}`, () => simulateSeason(score));
     sim.score = score;
-    const run = {
-      w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, perfect: sim.perfect, playoffs: sim.playoffs, date: Date.now(),
-      roster: SLOTS.map((s) => ({ slot: s, name: r[s].name, team: r[s].team, season: r[s].season, ppr: r[s].ppr, rating: effectiveRating(s, r[s]) })),
-    };
+    const runRoster = SLOTS.map((s) => ({ slot: s, name: r[s].name, team: r[s].team, season: r[s].season, ppr: r[s].ppr, rating: effectiveRating(s, r[s]) }));
     const siteBest = lb.top[0]?.bestScore ?? 0;
     sim.newSiteBest = !forcedScenario && !!user && lb.top.length > 0 && score > siteBest;
+    sim.newBestScore = !forcedScenario && !!user && !!stats && (stats.bestScore == null || score > stats.bestScore);
     setNotice("");
-    run.mode = mode.kind;
-    run.code = mode.code;
-    run.gm = !!mode.gm;
-    if (mode.gm) run.capUsed = capUsed;
     if (!forcedScenario) {
       siteActivity.current?.broadcastDraftFinished();
       if (mode.kind === "daily") {
-        const rec = { date: mode.date, w: sim.w, l: sim.l, score, outcome: sim.outcome, roster: run.roster };
+        const rec = { date: mode.date, w: sim.w, l: sim.l, score, outcome: sim.outcome, roster: runRoster };
         setDailyDone(rec);
         sset(DAILY_KEY(mode.date), rec, false);
-        if (user) upsertDailyRun(mode.date, userId, { username: user, w: sim.w, l: sim.l, score, outcome: sim.outcome });
       }
-      if (user && stats) {
-        sim.newBestScore = stats.bestScore == null || score > stats.bestScore;
-        let s = applyRun(stats, run);
-        if (mode.kind === "daily") {
-          const st = nextStreak(s, mode.date);
-          s = { ...s, dailyLast: mode.date, dailyStreak: st, dailyBestStreak: Math.max(st, s.dailyBestStreak || 0) };
-        }
-        saveStats(s);
-      } else {
-        setPending(run);
-      }
+      // The client never persists its own computed score/outcome directly - submit-run (a
+      // Supabase Edge Function) independently replays this exact draft trace and recomputes
+      // everything server-side (see game-logic.mjs's replayDraft/simulateSeason). The animation
+      // above already rendered from that same shared logic + seed, so an honest client sees
+      // identical numbers either way - only a tampered submission is ever rejected.
+      const trace = {
+        mode: { kind: mode.kind, seed: mode.seed, code: mode.code, date: mode.date, gm: mode.gm },
+        history, seq, gm: !!mode.gm,
+        // Informational only (not part of the verified score/roster path) - same trust level it
+        // always had, just reported by the client for the Stats screen's GM-mode leaderboard.
+        capUsed: mode.gm ? capUsed : undefined,
+      };
+      if (user) submitAndSync(userId, trace);
+      else setPending(trace);
       loadLeaderboard(); // fresh numbers for the sitewide ranking
       clearDraft(DRAFT_KEY);
       clearDraftTracked(mode.kind, mode.kind === "daily" ? DAILY_PROGRESS(mode.date) : FREE_PROGRESS);
@@ -1722,7 +1727,7 @@ export default function PerfectSeason() {
 
   // Ending an unlimited draft early is a DNF; the draft itself is cleared.
   function abandonCurrent() {
-    if (mode && mode.kind === "free" && !result && history.length > 0 && user && stats) saveStats(applyDnf(stats, history.length));
+    if (mode && mode.kind === "free" && !result && history.length > 0) recordDnf(history.length);
     clearDraftTracked("free", FREE_PROGRESS);
     setWip((w) => ({ ...w, free: 0 }));
   }
@@ -1962,7 +1967,7 @@ export default function PerfectSeason() {
       if (sameVariant(saved.mode)) { restoreDraft(saved); return; }
       // Use the saved history length (not live state) so the DNF is recorded correctly even if
       // this draft was started in an earlier session and never loaded back into memory.
-      if (user && stats) saveStats(applyDnf(stats, saved.history.length));
+      recordDnf(saved.history.length);
       clearDraftTracked("free", FREE_PROGRESS);
       setWip((w) => ({ ...w, free: 0 }));
     }
@@ -1997,7 +2002,7 @@ export default function PerfectSeason() {
       return;
     }
     setConfirmReset(false);
-    if (user && stats) saveStats(applyDnf(stats, history.length));
+    recordDnf(history.length);
     restart();
   }
 

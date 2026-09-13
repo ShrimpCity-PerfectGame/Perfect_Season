@@ -86,19 +86,14 @@ create policy "sou_runs are publicly readable" on public.sou_runs for select usi
 drop policy if exists "builds are publicly readable" on public.builds;
 create policy "builds are publicly readable" on public.builds for select using (true);
 
--- Writes restricted to the row's own owner. No client-side INSERT policy on profiles - profile
--- rows are created only by the trigger below, as part of auth.users insert.
+-- profiles and daily_runs are NOT client-writable at all - no update/insert policy exists for
+-- them below (RLS with zero matching policy = zero allowed writes for anon/authenticated roles).
+-- The submit-run Edge Function's service-role client is the only writer, after independently
+-- recomputing the score/outcome server-side (see supabase/functions/submit-run and game-logic.mjs).
+-- Profile rows are still created only by the trigger below, as part of auth.users insert.
 drop policy if exists "users update their own profile" on public.profiles;
-create policy "users update their own profile" on public.profiles
-  for update using (auth.uid() = id) with check (auth.uid() = id);
-
 drop policy if exists "users insert their own daily run" on public.daily_runs;
-create policy "users insert their own daily run" on public.daily_runs
-  for insert with check (auth.uid() = user_id);
-
 drop policy if exists "users update their own daily run" on public.daily_runs;
-create policy "users update their own daily run" on public.daily_runs
-  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "users insert their own sou run" on public.sou_runs;
 create policy "users insert their own sou run" on public.sou_runs
@@ -112,11 +107,13 @@ drop policy if exists "users insert their own build" on public.builds;
 create policy "users insert their own build" on public.builds
   for insert with check (auth.uid() = user_id);
 
--- Known, accepted limitation: public SELECT + auth.uid()-gated writes means an authenticated
--- client can still write any best_score/recent payload for their OWN row - RLS proves who is
--- writing, not that the number is truthful. No worse than the game's previous fully-open
--- window.storage, but not a fix either. Real tamper-resistance needs server-side score
--- recomputation from a signed roster+seed - a real follow-up, not attempted here.
+-- profiles/daily_runs tamper-resistance: closed for Daily (its seed is derived from the Edge
+-- Function's own clock, never trusted from the client) and for outright score/roster fabrication
+-- in every mode (submit-run replays the actual draft trace and recomputes the score itself - see
+-- game-logic.mjs's replayDraft). Still open: Unlimited/challenge-code mode's seed (mode.code) is
+-- client-chosen, so grinding many codes offline for a lucky legitimate outcome remains possible -
+-- an accepted, documented gap. sou_runs and builds (above) are untouched by this and remain fully
+-- client-trusted - lower-stakes minigames, not roster-scoring, a candidate for a later pass.
 
 -- Profile creation happens atomically with auth.users insert via this trigger, reading the
 -- username passed as signUp() metadata (options.data.username) - so a signup either fully

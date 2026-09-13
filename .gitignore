@@ -3,3 +3,4 @@ build/
 public/
 *.log
 .claude/scheduled_tasks.lock
+supabase/.temp/

@@ -1,0 +1,4 @@
+[functions.submit-run]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/submit-run/index.ts"

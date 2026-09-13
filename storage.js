@@ -88,9 +88,21 @@ export async function fetchProfile(userId) {
   const { data } = await getClient().from("profiles").select("*").eq("id", userId).single();
   return rowToProfile(data);
 }
-export async function updateProfile(userId, s) {
-  const { error } = await getClient().from("profiles").update(profileToRow(s)).eq("id", userId);
-  return !error;
+
+// profiles and daily_runs are no longer client-writable at all (see supabase/schema.sql's RLS) -
+// the client never computes its own score/outcome/DNF-count for persistence. Both of these call
+// the submit-run Edge Function, which independently replays the draft trace (or, for a DNF, just
+// applies the increment) and recomputes everything server-side before writing - see
+// game-logic.mjs's replayDraft/simulateSeason and supabase/functions/submit-run.
+export async function submitRun(trace) {
+  const { data, error } = await getClient().functions.invoke("submit-run", { body: trace });
+  if (error) return { ok: false };
+  return data;
+}
+export async function submitDnf(picks) {
+  const { data, error } = await getClient().functions.invoke("submit-run", { body: { dnf: true, picks } });
+  if (error) return false;
+  return !!data?.ok;
 }
 
 export async function fetchLeaderboardTop(limit = 10) {
@@ -115,11 +127,6 @@ export async function fetchDailyTop(date, limit = 10) {
   if (error || !data) return [];
   return data.map((r) => ({ username: r.username, w: r.w, l: r.l, score: r.score, outcome: r.outcome }));
 }
-export async function upsertDailyRun(date, userId, row) {
-  const { error } = await getClient().from("daily_runs").insert({ date, user_id: userId, username: row.username, w: row.w, l: row.l, score: row.score, outcome: row.outcome });
-  return !error;
-}
-
 export async function fetchSouTop(date, limit = 10) {
   const { data, error } = await getClient().from("sou_runs").select("*").eq("date", date).order("score", { ascending: false }).limit(limit);
   if (error || !data) return [];

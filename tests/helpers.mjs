@@ -5,11 +5,20 @@
 import { JSDOM } from "jsdom";
 import { webcrypto } from "node:crypto";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
+import * as GL from "../game-logic.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const root = path.resolve(__dirname, "..");
+
+// This is a SEPARATE instance of game-logic.mjs from the one esbuild inlines into the bundled
+// component below (bundling copies the module in, it doesn't share it) - deterministic given the
+// same data/players.json in, so both independently reach identical BOARDS/OPPS, same as the real
+// client bundle and the real submit-run Edge Function are two separate processes in production.
+const gameData = JSON.parse(readFileSync(path.join(root, "data", "players.json"), "utf8"));
+GL.initGameData(gameData.players, gameData.opponents);
 
 // In-memory mock of the Supabase client surface storage.js actually calls: auth (signUp,
 // signInWithPassword, signOut, getSession, onAuthStateChange) and .from("profiles"/"daily_runs")
@@ -43,7 +52,10 @@ export function makeMockAuth() {
         if (opts?.count) return Promise.resolve({ count: run().length, error: null });
         const builder = {
           eq(col, val) { state.filters.push((r) => r[col] === val); return builder; },
-          not(col, _op, val) { state.filters.push((r) => r[col] !== val); return builder; },
+          // Real Postgres has no "undefined" - an unset column reads as NULL, so `is null`/
+          // `is not null` must treat a column that was simply never set the same as one
+          // explicitly set to null (e.g. a fresh signup's row has no best_score key at all).
+          not(col, _op, val) { state.filters.push((r) => (r[col] ?? null) !== val); return builder; },
           order(col, opts) { state.order = { col, asc: opts?.ascending !== false }; return builder; },
           limit(n) { state.limit = n; return builder; },
           single() {
@@ -110,9 +122,103 @@ export function makeMockAuth() {
     return chan;
   }
 
+  // Mirrors supabase/functions/submit-run/index.ts against this same mock's in-memory
+  // profiles/dailyRuns - so every test that finishes a real draft or records a DNF exercises the
+  // actual server-side verification logic (game-logic.mjs's replayDraft/simulateSeason/applyRun/
+  // applyDnf/nextStreak), not a bypassed shortcut. Auth is `session.user.id` (this mock's stand-in
+  // for the real function's JWT verification) instead of a forwarded Authorization header.
+  const todayKeyMock = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  function mockRowToProfile(row) {
+    return {
+      runs: row?.runs || 0, dnf: row?.dnf || 0, wins: row?.wins || 0, losses: row?.losses || 0,
+      champs: row?.champs || 0, perfect: row?.perfect || 0, playoffs: row?.playoffs || 0,
+      bestScore: row?.best_score ?? null, bestRun: row?.best_run ?? null, bestRecord: row?.best_record ?? null,
+      recent: row?.recent || [], dailyStreak: row?.daily_streak || 0, dailyLast: row?.daily_last ?? null,
+      dailyBestStreak: row?.daily_best_streak || 0,
+    };
+  }
+  function mockProfileToRow(s) {
+    return {
+      runs: s.runs, dnf: s.dnf, wins: s.wins, losses: s.losses,
+      champs: s.champs, perfect: s.perfect, playoffs: s.playoffs,
+      best_score: s.bestScore, best_run: s.bestRun, best_record: s.bestRecord, recent: s.recent || [],
+      daily_streak: s.dailyStreak, daily_last: s.dailyLast, daily_best_streak: s.dailyBestStreak,
+    };
+  }
+  async function invokeSubmitRun(body) {
+    if (!session?.user) return { error: { message: "unauthorized" } };
+    const userId = session.user.id;
+
+    if (body?.dnf) {
+      const row = profiles.get(userId);
+      if (!row) return { error: { message: "no profile for this account" } };
+      Object.assign(row, mockProfileToRow(GL.applyDnf(mockRowToProfile(row), Number(body.picks) || 0)));
+      return { data: { ok: true } };
+    }
+
+    const { mode, history, seq, gm, capUsed } = body || {};
+    if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return { data: { error: "malformed submission" } };
+
+    let seed;
+    if (mode.kind === "daily") {
+      const today = todayKeyMock();
+      if (mode.date !== today) return { data: { error: "a daily submission must be for today" } };
+      seed = `daily-${today}`;
+    } else if (mode.kind === "free") {
+      if (typeof mode.code !== "string" || !mode.code) return { data: { error: "missing challenge code" } };
+      seed = mode.code;
+    } else {
+      return { data: { error: "unknown mode" } };
+    }
+
+    if (mode.kind === "daily" && dailyRuns.has(`${mode.date}:${userId}`)) {
+      return { data: { error: "today's daily is already recorded" } };
+    }
+
+    const replay = GL.replayDraft(seed, history, seq);
+    if (!replay.ok) return { data: { error: "illegal roster", reason: replay.reason } };
+    const roster = replay.roster;
+
+    let tot = 0, wt = 0;
+    for (const s of GL.SLOTS) { const k = s === "QB" ? GL.QB_WEIGHT : 1; tot += GL.effectiveRating(s, roster[s]) * k; wt += k; }
+    const score = Math.round((tot / wt) * 10) / 10;
+    const lineup = GL.SLOTS.map((s) => `${roster[s].id}${roster[s].season}`).join("|");
+    const sim = GL.withSeed(`${seed}#${lineup}`, () => GL.simulateSeason(score));
+
+    const run = {
+      w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, perfect: sim.perfect, playoffs: sim.playoffs,
+      date: Date.now(),
+      roster: GL.SLOTS.map((s) => ({ slot: s, name: roster[s].name, team: roster[s].team, season: roster[s].season, ppr: roster[s].ppr, rating: GL.effectiveRating(s, roster[s]) })),
+      mode: mode.kind, code: mode.kind === "free" ? mode.code : undefined,
+      gm: !!gm, capUsed: gm ? capUsed : undefined,
+    };
+
+    const existingRow = profiles.get(userId);
+    if (!existingRow) return { data: { error: "no profile for this account" } };
+
+    if (mode.kind === "daily") {
+      if (dailyRuns.has(`${mode.date}:${userId}`)) return { data: { error: "today's daily is already recorded" } };
+      dailyRuns.set(`${mode.date}:${userId}`, { date: mode.date, user_id: userId, username: existingRow.username, w: run.w, l: run.l, score, outcome: run.outcome });
+    }
+
+    const existing = mockRowToProfile(existingRow);
+    let updated = GL.applyRun(existing, run);
+    if (mode.kind === "daily") {
+      const streak = GL.nextStreak(existing, mode.date);
+      updated = { ...updated, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
+    }
+    Object.assign(existingRow, mockProfileToRow(updated));
+
+    return { data: { ok: true, run } };
+  }
+
   return {
     from,
     channel,
+    functions: { invoke: (name, opts) => (name === "submit-run" ? invokeSubmitRun(opts?.body) : Promise.resolve({ error: { message: "unknown function" } })) },
     removeChannel() {},
     _profiles: profiles, // test-only escape hatch for setup/assertions
     _builds: builds, // test-only escape hatch for setup/assertions

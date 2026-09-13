@@ -10,9 +10,12 @@ shows his best real season for that team in that era, with full stats but **no f
 Once six are picked, the roster is graded and plays a 17-game season against real NFL team-seasons,
 then the playoffs. Win all 20 and you've gone perfect.
 
-Everything currently lives in one self-contained React file: `perfect-season.jsx` (~360 KB, ~2,300
-lines, with all player and opponent data inlined as JSON on line 3 — avoid full-file reads, use
-targeted `offset`/`limit` reads or grep instead).
+The React component, all its screens, and every piece of game-specific display/UI logic live in
+one file: `perfect-season.jsx` (~175 KB, ~3,000 lines — still large enough that targeted
+`offset`/`limit` reads or grep beat a full-file read). Player and opponent data lives in
+`data/players.json` (~225 KB); the pure scoring/simulation/roster-legality logic shared with the
+`submit-run` Edge Function lives in `game-logic.mjs` — see that section under Architecture below
+before touching either.
 
 ## Build/Run Commands
 
@@ -29,8 +32,11 @@ SUPABASE_URL=... SUPABASE_ANON_KEY=... node build.mjs
 # then open public/page.html, which loads public/page.js
 
 # Headless DOM tests (jsdom + react-dom/client, drive the real UI via tests/helpers.mjs) - these
-# never touch a real Supabase project; window.__ps_supabase__ is a mock (see makeMockAuth in
-# tests/helpers.mjs), installed the same way window.storage is
+# never touch a real Supabase project or a real Deno runtime; window.__ps_supabase__ is a mock
+# (see makeMockAuth in tests/helpers.mjs), installed the same way window.storage is - its
+# functions.invoke("submit-run") mirrors supabase/functions/submit-run/index.ts against the same
+# in-memory profiles/daily_runs, using the real game-logic.mjs, so a finished draft in any test
+# exercises the real server-side verification logic, not a bypassed shortcut
 node tests/test-accounts.mjs      # signup, login, stats persistence
 node tests/test-daily.mjs         # seeded boards, daily lock, challenge codes
 node tests/test-nav.mjs           # landing page, mode switching, draft resume
@@ -41,6 +47,8 @@ node tests/test-reroll-pool.mjs   # reroll can't repeat an already-used team+era
 node tests/test-flex-scoring.mjs  # Flex grades on raw production, not position
 node tests/test-admin.mjs         # admin-account gating + force-board/player/outcome tools
 node tests/test-difficulty.mjs [N]  # plays N drafts with a bot, reports avg wins / 20-0 rate
+node tests/test-replay-verification.mjs  # game-logic.mjs's replayDraft: legit traces (incl. rerolls) accepted, tampered ones rejected
+node tests/test-tamper-resistance.mjs    # end-to-end: a fabricated submission never reaches profiles; a legit one still works
 
 # Browser checks (Playwright, screenshots + motion checks)
 python3 tests/shots.py
@@ -75,7 +83,7 @@ runs) goes through a Supabase client instead: `storage.js`'s `getClient()` retur
 `@supabase/supabase-js` client built from `SUPABASE_URL`/`SUPABASE_ANON_KEY` (injected at build
 time by `build.mjs` — see Build/Run Commands above). Auth, profile reads/writes, and leaderboard/
 daily queries all go through named functions in `storage.js` (`authSignUp`, `fetchProfile`,
-`fetchLeaderboardTop`, `upsertDailyRun`, etc.) — never call `getClient()` directly from
+`fetchLeaderboardTop`, `submitRun`, etc.) — never call `getClient()` directly from
 `perfect-season.jsx`. Personal-key reads/writes still go through `sget`/`sset`/`sdel`/
 `clearDraft`, which swallow errors and return null — **assume this half of the API has no
 read-after-write ordering guarantee** (Supabase's Postgres-backed half doesn't have this problem).
@@ -85,14 +93,36 @@ in flight) is the pattern to follow for any future bug in this class — don't t
 `await` ordering, since the race is between two independent async calls that don't share a promise
 chain.
 
-**Row Level Security, not app code, is the write gate.** `supabase/schema.sql` defines `profiles`
-and `daily_runs` with public SELECT and `auth.uid()`-gated writes; a `handle_new_user` trigger
-creates a profile row atomically when `auth.users` gets a new row (reading the username from
-`signUp()`'s `options.data.username`), so there's no separate client-side insert that could leave
-an orphaned auth user. **Known limitation**: an authenticated client can still write any
-`best_score`/`recent` payload for their own row — RLS proves who is writing, not that the number is
-truthful. Real tamper-resistance needs server-side score recomputation from a signed roster+seed;
-worth doing before tying money to leaderboard rank.
+**Row Level Security, not app code, is the write gate — but for `profiles`/`daily_runs`, no client
+policy exists at all.** `supabase/schema.sql` defines `profiles` and `daily_runs` with public
+SELECT and RLS enabled, but zero UPDATE/INSERT policy for either — a signed-in client cannot write
+either table directly, full stop. The `submit-run` Edge Function (`supabase/functions/submit-run`)
+is the only writer: it takes a draft trace (`{mode, history, seq}`), independently re-derives the
+seed (never trusts a client-supplied one — Daily's is `daily-<today>` from the function's own
+clock; free/challenge-code mode's is `mode.code`), replays it with `game-logic.mjs`'s
+`replayDraft` to confirm the roster was actually legally drafted, recomputes the score/season
+outcome itself, and only then writes via its own service-role client. `finish()` still renders the
+win/loss animation instantly from a local call to the same shared `simulateSeason` (so an honest
+client sees identical numbers with no added latency) and submits the trace in the background via
+`storage.js`'s `submitRun`/`submitDnf`; a rejected or failed submission keeps the local celebration
+UI but skips the optimistic stats update and surfaces the existing `saveError` panel. **Known,
+accepted gap**: Unlimited/challenge-code mode's seed is still client-chosen (`mode.code`), so
+grinding many codes offline for a lucky *legitimate* outcome remains possible — closing that needs
+server-issued/committed seeds, a bigger lift (network round-trip at draft start, rate-limiting),
+not attempted here. `sou_runs` (Stats O/U) and `builds` (Build-a-player) remain fully
+client-writable — lower-stakes minigames, not roster-scoring, a candidate for a later pass.
+
+**The scoring/simulation/roster-legality logic is one shared module, not two.** `game-logic.mjs`
+(imported by both `perfect-season.jsx` and `supabase/functions/submit-run`) holds every pure,
+framework-free function this depends on — `effectiveRating`/`flexRating`, `seededSequence`/`fits`/
+`boardHasOption`/`boardAt`, `rerollCandidate` (reroll's pool selection), `replayDraft` (full
+legality replay), `simulateSeason`/`gameResult`/`buildTimeline`, `applyRun`/`applyDnf`/
+`nextStreak` — plus `BOARDS`/`OPPS`, built from `data/players.json` (the former inline `DATA`/
+`OPP_DATA` literals, extracted verbatim) via `initGameData()`, which every consumer calls once at
+startup. This is deliberate: the client and the server must compute byte-identical results from
+the same seed+roster, and two independently-maintained copies of this logic would eventually
+drift. If you touch scoring, grading, board sequencing, or reroll logic, change it here — never
+duplicate it back into `perfect-season.jsx` or the Edge Function.
 
 **Everything seeded runs through `mulberry32(hashStr(seed))`.** Board sequences
 (`seededSequence`), reroll picks, and the season simulation (`simulateSeason`, wrapped by
