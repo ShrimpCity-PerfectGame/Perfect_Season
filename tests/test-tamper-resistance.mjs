@@ -124,4 +124,60 @@ await runTest("a fabricated capUsed is ignored - the server recomputes it from t
   assert(res.run.capUsed === trueCapUsed, `expected the server to ignore the fabricated capUsed:1 and report the true cost (${trueCapUsed}), got: ` + res.run.capUsed);
 });
 
+await runTest("an unrecognized scoring format is rejected outright", async () => {
+  const { history, seq } = await buildLegitTrace("BOGUSFORMAT");
+  for (const format of ["championship", "STANDARD", "ppr", 7, true]) {
+    const res = await submitRun({ mode: { kind: "free", code: "BOGUSFORMAT" }, history, seq, gm: false, format });
+    assert(!res.ok, `expected format ${JSON.stringify(format)} to be rejected, got: ` + JSON.stringify(res));
+  }
+  // ...but an absent format is fine, and means fantasy - this is what keeps a client from before
+  // the feature shipped working during a deploy.
+  const res = await submitRun({ mode: { kind: "free", code: "BOGUSFORMAT" }, history, seq, gm: false });
+  assert(res.ok, "expected a submission with no format at all to be accepted as fantasy, got: " + JSON.stringify(res));
+  assert(res.run.format === "fantasy", "expected an untagged submission to be stamped fantasy, got " + res.run.format);
+});
+
+await runTest("the server derives the daily seed from the format - a standard claim on a fantasy-seeded draft is rejected", async () => {
+  const date = utcDateKeyOffset(0);
+  // Drafted against the FANTASY daily's boards, then submitted claiming the standard format.
+  // The server re-derives seed `daily-<date>-std`, whose boards are different, so the replay fails.
+  const { history, seq } = await buildLegitTrace(`daily-${date}`);
+  const res = await submitRun({ mode: { kind: "daily", date }, history, seq, gm: false, format: "standard" });
+  assert(!res.ok, "expected a format/seed mismatch to be rejected, got: " + JSON.stringify(res));
+  assert(res.error === "illegal roster", "expected the replay itself to reject it, got: " + JSON.stringify(res));
+});
+
+await runTest("both formats' dailies can be played the same day, and each stays one-per-day", async () => {
+  const date = utcDateKeyOffset(0);
+  // This account already played today's fantasy daily in an earlier test above; submit it again
+  // to make that true regardless of test order, and to prove the fantasy lock still holds.
+  const fan = await buildLegitTrace(`daily-${date}`);
+  await submitRun({ mode: { kind: "daily", date }, history: fan.history, seq: fan.seq, gm: false, format: "fantasy" });
+  const fanAgain = await submitRun({ mode: { kind: "daily", date }, history: fan.history, seq: fan.seq, gm: false, format: "fantasy" });
+  assert(!fanAgain.ok, "expected the fantasy daily to stay locked to one per day, got: " + JSON.stringify(fanAgain));
+
+  // The standard daily is a separate draft and must still be available the same day - a shared
+  // (date, user_id) key would have rejected this.
+  const std = await buildLegitTrace(`daily-${date}-std`);
+  const b = await submitRun({ mode: { kind: "daily", date }, history: std.history, seq: std.seq, gm: false, format: "standard" });
+  assert(b.ok, "expected the standard daily to be playable the same day as the fantasy one, got: " + JSON.stringify(b));
+
+  // ...and it gets its own one-per-day lock.
+  const again = await submitRun({ mode: { kind: "daily", date }, history: std.history, seq: std.seq, gm: false, format: "standard" });
+  assert(!again.ok, "expected a second standard daily for the same date to be rejected, got: " + JSON.stringify(again));
+});
+
+await runTest("a standard-format run never lands in the fantasy best score", async () => {
+  const before = { ...auth._profiles.get(userId) };
+  const { history, seq } = await buildLegitTrace("STDONLY");
+  const res = await submitRun({ mode: { kind: "free", code: "STDONLY" }, history, seq, gm: false, format: "standard" });
+  assert(res.ok, "expected a legitimate standard run to be accepted, got: " + JSON.stringify(res));
+
+  const after = auth._profiles.get(userId);
+  assert(after.best_score === before.best_score, "a standard run must not touch best_score");
+  assert(after.best_score_std === res.run.score, `expected best_score_std to hold the standard run's score, got ${after.best_score_std}`);
+  // Career counters are deliberately shared across formats.
+  assert(after.runs === before.runs + 1, "the run should still count toward career totals");
+});
+
 console.log("test-tamper-resistance.mjs done");

@@ -16,6 +16,42 @@ export const FLEX_POS = ["RB", "WR", "TE"];
 // and replayDraft's enforcement of it can never independently drift out of sync.
 export const REROLL_BUDGET = 1;
 
+// ---------- Scoring formats ----------
+// Two ways to grade the same draft. "fantasy" is full PPR (the original, and what every score
+// stored before this existed was computed under); "standard" drops the point per reception, so
+// yards and touchdowns decide a player's grade instead of catch volume - closer to what actually
+// wins football games, which is what the season sim is modeling. The UI calls "standard"
+// *Championship mode*; the internal name stays "standard" because champ/champs/championships
+// already mean "won the title" everywhere else in this codebase (run.champ, profiles.champs, the
+// Championship playoff round).
+//
+// Absence always normalizes to "fantasy", which is what lets every run, profile and draft
+// snapshot written before this feature existed read back correctly with no backfill.
+export const FORMATS = ["fantasy", "standard"];
+export const normFormat = (f) => (f === "standard" ? "standard" : "fantasy");
+
+// A rating is capped here before it reaches team-score math. Note the stored `rating` in
+// data/players.json already has this applied (nothing in the file exceeds 130), so this only
+// bites when computing a rating here.
+export const RATING_CAP = 130;
+
+// Points equal to a rating of exactly 100 under standard scoring, per position and era window -
+// "a solid starter of that era", the same thing the full-PPR benchmarks mean. Derived by scaling
+// each position/era's PPR benchmark by the standard-to-PPR points ratio of that cell's
+// benchmark-caliber players, so both formats land on one comparable 0-130 scale. Like the PPR
+// benchmarks, era 4 folds the 17/16 season-length factor into the number rather than scaling
+// points separately. See SCORING.md.
+const STD_BENCH = {
+  QB: [269.7, 278.9, 334.6, 335.1, 363.4],
+  RB: [274.4, 249.0, 235.5, 241.3, 257.4],
+  WR: [195.0, 188.9, 202.8, 181.2, 193.1],
+  TE: [108.3, 131.4, 144.8, 140.8, 121.4],
+};
+// Era averages (mean, standard deviation) for the efficiency adjustment below. SCORING.md Step 4.
+const ERA_PASSER = [[80.2, 11.4], [83.1, 12.3], [87.3, 11.7], [91.6, 11.8], [91.3, 10.0]];
+const ERA_COMP = [[59.2, 4.4], [60.8, 4.5], [61.5, 4.2], [64.1, 4.0], [64.8, 3.6]];
+const ERA_YPC = [[4.07, 0.61], [4.23, 0.64], [4.20, 0.61], [4.29, 0.63], [4.35, 0.62]];
+
 export const TEAMS = {
   ARI: ["Cardinals", "Arizona", "#97233F", "#FFB612"], ATL: ["Falcons", "Atlanta", "#A71930", "#1B1B1B"],
   BAL: ["Ravens", "Baltimore", "#241773", "#9E7C0C"], BUF: ["Bills", "Buffalo", "#00338D", "#C60C30"],
@@ -35,6 +71,54 @@ export const TEAMS = {
   TEN: ["Titans", "Tennessee", "#0C2340", "#4B92DB"], WAS: ["Washington", "", "#5A1414", "#FFB612"],
 };
 
+// The standard NFL passer-rating formula. Lives here rather than in perfect-season.jsx because
+// the efficiency adjustment below needs it and that adjustment runs server-side too; the player
+// card's "QB rating" stat cell imports it back from here.
+export function passerRating(p) {
+  if (!p.att) return 0;
+  const c = (x) => Math.max(0, Math.min(2.375, x));
+  const a = c((p.cmp / p.att - 0.3) * 5), b = c((p.py / p.att - 3) * 0.25);
+  const t = c((p.ptd / p.att) * 20), d = c(2.375 - (p.int / p.att) * 25);
+  return ((a + b + t + d) / 6) * 100;
+}
+
+// How much a QB's passer rating / completion %, or an RB's yards per carry, moves his grade off
+// pure production, measured against his own era's average. The min(1, ...) term means a
+// low-volume player only earns part of the swing, so a backup with 80 efficient carries can't
+// inflate his grade. SCORING.md Step 4.
+//
+// This is deliberately IDENTICAL in both scoring formats: the formats differ in what counts as
+// production (Step 1), not in how efficiency is credited on top of it.
+//
+// It is also deliberately recomputed here rather than recovered from the stored `rating` by
+// subtracting its production term. The two look equivalent - they agree to ~0.03 for over 98% of
+// players - but inverting a value that was CAPPED at RATING_CAP before storage understates the
+// adjustment by up to 12 rating points on exactly the all-time seasons that decide a top
+// leaderboard score (LaDainian Tomlinson 2003: 130 recomputed vs 117.4 inverted). Don't
+// "simplify" this back into an inversion.
+export function efficiencyAdj(p) {
+  if (p.pos === "QB" && p.att > 0) {
+    const [pm, ps] = ERA_PASSER[p.w], [cm, cs] = ERA_COMP[p.w];
+    const z = (2 * ((passerRating(p) - pm) / ps) + ((100 * p.cmp) / p.att - cm) / cs) / 3;
+    return 5 * z * Math.min(1, p.att / 300);
+  }
+  if (p.pos === "RB" && p.car > 0) {
+    const [ym, ys] = ERA_YPC[p.w];
+    return 4 * ((p.ry / p.car - ym) / ys) * Math.min(1, p.car / 200);
+  }
+  return 0;
+}
+
+// A player's grade under standard (non-PPR) scoring. Standard points are exactly `ppr - rec`:
+// full PPR and standard differ ONLY by the one point per reception, every other term is the same.
+// That identity matters - recomputing points from the visible box-score columns is not viable,
+// because two-point conversions and return TDs are baked into the stored `ppr` without having
+// columns of their own (~656 of 3,124 rows would come out short).
+export function standardRating(p) {
+  const production = (100 * (p.ppr - p.rec)) / STD_BENCH[p.pos][p.w];
+  return Math.min(RATING_CAP, production + efficiencyAdj(p));
+}
+
 // ---------- Data load ----------
 // Populated by initGameData(); exported as `let` bindings so every importer sees the live values
 // once initialized (standard ES module live-binding - works the same in an esbuild bundle and in
@@ -43,17 +127,26 @@ export let BOARDS = {};
 export let OPPS = [];
 export let PLAYOFF_OPPS = [];
 let flexStatsByEra = [];
+let flexStatsByEraStd = [];
 
 export function initGameData(players, opponents) {
   const boards = {};
   for (const [key, arr] of Object.entries(players.b)) {
     const [team, w] = key.split("|");
-    boards[key] = arr.map((e) => ({
-      id: e[0], name: players.n[e[0]], pos: POS[e[1]], season: e[2], g: e[3],
-      cmp: e[4], att: e[5], py: e[6], ptd: e[7], int: e[8],
-      car: e[9], ry: e[10], rtd: e[11], rec: e[12], rcy: e[13], rctd: e[14],
-      fl: e[15], ppr: e[16], rating: e[17], team, w: Number(w),
-    })).sort((x, y) => {
+    boards[key] = arr.map((e) => {
+      const p = {
+        id: e[0], name: players.n[e[0]], pos: POS[e[1]], season: e[2], g: e[3],
+        cmp: e[4], att: e[5], py: e[6], ptd: e[7], int: e[8],
+        car: e[9], ry: e[10], rtd: e[11], rec: e[12], rcy: e[13], rctd: e[14],
+        fl: e[15], ppr: e[16], rating: e[17], team, w: Number(w),
+      };
+      // Standard-format equivalents of ppr/rating, derived once here so every consumer (grading,
+      // salary, the Edge Function, the test mock) is a field lookup over identical values rather
+      // than an independent recomputation that could drift.
+      p.stdPoints = p.ppr - p.rec;
+      p.stdRating = standardRating(p);
+      return p;
+    }).sort((x, y) => {
       const lx = x.name.split(" ").slice(1).join(" ") || x.name;
       const ly = y.name.split(" ").slice(1).join(" ") || y.name;
       return lx.localeCompare(ly);
@@ -65,18 +158,27 @@ export function initGameData(players, opponents) {
 
   const mean = (xs) => xs.reduce((a, x) => a + x, 0) / xs.length;
   const std = (xs, m) => Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / xs.length) || 1;
-  flexStatsByEra = WINDOWS.map((_, w) => {
+  // One pass builds both formats' pool stats from the same players, so they can't fall out of
+  // sync. `ratingStd` here is a standard DEVIATION - unrelated to the "standard" scoring format,
+  // whose fields are named stdPoints/stdRating.
+  const poolStats = (pool, points, rating) => {
+    const pprMean = mean(pool.map(points));
+    const ratingMean = mean(pool.map(rating));
+    return {
+      pprMean, pprStd: std(pool.map(points), pprMean),
+      ratingMean, ratingStd: std(pool.map(rating), ratingMean),
+    };
+  };
+  flexStatsByEra = [];
+  flexStatsByEraStd = [];
+  WINDOWS.forEach((_, w) => {
     const pool = [];
     for (const key of Object.keys(BOARDS)) {
       if (Number(key.split("|")[1]) !== w) continue;
       for (const p of BOARDS[key]) if (FLEX_POS.includes(p.pos)) pool.push(p);
     }
-    const pprMean = mean(pool.map((p) => p.ppr));
-    const ratingMean = mean(pool.map((p) => p.rating));
-    return {
-      pprMean, pprStd: std(pool.map((p) => p.ppr), pprMean),
-      ratingMean, ratingStd: std(pool.map((p) => p.rating), ratingMean),
-    };
+    flexStatsByEra[w] = poolStats(pool, (p) => p.ppr, (p) => p.rating);
+    flexStatsByEraStd[w] = poolStats(pool, (p) => p.stdPoints, (p) => p.stdRating);
   });
 }
 
@@ -225,14 +327,20 @@ export function replayDraft(seed, history, seq) {
 // combined RB/WR/TE pool per era window, then rescale onto the numeric range `rating` already
 // occupies for that same pool, so team-score math doesn't need to change - only which player
 // comes out on top for a Flex spot.
-export function flexRating(p) {
-  const s = flexStatsByEra[p.w];
-  return s.ratingMean + ((p.ppr - s.pprMean) / s.pprStd) * s.ratingStd;
+// Note this is intentionally NOT capped at RATING_CAP, in either format - it's a rescale of a
+// pool z-score, and capping it would change which player wins a Flex spot.
+export function flexRating(p, format) {
+  const std = normFormat(format) === "standard";
+  const s = (std ? flexStatsByEraStd : flexStatsByEra)[p.w];
+  const points = std ? p.stdPoints : p.ppr;
+  return s.ratingMean + ((points - s.pprMean) / s.pprStd) * s.ratingStd;
 }
 // The rating a player should count as in team-score math for the slot they're in: their normal
-// positional grade for a named slot, or their stats-only flexRating for a Flex spot.
-export function effectiveRating(slot, p) {
-  return slot.startsWith("FLEX") ? flexRating(p) : p.rating;
+// positional grade for a named slot, or their stats-only flexRating for a Flex spot. Omitting
+// `format` gives the original full-PPR grading exactly.
+export function effectiveRating(slot, p, format) {
+  if (slot.startsWith("FLEX")) return flexRating(p, format);
+  return normFormat(format) === "standard" ? p.stdRating : p.rating;
 }
 
 // ---------- GM mode (salary cap) ----------
@@ -243,9 +351,11 @@ export function effectiveRating(slot, p) {
 // enough that even the best single season in the game (rating ~120) tops out around a quarter of
 // GM_CAP - one all-timer shouldn't eat half your budget by itself. Shared so submit-run can
 // recompute capUsed itself from the verified roster instead of trusting the client's report.
+// Prices follow whichever format is being played, so the cap stays meaningful in both - pricing
+// standard-format rosters off full-PPR ratings would make big-play receivers better AND cheaper.
 export const GM_CAP = 150; // in $M, for a 6-man "roster"
-export function playerSalary(p) {
-  const r = Math.max(0, p.rating - 35);
+export function playerSalary(p, format) {
+  const r = Math.max(0, (normFormat(format) === "standard" ? p.stdRating : p.rating) - 35);
   return Math.max(1, Math.round(0.0055 * r * r));
 }
 
@@ -402,6 +512,13 @@ export function applyDnf(prev, picks) {
   return { ...prev, dnf: (prev.dnf || 0) + 1, recent: [{ dnf: true, picks, date: Date.now() }, ...(prev.recent || [])].slice(0, 10), updated: Date.now() };
 }
 const betterRecord = (a, b) => !b || a.w > b.w || (a.w === b.w && a.l < b.l);
+// Which profile fields hold each format's best score. Scores from the two formats aren't
+// comparable, so they rank separately; everything else about a run is. Adding a third format is
+// one entry here plus its two columns.
+export const BEST_FIELDS = {
+  fantasy: { score: "bestScore", run: "bestRun" },
+  standard: { score: "bestScoreStd", run: "bestRunStd" },
+};
 export function applyRun(prev, run) {
   const s = {
     ...prev,
@@ -410,7 +527,10 @@ export function applyRun(prev, run) {
     playoffs: prev.playoffs + (run.playoffs ? 1 : 0),
     recent: [run, ...(prev.recent || [])].slice(0, 10), updated: Date.now(),
   };
-  if (prev.bestScore == null || run.score > prev.bestScore) { s.bestScore = run.score; s.bestRun = run; }
+  // Career counters above stay merged across formats - they count seasons played, not points
+  // scored, and both formats run the identical simulation. Only the score-ranked bests split.
+  const f = BEST_FIELDS[normFormat(run.format)];
+  if (prev[f.score] == null || run.score > prev[f.score]) { s[f.score] = run.score; s[f.run] = run; }
   if (betterRecord(run, prev.bestRecord)) s.bestRecord = { w: run.w, l: run.l };
   return s;
 }

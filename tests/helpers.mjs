@@ -84,7 +84,12 @@ export function makeMockAuth() {
           const id = webcrypto.randomUUID();
           builds.set(id, { id, created_at: new Date().toISOString(), ...row });
         } else {
-          store.set(`${row.date}:${row.user_id}`, row);
+          // daily_runs is keyed per format (its real primary key is (date, format, user_id));
+          // sou_runs has no format and stays (date, user_id).
+          const key = table === "daily_runs"
+            ? `${row.date}:${row.format || "fantasy"}:${row.user_id}`
+            : `${row.date}:${row.user_id}`;
+          store.set(key, row);
         }
         return Promise.resolve({ error: null });
       },
@@ -143,6 +148,7 @@ export function makeMockAuth() {
       runs: row?.runs || 0, dnf: row?.dnf || 0, wins: row?.wins || 0, losses: row?.losses || 0,
       champs: row?.champs || 0, perfect: row?.perfect || 0, playoffs: row?.playoffs || 0,
       bestScore: row?.best_score ?? null, bestRun: row?.best_run ?? null, bestRecord: row?.best_record ?? null,
+      bestScoreStd: row?.best_score_std ?? null, bestRunStd: row?.best_run_std ?? null,
       recent: row?.recent || [], dailyStreak: row?.daily_streak || 0, dailyLast: row?.daily_last ?? null,
       dailyBestStreak: row?.daily_best_streak || 0,
     };
@@ -152,6 +158,7 @@ export function makeMockAuth() {
       runs: s.runs, dnf: s.dnf, wins: s.wins, losses: s.losses,
       champs: s.champs, perfect: s.perfect, playoffs: s.playoffs,
       best_score: s.bestScore, best_run: s.bestRun, best_record: s.bestRecord, recent: s.recent || [],
+      best_score_std: s.bestScoreStd, best_run_std: s.bestRunStd,
       daily_streak: s.dailyStreak, daily_last: s.dailyLast, daily_best_streak: s.dailyBestStreak,
     };
   }
@@ -166,15 +173,19 @@ export function makeMockAuth() {
       return { data: { ok: true } };
     }
 
-    const { mode, history, seq, gm } = body || {};
+    const { mode, history, seq, gm, format: rawFormat } = body || {};
     if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return { data: { error: "malformed submission" } };
+
+    // Top-level only, allow-listed, missing means fantasy - mirrors index.ts exactly.
+    if (rawFormat != null && !GL.FORMATS.includes(rawFormat)) return { data: { error: "unknown scoring format" } };
+    const format = GL.normFormat(rawFormat);
 
     let seed;
     if (mode.kind === "daily") {
       if (typeof mode.date !== "string" || !isPlausibleDailyDateMock(mode.date)) {
         return { data: { error: "a daily submission must be for today" } };
       }
-      seed = `daily-${mode.date}`;
+      seed = `daily-${mode.date}${format === "standard" ? "-std" : ""}`;
     } else if (mode.kind === "free") {
       if (typeof mode.code !== "string" || !mode.code) return { data: { error: "missing challenge code" } };
       seed = mode.code;
@@ -182,37 +193,36 @@ export function makeMockAuth() {
       return { data: { error: "unknown mode" } };
     }
 
-    if (mode.kind === "daily" && dailyRuns.has(`${mode.date}:${userId}`)) {
-      return { data: { error: "today's daily is already recorded" } };
-    }
-
     const replay = GL.replayDraft(seed, history, seq);
     if (!replay.ok) return { data: { error: "illegal roster", reason: replay.reason } };
     const roster = replay.roster;
 
     let tot = 0, wt = 0;
-    for (const s of GL.SLOTS) { const k = s === "QB" ? GL.QB_WEIGHT : 1; tot += GL.effectiveRating(s, roster[s]) * k; wt += k; }
+    for (const s of GL.SLOTS) { const k = s === "QB" ? GL.QB_WEIGHT : 1; tot += GL.effectiveRating(s, roster[s], format) * k; wt += k; }
     const score = Math.round((tot / wt) * 10) / 10;
     const lineup = GL.SLOTS.map((s) => `${roster[s].id}${roster[s].season}`).join("|");
     const sim = GL.withSeed(`${seed}#${lineup}`, () => GL.simulateSeason(score));
 
     // Recomputed from the verified roster, mirroring submit-run/index.ts - never trusted from
     // the client, since capUsed feeds a competitive Stats-screen leaderboard.
-    const finalCapUsed = gm ? GL.SLOTS.reduce((sum, s) => sum + GL.playerSalary(roster[s]), 0) : undefined;
+    const finalCapUsed = gm ? GL.SLOTS.reduce((sum, s) => sum + GL.playerSalary(roster[s], format), 0) : undefined;
     const run = {
       w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, perfect: sim.perfect, playoffs: sim.playoffs,
       date: Date.now(),
-      roster: GL.SLOTS.map((s) => ({ slot: s, name: roster[s].name, team: roster[s].team, season: roster[s].season, ppr: roster[s].ppr, rating: GL.effectiveRating(s, roster[s]) })),
+      roster: GL.SLOTS.map((s) => ({ slot: s, name: roster[s].name, team: roster[s].team, season: roster[s].season, ppr: roster[s].ppr, rating: GL.effectiveRating(s, roster[s], format) })),
       mode: mode.kind, code: mode.kind === "free" ? mode.code : undefined,
-      gm: !!gm, capUsed: finalCapUsed,
+      gm: !!gm, capUsed: finalCapUsed, format,
     };
 
     const existingRow = profiles.get(userId);
     if (!existingRow) return { data: { error: "no profile for this account" } };
 
+    // Keyed by format too, mirroring the real (date, format, user_id) primary key - this mock has
+    // no real constraint, so without it the standard daily would silently overwrite the fantasy one.
     if (mode.kind === "daily") {
-      if (dailyRuns.has(`${mode.date}:${userId}`)) return { data: { error: "today's daily is already recorded" } };
-      dailyRuns.set(`${mode.date}:${userId}`, { date: mode.date, user_id: userId, username: existingRow.username, w: run.w, l: run.l, score, outcome: run.outcome });
+      const dailyKey = `${mode.date}:${format}:${userId}`;
+      if (dailyRuns.has(dailyKey)) return { data: { error: "today's daily is already recorded" } };
+      dailyRuns.set(dailyKey, { date: mode.date, format, user_id: userId, username: existingRow.username, w: run.w, l: run.l, score, outcome: run.outcome });
     }
 
     const existing = mockRowToProfile(existingRow);
@@ -272,6 +282,10 @@ export function makeMockAuth() {
 }
 
 export function setupDom(url = "http://localhost/") {
+  // Tear down the previous jsdom before replacing it. Most suites call this once, but a bot that
+  // plays hundreds of drafts in one process (test-difficulty.mjs) otherwise keeps every window
+  // it ever built alive through these globals and exhausts the heap partway through a long run.
+  if (global.window && typeof global.window.close === "function") global.window.close();
   const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", { url });
   const { window } = dom;
   global.window = window;

@@ -13,8 +13,14 @@ create table if not exists public.profiles (
   champs        integer not null default 0,
   perfect       integer not null default 0,
   playoffs      integer not null default 0,
-  best_score    numeric,
-  best_run      jsonb,
+  -- best_score/best_run are the FANTASY (full-PPR) format's bests; *_std hold the standard
+  -- format's ("Championship mode" in the UI). Scores from the two formats aren't comparable, so
+  -- they rank separately. Everything above is merged across formats - those count seasons played,
+  -- not points scored. See game-logic.mjs's BEST_FIELDS.
+  best_score     numeric,
+  best_run       jsonb,
+  best_score_std numeric,
+  best_run_std   jsonb,
   best_record   jsonb,
   recent        jsonb not null default '[]'::jsonb,
   daily_streak       integer default 0,
@@ -24,9 +30,13 @@ create table if not exists public.profiles (
   updated_at    timestamptz not null default now()
 );
 create index if not exists profiles_best_score_idx on public.profiles (best_score desc nulls last);
+create index if not exists profiles_best_score_std_idx on public.profiles (best_score_std desc nulls last);
 
+-- One daily per format per day: the two formats deal different boards (seeds "daily-<date>" and
+-- "daily-<date>-std"), so `format` is part of the primary key that enforces "one daily a day".
 create table if not exists public.daily_runs (
   date        text not null,
+  format      text not null default 'fantasy' check (format in ('fantasy', 'standard')),
   user_id     uuid not null references auth.users(id) on delete cascade,
   username    text not null,
   w           integer not null,
@@ -34,9 +44,9 @@ create table if not exists public.daily_runs (
   score       numeric not null,
   outcome     text,
   created_at  timestamptz not null default now(),
-  primary key (date, user_id)
+  primary key (date, format, user_id)
 );
-create index if not exists daily_runs_date_score_idx on public.daily_runs (date, score desc);
+create index if not exists daily_runs_date_format_score_idx on public.daily_runs (date, format, score desc);
 
 -- Stats O/U's daily leaderboard: one seeded sequence of rounds per day, shared by everyone
 -- (mode.seed = "sou-<date>", same pattern as the roster daily's "daily-<date>"), three lives,

@@ -25,7 +25,7 @@ await runTest("today's daily deals the same board to two independent players", a
   window.__ps_supabase__ = makeMockAuth();
   const a = await mount();
   await flush();
-  await click(findButtonByText(a.container, "Play today's daily"));
+  await click(findButtonByText(a.container, "Fantasy daily"));
   await flush();
 
   setupDom();
@@ -33,7 +33,7 @@ await runTest("today's daily deals the same board to two independent players", a
   window.__ps_supabase__ = makeMockAuth();
   const b = await mount();
   await flush();
-  await click(findButtonByText(b.container, "Play today's daily"));
+  await click(findButtonByText(b.container, "Fantasy daily"));
   await flush();
 
   assert(seedlineOf(a.container) && seedlineOf(a.container).includes("same boards for everyone"), "expected the daily seedline, got: " + seedlineOf(a.container));
@@ -54,13 +54,43 @@ await runTest("a finished daily can't be replayed", async () => {
   const { container } = await mount();
   await flush();
   const home = text(container);
-  assert(home.includes("See today's result"), "expected the home screen to show a finished daily, got: " + home.slice(0, 400));
-  assert(!home.includes("Play today's daily"), "expected the play prompt to be gone once the daily is done");
+  assert(home.includes("See result"), "expected the home screen to show a finished daily, got: " + home.slice(0, 400));
 
-  await click(findButtonByText(container, "See today's result"));
+  await click(findButtonByText(container, "Fantasy daily"));
   await flush();
   assert(text(container).includes("Made the divisional round"), "expected the daily recap instead of a fresh board");
   assert(!text(container).includes("Pick 1 of 6"), "a finished daily should not offer a fresh pick 1");
+});
+
+await runTest("each scoring format has its own daily, locked independently", async () => {
+  setupDom();
+  window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
+  const todayKey = localTodayKey();
+  // Only the Fantasy daily is finished.
+  await window.storage.set(`ps-daily:${todayKey}`, JSON.stringify({
+    date: todayKey, format: "fantasy", w: 12, l: 5, score: 88.4, outcome: "Made the divisional round", roster: [],
+  }), false);
+  const { container } = await mount();
+  await flush();
+
+  // The Championship daily must still be playable, and must deal a different board than the
+  // Fantasy one - otherwise playing one would spoil the other.
+  await click(findButtonByText(container, "Championship daily"));
+  await flush();
+  const champBoard = boardOf(container);
+  assert(!text(container).includes("Made the divisional round"), "the Championship daily must not be locked by a finished Fantasy daily");
+  assert(seedlineOf(container).includes("Championship"), "expected the Championship daily's mode bar, got: " + seedlineOf(container));
+
+  setupDom();
+  window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
+  const other = await mount();
+  await flush();
+  await click(findButtonByText(other.container, "Fantasy daily"));
+  await flush();
+  assert(boardOf(other.container) !== champBoard,
+    `expected the two formats' dailies to deal different boards, both dealt "${champBoard}"`);
 });
 
 await runTest("a challenge code deals the same board to whoever enters it", async () => {

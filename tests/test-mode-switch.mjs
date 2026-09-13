@@ -47,4 +47,31 @@ await runTest("switching from a half-finished Genius draft to GM mode starts a f
   assert(container.querySelectorAll(".card .pill").length > 0, "expected GM mode's salary pills on the fresh board");
 });
 
+await runTest("switching scoring format mid-draft starts a fresh draft rather than resuming under the wrong rules", async () => {
+  // The scoring format is part of the free-draft variant for the same reason genius/gm are:
+  // resuming a full-PPR draft under standard scoring would grade it by rules it wasn't drafted
+  // under, and the run would be submitted against the wrong leaderboard.
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  const formatButton = (label) => [...container.querySelectorAll(".fmtbtn")].find((b) => b.textContent.includes(label));
+
+  await click(formatButton("Fantasy"));
+  await flush();
+  await click(modeButton("Unlimited"));
+  await flush();
+  await draftFirstCard();
+  assert(text(container).includes("Pick 2 of 6"), "expected one pick made in the Fantasy draft");
+
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(formatButton("Championship"));
+  await flush();
+  await click(modeButton("Unlimited"));
+  await flush();
+
+  const t = text(container);
+  assert(t.includes("Championship"), "expected the mode bar to show Championship scoring, got: " + t.slice(0, 300));
+  assert(t.includes("Pick 1 of 6"), "expected a fresh draft, not the resumed Fantasy progress, got: " + t.slice(0, 300));
+});
+
 console.log("test-mode-switch.mjs done");

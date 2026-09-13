@@ -71,6 +71,7 @@ function rowToProfile(row) {
     username: row.username, runs: row.runs || 0, dnf: row.dnf || 0, wins: row.wins || 0, losses: row.losses || 0,
     champs: row.champs || 0, perfect: row.perfect || 0, playoffs: row.playoffs || 0,
     bestScore: row.best_score ?? null, bestRun: row.best_run ?? null, bestRecord: row.best_record ?? null,
+    bestScoreStd: row.best_score_std ?? null, bestRunStd: row.best_run_std ?? null,
     recent: row.recent || [], dailyStreak: row.daily_streak || 0, dailyLast: row.daily_last ?? null,
     dailyBestStreak: row.daily_best_streak || 0, id: row.id,
   };
@@ -80,9 +81,14 @@ function profileToRow(s) {
     username: s.username, runs: s.runs, dnf: s.dnf, wins: s.wins, losses: s.losses,
     champs: s.champs, perfect: s.perfect, playoffs: s.playoffs,
     best_score: s.bestScore, best_run: s.bestRun, best_record: s.bestRecord, recent: s.recent || [],
+    best_score_std: s.bestScoreStd, best_run_std: s.bestRunStd,
     daily_streak: s.dailyStreak, daily_last: s.dailyLast, daily_best_streak: s.dailyBestStreak,
   };
 }
+// Which profiles column ranks each scoring format. Mirrors game-logic.mjs's BEST_FIELDS on the
+// DB-column side of the boundary.
+const BEST_COL = { fantasy: "best_score", standard: "best_score_std" };
+const bestCol = (format) => BEST_COL[format] || BEST_COL.fantasy;
 
 export async function fetchProfile(userId) {
   const { data } = await getClient().from("profiles").select("*").eq("id", userId).single();
@@ -105,16 +111,19 @@ export async function submitDnf(picks) {
   return !!data?.ok;
 }
 
-export async function fetchLeaderboardTop(limit = 10) {
-  const { data, error } = await getClient().from("profiles").select("*").not("best_score", "is", null).order("best_score", { ascending: false }).limit(limit);
+export async function fetchLeaderboardTop(limit = 10, format = "fantasy") {
+  const col = bestCol(format);
+  const { data, error } = await getClient().from("profiles").select("*").not(col, "is", null).order(col, { ascending: false }).limit(limit);
   if (error || !data) return [];
   return data.map(rowToProfile);
 }
-// How many players sit strictly above this score - callers add 1 for a 1-based rank.
-export async function fetchOwnRank(score) {
+// How many players sit strictly above this score in the same format - callers add 1 for a
+// 1-based rank. Ranking across formats would be meaningless: the two score different things.
+export async function fetchOwnRank(score, format = "fantasy") {
+  const col = bestCol(format);
   const { data, error } = await getClient().from("profiles").select("*");
   if (error || !data) return 0;
-  return data.filter((r) => r.best_score != null && r.best_score > score).length;
+  return data.filter((r) => r[col] != null && r[col] > score).length;
 }
 export async function fetchSiteTotals() {
   const { data, error } = await getClient().from("profiles").select("*");
@@ -122,8 +131,8 @@ export async function fetchSiteTotals() {
   const totals = rows.reduce((t, r) => ({ runs: t.runs + (r.runs || 0) + (r.dnf || 0), perfect: t.perfect + (r.perfect || 0) }), { runs: 0, perfect: 0 });
   return { ...totals, players: rows.length };
 }
-export async function fetchDailyTop(date, limit = 10) {
-  const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).order("score", { ascending: false }).limit(limit);
+export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
+  const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).eq("format", format).order("score", { ascending: false }).limit(limit);
   if (error || !data) return [];
   return data.map((r) => ({ username: r.username, w: r.w, l: r.l, score: r.score, outcome: r.outcome }));
 }
@@ -165,7 +174,9 @@ export async function fetchBuildCount() {
 // O/U's "career" caveat, Build-a-player's last-season-only pool).
 export async function fetchStatsProfiles(limit = 300) {
   const { data, error } = await getClient().from("profiles")
-    .select("id, username, runs, dnf, best_score, best_run, wins, losses, champs, perfect, playoffs, daily_streak, daily_last, daily_best_streak, recent")
+    // NOTE: an explicit column list, not select("*") - a column missing here doesn't error, it
+    // just makes every leaderboard built from it render empty. Both formats' bests must be listed.
+    .select("id, username, runs, dnf, best_score, best_run, best_score_std, best_run_std, wins, losses, champs, perfect, playoffs, daily_streak, daily_last, daily_best_streak, recent")
     .order("updated_at", { ascending: false }).limit(limit);
   if (error || !data) return [];
   return data.map(rowToProfile);

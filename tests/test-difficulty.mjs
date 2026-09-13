@@ -5,6 +5,10 @@
 import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, makeMockAuth } from "./helpers.mjs";
 
 const N = Number(process.argv[2]) || 15;
+// "fantasy" (full PPR, the default) or "standard" (Championship mode). Grading changes between
+// them, so CLAUDE.md's "rerun the difficulty bot after any grading change" means running both.
+const FORMAT = process.argv[3] === "standard" ? "standard" : "fantasy";
+const GM = process.argv[4] === "gm";
 
 async function draftOneSeason() {
   setupDom();
@@ -12,7 +16,15 @@ async function draftOneSeason() {
   window.__ps_supabase__ = makeMockAuth();
   const { container } = await mount();
   await flush();
-  await click(findButtonByText(container, "Start a draft"));
+  if (FORMAT === "standard") {
+    await click([...container.querySelectorAll(".fmtbtn")].find((b) => b.textContent.includes("Championship")));
+    await flush();
+  }
+  if (GM) {
+    await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "GM mode").closest("button"));
+  } else {
+    await click(findButtonByText(container, "Start a draft"));
+  }
   await flush();
 
   for (let pick = 0; pick < 6; pick++) {
@@ -57,7 +69,7 @@ console.log("");
 const avgWins = results.reduce((a, r) => a + r.w, 0) / results.length;
 const perfectRate = (results.filter((r) => r.perfect).length / results.length) * 100;
 
-console.log(`Played ${N} drafts with a first-eligible-player bot.`);
+console.log(`Played ${N} drafts with a first-eligible-player bot (${FORMAT} scoring${GM ? ", GM mode" : ""}).`);
 console.log(`Average record: ${avgWins.toFixed(1)}-${(20 - avgWins).toFixed(1)}`);
 console.log(`Perfect-season rate: ${perfectRate.toFixed(1)}%`);
 console.log(`(CLAUDE.md's target of ~15 avg wins / 2-4% perfect is for a "fantasy-savvy" drafter that`);

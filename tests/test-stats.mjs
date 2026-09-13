@@ -70,7 +70,8 @@ await runTest("the Stats screen shows sitewide totals once the one fetch resolve
 
 await runTest("best lineups ever ranks by best score, most-drafted players aggregates across profiles", async () => {
   const t = text(container);
-  assert(t.includes("Best lineups ever"), "expected the best-lineups section");
+  // Score-ranked boards are per format; Fantasy is the default selection.
+  assert(t.includes("Best Fantasy lineups ever"), "expected the best-lineups section");
   assert(t.includes("alice") && t.includes("95.5"), "expected alice's best score, got: " + t.slice(0, 800));
   assert(t.includes("Most-drafted players"), "expected the most-drafted section");
   assert(t.includes("Tom Brady") && t.includes("3 drafts"), "expected Tom Brady drafted 3 times (2 from alice's recent, 1 from bob's), got: " + t.slice(0, 1200));
@@ -78,7 +79,7 @@ await runTest("best lineups ever ranks by best score, most-drafted players aggre
 
 await runTest("position records show the highest-rated player ever at each slot", async () => {
   const t = text(container);
-  assert(t.includes("Position records"), "expected a position-records section");
+  assert(t.includes("position records"), "expected a position-records section");
   assert(t.includes("Tom Brady"), "expected Tom Brady (rating 140) to hold the QB record over Drew Brees (130)");
   assert(t.includes("Priest Holmes"), "expected Priest Holmes to hold the RB record");
 });
@@ -102,7 +103,7 @@ await runTest("best win percentage requires a minimum sample and ranks by rate",
 
 await runTest("best GM-mode score is drawn only from runs tagged run.gm", async () => {
   const t = text(container);
-  assert(t.includes("Best GM-mode score"), "expected a GM-mode section");
+  assert(t.includes("GM-mode score"), "expected a GM-mode section");
   assert(t.includes("88.3"), "expected alice's tagged GM run (score 88.3), got: " + t.slice(0, 1500));
 });
 

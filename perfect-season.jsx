@@ -12,6 +12,7 @@ import {
   hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, rerollCandidate,
   flexRating, effectiveRating, winProb, shuffle, windowedShuffle, tagOpp, buildTimeline, simulateSeason,
   applyDnf, LOSER_PTS, MARGINS, nextStreak, GM_CAP, playerSalary, REROLL_BUDGET,
+  passerRating, normFormat, BEST_FIELDS, FORMATS,
 } from "./game-logic.mjs";
 initGameData(gameData.players, gameData.opponents);
 
@@ -176,14 +177,6 @@ const prettyDate = (key) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "long", day: "numeric" });
 };
-
-function passerRating(p) {
-  if (!p.att) return 0;
-  const c = (x) => Math.max(0, Math.min(2.375, x));
-  const a = c((p.cmp / p.att - 0.3) * 5), b = c((p.py / p.att - 3) * 0.25);
-  const t = c((p.ptd / p.att) * 20), d = c(2.375 - (p.int / p.att) * 25);
-  return ((a + b + t + d) / 6) * 100;
-}
 
 // Every player at a position shows the same stat columns, in the same order.
 // Same shape at every position: main-role yards, TDs, per-attempt average, then volume,
@@ -837,6 +830,17 @@ h2.h{font-family:var(--display);font-weight:800;font-size:24px;color:var(--ink);
 .hero{margin:6px 0 22px}
 .hero .brand{margin-bottom:8px}
 .hero .sub{max-width:60ch;font-size:16px;line-height:1.5}
+.fmtpick{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;
+  border:1px solid #363B46;border-radius:12px;background:linear-gradient(160deg,var(--surface2),var(--surface))}
+.fmtlabel{font-weight:800;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-right:2px}
+.fmtbtn{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:1px solid #3C4250;border-radius:10px;
+  padding:7px 13px;background:var(--surface);color:var(--muted);font-weight:800;font-size:14px;cursor:pointer;transition:filter .12s}
+.fmtbtn:hover{filter:brightness(1.15)}
+.fmtbtn.on{background:var(--lamp);color:#241704;border-color:transparent}
+.fmtsub{font-weight:700;font-size:11px;opacity:.75;letter-spacing:.02em}
+.fmtnote{flex-basis:100%;margin:2px 0 0;color:var(--muted);font-size:13.5px;max-width:66ch}
+.dailycta{display:flex;gap:8px;flex-wrap:wrap}
+.dailycta .btn{display:inline-flex;align-items:center}
 .modes{display:grid;gap:10px;margin-bottom:18px}
 .mode{display:block;width:100%;text-align:left;border:1px solid #363B46;border-radius:12px;padding:16px 18px;color:var(--ink);
   background:linear-gradient(160deg,var(--surface2),var(--surface));box-shadow:var(--bevel),0 3px 10px rgba(0,0,0,.35);transition:transform .08s,filter .12s}
@@ -914,9 +918,38 @@ const topPct = (rank, total) => {
 // Every leaderboard on the Stats screen is a different sort/aggregation over one fetched batch of
 // profiles (see storage.js's fetchStatsProfiles) - kept as one pure function so the component
 // itself just useMemo's the result instead of a wall of inline .sort()/.filter() calls.
+// Score-ranked boards are computed for BOTH formats in this one pass (it's a single walk over an
+// already-fetched array, so there's no cost to it) and the screen picks which to show. Career
+// counters below stay merged - they measure seasons played, not points scored.
 function computeSiteStats(profiles) {
-  const bestLineups = profiles.filter((q) => q.bestScore != null)
-    .sort((a, b) => b.bestScore - a.bestScore).slice(0, 15);
+  const byFormat = {};
+  for (const f of FORMATS) {
+    const scored = profiles.filter((q) => scoreOf(q, f) != null);
+    byFormat[f] = {
+      bestLineups: [...scored].sort((a, b) => scoreOf(b, f) - scoreOf(a, f)).slice(0, 15),
+      // Best-ever player at each slot. Each format's best_run column is format-pure by
+      // construction, so no tagging is needed and no run lands in the wrong bucket - which also
+      // avoids comparing a full-PPR rating against a standard one.
+      posRecords: (() => {
+        const rec = {};
+        for (const q of profiles) {
+          const best = runOf(q, f);
+          if (!best) continue;
+          for (const p of best.roster) {
+            const bucket = p.slot.startsWith("FLEX") ? "FLEX" : p.slot;
+            if (!rec[bucket] || p.rating > rec[bucket].rating) rec[bucket] = { ...p, username: q.username };
+          }
+        }
+        return rec;
+      })(),
+      // GM-mode runs are tagged via run.gm (see finish()); runs from before either tag existed
+      // are simply excluded rather than assumed, since recent only holds a bounded window.
+      bestGm: profiles.flatMap((q) => (q.recent || [])
+        .filter((run) => run.gm && normFormat(run.format) === f)
+        .map((run) => ({ ...run, username: q.username })))
+        .sort((a, b) => b.score - a.score).slice(0, 10),
+    };
+  }
 
   const draftCounts = new Map();
   for (const q of profiles) for (const run of q.recent || []) {
@@ -940,28 +973,11 @@ function computeSiteStats(profiles) {
     .map((q) => ({ ...q, pct: q.wins / (q.wins + q.losses) }))
     .sort((a, b) => b.pct - a.pct).slice(0, 10);
 
-  // Best-ever player at each slot, scanning every profile's best-scoring roster - a "hall of fame
-  // within the hall of fame" that needs no tracking beyond what best_run already stores.
-  const posRecords = {};
-  for (const q of profiles) {
-    if (!q.bestRun) continue;
-    for (const p of q.bestRun.roster) {
-      const bucket = p.slot.startsWith("FLEX") ? "FLEX" : p.slot;
-      if (!posRecords[bucket] || p.rating > posRecords[bucket].rating) posRecords[bucket] = { ...p, username: q.username };
-    }
-  }
-
-  // GM-mode runs are tagged via run.gm (see finish()) - older runs predate the tag and are
-  // simply excluded, not treated as false, since recent/bestRun only hold a bounded window.
-  const gmRuns = [];
-  for (const q of profiles) for (const run of q.recent || []) if (run.gm) gmRuns.push({ ...run, username: q.username });
-  const bestGm = gmRuns.sort((a, b) => b.score - a.score).slice(0, 10);
-
   const totalWins = withDrafts.reduce((t, q) => t + q.wins, 0);
   const totalLosses = withDrafts.reduce((t, q) => t + q.losses, 0);
   const avgWinPct = totalWins + totalLosses > 0 ? Math.round((100 * totalWins) / (totalWins + totalLosses)) : 0;
 
-  return { bestLineups, mostDrafted, mostWins, mostChamps, mostPlayoffs, longestStreaks, bestWinPct, posRecords, bestGm, avgWinPct };
+  return { byFormat, mostDrafted, mostWins, mostChamps, mostPlayoffs, longestStreaks, bestWinPct, avgWinPct };
 }
 const POS_RECORD_SLOTS = [["QB", "QB"], ["RB", "RB"], ["WR", "WR"], ["TE", "TE"], ["FLEX", "Flex"]];
 const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -1184,18 +1200,31 @@ function AuthPanel({ onAuthed, title, blurb }) {
 }
 
 const DRAFT_KEY = "ps-draft";
-const DAILY_KEY = (d) => `ps-daily:${d}`;
-const DAILY_PROGRESS = (d) => `ps-daily-wip:${d}`;
+// Both formats' dailies are live on the same calendar day, so their saved state is keyed per
+// format. Fantasy keeps the original unsuffixed keys, so a daily already in progress when this
+// shipped resumes normally.
+const fmtSuffix = (f) => (normFormat(f) === "standard" ? ":std" : "");
+const DAILY_KEY = (d, f) => `ps-daily:${d}${fmtSuffix(f)}`;
+const DAILY_PROGRESS = (d, f) => `ps-daily-wip:${d}${fmtSuffix(f)}`;
 const FREE_PROGRESS = "ps-free-wip";
+const FORMAT_KEY = "ps-format";
+// Which saved-progress slot a mode occupies. Free-mode variants (genius/gm/format) all share one
+// slot the way they always have; the two dailies genuinely coexist, so they don't.
+const slotId = (m) => (m.kind === "daily" ? `daily:${normFormat(m.format)}` : "free");
+// Scores from the two formats live in different profile fields and never rank against each other.
+const scoreOf = (p, format) => (p ? p[BEST_FIELDS[normFormat(format)].score] ?? null : null);
+const runOf = (p, format) => (p ? p[BEST_FIELDS[normFormat(format)].run] ?? null : null);
+const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };
 const HOWTO_KEY = "ps-howto-seen";
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
 const findPlayer = (key, id, season) => (BOARDS[key] || []).find((p) => p.id === id && p.season === season);
 const shortYr = (y) => `'${String(y).slice(2)}`;
 
-function bestAvailable(key, draftedIds, openSlots) {
+function bestAvailable(key, draftedIds, openSlots, format) {
+  const rate = (p) => (normFormat(format) === "standard" ? p.stdRating : p.rating);
   const c = (BOARDS[key] || []).filter((p) => !draftedIds.includes(p.id) && openSlots.some((s) => fits(p.pos, s)));
-  return c.reduce((a, p) => (!a || p.rating > a.rating ? p : a), null);
+  return c.reduce((a, p) => (!a || rate(p) > rate(a) ? p : a), null);
 }
 
 function permute(arr) {
@@ -1214,7 +1243,7 @@ function permute(arr) {
 // whatever slots happened to still be open at that exact moment"), this considers all 720
 // board/slot pairings so a QB taken early only because it was the lone option doesn't hide a
 // much better QB seen later on a board whose player ended up elsewhere.
-function bestOrderFor(history) {
+function bestOrderFor(history, format) {
   const boardKeys = history.map((h) => h.key);
   let best = null;
   for (const order of permute(SLOTS)) {
@@ -1223,9 +1252,9 @@ function bestOrderFor(history) {
     for (let i = 0; i < boardKeys.length; i++) {
       const slot = order[i], key = boardKeys[i];
       const top = (BOARDS[key] || []).filter((p) => fits(p.pos, slot))
-        .reduce((a, p) => (!a || effectiveRating(slot, p) > effectiveRating(slot, a) ? p : a), null);
+        .reduce((a, p) => (!a || effectiveRating(slot, p, format) > effectiveRating(slot, a, format) ? p : a), null);
       if (!top) { ok = false; break; }
-      total += effectiveRating(slot, top) * (slot === "QB" ? QB_WEIGHT : 1);
+      total += effectiveRating(slot, top, format) * (slot === "QB" ? QB_WEIGHT : 1);
       assignment[slot] = { key, player: top };
     }
     if (ok && (!best || total > best.totalRating)) best = { slotAssignment: assignment, totalRating: total };
@@ -1249,8 +1278,11 @@ function Confetti({ n = 26 }) {
 function shareText(result, roster, place, mode) {
   const reg = result.games.filter((g) => !g.playoff).map((g) => (g.win ? "🟩" : "🟥")).join("");
   const po = result.games.filter((g) => g.playoff).map((g) => (g.win ? "🟩" : "🟥")).join("");
+  // The format is named whenever it isn't the default, so a shared score can't be mistaken for a
+  // full-PPR one - the two don't rank against each other.
+  const fmt = normFormat(mode?.format) === "standard" ? " · Championship" : "";
   const lines = [
-    mode && mode.kind === "daily" ? `Perfect Season 🏈 Daily ${mode.date} · ${result.w}–${result.l}` : `Perfect Season 🏈 ${result.w}–${result.l}`,
+    mode && mode.kind === "daily" ? `Perfect Season 🏈 Daily ${mode.date}${fmt} · ${result.w}–${result.l}` : `Perfect Season 🏈${fmt} ${result.w}–${result.l}`,
     result.outcome,
     `Team score ${result.score.toFixed(1)}${place ? ` · #${place.rank.toLocaleString()} of ${place.total.toLocaleString()}` : ""}`,
     reg,
@@ -1318,10 +1350,21 @@ export default function PerfectSeason() {
   const [howTo, setHowTo] = useState(false);
   const [share, setShare] = useState({ state: "idle", text: "" });
   const [confirmReset, setConfirmReset] = useState(false);
-  const [mode, setMode] = useState(null);           // { kind: "free"|"daily", code, date, seed }
+  const [mode, setMode] = useState(null);           // { kind: "free"|"daily", code, date, seed, gm, genius, format }
   const [seq, setSeq] = useState([]);               // seeded board order for this draft
   const [seqIdx, setSeqIdx] = useState(0);
-  const [dailyDone, setDailyDone] = useState(null); // today's finished daily, if any
+  // Which scoring format new drafts use. A per-device preference rather than a mode, so it
+  // layers over Daily/Unlimited/Genius/GM instead of doubling the number of mode tiles.
+  const [format, setFormat] = useState("fantasy");
+  // Which format the Leaderboard/Stats screens are showing. Separate from `format` above: which
+  // board you're reading is independent of which format your next draft will use.
+  const [boardFormat, setBoardFormat] = useState("fantasy");
+  // loadLeaderboard() is called from effects and handlers that captured an older render, and it
+  // reads the board format at call time - a ref, so it can't pick up a stale value the way
+  // reading the state variable through a closure would.
+  const boardFormatRef = useRef("fantasy");
+  function showBoardFormat(f) { boardFormatRef.current = f; setBoardFormat(f); }
+  const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, profiles: [], buildCount: 0, topBuilds: [] });
@@ -1345,10 +1388,10 @@ export default function PerfectSeason() {
   // then delete - see clearDraft below), so a refreshWip() read can land before it's done and
   // return the stale pre-clear snapshot; while a clear is pending for a mode, refreshWip()
   // leaves that mode's wip alone instead of trusting the read.
-  const pendingClears = useRef({ free: 0, daily: 0 });
-  function clearDraftTracked(kind, key) {
-    pendingClears.current[kind]++;
-    clearDraft(key).finally(() => { pendingClears.current[kind]--; });
+  const pendingClears = useRef({});
+  function clearDraftTracked(slot, key) {
+    pendingClears.current[slot] = (pendingClears.current[slot] || 0) + 1;
+    clearDraft(key).finally(() => { pendingClears.current[slot]--; });
   }
   const sentinel = useRef(null);
   const draftTop = useRef(null);
@@ -1357,7 +1400,7 @@ export default function PerfectSeason() {
 
   const drafted = useMemo(() => new Set(Object.values(roster).map((p) => p.id)), [roster]);
   const open = SLOTS.filter((s) => !roster[s]);
-  const capUsed = SLOTS.reduce((sum, s) => sum + (roster[s] ? playerSalary(roster[s]) : 0), 0);
+  const capUsed = SLOTS.reduce((sum, s) => sum + (roster[s] ? playerSalary(roster[s], mode?.format) : 0), 0);
   const capRemaining = GM_CAP - capUsed;
 
   useEffect(() => {
@@ -1374,7 +1417,12 @@ export default function PerfectSeason() {
     });
     loadLeaderboard();
     (async () => {
-      setDailyDone(await sget(DAILY_KEY(todayKey()), false));
+      const today = todayKey();
+      const [fanDone, stdDone, savedFormat] = await Promise.all([
+        sget(DAILY_KEY(today, "fantasy"), false), sget(DAILY_KEY(today, "standard"), false), sget(FORMAT_KEY, false),
+      ]);
+      setDailyDone({ fantasy: fanDone, standard: stdDone });
+      if (savedFormat) setFormat(normFormat(savedFormat));
       setSouDone(await sget(SOU_DONE_KEY(todayKey()), false));
       const saved = await sget(DRAFT_KEY, false);
       const ok = saved && saved.spin && BOARDS[`${saved.spin.team}|${saved.spin.w}`] && Array.isArray(saved.history)
@@ -1397,8 +1445,8 @@ export default function PerfectSeason() {
     if (!draftReady || result || !spin || spinning || !mode) return;
     const snap = { history, spin, used, rerolls, mode, seq, seqIdx };
     sset(DRAFT_KEY, snap, false);
-    sset(mode.kind === "daily" ? DAILY_PROGRESS(mode.date) : FREE_PROGRESS, snap, false);
-    setWip((w) => ({ ...w, [mode.kind]: history.length }));
+    sset(mode.kind === "daily" ? DAILY_PROGRESS(mode.date, mode.format) : FREE_PROGRESS, snap, false);
+    setWip((w) => ({ ...w, [slotId(mode)]: history.length }));
   }, [draftReady, history, spin, used, rerolls, mode, seq, seqIdx, result, spinning]);
 
   // Show the compact team bar once the big scoreboard scrolls out of view
@@ -1413,15 +1461,17 @@ export default function PerfectSeason() {
   // top/totals/myRank replace the old "fetch every stats row, derive everything client-side"
   // approach - each is now its own targeted query (see storage.js), so this scales past a
   // handful of players instead of loading the entire table on every leaderboard view.
-  async function loadLeaderboard() {
+  async function loadLeaderboard(fmt) {
+    const boardFormat = normFormat(fmt || boardFormatRef.current);
     setLb((x) => ({ ...x, loading: true, error: false }));
     try {
-      const [top, totals] = await Promise.all([fetchLeaderboardTop(10), fetchSiteTotals()]);
+      const [top, totals] = await Promise.all([fetchLeaderboardTop(10, boardFormat), fetchSiteTotals()]);
       const myKey = user ? user.toLowerCase() : null;
       let myRank = -1;
       if (myKey) {
+        const mine = scoreOf(stats, boardFormat);
         const idx = top.findIndex((q) => q.id === myKey);
-        myRank = idx >= 0 ? idx : stats?.bestScore != null ? await fetchOwnRank(stats.bestScore) : -1;
+        myRank = idx >= 0 ? idx : mine != null ? await fetchOwnRank(mine, boardFormat) : -1;
       }
       setLb({ loading: false, top, totals, myRank, error: false });
       setLiveDrafts(totals.runs);
@@ -1535,13 +1585,21 @@ export default function PerfectSeason() {
     }, 65);
   }
 
-  // Both an unlimited draft and the daily can sit half-finished at once; each keeps its own slot.
+  // An unlimited draft and both formats' dailies can all sit half-finished at once; each keeps
+  // its own slot.
   async function refreshWip() {
-    const [f, d] = await Promise.all([sget(FREE_PROGRESS, false), sget(DAILY_PROGRESS(todayKey()), false)]);
+    const today = todayKey();
+    const [f, dFan, dStd] = await Promise.all([
+      sget(FREE_PROGRESS, false),
+      sget(DAILY_PROGRESS(today, "fantasy"), false),
+      sget(DAILY_PROGRESS(today, "standard"), false),
+    ]);
+    const found = { free: f, "daily:fantasy": dFan, "daily:standard": dStd };
     setWip((w) => {
       const next = { ...w };
-      if (pendingClears.current.free === 0) next.free = validDraft(f) ? f.history.length : 0;
-      if (pendingClears.current.daily === 0) next.daily = validDraft(d) ? d.history.length : 0;
+      for (const [slot, saved] of Object.entries(found)) {
+        if (!pendingClears.current[slot]) next[slot] = validDraft(saved) ? saved.history.length : 0;
+      }
       return next;
     });
   }
@@ -1554,7 +1612,7 @@ export default function PerfectSeason() {
     setMode(saved.mode); setSeq(saved.seq || []); setSeqIdx(saved.seqIdx || 0);
     setSpin(saved.spin); setDisplay(saved.spin); setResult(null); setSelected(null);
     setShown(0); setPo({ idx: 0, stage: "pre" }); setResumed(true);
-    setWip((w) => ({ ...w, [saved.mode.kind]: saved.history.length }));
+    setWip((w) => ({ ...w, [slotId(saved.mode)]: saved.history.length }));
   }
 
   const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history) && s.history.length > 0
@@ -1563,10 +1621,14 @@ export default function PerfectSeason() {
   // presetRoster (Build-a-player) pre-fills one slot before the sequence is walked, so boardAt
   // correctly treats that position as already spoken for from the very first board.
   function startDraft(m, presetRoster) {
-    const seed = m.kind === "daily" ? `daily-${m.date}` : m.code;
+    const fmt = normFormat(m.format);
+    // The two formats' dailies are deliberately different drafts, so playing one doesn't spoil
+    // the other's boards. Free-mode seeds are unchanged - boards there don't depend on format,
+    // and an existing challenge code must keep dealing the same boards it always did.
+    const seed = m.kind === "daily" ? `daily-${m.date}${fmtSuffix(fmt)}` : m.code;
     const list = seededSequence(seed);
     const initialRoster = presetRoster || {};
-    setMode({ ...m, seed }); setSeq(list);
+    setMode({ ...m, format: fmt, seed }); setSeq(list);
     setRoster(initialRoster); setHistory([]); setUsed([]); setSelected(null); setResult(null);
     setShown(0); setPo({ idx: 0, stage: "pre" }); setRerolls({ team: REROLL_BUDGET, years: REROLL_BUDGET });
     setPending(null); setNotice(""); setResumed(false); setConfirmReset(false);
@@ -1611,7 +1673,7 @@ export default function PerfectSeason() {
   // currently spinning, without waiting on setSpin() to commit first.
   function draft(player, slot, keyOverride) {
     const key = keyOverride || `${spin.team}|${spin.w}`;
-    const best = bestAvailable(key, [...drafted], open);
+    const best = bestAvailable(key, [...drafted], open, mode.format);
     // Computed locally (not read back from state) because finish() below needs the complete,
     // up-to-the-final-pick history synchronously - setHistory's update wouldn't land in this
     // render's closure until after this function returns, so finish() would otherwise submit a
@@ -1635,23 +1697,28 @@ export default function PerfectSeason() {
   // complete, up-to-the-final-pick history computed locally by the caller, never read back from
   // the `history` state directly here, which is still one render behind on this exact tick.
   function finish(r, forcedScenario, finishedHistory) {
+    const fmt = normFormat(mode.format);
     let tot = 0, wt = 0;
-    for (const s of SLOTS) { const k = s === "QB" ? QB_WEIGHT : 1; tot += effectiveRating(s, r[s]) * k; wt += k; }
+    for (const s of SLOTS) { const k = s === "QB" ? QB_WEIGHT : 1; tot += effectiveRating(s, r[s], fmt) * k; wt += k; }
     const score = Math.round((tot / wt) * 10) / 10;
     const lineup = SLOTS.map((s) => `${r[s].id}${r[s].season}`).join("|");
     const sim = forcedScenario ? forceSeason(forcedScenario) : withSeed(`${mode.seed}#${lineup}`, () => simulateSeason(score));
     sim.score = score;
-    const runRoster = SLOTS.map((s) => ({ slot: s, name: r[s].name, team: r[s].team, season: r[s].season, ppr: r[s].ppr, rating: effectiveRating(s, r[s]) }));
-    const siteBest = lb.top[0]?.bestScore ?? 0;
-    sim.newSiteBest = !forcedScenario && !!user && lb.top.length > 0 && score > siteBest;
-    sim.newBestScore = !forcedScenario && !!user && !!stats && (stats.bestScore == null || score > stats.bestScore);
+    sim.format = fmt;
+    const runRoster = SLOTS.map((s) => ({ slot: s, name: r[s].name, team: r[s].team, season: r[s].season, ppr: r[s].ppr, rating: effectiveRating(s, r[s], fmt) }));
+    // Both "best" comparisons are per format - the leaderboard on screen and this profile's best
+    // are whichever format was just played, never the other one's numbers.
+    const siteBest = scoreOf(lb.top[0], fmt) ?? 0;
+    const myBest = scoreOf(stats, fmt);
+    sim.newSiteBest = !forcedScenario && !!user && lb.top.length > 0 && normFormat(boardFormatRef.current) === fmt && score > siteBest;
+    sim.newBestScore = !forcedScenario && !!user && !!stats && (myBest == null || score > myBest);
     setNotice("");
     if (!forcedScenario) {
       siteActivity.current?.broadcastDraftFinished();
       if (mode.kind === "daily") {
-        const rec = { date: mode.date, w: sim.w, l: sim.l, score, outcome: sim.outcome, roster: runRoster };
-        setDailyDone(rec);
-        sset(DAILY_KEY(mode.date), rec, false);
+        const rec = { date: mode.date, format: fmt, w: sim.w, l: sim.l, score, outcome: sim.outcome, roster: runRoster };
+        setDailyDone((d) => ({ ...d, [fmt]: rec }));
+        sset(DAILY_KEY(mode.date, fmt), rec, false);
       }
       // The client never persists its own computed score/outcome/capUsed directly - submit-run (a
       // Supabase Edge Function) independently replays this exact draft trace and recomputes
@@ -1659,16 +1726,22 @@ export default function PerfectSeason() {
       // replayDraft/simulateSeason/playerSalary). The animation above already rendered from that
       // same shared logic + seed, so an honest client sees identical numbers either way - only a
       // tampered submission is ever rejected.
+      // `format` goes top-level only, never inside `mode` - it selects both the daily seed and
+      // the scoring formula server-side, and two places it could come from would just be an
+      // ambiguity to probe.
       const trace = {
         mode: { kind: mode.kind, seed: mode.seed, code: mode.code, date: mode.date, gm: mode.gm },
-        history: finishedHistory, seq, gm: !!mode.gm,
+        history: finishedHistory, seq, gm: !!mode.gm, format: fmt,
       };
       if (user) submitAndSync(userId, trace);
       else setPending(trace);
-      loadLeaderboard(); // fresh numbers for the sitewide ranking
+      // Point the leaderboard at the format just played before refreshing it, so the rank shown
+      // beside this result ranks it against its own format rather than the other one's numbers.
+      showBoardFormat(fmt);
+      loadLeaderboard(fmt);
       clearDraft(DRAFT_KEY);
-      clearDraftTracked(mode.kind, mode.kind === "daily" ? DAILY_PROGRESS(mode.date) : FREE_PROGRESS);
-      setWip((w) => ({ ...w, [mode.kind]: 0 }));
+      clearDraftTracked(slotId(mode), mode.kind === "daily" ? DAILY_PROGRESS(mode.date, fmt) : FREE_PROGRESS);
+      setWip((w) => ({ ...w, [slotId(mode)]: 0 }));
     }
     setShare({ state: "idle", text: "" });
     setResult(sim);
@@ -1739,7 +1812,7 @@ export default function PerfectSeason() {
     abandonCurrent();
     clearDraft(DRAFT_KEY);
     setView("play");
-    startDraft({ kind: "free", code: newCode(), ...extra });
+    startDraft({ kind: "free", code: newCode(), format, ...extra });
   }
 
   // Stats O/U: "career" here means the sum of a player's appearances across every board he
@@ -1946,13 +2019,20 @@ export default function PerfectSeason() {
   }
 
   // Today's daily always picks up where it left off: you get one run at it, not one per visit.
-  async function startDaily() {
+  // Each format has its own daily (different seed, different boards), so every check here is
+  // per-format - without that, opening one while the other is in progress would no-op or resume
+  // the wrong draft.
+  async function startDaily(f) {
+    const fmt = normFormat(f ?? format);
+    setFormat(fmt);
+    sset(FORMAT_KEY, fmt, false);
     setView("play");
     const d = todayKey();
-    if (mode && mode.kind === "daily" && mode.date === d && !dailyDone) return;
-    const saved = await sget(DAILY_PROGRESS(d), false);
-    if (!dailyDone && validDraft(saved) && saved.mode.date === d) { restoreDraft(saved); return; }
-    startDraft({ kind: "daily", date: d, code: `DAILY-${d}` });
+    const done = dailyDone[fmt];
+    if (mode && mode.kind === "daily" && mode.date === d && normFormat(mode.format) === fmt && !done) return;
+    const saved = await sget(DAILY_PROGRESS(d, fmt), false);
+    if (!done && validDraft(saved) && saved.mode.date === d && normFormat(saved.mode.format) === fmt) { restoreDraft(saved); return; }
+    startDraft({ kind: "daily", date: d, code: `DAILY-${d}`, format: fmt });
   }
 
   // Unlimited: pick up the half-finished one if there is one, otherwise deal a fresh board.
@@ -1963,7 +2043,11 @@ export default function PerfectSeason() {
   // dealing a fresh board in the variant actually requested.
   async function openFree(extra) {
     setView("play");
-    const sameVariant = (m) => !!m?.genius === !!extra?.genius && !!m?.gm === !!extra?.gm;
+    // The scoring format is part of the variant: resuming a full-PPR draft under standard scoring
+    // (or the reverse) would grade it by rules it wasn't drafted under.
+    const want = { ...extra, format: normFormat(extra?.format ?? format) };
+    const sameVariant = (m) => !!m?.genius === !!want.genius && !!m?.gm === !!want.gm
+      && normFormat(m?.format) === want.format;
     if (mode && mode.kind === "free" && sameVariant(mode) && !result && history.length > 0) return;
     const saved = await sget(FREE_PROGRESS, false);
     if (validDraft(saved) && saved.mode.kind === "free") {
@@ -1975,7 +2059,7 @@ export default function PerfectSeason() {
       setWip((w) => ({ ...w, free: 0 }));
     }
     clearDraft(DRAFT_KEY);
-    startDraft({ kind: "free", code: newCode(), ...extra });
+    startDraft({ kind: "free", code: newCode(), ...want });
   }
 
   function startCode(raw) {
@@ -1985,13 +2069,15 @@ export default function PerfectSeason() {
     clearDraft(DRAFT_KEY);
     setCodeInput("");
     setView("play");
-    startDraft({ kind: "free", code });
+    // Carries the current format, so entering a code while Championship is selected doesn't
+    // silently drop you back into full-PPR scoring.
+    startDraft({ kind: "free", code, format });
   }
 
-  async function loadDailyBoard() {
+  async function loadDailyBoard(f) {
     setDailyBoard({ loading: true, rows: [] });
     try {
-      const rows = await fetchDailyTop(todayKey(), 10);
+      const rows = await fetchDailyTop(todayKey(), 10, normFormat(f || boardFormatRef.current));
       setDailyBoard({ loading: false, rows });
     } catch (e) { setDailyBoard({ loading: false, rows: [] }); }
   }
@@ -2040,6 +2126,8 @@ export default function PerfectSeason() {
   const totals = lb.totals;
   const perfectPct = totals.runs > 0 ? Math.round((100 * totals.perfect) / totals.runs) : 0;
   const site = useMemo(() => computeSiteStats(siteStats.profiles), [siteStats.profiles]);
+  // The score-ranked half of the Stats screen, for whichever format is selected there.
+  const fmtStats = site.byFormat[normFormat(boardFormat)];
   const myKey = user ? user.toLowerCase() : null;
   const myRank = lb.myRank;
   const regGames = result ? result.games.filter((g) => !g.playoff) : [];
@@ -2049,12 +2137,22 @@ export default function PerfectSeason() {
   const regW = regGames.filter((g) => g.win).length;
   const inProgress = !!mode && !result && history.length > 0 && history.length < 6;
   const freePicks = (mode && mode.kind === "free" && !result ? history.length : wip.free) || 0;
-  const dailyPicks = dailyDone ? 0 : ((mode && mode.kind === "daily" && mode.date === todayKey() && !result ? history.length : wip.daily) || 0);
+  // Per format, since both dailies can be part-finished at the same time.
+  const dailyPicksFor = (f) => (dailyDone[f] ? 0
+    : ((mode && mode.kind === "daily" && mode.date === todayKey() && normFormat(mode.format) === f && !result
+      ? history.length : wip[`daily:${f}`]) || 0));
+  // The finished record for the daily currently open, if that's what this is - and the format
+  // whose daily is still available to offer next.
+  const modeDailyDone = mode && mode.kind === "daily" ? dailyDone[normFormat(mode.format)] : null;
+  const otherFormat = mode && normFormat(mode.format) === "standard" ? "fantasy" : "standard";
   // Ranks this run against everyone's BEST-ever score (via myRank, already refreshed by the
   // loadLeaderboard() call in finish()) rather than against every run ever played - a real
   // per-run leaderboard would need a full runs log table this schema doesn't have. For a new
   // personal best this is exactly right; for a non-best run it shows the existing best's rank.
-  const place = finished && !lb.error && myRank >= 0 ? { rank: myRank + 1, total: totals.players } : null;
+  // Only rank a result against a leaderboard loaded for its OWN format - the two score different
+  // things, so a cross-format rank would be meaningless rather than merely imprecise.
+  const place = finished && !lb.error && myRank >= 0 && normFormat(result?.format) === normFormat(boardFormat)
+    ? { rank: myRank + 1, total: totals.players } : null;
   function skipPlayoffs() { setShown(result.games.length); setPo({ idx: 0, stage: "done" }); }
 
   return (
@@ -2107,17 +2205,47 @@ export default function PerfectSeason() {
               </div>
             </header>
 
+            {/* Scoring format is a preference that layers over every mode below, not a mode of
+                its own - otherwise each tile would need a Fantasy and a Championship twin. */}
+            <div className="fmtpick" role="group" aria-label="Scoring format">
+              <span className="fmtlabel">Scoring</span>
+              {FORMATS.map((f) => (
+                <button key={f} className={`fmtbtn ${format === f ? "on" : ""}`} aria-pressed={format === f}
+                  onClick={() => { setFormat(f); sset(FORMAT_KEY, f, false); }}>
+                  {FORMAT_LABEL[f]}<span className="fmtsub">{f === "fantasy" ? "Full PPR" : "Standard"}</span>
+                </button>
+              ))}
+              <p className="fmtnote">
+                {format === "standard"
+                  ? "Championship scoring counts yards and touchdowns only - a catch is worth nothing on its own, so high-volume possession receivers grade lower and big-play producers grade higher. Closer to what wins games than to what wins a fantasy league."
+                  : "Fantasy scoring is full PPR: every reception is worth a point, so target volume counts as much as yardage."}
+              </p>
+            </div>
+
             <div className="modes">
-              <button className="mode daily" onClick={startDaily}>
+              {/* The only tile with two CTAs: both formats' dailies are live at once, each its
+                  own draft with its own boards, so one button can't express both states. */}
+              <div className="mode daily static">
                 <div className="mt">
                   <span className="icon" aria-hidden="true">📅</span>
                   <span className="mn">Daily challenge</span>
                   {stats?.dailyStreak && stats.dailyLast === todayKey() ? <span className="pill">{stats.dailyStreak} day streak</span> : null}
-                  {dailyPicks > 0 && <span className="pill">{dailyPicks} of 6 picked</span>}
                 </div>
-                <p>The same six boards for everyone, one draft a day, no resets. {prettyDate(todayKey())}.</p>
-                <span className="go">{dailyDone ? "See today's result" : dailyPicks > 0 ? "Finish today's daily" : "Play today's daily"}</span>
-              </button>
+                <p>The same six boards for everyone, one draft a day, no resets. {prettyDate(todayKey())}. Each scoring format has its own daily.</p>
+                <div className="dailycta">
+                  {FORMATS.map((f) => {
+                    const picks = dailyPicksFor(f);
+                    return (
+                      <button key={f} className="btn" onClick={() => startDaily(f)}>
+                        {FORMAT_LABEL[f]} daily
+                        <span className="go" style={{ marginLeft: 8 }}>
+                          {dailyDone[f] ? "See result" : picks > 0 ? `${picks} of 6` : "Play"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
               <button className="mode m-unlimited" onClick={() => openFree()}>
                 <div className="mt">
@@ -2169,7 +2297,7 @@ export default function PerfectSeason() {
             <div className="hometiles">
               <div className="tile"><div className="n">{user && stats ? draftsOf(stats) : "–"}</div><div className="l">Your drafts</div></div>
               <div className="tile"><div className="n">{user && stats?.bestRecord ? `${stats.bestRecord.w}–${stats.bestRecord.l}` : "–"}</div><div className="l">Your best record</div></div>
-              <div className="tile"><div className="n">{siteBest ? siteBest.bestScore.toFixed(1) : "–"}</div><div className="l">Best score sitewide</div></div>
+              <div className="tile"><div className="n">{scoreOf(siteBest, boardFormat) != null ? scoreOf(siteBest, boardFormat).toFixed(1) : "–"}</div><div className="l">Best {FORMAT_LABEL[boardFormat]} score sitewide</div></div>
             </div>
 
             {!lb.loading && totals.players > 0 && (
@@ -2218,9 +2346,9 @@ export default function PerfectSeason() {
                 </button>
                 <button className="mb" onClick={() => { refreshWip(); setView("home"); }}>All modes</button>
                 {mode.kind === "daily" ? (
-                  <span className="seedline">{prettyDate(mode.date)} · same boards for everyone</span>
+                  <span className="seedline">{FORMAT_LABEL[normFormat(mode.format)]} · {prettyDate(mode.date)} · same boards for everyone</span>
                 ) : (
-                  <span className="seedline">{mode.genius && "Genius mode · "}{mode.gm && "GM mode · "}Code <code>{mode.code}</code></span>
+                  <span className="seedline">{normFormat(mode.format) === "standard" && "Championship · "}{mode.genius && "Genius mode · "}{mode.gm && "GM mode · "}Code <code>{mode.code}</code></span>
                 )}
               </div>
             )}
@@ -2229,19 +2357,22 @@ export default function PerfectSeason() {
               <AdminPanel openSlots={open} onForceBoard={adminForceBoard} onForcePlayer={adminForcePlayer} onForceOutcome={adminForceOutcome} />
             )}
 
-            {mode && mode.kind === "daily" && dailyDone && !result && (
+            {modeDailyDone && !result && (
               <div className="locked">
-                <h3>Today's daily is done</h3>
-                <p className="note" style={{ marginTop: 0 }}>You went {dailyDone.w}–{dailyDone.l} with a team score of {dailyDone.score.toFixed(1)}. {dailyDone.outcome}.</p>
-                <RosterRows roster={dailyDone.roster} />
+                <h3>Today's {FORMAT_LABEL[normFormat(mode.format)]} daily is done</h3>
+                <p className="note" style={{ marginTop: 0 }}>You went {modeDailyDone.w}–{modeDailyDone.l} with a team score of {modeDailyDone.score.toFixed(1)}. {modeDailyDone.outcome}.</p>
+                <RosterRows roster={modeDailyDone.roster} />
                 <div className="frow" style={{ marginTop: 12 }}>
-                  <button className="btn solid" onClick={restart}>Play an unlimited draft</button>
+                  {!dailyDone[otherFormat] && (
+                    <button className="btn solid" onClick={() => startDaily(otherFormat)}>Play the {FORMAT_LABEL[otherFormat]} daily</button>
+                  )}
+                  <button className="btn" onClick={restart}>Play an unlimited draft</button>
                   <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>Today's leaderboard</button>
                 </div>
               </div>
             )}
 
-            {!(mode && mode.kind === "daily" && dailyDone && !result) && (
+            {!(modeDailyDone && !result) && (
             <>
             {mode.gm && !result && (
               <div className="frow" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
@@ -2332,8 +2463,8 @@ export default function PerfectSeason() {
                                   <div className="nm-row">
                                     <span className="pp">{p.pos}</span><span className="nm">{p.name}</span>
                                     {mode.gm && (
-                                      <span className="pill" style={{ marginLeft: 8, color: playerSalary(p) > capRemaining ? "var(--loss)" : undefined }}>
-                                        ${playerSalary(p)}M
+                                      <span className="pill" style={{ marginLeft: 8, color: playerSalary(p, mode.format) > capRemaining ? "var(--loss)" : undefined }}>
+                                        ${playerSalary(p, mode.format)}M
                                       </span>
                                     )}
                                   </div>
@@ -2349,7 +2480,7 @@ export default function PerfectSeason() {
                             {isSel && (
                               <div className="drafts">
                                 {slotsFor.map((s) => {
-                                  const cost = mode.gm ? playerSalary(p) : 0;
+                                  const cost = mode.gm ? playerSalary(p, mode.format) : 0;
                                   const tooExpensive = mode.gm && cost > capRemaining;
                                   return (
                                     <button key={s} className="btn solid" disabled={tooExpensive} onClick={() => draft(p, s)}>
@@ -2439,17 +2570,19 @@ export default function PerfectSeason() {
                 {finished && (
                   <>
                     <h2 className="h">Your roster, graded</h2>
-                    <RosterRows roster={SLOTS.map((s) => ({ slot: s, ...roster[s], rating: effectiveRating(s, roster[s]) }))} />
-                    <p className="note">Grades compare each season to the top fantasy finishers at that position in the same era, with 17-game seasons scaled to 16. QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Flex is graded on production alone, not position - no positional bump either way. Team score averages the six, with the QB counting 1.25 times.</p>
+                    <RosterRows roster={SLOTS.map((s) => ({ slot: s, ...roster[s], rating: effectiveRating(s, roster[s], mode.format) }))} />
+                    <p className="note">Grades compare each season to the top finishers at that position in the same era, with 17-game seasons scaled to 16. {normFormat(mode.format) === "standard" ? "Championship scoring counts yards and touchdowns only - receptions are worth nothing, so volume receivers rate lower and big-play producers rate higher than they do in Fantasy scoring." : "Fantasy scoring is full PPR, so every reception is worth a point."} QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Flex is graded on production alone, not position - no positional bump either way. Team score averages the six, with the QB counting 1.25 times.</p>
                     {history.length === 6 && (() => {
+                      // Board players carry both formats' grades; show the one actually in play.
+                      const rate = (p) => (normFormat(mode.format) === "standard" ? p.stdRating : p.rating);
                       const rows = history.map((h, i) => {
                         const took = findPlayer(h.key, h.id, h.season);
                         const best = findPlayer(h.key, h.bestId, h.bestSeason) || took;
                         const [tm, w] = h.key.split("|");
-                        return { i, took, best, gotIt: took.rating >= best.rating - 0.05, board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
+                        return { i, took, best, gotIt: rate(took) >= rate(best) - 0.05, board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
                       });
                       const hits = rows.filter((r) => r.gotIt).length;
-                      const optimal = bestOrderFor(history);
+                      const optimal = bestOrderFor(history, mode.format);
                       const totalWeight = SLOTS.reduce((t, s) => t + (s === "QB" ? QB_WEIGHT : 1), 0);
                       return (
                         <>
@@ -2459,9 +2592,9 @@ export default function PerfectSeason() {
                             {rows.map((r) => (
                               <div className="rc" key={r.i}>
                                 <div className="n">{r.i + 1}</div>
-                                <div><div className="bd">{r.board}</div><div className="tk">{r.took.name} {shortYr(r.took.season)}<span className={`g2 ${gradeTier(r.took.rating)}`}>{grade(r.took.rating)}</span></div></div>
+                                <div><div className="bd">{r.board}</div><div className="tk">{r.took.name} {shortYr(r.took.season)}<span className={`g2 ${gradeTier(rate(r.took))}`}>{grade(rate(r.took))}</span></div></div>
                                 <div className="alt">{r.gotIt ? <span className="ok">Best on the board</span>
-                                  : <>Best available: <b>{r.best.name} {shortYr(r.best.season)}</b> <span className={`g2 ${gradeTier(r.best.rating)}`}>{grade(r.best.rating)}</span></>}</div>
+                                  : <>Best available: <b>{r.best.name} {shortYr(r.best.season)}</b> <span className={`g2 ${gradeTier(rate(r.best))}`}>{grade(rate(r.best))}</span></>}</div>
                               </div>
                             ))}
                           </div>
@@ -2474,7 +2607,7 @@ export default function PerfectSeason() {
                               <RosterRows roster={SLOTS.map((s) => {
                                 const a = optimal.slotAssignment[s];
                                 const [tm, w] = a.key.split("|");
-                                return { slot: s, ...a.player, rating: effectiveRating(s, a.player), board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
+                                return { slot: s, ...a.player, rating: effectiveRating(s, a.player, mode.format), board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
                               })} />
                               <p className="note recap-optimal">This assumes hindsight of all six boards you saw - it's what the ideal slot assignment would have scored, not a board you missed.</p>
                             </>
@@ -2529,18 +2662,28 @@ export default function PerfectSeason() {
                   <div className="tile"><div className="n">{stats.perfect}</div><div className="l">Perfect seasons</div></div>
                   <div className="tile"><div className="n">{Math.round((100 * stats.playoffs) / draftsOf(stats))}%</div><div className="l">Made the playoffs</div></div>
                   <div className="tile"><div className="n">{stats.runs ? `${(stats.wins / stats.runs).toFixed(1)}–${(stats.losses / stats.runs).toFixed(1)}` : "–"}</div><div className="l">Average record, finished seasons</div></div>
-                  <div className="tile"><div className="n">{stats.bestScore != null ? stats.bestScore.toFixed(1) : "–"}</div><div className="l">Best team score{myRank >= 0 ? `, #${myRank + 1} sitewide` : ""}</div></div>
+                  {/* One tile per format rather than a toggle - on your own page both are worth
+                      seeing at a glance, and they never rank against each other anyway. */}
+                  {FORMATS.map((f) => (
+                    <div className="tile" key={f}>
+                      <div className="n">{scoreOf(stats, f) != null ? scoreOf(stats, f).toFixed(1) : "–"}</div>
+                      <div className="l">Best {FORMAT_LABEL[f]} score{normFormat(boardFormat) === f && myRank >= 0 ? `, #${myRank + 1} sitewide` : ""}</div>
+                    </div>
+                  ))}
                   <div className="tile"><div className="n">{stats.dailyStreak && (stats.dailyLast === todayKey() || nextStreak(stats, todayKey()) > 1) ? stats.dailyStreak : 0}</div>
                     <div className="l">Daily streak{stats.dailyBestStreak ? `, best ${stats.dailyBestStreak}` : ""}</div></div>
                 </div>
 
-                {stats.bestRun && (
-                  <>
-                    <h2 className="h">Best lineup</h2>
-                    <p className="note" style={{ marginTop: 0 }}>{stats.bestRun.w}–{stats.bestRun.l}, team score {stats.bestRun.score.toFixed(1)}, {fmtDate(stats.bestRun.date)}. {stats.bestRun.outcome}.</p>
-                    <RosterRows roster={stats.bestRun.roster} />
-                  </>
-                )}
+                {FORMATS.filter((f) => runOf(stats, f)).map((f) => {
+                  const best = runOf(stats, f);
+                  return (
+                    <div key={f}>
+                      <h2 className="h">Best {FORMAT_LABEL[f]} lineup</h2>
+                      <p className="note" style={{ marginTop: 0 }}>{best.w}–{best.l}, team score {best.score.toFixed(1)}, {fmtDate(best.date)}. {best.outcome}.</p>
+                      <RosterRows roster={best.roster} />
+                    </div>
+                  );
+                })}
 
                 {stats.recent?.length > 0 && (
                   <>
@@ -2578,14 +2721,26 @@ export default function PerfectSeason() {
               <div className="panel"><p>The leaderboard didn't load.</p><button className="btn" onClick={loadLeaderboard}>Try again</button></div>
             ) : (
               <>
+                {/* Every board on this screen is per format - the two score different things, so
+                    ranking them together would be meaningless. */}
+                <div className="fmtpick" role="group" aria-label="Leaderboard scoring format">
+                  <span className="fmtlabel">Scoring</span>
+                  {FORMATS.map((f) => (
+                    <button key={f} className={`fmtbtn ${boardFormat === f ? "on" : ""}`} aria-pressed={boardFormat === f}
+                      onClick={() => { showBoardFormat(f); loadLeaderboard(f); loadDailyBoard(f); }}>
+                      {FORMAT_LABEL[f]}<span className="fmtsub">{f === "fantasy" ? "Full PPR" : "Standard"}</span>
+                    </button>
+                  ))}
+                </div>
+
                 <div className="dayhead">
-                  <h2 className="h">Today's daily</h2>
-                  <button className="linkbtn" onClick={loadDailyBoard} disabled={dailyBoard.loading}>{dailyBoard.loading ? "Loading…" : "Refresh"}</button>
+                  <h2 className="h">Today's {FORMAT_LABEL[boardFormat]} daily</h2>
+                  <button className="linkbtn" onClick={() => loadDailyBoard()} disabled={dailyBoard.loading}>{dailyBoard.loading ? "Loading…" : "Refresh"}</button>
                 </div>
                 {dailyBoard.rows.length === 0 ? (
                   <p className="note" style={{ marginTop: 0 }}>
                     {dailyBoard.loading ? "Loading today's scores…" : "No finished dailies yet today."}{" "}
-                    {!dailyDone && <button className="linkbtn" onClick={() => { setView("play"); startDaily(); }}>Play today's daily</button>}
+                    {!dailyDone[boardFormat] && <button className="linkbtn" onClick={() => { setView("play"); startDaily(boardFormat); }}>Play today's {FORMAT_LABEL[boardFormat]} daily</button>}
                   </p>
                 ) : (
                   <table className="lb">
@@ -2619,10 +2774,10 @@ export default function PerfectSeason() {
                 {siteBest ? (
                   <div className="champion">
                     <div className="stripe" style={{ background: "var(--lamp)" }} />
-                    <div className="pickno">Sitewide best team score</div>
-                    <div className="sc led-wrap"><span className="led">{siteBest.bestScore.toFixed(1)}</span></div>
-                    <div className="by">{siteBest.username}{siteBest.bestRun ? `, went ${siteBest.bestRun.w}–${siteBest.bestRun.l}` : ""}</div>
-                    {siteBest.bestRun && <RosterChips roster={siteBest.bestRun.roster} />}
+                    <div className="pickno">Sitewide best {FORMAT_LABEL[boardFormat]} team score</div>
+                    <div className="sc led-wrap"><span className="led">{scoreOf(siteBest, boardFormat).toFixed(1)}</span></div>
+                    <div className="by">{siteBest.username}{runOf(siteBest, boardFormat) ? `, went ${runOf(siteBest, boardFormat).w}–${runOf(siteBest, boardFormat).l}` : ""}</div>
+                    {runOf(siteBest, boardFormat) && <RosterChips roster={runOf(siteBest, boardFormat).roster} />}
                   </div>
                 ) : (
                   <div className="panel"><p style={{ margin: 0 }}>No scores yet. Finish a season while logged in to claim the top spot.</p></div>
@@ -2638,7 +2793,7 @@ export default function PerfectSeason() {
                           <tr key={q.id} className={q.id === myKey ? "me" : ""}>
                             <td className="rk">{i + 1}</td>
                             <td>{q.username}</td>
-                            <td className="r">{q.bestScore.toFixed(1)}</td>
+                            <td className="r">{scoreOf(q, boardFormat).toFixed(1)}</td>
                             <td className="r">{q.bestRecord ? `${q.bestRecord.w}–${q.bestRecord.l}` : "–"}</td>
                             <td className="r hide">{draftsOf(q)}{q.dnf ? <span className="muted"> ({q.dnf} DNF)</span> : null}</td>
                             <td className="r hide">{q.perfect}</td>
@@ -2650,7 +2805,7 @@ export default function PerfectSeason() {
                 )}
 
                 {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
-                {user && myRank >= 10 && <p className="note">You're #{myRank + 1} with a best score of {stats.bestScore.toFixed(1)}.</p>}
+                {user && myRank >= 10 && scoreOf(stats, boardFormat) != null && <p className="note">You're #{myRank + 1} with a best {FORMAT_LABEL[boardFormat]} score of {scoreOf(stats, boardFormat).toFixed(1)}.</p>}
                 <button className="btn" onClick={loadLeaderboard} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
               </>
             )}
@@ -2675,26 +2830,42 @@ export default function PerfectSeason() {
                 <p className="note">Leaderboards below draw from the 300 most recently active accounts, not everyone who's ever played.</p>
                 <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>
 
-                <h2 className="h" style={{ marginTop: 22 }}>Best lineups ever</h2>
-                {site.bestLineups.length === 0 ? (
-                  <p className="note" style={{ marginTop: 0 }}>No scores yet.</p>
+                {/* Only the score-ranked boards split by format; the career records further down
+                    are shared, since both formats play the identical season simulation. */}
+                <div className="fmtpick" style={{ marginTop: 18 }} role="group" aria-label="Stats scoring format">
+                  <span className="fmtlabel">Scoring</span>
+                  {FORMATS.map((f) => (
+                    <button key={f} className={`fmtbtn ${boardFormat === f ? "on" : ""}`} aria-pressed={boardFormat === f}
+                      onClick={() => showBoardFormat(f)}>
+                      {FORMAT_LABEL[f]}<span className="fmtsub">{f === "fantasy" ? "Full PPR" : "Standard"}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <h2 className="h" style={{ marginTop: 22 }}>Best {FORMAT_LABEL[boardFormat]} lineups ever</h2>
+                {fmtStats.bestLineups.length === 0 ? (
+                  <p className="note" style={{ marginTop: 0 }}>No {FORMAT_LABEL[boardFormat]} scores yet.</p>
                 ) : (
                   <div className="recap">
-                    {site.bestLineups.map((q, i) => (
-                      <div key={q.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-                        <div style={{ fontWeight: 700 }}>
-                          #{i + 1} {q.username}{" "}
-                          <span style={{ color: "var(--muted)", fontWeight: 400 }}>
-                            — {q.bestScore.toFixed(1)}{q.bestRun ? `, ${q.bestRun.w}–${q.bestRun.l}` : ""}
-                          </span>
+                    {fmtStats.bestLineups.map((q, i) => {
+                      const best = runOf(q, boardFormat);
+                      return (
+                        <div key={q.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+                          <div style={{ fontWeight: 700 }}>
+                            #{i + 1} {q.username}{" "}
+                            <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+                              — {scoreOf(q, boardFormat).toFixed(1)}{best ? `, ${best.w}–${best.l}` : ""}
+                            </span>
+                          </div>
+                          {best && <RosterChips roster={best.roster} />}
                         </div>
-                        {q.bestRun && <RosterChips roster={q.bestRun.roster} />}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
                 <h2 className="h" style={{ marginTop: 22 }}>Most-drafted players</h2>
+                <p className="note" style={{ marginTop: 0 }}>Counted across both scoring formats - this is a popularity tally, not a score.</p>
                 {site.mostDrafted.length === 0 ? (
                   <p className="note" style={{ marginTop: 0 }}>No runs yet.</p>
                 ) : (
@@ -2709,10 +2880,10 @@ export default function PerfectSeason() {
                   </div>
                 )}
 
-                <h2 className="h" style={{ marginTop: 22 }}>Position records</h2>
+                <h2 className="h" style={{ marginTop: 22 }}>{FORMAT_LABEL[boardFormat]} position records</h2>
                 <div className="recap">
                   {POS_RECORD_SLOTS.map(([bucket, label]) => {
-                    const p = site.posRecords[bucket];
+                    const p = fmtStats.posRecords[bucket];
                     return (
                       <div className="rc" key={bucket}>
                         <div className="n">{label}</div>
@@ -2728,6 +2899,9 @@ export default function PerfectSeason() {
                     );
                   })}
                 </div>
+
+                <h2 className="h" style={{ marginTop: 22 }}>Career records</h2>
+                <p className="note" style={{ marginTop: 0 }}>Combined across both scoring formats - a season played is a season played, and both run the same simulation.</p>
 
                 <h2 className="h" style={{ marginTop: 22 }}>Most career wins</h2>
                 <RankRows rows={site.mostWins} empty="No finished drafts yet." value={(q) => `${q.wins}–${q.losses}`} />
@@ -2745,8 +2919,8 @@ export default function PerfectSeason() {
                 <p className="note" style={{ marginTop: 0 }}>Minimum 3 finished drafts.</p>
                 <RankRows rows={site.bestWinPct} empty="Not enough finished drafts yet." value={(q) => `${Math.round(q.pct * 100)}%`} />
 
-                <h2 className="h" style={{ marginTop: 22 }}>Best GM-mode score</h2>
-                <RankRows rows={site.bestGm} empty="No GM-mode runs yet." value={(q) => q.score.toFixed(1)} />
+                <h2 className="h" style={{ marginTop: 22 }}>Best {FORMAT_LABEL[boardFormat]} GM-mode score</h2>
+                <RankRows rows={fmtStats.bestGm} empty="No GM-mode runs yet." value={(q) => q.score.toFixed(1)} />
 
                 <h2 className="h" style={{ marginTop: 22 }}>Highest-OVR created player</h2>
                 <p className="note" style={{ marginTop: 0 }}>Build-a-player results, sitewide - doesn't touch anyone's own stats or leaderboard rank.</p>

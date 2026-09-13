@@ -46,7 +46,8 @@ node tests/test-board-order.mjs   # board section reordering timing
 node tests/test-reroll-pool.mjs   # reroll can't repeat an already-used team+era
 node tests/test-flex-scoring.mjs  # Flex grades on raw production, not position
 node tests/test-admin.mjs         # admin-account gating + force-board/player/outcome tools
-node tests/test-difficulty.mjs [N]  # plays N drafts with a bot, reports avg wins / 20-0 rate
+node tests/test-scoring-format.mjs # fantasy vs standard grading: the fantasy path is byte-identical, standard math is pinned
+node tests/test-difficulty.mjs [N] [fantasy|standard] [gm]  # plays N drafts with a bot, reports avg wins / 20-0 rate
 node tests/test-replay-verification.mjs  # game-logic.mjs's replayDraft: legit traces (incl. rerolls) accepted, tampered ones rejected
 node tests/test-tamper-resistance.mjs    # end-to-end: a fabricated submission never reaches profiles; a legit one still works
 
@@ -124,6 +125,32 @@ the same seed+roster, and two independently-maintained copies of this logic woul
 drift. If you touch scoring, grading, board sequencing, or reroll logic, change it here — never
 duplicate it back into `perfect-season.jsx` or the Edge Function.
 
+**Two scoring formats, one pipeline.** A draft is played in either `"fantasy"` (full PPR, the
+original and the default) or `"standard"` (no point per reception — the UI calls it **Championship
+mode**; the internal name avoids colliding with `run.champ`/`profiles.champs`, which mean *won the
+title*). The format is a per-device preference that layers over Daily/Unlimited/Genius/GM rather
+than a mode of its own, it rides on `mode.format`, and **absence always normalizes to fantasy**
+(`normFormat`), so everything written before this existed reads back correctly with no backfill.
+`SCORING.md` is authoritative for the math; the short version is that only Step 1 differs, standard
+points are exactly `ppr - rec`, and each position/era is re-anchored so both formats share one
+0–130 scale. Ratings for both are precomputed per player in `initGameData` (`rating`/`stdRating`),
+so consumers do a field lookup instead of recomputing. Things worth knowing before touching this:
+
+- **Fantasy ratings must keep coming from the stored `e[17]`, never recomputed** — the formula
+  reproduces them only to ~0.03, which is irrelevant for standard (no stored value to match) but
+  would shift every score already on the leaderboard.
+- **`efficiencyAdj` must stay a recomputation**, not an inversion of the stored rating. Inverting
+  looks equivalent but silently understates it by up to 12 points on the 40 seasons clamped at
+  `RATING_CAP` — exactly the all-timers that decide a top score. `test-scoring-format.mjs` pins this.
+- **Scores from the two formats never rank against each other.** They live in separate `profiles`
+  columns (`best_score`/`best_score_std`, see `BEST_FIELDS`) and separate leaderboards; career
+  counters (runs/wins/champs/streak) are deliberately merged, since both run the identical sim.
+- **Each format has its own daily**, seeded `daily-<date>` and `daily-<date>-std` so playing one
+  doesn't spoil the other's boards; `daily_runs`' primary key is `(date, format, user_id)`.
+  Free-mode seeds are unchanged — an existing challenge code still deals the boards it always did.
+- The format is part of the free-draft variant in `openFree`'s `sameVariant` guard, for the same
+  reason genius/gm are: resuming a draft under the other format's rules would grade it wrongly.
+
 **Everything seeded runs through `mulberry32(hashStr(seed))`.** Board sequences
 (`seededSequence`), reroll picks, and the season simulation (`simulateSeason`, wrapped by
 `withSeed` which temporarily swaps global `Math.random`) all derive from `mode.seed` (`daily-<date>`
@@ -177,10 +204,12 @@ a failed delete resurrect finished state — see the storage-ordering note in Ar
 rate. Its bot is deliberately dumb (not a "fantasy-savvy" drafter), so don't read its numbers as an
 absolute target — but a big swing in them after a change to `rating`, `SPREAD`, `QB_WEIGHT` (still
 1.25, the extra weight QB carries in team score), or the opponent pool signals an unintended
-balance shift, not a tuned one.
+balance shift, not a tuned one. It takes a format and a GM flag (`… 250 standard gm`) — a grading
+change means running each format, since they have separate benchmarks.
 
-**Protect the daily.** The daily is a single seeded draft per day: no resets, its own saved
-progress slot (`ps-daily-wip:<date>`), and it resumes rather than restarts. Any new navigation path
+**Protect the daily.** The daily is a single seeded draft per day **per scoring format**: no resets,
+its own saved progress slot (`ps-daily-wip:<date>`, suffixed `:std` for Championship), and it
+resumes rather than restarts. Any new navigation path
 must not give a player a second crack at it. Unlimited drafts may be reset, but a reset counts as a
 **DNF** against their stats.
 
@@ -194,13 +223,12 @@ Don't hand-edit `data.json`; change the scripts and regenerate.
 
 ## Immediate Next Goals
 
-1. **Scoring modes** — standard and half-PPR alongside the current full PPR. Blocked: this needs
-   re-deriving player ratings, which normally runs through `scripts/*.py` (the nflverse/PFR
-   pipeline), and that pipeline doesn't exist in this checkout — don't start this without the
-   real upstream source data.
-2. **Housekeeping** — custom domain (currently a free `*.vercel.app` subdomain; add the URL to
+1. **Housekeeping** — custom domain (currently a free `*.vercel.app` subdomain; add the URL to
    the share text once one exists), 2026 season data once it's played, an accessibility pass
    (position colors currently carry meaning on their own).
+2. **Half-PPR**, if wanted, is now a small change rather than a blocked one — see the scoring-format
+   note in Architecture. It needs a third `FORMATS` entry, a benchmark column, a `BEST_FIELDS`
+   entry, and two `profiles` columns; no data regeneration.
 
 **Done:** the game is a real public product now, not a local-only demo. Accounts/stats/leaderboard
 run on Supabase (Postgres + Auth, RLS-gated — see Architecture above) instead of `window.storage`,

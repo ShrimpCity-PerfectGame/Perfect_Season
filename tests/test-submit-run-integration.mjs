@@ -64,4 +64,24 @@ await runTest("completing a real draft by clicking through the UI actually persi
   assert(!container.textContent.includes("couldn't be saved"), "expected no save-error banner for a legitimate draft, got: " + container.textContent.slice(0, 300));
 });
 
+await runTest("a Championship draft clicked through the real UI persists to the standard column only", async () => {
+  const before = { ...auth._profiles.get(userId) };
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click([...container.querySelectorAll(".fmtbtn")].find((b) => b.textContent.includes("Championship")));
+  await flush();
+  await click(findButtonByText(container, "Start a draft"));
+  await flush();
+
+  for (let round = 0; round < 6; round++) await draftFirstEligible();
+  assert(container.textContent.includes("Team score"), "expected the result screen to render after the 6th pick");
+
+  await flush(6);
+  const row = auth._profiles.get(userId);
+  assert(row.runs === before.runs + 1, "expected the Championship draft to count as a finished run, got runs=" + row.runs);
+  assert(row.best_score_std != null, "expected a standard-format best score to be recorded, got: " + row.best_score_std);
+  assert(row.best_score === before.best_score, "a Championship run must not touch the Fantasy best score");
+  assert(!container.textContent.includes("couldn't be saved"), "expected no save-error banner, got: " + container.textContent.slice(0, 300));
+});
+
 console.log("test-submit-run-integration.mjs done");
