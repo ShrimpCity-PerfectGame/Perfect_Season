@@ -72,20 +72,35 @@ export function makeMockAuth() {
     };
   }
 
-  // Minimal Realtime Presence fake for subscribeOnlineCount - enough to verify the UI reads *a*
-  // count once tracked, not a real multi-client simulation (see storage.js's own comment).
-  function channel(_name) {
-    const syncListeners = [];
+  // Minimal Realtime fake for subscribeSiteActivity - presence enough to verify the UI reads *a*
+  // count once tracked (not a real multi-client simulation, see storage.js's own comment), plus
+  // broadcast: send() fires this same channel's own registered handlers (this mock models one
+  // shared channel instance, so send() both matches "the tab that finished also gets notified"
+  // and lets a test simulate another tab's broadcast by calling send() directly via _channels).
+  const channels = new Map(); // name -> channel, test-only escape hatch (mirrors _profiles)
+  function channel(name) {
+    const presenceListeners = [];
+    const broadcastListeners = {};
     const presence = {};
-    return {
-      on(_type, _opts, cb) { syncListeners.push(cb); return this; },
-      subscribe(cb) { if (cb) cb("SUBSCRIBED"); return this; },
+    const chan = {
+      on(type, opts, cb) {
+        if (type === "broadcast") (broadcastListeners[opts?.event] ||= []).push(cb);
+        else presenceListeners.push(cb);
+        return chan;
+      },
+      subscribe(cb) { if (cb) cb("SUBSCRIBED"); return chan; },
       async track(meta) {
         presence["mock-self"] = [meta || {}];
-        syncListeners.forEach((cb) => cb());
+        presenceListeners.forEach((cb) => cb());
       },
       presenceState() { return presence; },
+      send({ event, payload }) {
+        (broadcastListeners[event] || []).forEach((cb) => cb({ event, payload }));
+        return Promise.resolve("ok");
+      },
     };
+    channels.set(name, chan);
+    return chan;
   }
 
   return {
@@ -93,6 +108,7 @@ export function makeMockAuth() {
     channel,
     removeChannel() {},
     _profiles: profiles, // test-only escape hatch for setup/assertions
+    _channels: channels, // test-only escape hatch, e.g. auth._channels.get("site-activity").send({event:"draft_finished", payload:{}})
     auth: {
       async signUp({ email, password, options }) {
         if (authUsers.has(email)) return { data: null, error: { message: "User already registered" } };
@@ -294,6 +310,16 @@ export async function selectOption(el, value) {
 
 export function text(container) {
   return container.textContent;
+}
+
+// Simulates a Realtime broadcast arriving from another tab - e.g.
+// broadcast(auth, "site-activity", "draft_finished", {}). Wrapped in act() like every other
+// helper here that triggers a React state update from outside a real DOM event.
+export async function broadcast(auth, channelName, event, payload) {
+  const act = await getAct();
+  await act(async () => {
+    auth._channels.get(channelName).send({ event, payload });
+  });
 }
 
 export function findButtonByText(container, needle) {

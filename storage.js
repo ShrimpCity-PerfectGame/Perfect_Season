@@ -141,15 +141,22 @@ export async function fetchRecentRosters(limit = 300) {
   return data.flatMap((r) => r.recent || []).filter((run) => !run.dnf && run.roster);
 }
 
-// A live concurrent-players count via Supabase Realtime Presence - every open tab (no auth
-// needed; guests count too) joins one shared channel and "tracks" itself, and every tab in the
-// channel gets a "sync" event with the full presence set whenever anyone joins/leaves. Unlike
-// every other export here, this is a long-lived subscription, not a one-shot request, so it
-// returns an unsubscribe function instead of a promise - call it on unmount.
-export function subscribeOnlineCount(onCount) {
+// One channel, two live concerns: a concurrent-players count via Supabase Realtime Presence
+// (every open tab - no auth needed, guests count too - joins and "tracks" itself; every tab gets
+// a "sync" event with the full presence set whenever anyone joins/leaves), and a live
+// total-drafts tick via Realtime broadcast (every tab that finishes a draft tells every other
+// open tab to bump its count by one - optimistic, not re-fetched, since this is a fun live
+// number, not a ledger). Unlike every other export here, this is a long-lived subscription, not
+// a one-shot request, so it returns an unsubscribe function (call it on unmount) alongside a
+// broadcaster for the "a draft just finished" side.
+export function subscribeSiteActivity({ onOnlineCount, onDraftFinished }) {
   const client = getClient();
-  const channel = client.channel("online-players");
-  channel.on("presence", { event: "sync" }, () => onCount(Object.keys(channel.presenceState()).length));
+  const channel = client.channel("site-activity");
+  channel.on("presence", { event: "sync" }, () => onOnlineCount(Object.keys(channel.presenceState()).length));
+  channel.on("broadcast", { event: "draft_finished" }, onDraftFinished);
   channel.subscribe(async (status) => { if (status === "SUBSCRIBED") await channel.track({}); });
-  return () => client.removeChannel(channel);
+  return {
+    unsubscribe: () => client.removeChannel(channel),
+    broadcastDraftFinished: () => channel.send({ type: "broadcast", event: "draft_finished", payload: {} }),
+  };
 }

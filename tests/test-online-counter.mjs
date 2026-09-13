@@ -1,12 +1,16 @@
-// A live concurrent-players count via Supabase Realtime Presence (storage.js's
-// subscribeOnlineCount). tests/helpers.mjs's mock channel() fires one sync event once this tab
-// tracks itself - enough to verify the UI actually reads the presence count, not a real
-// multi-client simulation (that can only be verified live, in two real browser sessions).
-import { setupDom, makeStorage, mount, flush, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+// A live concurrent-players count via Supabase Realtime Presence, and a live total-drafts count
+// via Realtime broadcast - both on one channel (storage.js's subscribeSiteActivity).
+// tests/helpers.mjs's mock channel() fires one sync event once this tab tracks itself - enough
+// to verify the UI actually reads the presence count, not a real multi-client simulation (that
+// can only be verified live, in two real browser sessions). Same idea for broadcast: a test
+// triggers the mock channel's own send() directly (via auth._channels) to simulate another tab
+// finishing a draft, without needing a second mounted app.
+import { setupDom, makeStorage, mount, flush, findButtonByText, assert, runTest, makeMockAuth, broadcast } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
-window.__ps_supabase__ = makeMockAuth();
+const auth = makeMockAuth();
+window.__ps_supabase__ = auth;
 const { container } = await mount();
 await flush();
 
@@ -15,6 +19,20 @@ await runTest("the home screen shows a live online-players count once the presen
   const pill = [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("online now"));
   assert(pill, "expected an online-count pill on the Sitewide panel, got: " + container.textContent.slice(0, 500));
   assert(/\d+ online now/.test(pill.textContent), "expected a numeric count, got: " + pill.textContent);
+});
+
+await runTest("the home screen shows a live drafts count that ticks up on a broadcast from another tab", async () => {
+  const draftsPill = () => [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("drafts"));
+  const before = draftsPill();
+  assert(before, "expected a drafts-count pill on the home hero, got: " + container.textContent.slice(0, 500));
+  const startCount = parseInt(before.textContent.replace(/[^\d]/g, ""), 10);
+  assert(!Number.isNaN(startCount), "expected a numeric count, got: " + before.textContent);
+
+  await broadcast(auth, "site-activity", "draft_finished", {});
+
+  const after = draftsPill();
+  const afterCount = parseInt(after.textContent.replace(/[^\d]/g, ""), 10);
+  assert(afterCount === startCount + 1, `expected the drafts count to tick up by 1 (${startCount} -> ${startCount + 1}), got ${afterCount}`);
 });
 
 console.log("test-online-counter.mjs done");

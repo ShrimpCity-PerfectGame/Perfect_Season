@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchRecentRosters, subscribeOnlineCount,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchRecentRosters, subscribeSiteActivity,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, updateProfile,
 } from "./storage.js";
@@ -1124,6 +1124,7 @@ h2.h{font-family:var(--display);font-weight:800;font-size:24px;color:var(--ink);
 .mode.m-bap .go{background:#2FD3C6;color:#04211E;box-shadow:0 2px 10px rgba(47,211,198,.25)}
 .mode.static .icon{background:rgba(147,168,155,.14);color:var(--muted)}
 .mode .pill{font-size:12px;font-weight:700;color:#241704;background:var(--lamp);border-radius:20px;padding:2px 9px}
+.pill{font-size:13px;font-weight:600;color:var(--ink);background:var(--surface2);border:1px solid var(--line2);border-radius:20px;padding:4px 12px}
 .sou-hud{display:flex;align-items:center;gap:16px;margin-bottom:12px}
 .sou-hearts{font-size:28px;line-height:1;letter-spacing:3px}
 .sou-score{font-family:var(--display);font-weight:800;font-size:19px;color:var(--ink)}
@@ -1305,6 +1306,21 @@ function RosterRows({ roster }) {
           <div className="pts">{p.ppr.toFixed(1)}<small>PPR pts</small></div>
           <div className={`gr ${gradeTier(p.rating)}`}>{grade(p.rating)}</div>
         </div>
+      ))}
+    </div>
+  );
+}
+
+// A drafted-roster summary as small position-colored chips (reusing the same chip/pos-${slot}
+// coloring the in-draft sticky bar uses) instead of one long comma-joined line of names - used
+// anywhere a saved roster gets shown back compactly (the sitewide/hall-of-fame best-lineup cards).
+function RosterChips({ roster }) {
+  return (
+    <div className="chips" style={{ flexWrap: "wrap", marginTop: 6 }}>
+      {roster.map((p, i) => (
+        <span key={i} className={`chip on pos-${(p.slot || "").startsWith("FLEX") ? "FLEX" : p.slot || ""}`}>
+          {p.name} · {shortYr(p.season)}
+        </span>
       ))}
     </div>
   );
@@ -1521,6 +1537,8 @@ export default function PerfectSeason() {
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
   const [hof, setHof] = useState({ loading: false, loaded: false, top: [], drafted: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
+  const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
+  const siteActivity = useRef(null); // { unsubscribe, broadcastDraftFinished } from subscribeSiteActivity - finish() reaches it to announce a completed draft
   // Over/Under's daily game state while playing:
   // { date, roundIndex, lives, score, round, guess, correct, deadline, timeLeft }
   const [sou, setSou] = useState(null);
@@ -1577,8 +1595,11 @@ export default function PerfectSeason() {
       setDraftReady(true);
       if (!(await sget(HOWTO_KEY, false))) setHowTo(true);
     })();
-    const unsubOnline = subscribeOnlineCount(setOnline);
-    return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); unsubOnline(); };
+    siteActivity.current = subscribeSiteActivity({
+      onOnlineCount: setOnline,
+      onDraftFinished: () => setLiveDrafts((n) => (n == null ? n : n + 1)),
+    });
+    return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); siteActivity.current?.unsubscribe(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1614,6 +1635,7 @@ export default function PerfectSeason() {
         myRank = idx >= 0 ? idx : stats?.bestScore != null ? await fetchOwnRank(stats.bestScore) : -1;
       }
       setLb({ loading: false, top, totals, myRank, error: false });
+      setLiveDrafts(totals.runs);
     } catch (e) {
       setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1, error: true });
     }
@@ -1827,7 +1849,10 @@ export default function PerfectSeason() {
     setNotice("");
     run.mode = mode.kind;
     run.code = mode.code;
+    run.gm = !!mode.gm;
+    if (mode.gm) run.capUsed = capUsed;
     if (!forcedScenario) {
+      siteActivity.current?.broadcastDraftFinished();
       if (mode.kind === "daily") {
         const rec = { date: mode.date, w: sim.w, l: sim.l, score, outcome: sim.outcome, roster: run.roster };
         setDailyDone(rec);
@@ -2269,7 +2294,10 @@ export default function PerfectSeason() {
                 <h1 className="title">Perfect Season</h1>
               </div>
               <p className="sub">Draft six players from random teams and eras. The stats are real, the fantasy points are hidden, and your lineup plays a full season against real NFL teams. Win all 20 and you've gone perfect.</p>
-              {online != null && <span className="pill" style={{ marginTop: 8, display: "inline-block" }}>🟢 {online} online now</span>}
+              <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {online != null && <span className="pill">🟢 {online} online now</span>}
+                {liveDrafts != null && <span className="pill">🏈 {liveDrafts.toLocaleString()} drafts</span>}
+              </div>
             </header>
 
             <div className="modes">
@@ -2787,7 +2815,7 @@ export default function PerfectSeason() {
                     <div className="pickno">Sitewide best team score</div>
                     <div className="sc led-wrap"><span className="led">{siteBest.bestScore.toFixed(1)}</span></div>
                     <div className="by">{siteBest.username}{siteBest.bestRun ? `, went ${siteBest.bestRun.w}–${siteBest.bestRun.l}` : ""}</div>
-                    {siteBest.bestRun && <div className="ln">{siteBest.bestRun.roster.map((p) => `${p.name} (${p.season})`).join(", ")}</div>}
+                    {siteBest.bestRun && <RosterChips roster={siteBest.bestRun.roster} />}
                   </div>
                 ) : (
                   <div className="panel"><p style={{ margin: 0 }}>No scores yet. Finish a season while logged in to claim the top spot.</p></div>
@@ -2829,10 +2857,14 @@ export default function PerfectSeason() {
                     ) : (
                       <div className="recap">
                         {hof.top.map((q, i) => (
-                          <div className="rc" key={q.id}>
-                            <div className="n">{i + 1}</div>
-                            <div><div className="bd">{q.username}</div><div className="tk">{q.bestScore.toFixed(1)}{q.bestRun ? `, ${q.bestRun.w}–${q.bestRun.l}` : ""}</div></div>
-                            <div className="alt">{q.bestRun ? q.bestRun.roster.map((p) => `${p.name} (${p.season})`).join(", ") : ""}</div>
+                          <div key={q.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+                            <div style={{ fontWeight: 700 }}>
+                              #{i + 1} {q.username}{" "}
+                              <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+                                — {q.bestScore.toFixed(1)}{q.bestRun ? `, ${q.bestRun.w}–${q.bestRun.l}` : ""}
+                              </span>
+                            </div>
+                            {q.bestRun && <RosterChips roster={q.bestRun.roster} />}
                           </div>
                         ))}
                       </div>
@@ -2849,7 +2881,7 @@ export default function PerfectSeason() {
                         {hof.drafted.map((p, i) => (
                           <div className="rc" key={i}>
                             <div className="n">{i + 1}</div>
-                            <div><div className="bd">{p.name}</div><div className="tk">{p.season} {TEAMS[p.team] ? TEAMS[p.team][0] : p.team}</div></div>
+                            <div><div className="bd">{p.season} {TEAMS[p.team] ? TEAMS[p.team][0] : p.team}</div><div className="tk">{p.name}</div></div>
                             <div className="alt">{p.count} draft{p.count === 1 ? "" : "s"}</div>
                           </div>
                         ))}
