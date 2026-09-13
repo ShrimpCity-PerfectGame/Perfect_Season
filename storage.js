@@ -129,3 +129,14 @@ export async function upsertSouRun(date, userId, row) {
   const { error } = await getClient().from("sou_runs").insert({ date, user_id: userId, username: row.username, score: row.score });
   return !error;
 }
+
+// Hall of fame's "most-drafted players" needs every roster anyone's actually drafted, not just
+// each profile's single best one - the closest available signal is each profile's own `recent`
+// (their last 10 finished runs). Deliberately bounded to the most-recently-active profiles
+// (order + limit) rather than an unbounded full-table scan, since this is new code with no
+// existing precedent to match.
+export async function fetchRecentRosters(limit = 300) {
+  const { data, error } = await getClient().from("profiles").select("recent").order("updated_at", { ascending: false }).limit(limit);
+  if (error || !data) return [];
+  return data.flatMap((r) => r.recent || []).filter((run) => !run.dnf && run.roster);
+}

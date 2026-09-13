@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchRecentRosters,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, updateProfile,
 } from "./storage.js";
@@ -1519,6 +1519,7 @@ export default function PerfectSeason() {
   const [dailyDone, setDailyDone] = useState(null); // today's finished daily, if any
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
+  const [hof, setHof] = useState({ loading: false, loaded: false, top: [], drafted: [] });
   // Over/Under's daily game state while playing:
   // { date, roundIndex, lives, score, round, guess, correct, deadline, timeLeft }
   const [sou, setSou] = useState(null);
@@ -1613,6 +1614,33 @@ export default function PerfectSeason() {
       setLb({ loading: false, top, totals, myRank, error: false });
     } catch (e) {
       setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1, error: true });
+    }
+  }
+
+  // Lazy - only fetched once the Hall of Fame section is actually opened, since it's two extra
+  // queries beyond what the Leaderboard view already loads. "Best lineups" reuses
+  // fetchLeaderboardTop with a bigger limit (no new backend needed); "most-drafted" has no
+  // single-field equivalent, so it's aggregated client-side from a bounded sample of recent runs
+  // (fetchRecentRosters) - a real but partial slice, same honesty as this app's other "partial
+  // sample" stats (Stats O/U's "career" caveat, Build-a-player's last-season-only pool).
+  async function loadHallOfFame() {
+    setHof((h) => ({ ...h, loading: true }));
+    try {
+      const [top, runs] = await Promise.all([fetchLeaderboardTop(25), fetchRecentRosters(300)]);
+      const counts = new Map();
+      for (const run of runs) {
+        for (const p of run.roster) {
+          const key = `${p.name}|${p.season}|${p.team}`;
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+      }
+      const drafted = [...counts.entries()]
+        .map(([key, count]) => { const [name, season, team] = key.split("|"); return { name, season, team, count }; })
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 15);
+      setHof({ loading: false, loaded: true, top, drafted });
+    } catch (e) {
+      setHof({ loading: false, loaded: true, top: [], drafted: [] });
     }
   }
 
@@ -2786,6 +2814,46 @@ export default function PerfectSeason() {
                 {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
                 {user && myRank >= 10 && <p className="note">You're #{myRank + 1} with a best score of {stats.bestScore.toFixed(1)}.</p>}
                 <button className="btn" onClick={loadLeaderboard} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
+
+                <h2 className="h" style={{ marginTop: 22 }}>Hall of fame</h2>
+                {!hof.loaded ? (
+                  <button className="btn" onClick={loadHallOfFame} disabled={hof.loading}>{hof.loading ? "Loading…" : "Show hall of fame"}</button>
+                ) : (
+                  <>
+                    <h3>Best lineups ever</h3>
+                    {hof.top.length === 0 ? (
+                      <p className="note" style={{ marginTop: 0 }}>No scores yet.</p>
+                    ) : (
+                      <div className="recap">
+                        {hof.top.map((q, i) => (
+                          <div className="rc" key={q.id}>
+                            <div className="n">{i + 1}</div>
+                            <div><div className="bd">{q.username}</div><div className="tk">{q.bestScore.toFixed(1)}{q.bestRun ? `, ${q.bestRun.w}–${q.bestRun.l}` : ""}</div></div>
+                            <div className="alt">{q.bestRun ? q.bestRun.roster.map((p) => `${p.name} (${p.season})`).join(", ") : ""}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <h3 style={{ marginTop: 18 }}>Most-drafted players</h3>
+                    <p className="note" style={{ marginTop: 0 }}>
+                      From the last 10 finished runs of the 300 most recently active players - not everyone who's ever played.
+                    </p>
+                    {hof.drafted.length === 0 ? (
+                      <p className="note" style={{ marginTop: 0 }}>No runs yet.</p>
+                    ) : (
+                      <div className="recap">
+                        {hof.drafted.map((p, i) => (
+                          <div className="rc" key={i}>
+                            <div className="n">{i + 1}</div>
+                            <div><div className="bd">{p.name}</div><div className="tk">{p.season} {TEAMS[p.team] ? TEAMS[p.team][0] : p.team}</div></div>
+                            <div className="alt">{p.count} draft{p.count === 1 ? "" : "s"}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </>
             )}
           </>
