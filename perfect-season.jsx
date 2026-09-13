@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchRecentRosters, subscribeSiteActivity,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchStatsProfiles, subscribeSiteActivity,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, updateProfile,
 } from "./storage.js";
@@ -1125,6 +1125,7 @@ h2.h{font-family:var(--display);font-weight:800;font-size:24px;color:var(--ink);
 .mode.static .icon{background:rgba(147,168,155,.14);color:var(--muted)}
 .mode .pill{font-size:12px;font-weight:700;color:#241704;background:var(--lamp);border-radius:20px;padding:2px 9px}
 .pill{font-size:13px;font-weight:600;color:var(--ink);background:var(--surface2);border:1px solid var(--line2);border-radius:20px;padding:4px 12px}
+button.pill{font-family:inherit}
 .sou-hud{display:flex;align-items:center;gap:16px;margin-bottom:12px}
 .sou-hearts{font-size:28px;line-height:1;letter-spacing:3px}
 .sou-score{font-family:var(--display);font-weight:800;font-size:19px;color:var(--ink)}
@@ -1184,6 +1185,60 @@ const topPct = (rank, total) => {
   const p = (100 * rank) / total;
   return p < 1 ? `Top ${p.toFixed(1)}%` : `Top ${Math.max(1, Math.round(p))}%`;
 };
+
+// Every leaderboard on the Stats screen is a different sort/aggregation over one fetched batch of
+// profiles (see storage.js's fetchStatsProfiles) - kept as one pure function so the component
+// itself just useMemo's the result instead of a wall of inline .sort()/.filter() calls.
+function computeSiteStats(profiles) {
+  const bestLineups = profiles.filter((q) => q.bestScore != null)
+    .sort((a, b) => b.bestScore - a.bestScore).slice(0, 15);
+
+  const draftCounts = new Map();
+  for (const q of profiles) for (const run of q.recent || []) {
+    if (run.dnf || !run.roster) continue;
+    for (const p of run.roster) {
+      const key = `${p.name}|${p.season}|${p.team}`;
+      draftCounts.set(key, (draftCounts.get(key) || 0) + 1);
+    }
+  }
+  const mostDrafted = [...draftCounts.entries()]
+    .map(([key, count]) => { const [name, season, team] = key.split("|"); return { name, season, team, count }; })
+    .sort((a, b) => b.count - a.count).slice(0, 15);
+
+  const withDrafts = profiles.filter((q) => draftsOf(q) > 0);
+  const mostWins = [...withDrafts].sort((a, b) => b.wins - a.wins).slice(0, 10);
+  const mostChamps = withDrafts.filter((q) => q.champs > 0).sort((a, b) => b.champs - a.champs).slice(0, 10);
+  const mostPlayoffs = withDrafts.filter((q) => q.playoffs > 0).sort((a, b) => b.playoffs - a.playoffs).slice(0, 10);
+  const longestStreaks = profiles.filter((q) => q.dailyBestStreak > 0).sort((a, b) => b.dailyBestStreak - a.dailyBestStreak).slice(0, 10);
+  // A minimum sample so a 1-0 account can't top a percentage-based leaderboard.
+  const bestWinPct = withDrafts.filter((q) => q.wins + q.losses >= 3)
+    .map((q) => ({ ...q, pct: q.wins / (q.wins + q.losses) }))
+    .sort((a, b) => b.pct - a.pct).slice(0, 10);
+
+  // Best-ever player at each slot, scanning every profile's best-scoring roster - a "hall of fame
+  // within the hall of fame" that needs no tracking beyond what best_run already stores.
+  const posRecords = {};
+  for (const q of profiles) {
+    if (!q.bestRun) continue;
+    for (const p of q.bestRun.roster) {
+      const bucket = p.slot.startsWith("FLEX") ? "FLEX" : p.slot;
+      if (!posRecords[bucket] || p.rating > posRecords[bucket].rating) posRecords[bucket] = { ...p, username: q.username };
+    }
+  }
+
+  // GM-mode runs are tagged via run.gm (see finish()) - older runs predate the tag and are
+  // simply excluded, not treated as false, since recent/bestRun only hold a bounded window.
+  const gmRuns = [];
+  for (const q of profiles) for (const run of q.recent || []) if (run.gm) gmRuns.push({ ...run, username: q.username });
+  const bestGm = gmRuns.sort((a, b) => b.score - a.score).slice(0, 10);
+
+  const totalWins = withDrafts.reduce((t, q) => t + q.wins, 0);
+  const totalLosses = withDrafts.reduce((t, q) => t + q.losses, 0);
+  const avgWinPct = totalWins + totalLosses > 0 ? Math.round((100 * totalWins) / (totalWins + totalLosses)) : 0;
+
+  return { bestLineups, mostDrafted, mostWins, mostChamps, mostPlayoffs, longestStreaks, bestWinPct, posRecords, bestGm, avgWinPct };
+}
+const POS_RECORD_SLOTS = [["QB", "QB"], ["RB", "RB"], ["WR", "WR"], ["TE", "TE"], ["FLEX", "Flex"]];
 const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const USER_RE = /^[a-zA-Z0-9_]{3,16}$/;
 
@@ -1321,6 +1376,24 @@ function RosterChips({ roster }) {
         <span key={i} className={`chip on pos-${(p.slot || "").startsWith("FLEX") ? "FLEX" : p.slot || ""}`}>
           {p.name} · {shortYr(p.season)}
         </span>
+      ))}
+    </div>
+  );
+}
+
+// A plain "#rank — username — value" leaderboard, shared by every zero-frills Stats leaderboard
+// (wins, championships, playoffs, streak, win %, GM score) - the same .rc grid every other
+// leaderboard-style row in this app uses, just without a bd/tk label pair in the middle column.
+function RankRows({ rows, empty, value }) {
+  if (rows.length === 0) return <p className="note" style={{ marginTop: 0 }}>{empty}</p>;
+  return (
+    <div className="recap">
+      {rows.map((r, i) => (
+        <div className="rc" key={r.id || i}>
+          <div className="n">{i + 1}</div>
+          <div className="tk">{r.username}</div>
+          <div className="alt">{value(r)}</div>
+        </div>
       ))}
     </div>
   );
@@ -1535,7 +1608,7 @@ export default function PerfectSeason() {
   const [dailyDone, setDailyDone] = useState(null); // today's finished daily, if any
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
-  const [hof, setHof] = useState({ loading: false, loaded: false, top: [], drafted: [] });
+  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, profiles: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
   const siteActivity = useRef(null); // { unsubscribe, broadcastDraftFinished } from subscribeSiteActivity - finish() reaches it to announce a completed draft
@@ -1641,30 +1714,16 @@ export default function PerfectSeason() {
     }
   }
 
-  // Lazy - only fetched once the Hall of Fame section is actually opened, since it's two extra
-  // queries beyond what the Leaderboard view already loads. "Best lineups" reuses
-  // fetchLeaderboardTop with a bigger limit (no new backend needed); "most-drafted" has no
-  // single-field equivalent, so it's aggregated client-side from a bounded sample of recent runs
-  // (fetchRecentRosters) - a real but partial slice, same honesty as this app's other "partial
-  // sample" stats (Stats O/U's "career" caveat, Build-a-player's last-season-only pool).
-  async function loadHallOfFame() {
-    setHof((h) => ({ ...h, loading: true }));
+  // Lazy - only fetched once the Stats tab is actually opened. Every leaderboard on that screen
+  // (see the Stats view below) is a different client-side sort/aggregation over this one fetch -
+  // see fetchStatsProfiles for why a single bounded query can feed all of them.
+  async function loadSiteStats() {
+    setSiteStats((s) => ({ ...s, loading: true }));
     try {
-      const [top, runs] = await Promise.all([fetchLeaderboardTop(25), fetchRecentRosters(300)]);
-      const counts = new Map();
-      for (const run of runs) {
-        for (const p of run.roster) {
-          const key = `${p.name}|${p.season}|${p.team}`;
-          counts.set(key, (counts.get(key) || 0) + 1);
-        }
-      }
-      const drafted = [...counts.entries()]
-        .map(([key, count]) => { const [name, season, team] = key.split("|"); return { name, season, team, count }; })
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 15);
-      setHof({ loading: false, loaded: true, top, drafted });
+      const profiles = await fetchStatsProfiles(300);
+      setSiteStats({ loading: false, loaded: true, profiles });
     } catch (e) {
-      setHof({ loading: false, loaded: true, top: [], drafted: [] });
+      setSiteStats({ loading: false, loaded: true, profiles: [] });
     }
   }
 
@@ -2236,6 +2295,7 @@ export default function PerfectSeason() {
   const siteBest = lb.top[0];
   const totals = lb.totals;
   const perfectPct = totals.runs > 0 ? Math.round((100 * totals.perfect) / totals.runs) : 0;
+  const site = useMemo(() => computeSiteStats(siteStats.profiles), [siteStats.profiles]);
   const myKey = user ? user.toLowerCase() : null;
   const myRank = lb.myRank;
   const regGames = result ? result.games.filter((g) => !g.playoff) : [];
@@ -2258,9 +2318,9 @@ export default function PerfectSeason() {
       <style>{CSS}</style>
       <div className="wrap">
         <nav className="nav" aria-label="Sections">
-          {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"]].map(([k, l]) => (
+          {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"], ["stats", "Stats"]].map(([k, l]) => (
             <button key={k} className={`tab ${view === k ? "on" : ""}`} aria-current={view === k ? "page" : undefined}
-              onClick={() => { setView(k); if (k === "home") refreshWip(); if (k === "board") { loadLeaderboard(); loadDailyBoard(); } }}>
+              onClick={() => { setView(k); if (k === "home") refreshWip(); if (k === "board") { loadLeaderboard(); loadDailyBoard(); } if (k === "stats" && !siteStats.loaded) loadSiteStats(); }}>
               {l}{k === "play" && view !== "play" && mode && open.length < 6 && !result && <span className="dot" aria-label="Draft in progress" />}
             </button>
           ))}
@@ -2296,7 +2356,10 @@ export default function PerfectSeason() {
               <p className="sub">Draft six players from random teams and eras. The stats are real, the fantasy points are hidden, and your lineup plays a full season against real NFL teams. Win all 20 and you've gone perfect.</p>
               <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {online != null && <span className="pill">🟢 {online} online now</span>}
-                {liveDrafts != null && <span className="pill">🏈 {liveDrafts.toLocaleString()} drafts</span>}
+                {liveDrafts != null && (
+                  <button className="pill" style={{ border: "none", cursor: "pointer" }}
+                    onClick={() => { setView("stats"); if (!siteStats.loaded) loadSiteStats(); }}>🏈 {liveDrafts.toLocaleString()} drafts</button>
+                )}
               </div>
             </header>
 
@@ -2845,50 +2908,100 @@ export default function PerfectSeason() {
                 {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
                 {user && myRank >= 10 && <p className="note">You're #{myRank + 1} with a best score of {stats.bestScore.toFixed(1)}.</p>}
                 <button className="btn" onClick={loadLeaderboard} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
+              </>
+            )}
+          </>
+        )}
 
-                <h2 className="h" style={{ marginTop: 22 }}>Hall of fame</h2>
-                {!hof.loaded ? (
-                  <button className="btn" onClick={loadHallOfFame} disabled={hof.loading}>{hof.loading ? "Loading…" : "Show hall of fame"}</button>
+        {/* ---------------- STATS ---------------- */}
+        {view === "stats" && (
+          <>
+            {!siteStats.loaded ? (
+              <p className="muted">Loading stats…</p>
+            ) : (
+              <>
+                <h2 className="h">Sitewide</h2>
+                <div className="tiles">
+                  <div className="tile"><div className="n">{totals.players}</div><div className="l">Accounts</div></div>
+                  <div className="tile"><div className="n">{(liveDrafts ?? totals.runs).toLocaleString()}</div><div className="l">Drafts</div></div>
+                  <div className="tile"><div className="n">{totals.perfect}</div><div className="l">Perfect seasons</div></div>
+                  <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
+                </div>
+                <p className="note">Leaderboards below draw from the 300 most recently active accounts, not everyone who's ever played.</p>
+                <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>
+
+                <h2 className="h" style={{ marginTop: 22 }}>Best lineups ever</h2>
+                {site.bestLineups.length === 0 ? (
+                  <p className="note" style={{ marginTop: 0 }}>No scores yet.</p>
                 ) : (
-                  <>
-                    <h3>Best lineups ever</h3>
-                    {hof.top.length === 0 ? (
-                      <p className="note" style={{ marginTop: 0 }}>No scores yet.</p>
-                    ) : (
-                      <div className="recap">
-                        {hof.top.map((q, i) => (
-                          <div key={q.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-                            <div style={{ fontWeight: 700 }}>
-                              #{i + 1} {q.username}{" "}
-                              <span style={{ color: "var(--muted)", fontWeight: 400 }}>
-                                — {q.bestScore.toFixed(1)}{q.bestRun ? `, ${q.bestRun.w}–${q.bestRun.l}` : ""}
-                              </span>
-                            </div>
-                            {q.bestRun && <RosterChips roster={q.bestRun.roster} />}
-                          </div>
-                        ))}
+                  <div className="recap">
+                    {site.bestLineups.map((q, i) => (
+                      <div key={q.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+                        <div style={{ fontWeight: 700 }}>
+                          #{i + 1} {q.username}{" "}
+                          <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+                            — {q.bestScore.toFixed(1)}{q.bestRun ? `, ${q.bestRun.w}–${q.bestRun.l}` : ""}
+                          </span>
+                        </div>
+                        {q.bestRun && <RosterChips roster={q.bestRun.roster} />}
                       </div>
-                    )}
-
-                    <h3 style={{ marginTop: 18 }}>Most-drafted players</h3>
-                    <p className="note" style={{ marginTop: 0 }}>
-                      From the last 10 finished runs of the 300 most recently active players - not everyone who's ever played.
-                    </p>
-                    {hof.drafted.length === 0 ? (
-                      <p className="note" style={{ marginTop: 0 }}>No runs yet.</p>
-                    ) : (
-                      <div className="recap">
-                        {hof.drafted.map((p, i) => (
-                          <div className="rc" key={i}>
-                            <div className="n">{i + 1}</div>
-                            <div><div className="bd">{p.season} {TEAMS[p.team] ? TEAMS[p.team][0] : p.team}</div><div className="tk">{p.name}</div></div>
-                            <div className="alt">{p.count} draft{p.count === 1 ? "" : "s"}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
+                    ))}
+                  </div>
                 )}
+
+                <h2 className="h" style={{ marginTop: 22 }}>Most-drafted players</h2>
+                {site.mostDrafted.length === 0 ? (
+                  <p className="note" style={{ marginTop: 0 }}>No runs yet.</p>
+                ) : (
+                  <div className="recap">
+                    {site.mostDrafted.map((p, i) => (
+                      <div className="rc" key={i}>
+                        <div className="n">{i + 1}</div>
+                        <div><div className="bd">{p.season} {TEAMS[p.team] ? TEAMS[p.team][0] : p.team}</div><div className="tk">{p.name}</div></div>
+                        <div className="alt">{p.count} draft{p.count === 1 ? "" : "s"}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <h2 className="h" style={{ marginTop: 22 }}>Position records</h2>
+                <div className="recap">
+                  {POS_RECORD_SLOTS.map(([bucket, label]) => {
+                    const p = site.posRecords[bucket];
+                    return (
+                      <div className="rc" key={bucket}>
+                        <div className="n">{label}</div>
+                        {p ? (
+                          <>
+                            <div><div className="bd">{p.season} {TEAMS[p.team] ? TEAMS[p.team][0] : p.team}</div><div className="tk">{p.name}</div></div>
+                            <div className="alt">{p.username}</div>
+                          </>
+                        ) : (
+                          <div className="alt">No record yet.</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <h2 className="h" style={{ marginTop: 22 }}>Most career wins</h2>
+                <RankRows rows={site.mostWins} empty="No finished drafts yet." value={(q) => `${q.wins}–${q.losses}`} />
+
+                <h2 className="h" style={{ marginTop: 22 }}>Most championships</h2>
+                <RankRows rows={site.mostChamps} empty="No championships yet." value={(q) => q.champs} />
+
+                <h2 className="h" style={{ marginTop: 22 }}>Most playoff appearances</h2>
+                <RankRows rows={site.mostPlayoffs} empty="No playoff runs yet." value={(q) => q.playoffs} />
+
+                <h2 className="h" style={{ marginTop: 22 }}>Longest daily streak</h2>
+                <RankRows rows={site.longestStreaks} empty="No daily streaks yet." value={(q) => `${q.dailyBestStreak} day${q.dailyBestStreak === 1 ? "" : "s"}`} />
+
+                <h2 className="h" style={{ marginTop: 22 }}>Best win percentage</h2>
+                <p className="note" style={{ marginTop: 0 }}>Minimum 3 finished drafts.</p>
+                <RankRows rows={site.bestWinPct} empty="Not enough finished drafts yet." value={(q) => `${Math.round(q.pct * 100)}%`} />
+
+                <h2 className="h" style={{ marginTop: 22 }}>Best GM-mode score</h2>
+                <RankRows rows={site.bestGm} empty="No GM-mode runs yet." value={(q) => q.score.toFixed(1)} />
               </>
             )}
           </>

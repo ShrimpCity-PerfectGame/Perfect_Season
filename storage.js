@@ -130,15 +130,21 @@ export async function upsertSouRun(date, userId, row) {
   return !error;
 }
 
-// Hall of fame's "most-drafted players" needs every roster anyone's actually drafted, not just
-// each profile's single best one - the closest available signal is each profile's own `recent`
-// (their last 10 finished runs). Deliberately bounded to the most-recently-active profiles
-// (order + limit) rather than an unbounded full-table scan, since this is new code with no
-// existing precedent to match.
-export async function fetchRecentRosters(limit = 300) {
-  const { data, error } = await getClient().from("profiles").select("recent").order("updated_at", { ascending: false }).limit(limit);
+// The Stats screen's one data source: every leaderboard there (best lineups, most-drafted
+// players, most wins/championships/playoffs, longest streak, win %, position records, best
+// GM-mode score) is a different client-side sort/aggregation over this same fetched array,
+// since wins/losses/champs/perfect/playoffs/daily_best_streak/best_run/recent are all columns on
+// the same profiles row - one query instead of one per stat. Deliberately bounded to the
+// most-recently-active profiles (order + limit) rather than an unbounded full-table scan, so a
+// stat like "best lineups ever" is really "best among recently active players," not everyone
+// who's ever played - the same honesty tier as this app's other partial-sample stats (Stats
+// O/U's "career" caveat, Build-a-player's last-season-only pool).
+export async function fetchStatsProfiles(limit = 300) {
+  const { data, error } = await getClient().from("profiles")
+    .select("id, username, runs, dnf, best_score, best_run, wins, losses, champs, perfect, playoffs, daily_streak, daily_last, daily_best_streak, recent")
+    .order("updated_at", { ascending: false }).limit(limit);
   if (error || !data) return [];
-  return data.flatMap((r) => r.recent || []).filter((run) => !run.dnf && run.roster);
+  return data.map(rowToProfile);
 }
 
 // One channel, two live concerns: a concurrent-players count via Supabase Realtime Presence
