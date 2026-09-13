@@ -1239,6 +1239,62 @@ function AdminPanel({ openSlots, onForceBoard, onForcePlayer, onForceOutcome }) 
   );
 }
 
+// Read-only companion to the draft board: browse every player who's ever qualified for a board,
+// by team and era - no drafting, just the same card/section markup the live board uses (minus
+// the "hit"/"drafts" interactive bits) so it looks and feels like the same data.
+function PlayerIndex() {
+  const [team, setTeam] = useState("");
+  const [w, setW] = useState("");
+  const key = team && w !== "" ? `${team}|${w}` : null;
+  const board = key ? BOARDS[key] || [] : [];
+  return (
+    <>
+      <h2 className="h">Players</h2>
+      <p className="note" style={{ marginTop: 0 }}>
+        Browse every player who's ever qualified for a board, by team and era.
+      </p>
+      <div className="frow" style={{ flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+        <select className="inp" value={team} onChange={(e) => setTeam(e.target.value)}>
+          <option value="">Choose a team</option>
+          {TEAM_CODES.map((t) => <option key={t} value={t}>{TEAMS[t][0]}</option>)}
+        </select>
+        <select className="inp" value={w} onChange={(e) => setW(e.target.value)}>
+          <option value="">Choose an era</option>
+          {WINDOWS.map((win, i) => <option key={i} value={i}>{win[0]}–{win[1]}</option>)}
+        </select>
+      </div>
+      {!key ? (
+        <p className="note">Pick a team and an era to see who's on the board.</p>
+      ) : board.length === 0 ? (
+        <p className="note">No players qualified for {TEAMS[team][0]}, {WINDOWS[w][0]}–{WINDOWS[w][1]}.</p>
+      ) : (
+        POS.map((pos) => {
+          const list = board.filter((p) => p.pos === pos);
+          if (!list.length) return null;
+          return (
+            <section className={`sec pos-${pos}`} key={pos}>
+              <div className="hd"><h3>{POS_NAME[pos]}</h3></div>
+              {list.map((p) => (
+                <div className="card" key={`${p.id}-${p.season}`}>
+                  <div className="row">
+                    <div>
+                      <div className="nm-row"><span className="pp">{p.pos}</span><span className="nm">{p.name}</span></div>
+                      <div className="meta"><span className="tdot" style={teamVars(p.team)} />{p.season} {teamLabel(p.team, p.season)}, {p.g} games</div>
+                    </div>
+                    <div className="cells">
+                      {statCells(p).map(([n, l]) => (<div className="cell" key={l}><div className="n">{n}</div><div className="l">{l}</div></div>))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </section>
+          );
+        })
+      )}
+    </>
+  );
+}
+
 function RosterRows({ roster }) {
   return (
     <div className="reveal">
@@ -2147,7 +2203,7 @@ export default function PerfectSeason() {
       <style>{CSS}</style>
       <div className="wrap">
         <nav className="nav" aria-label="Sections">
-          {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["board", "Leaderboard"]].map(([k, l]) => (
+          {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"]].map(([k, l]) => (
             <button key={k} className={`tab ${view === k ? "on" : ""}`} aria-current={view === k ? "page" : undefined}
               onClick={() => { setView(k); if (k === "home") refreshWip(); if (k === "board") { loadLeaderboard(); loadDailyBoard(); } }}>
               {l}{k === "play" && view !== "play" && mode && open.length < 6 && !result && <span className="dot" aria-label="Draft in progress" />}
@@ -2734,6 +2790,9 @@ export default function PerfectSeason() {
             )}
           </>
         )}
+
+        {/* ---------------- PLAYER INDEX ---------------- */}
+        {view === "players" && <PlayerIndex />}
 
         {/* ---------------- BUILD-A-PLAYER ---------------- */}
         {view === "buildplayer" && bap && bap.stage === "pickpos" && (

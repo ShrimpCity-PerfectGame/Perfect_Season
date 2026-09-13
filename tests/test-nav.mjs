@@ -1,5 +1,5 @@
 // Landing page, mode switching, and draft resume.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, selectOption } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -37,6 +37,25 @@ await runTest("draft in progress is resumable from the home screen", async () =>
   await flush();
   const t = text(container);
   assert(/1 of 6|resume/i.test(t) || t.includes("Draft"), "expected some indication of an in-progress draft on the home screen");
+});
+
+await runTest("the Players tab browses the board by team and era, read-only", async () => {
+  await click(findButtonByText(container, "Players"));
+  await flush();
+  assert(container.querySelector("h2.h")?.textContent === "Players", "expected the Players view");
+  assert(text(container).includes("Pick a team and an era"), "expected the empty-state prompt before choosing a team/era");
+
+  const [teamSelect, eraSelect] = container.querySelectorAll(".frow select.inp");
+  assert(teamSelect && eraSelect, "expected team and era dropdowns");
+  const teamValue = [...teamSelect.options].find((o) => o.value)?.value;
+  await selectOption(teamSelect, teamValue);
+  await selectOption(eraSelect, "4"); // 2021-2025, guaranteed to have last-season data
+  await flush();
+
+  const t = text(container);
+  assert(!t.includes("Pick a team and an era"), "expected the prompt to go away once a team/era is chosen");
+  assert(container.querySelector(".sec"), "expected position sections once a board is chosen");
+  assert(!container.querySelector(".card button.hit"), "the player index must be read-only - no draftable cards");
 });
 
 console.log("test-nav.mjs done");

@@ -263,6 +263,17 @@ export async function type(el, value) {
   });
 }
 
+// Same idea as type(), but for <select> - HTMLSelectElement's value setter isn't inherited from
+// HTMLInputElement, so type()'s setter lookup doesn't apply to it.
+export async function selectOption(el, value) {
+  const act = await getAct();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+    setter.call(el, value);
+    el.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+}
+
 export function text(container) {
   return container.textContent;
 }
