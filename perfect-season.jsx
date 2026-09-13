@@ -853,6 +853,7 @@ h2.h{font-family:var(--display);font-weight:800;font-size:24px;color:var(--ink);
 .ptsval.down{color:var(--loss)}
 .ptspar{font-size:13px;color:var(--muted)}
 .bankrow{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.flexnote{border-left:3px solid var(--lamp);padding-left:12px;margin-top:10px}
 .dailycta{display:flex;gap:8px;flex-wrap:wrap}
 .dailycta .btn{display:inline-flex;align-items:center}
 .modes{display:grid;gap:10px;margin-bottom:18px}
@@ -1323,7 +1324,7 @@ function HowTo({ onClose }) {
         <h2 id="howto-title">How to play</h2>
         <ol>
           <li>Each round spins a <b>team and a five-year era</b>, like "Rams, 1999–2005." Draft one player from that board.</li>
-          <li>Fill six spots: <b>QB, RB, WR, TE, and two Flex</b>. A Flex can be any RB, WR, or TE.</li>
+          <li>Fill six spots: <b>QB, RB, WR, TE, and two Flex</b>. A Flex can be any RB, WR, or TE — and it's graded on raw production rather than against his own position, with no upper limit, so <b>your best player is often worth more in Flex</b> than in his natural spot.</li>
           <li>Every player shows <b>his best season</b> for that team in that era. The stats are real. The fantasy points are hidden.</li>
           <li>You get <b>one team re-spin and one era re-spin</b> per draft. Use them wisely.</li>
           <li>Play <b>unlimited</b> drafts any time, or take the <b>daily</b> — one draft a day, the same boards for everyone.</li>
@@ -2653,7 +2654,8 @@ export default function PerfectSeason() {
                   <>
                     <h2 className="h">Your roster, graded</h2>
                     <RosterRows roster={SLOTS.map((s) => ({ slot: s, ...roster[s], rating: effectiveRating(s, roster[s], mode.format) }))} />
-                    <p className="note">Grades compare each season to the top finishers at that position in the same era, with 17-game seasons scaled to 16. {normFormat(mode.format) === "standard" ? "Championship scoring counts yards and touchdowns only - receptions are worth nothing, so volume receivers rate lower and big-play producers rate higher than they do in Fantasy scoring." : "Fantasy scoring is full PPR, so every reception is worth a point."} QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Flex is graded on production alone, not position - no positional bump either way. Team score averages the six, with the QB counting 1.25 times.</p>
+                    <p className="note">Grades compare each season to the top finishers at that position in the same era, with 17-game seasons scaled to 16. {normFormat(mode.format) === "standard" ? "Championship scoring counts yards and touchdowns only - receptions are worth nothing, so volume receivers rate lower and big-play producers rate higher than they do in Fantasy scoring." : "Fantasy scoring is full PPR, so every reception is worth a point."} QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Team score averages the six, with the QB counting 1.25 times.</p>
+                    <p className="note flexnote"><b>Flex is graded differently, on purpose.</b> A named slot compares a player to others at his own position. Flex ignores position entirely and compares raw production across every RB, WR and TE of that era — so a tight end usually rates lower in Flex, and a high-volume back rates higher. Flex is also the only slot with no 130 ceiling: a named slot clips an all-time season at 130, Flex shows its full value. <b>That's why your best player often belongs in Flex rather than his own position.</b></p>
                     {history.length === 6 && (() => {
                       // Board players carry both formats' grades; show the one actually in play.
                       const rate = (p) => (normFormat(mode.format) === "standard" ? p.stdRating : p.rating);
@@ -2691,7 +2693,7 @@ export default function PerfectSeason() {
                                 const [tm, w] = a.key.split("|");
                                 return { slot: s, ...a.player, rating: effectiveRating(s, a.player, mode.format), board: `${TEAMS[tm][0]} ${WINDOWS[w][0]}–${WINDOWS[w][1]}` };
                               })} />
-                              <p className="note recap-optimal">This assumes hindsight of all six boards you saw - it's what the ideal slot assignment would have scored, not a board you missed.</p>
+                              <p className="note recap-optimal">This assumes hindsight of all six boards you saw - it's what the ideal slot assignment would have scored, not a board you missed. If it's moved your best player into Flex, that's the reason: Flex has no 130 ceiling, so a monster season is worth more there than in his own position.</p>
                             </>
                           )}
                         </>

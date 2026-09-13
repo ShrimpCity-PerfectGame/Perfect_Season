@@ -115,9 +115,23 @@ teamScore = (1.25 × QB + RB + WR + TE + Flex1 + Flex2) / 6.25
 
 Ratings are **capped at 130**, so one monster season can't carry five bad picks. The cap is applied
 when the rating is computed, not at team-score time — nothing in `data/players.json` exceeds 130,
-and 40 seasons sit exactly at it. (A Flex rating is the one exception: it's a pool z-score rescale
-and is left uncapped in both formats.) The team score is what the leaderboard ranks and what the
-season simulation uses.
+and 40 seasons sit exactly at it. The team score is what the leaderboard ranks and what the season
+simulation uses.
+
+**Flex is the deliberate exception, and it matters.** A Flex rating is a pool z-score rescale and is
+left **uncapped** in both formats, so it's the only place an all-time season shows its full value:
+Christian McCaffrey's 2019 is clipped to 130 at RB but rates **168** in Flex. Consequently *your
+best player usually belongs in Flex rather than his own position* — a real strategic lever, not an
+accident. This is explained in-game (the grading note under the graded roster, the "Best possible
+order" note, and How to play), because while it went unexplained it just read as a bug.
+
+The cap's second job is protecting the simulation: `winProb` is decided outright at a 20-point gap
+and the strongest opponent is rated 120, so a team score of 140 would beat every opponent in the
+game automatically. Uncapped Flex can't realistically reach that, because the named slots stay
+capped — it would take two 168-caliber Flex players plus three clipped named picks on the same six
+boards. Across 400 best-available drafts the highest team score observed was 129.2. **If the player
+data is ever regenerated or re-rated, re-check that headroom**; it's the assumption that makes
+uncapped Flex safe.
 
 ## Step 7 — Letter grades (display only)
 

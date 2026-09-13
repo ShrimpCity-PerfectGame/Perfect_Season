@@ -327,8 +327,18 @@ export function replayDraft(seed, history, seq) {
 // combined RB/WR/TE pool per era window, then rescale onto the numeric range `rating` already
 // occupies for that same pool, so team-score math doesn't need to change - only which player
 // comes out on top for a Flex spot.
-// Note this is intentionally NOT capped at RATING_CAP, in either format - it's a rescale of a
-// pool z-score, and capping it would change which player wins a Flex spot.
+// Deliberately NOT capped at RATING_CAP, unlike the named-slot ratings baked into the data. This
+// is the one place an all-time season can show its full value: a named slot clips McCaffrey 2019 to
+// 130, while Flex rates him 168. Flex is therefore where your best player usually belongs, and the
+// draft recap and the grading note both say so - it was only confusing while it went unexplained.
+//
+// The cap's other job is keeping team scores inside the range where the season simulation still has
+// any uncertainty: winProb is decided outright at a 20-point gap and the strongest opponent is
+// rated 120, so a team score of 140 would beat everything in the game automatically. Uncapped Flex
+// can't realistically get there - named slots are still hard-capped, so it would take TWO
+// 168-caliber Flex players plus three capped named picks on the same six boards. Across 400
+// best-available drafts the highest team score seen was 129.2. If that ever stops being true (new
+// season data, a re-rating), this is the first thing to re-check.
 export function flexRating(p, format) {
   const std = normFormat(format) === "standard";
   const s = (std ? flexStatsByEraStd : flexStatsByEra)[p.w];

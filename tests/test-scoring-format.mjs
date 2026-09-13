@@ -81,10 +81,59 @@ await runTest("standard flex rating draws on the standard pool, not the PPR pool
   // a receiver who got there on volume falls.
   const share = (p) => p.rec / p.ppr;
   for (const p of flex) {
-    const delta = GL.flexRating(p, "standard") - GL.flexRating(p, "fantasy");
+    const fan = GL.flexRating(p, "fantasy"), std = GL.flexRating(p, "standard");
+    // A player clamped at the cap in both formats can't show movement - the clamp hides it. That's
+    // the cap working, not the format failing to apply, so those are out of scope here.
+    if (fan >= GL.RATING_CAP && std >= GL.RATING_CAP) continue;
+    const delta = std - fan;
     if (share(p) > 0.4) assert(delta < 0, `${p.name} ${p.season} earned ${(100 * share(p)).toFixed(0)}% of his points on receptions and should fall, moved ${delta.toFixed(2)}`);
     if (share(p) < 0.2) assert(delta > 0, `${p.name} ${p.season} barely scored on receptions and should rise, moved ${delta.toFixed(2)}`);
   }
+});
+
+await runTest("Flex is deliberately uncapped, so an all-time season can show its full value", async () => {
+  // This is intended behaviour, not an oversight - it's the one slot where a season above the cap
+  // isn't clipped, which is why your best player usually belongs in Flex. Pinned because it looks
+  // like a bug from the outside and has already been "fixed" once by mistake. If you're changing
+  // this, change the player-facing explanations with it (the grading note under the graded roster,
+  // the Best possible order note, HowTo, and SCORING.md) - it was only ever confusing because it
+  // went unexplained.
+  const over = all.filter((p) => GL.FLEX_POS.includes(p.pos) && GL.flexRating(p, "fantasy") > GL.RATING_CAP);
+  assert(over.length > 0, "expected some all-time seasons to rate above the cap in Flex");
+
+  const mcc = all.find((p) => p.name === "Christian McCaffrey" && p.season === 2019);
+  assert(mcc, "expected McCaffrey's 2019 season on a board");
+  assert(GL.effectiveRating("RB", mcc, "fantasy") === GL.RATING_CAP, "his named-slot rating should be clipped at the cap");
+  assert(GL.effectiveRating("FLEX1", mcc, "fantasy") > GL.RATING_CAP + 20, "his Flex rating should show the value the cap hides");
+});
+
+await runTest("uncapped Flex still can't push a real draft into auto-win territory", async () => {
+  // The cap's other job is keeping team scores inside the band where the season sim is uncertain:
+  // the strongest opponent is 120 and winProb is decided outright at a 20-point gap, so a team
+  // score of 140 beats everything automatically. Named slots stay hard-capped, so reaching that
+  // needs two all-timers in Flex on the same six boards. This guards the headroom.
+  let best = 0;
+  for (let i = 0; i < 150; i++) {
+    const seq = GL.seededSequence("CEIL" + i);
+    const roster = {}; const drafted = new Set();
+    let idx = GL.boardAt(seq, 0, roster); let ok = true;
+    for (let k = 0; k < 6; k++) {
+      const open = GL.SLOTS.filter((s) => !roster[s]); const c = [];
+      for (const p of GL.BOARDS[seq[idx]] || []) {
+        if (drafted.has(p.id)) continue;
+        for (const s of open) if (GL.fits(p.pos, s)) c.push({ p, s, r: GL.effectiveRating(s, p, "fantasy") });
+      }
+      if (!c.length) { ok = false; break; }
+      c.sort((a, b) => b.r - a.r);
+      roster[c[0].s] = c[0].p; drafted.add(c[0].p.id);
+      if (k < 5) idx = GL.boardAt(seq, idx + 1, roster);
+    }
+    if (!ok) continue;
+    let t = 0, w = 0;
+    for (const s of GL.SLOTS) { const k = s === "QB" ? GL.QB_WEIGHT : 1; t += GL.effectiveRating(s, roster[s], "fantasy") * k; w += k; }
+    best = Math.max(best, t / w);
+  }
+  assert(best < 140, `a best-available draft reached ${best.toFixed(1)}, which auto-beats every opponent - the sim has lost its headroom`);
 });
 
 await runTest("volume compilers fall and big-play producers rise", async () => {
