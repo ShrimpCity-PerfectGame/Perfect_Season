@@ -56,6 +56,8 @@ export function makeMockAuth() {
           // `is not null` must treat a column that was simply never set the same as one
           // explicitly set to null (e.g. a fresh signup's row has no best_score key at all).
           not(col, _op, val) { state.filters.push((r) => (r[col] ?? null) !== val); return builder; },
+          // An unset column is 0 for the numeric points ladders, matching their `not null default 0`.
+          gt(col, val) { state.filters.push((r) => (r[col] ?? 0) > val); return builder; },
           order(col, opts) { state.order = { col, asc: opts?.ascending !== false }; return builder; },
           limit(n) { state.limit = n; return builder; },
           single() {

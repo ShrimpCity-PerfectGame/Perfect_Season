@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchStatsProfiles, subscribeSiteActivity,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchStatsProfiles, subscribeSiteActivity, fetchLadderTop,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, submitRun, submitDnf,
@@ -13,6 +13,7 @@ import {
   flexRating, effectiveRating, winProb, shuffle, windowedShuffle, tagOpp, buildTimeline, simulateSeason,
   applyDnf, LOSER_PTS, MARGINS, nextStreak, GM_CAP, playerSalary, REROLL_BUDGET,
   passerRating, normFormat, BEST_FIELDS, FORMATS,
+  botPar, draftPoints, modeKey, LADDERS,
 } from "./game-logic.mjs";
 initGameData(gameData.players, gameData.opponents);
 
@@ -846,6 +847,12 @@ h2.h{font-family:var(--display);font-weight:800;font-size:24px;color:var(--ink);
 .fmtbtn.on{background:var(--lamp);color:#241704;border-color:transparent}
 .fmtsub{font-weight:700;font-size:11px;opacity:.75;letter-spacing:.02em}
 .fmtnote{flex-basis:100%;margin:2px 0 0;color:var(--muted);font-size:13.5px;max-width:66ch}
+.pts{margin-top:8px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ptsval{font-family:var(--display);font-weight:800;font-size:23px;line-height:1}
+.ptsval.up{color:var(--lamp)}
+.ptsval.down{color:var(--loss)}
+.ptspar{font-size:13px;color:var(--muted)}
+.bankrow{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .dailycta{display:flex;gap:8px;flex-wrap:wrap}
 .dailycta .btn{display:inline-flex;align-items:center}
 .modes{display:grid;gap:10px;margin-bottom:18px}
@@ -1222,6 +1229,8 @@ const slotId = (m) => (m.kind === "daily" ? `daily:${normFormat(m.format)}` : "f
 const scoreOf = (p, format) => (p ? p[BEST_FIELDS[normFormat(format)].score] ?? null : null);
 const runOf = (p, format) => (p ? p[BEST_FIELDS[normFormat(format)].run] ?? null : null);
 const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };
+const LADDER_LABEL = { daily: "Daily", unlimited: "Unlimited", genius: "Genius", gm: "GM" };
+const pointsOf = (p, ladder) => (p?.points?.[ladder] ?? 0);
 const HOWTO_KEY = "ps-howto-seen";
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
@@ -1379,6 +1388,10 @@ export default function PerfectSeason() {
   const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [], format: "fantasy" });
+  // The points ladder currently being viewed, and its rows. Paired the same way lb/lbFormat are,
+  // so the rows and the column that reads them can never describe different ladders.
+  const [ladder, setLadder] = useState({ loading: false, rows: [], mode: "unlimited" });
+  const [ladderMode, setLadderMode] = useState("unlimited");
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, profiles: [], buildCount: 0, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
@@ -1509,10 +1522,14 @@ export default function PerfectSeason() {
   // profiles is no longer client-writable at all (see supabase/schema.sql) - a DNF applies
   // optimistically to local state for instant UI feedback (same shape the server will also
   // compute, via the same shared applyDnf), then confirms through submit-run in the background.
-  function recordDnf(picks) {
+  // `m` is the mode being abandoned - needed so the points penalty lands on the right ladder.
+  // Defaults to the live mode, but callers that read a saved draft off storage pass that draft's
+  // own mode, since it may not be the one currently loaded.
+  function recordDnf(picks, m = mode) {
     if (!user || !stats) return;
-    setStats(applyDnf(stats, picks));
-    submitDnf(picks).then((ok) => setSaveError(!ok));
+    const ladder = modeKey({ mode: m?.kind, gm: m?.gm, genius: m?.genius });
+    setStats(applyDnf(stats, picks, ladder));
+    submitDnf(picks, ladder).then((ok) => setSaveError(!ok));
   }
 
   // Submits a draft trace to submit-run and, once the server has independently replayed and
@@ -1717,6 +1734,14 @@ export default function PerfectSeason() {
     const sim = forcedScenario ? forceSeason(forcedScenario) : withSeed(`${mode.seed}#${lineup}`, () => simulateSeason(score));
     sim.score = score;
     sim.format = fmt;
+    // Computed locally so the result screen can show points immediately, exactly like the score
+    // and the season animation. The server independently recomputes both from the verified boards
+    // and its own numbers are what actually get stored - an honest client just sees the same ones.
+    if (!forcedScenario && finishedHistory) {
+      const par = botPar(finishedHistory.map((h) => h.key), { format: fmt, gm: !!mode.gm });
+      sim.par = par ?? undefined;
+      sim.points = draftPoints(score, par);
+    }
     const runRoster = SLOTS.map((s) => ({ slot: s, name: r[s].name, team: r[s].team, season: r[s].season, ppr: r[s].ppr, rating: effectiveRating(s, r[s], fmt) }));
     // Both "best" comparisons are per format - the leaderboard on screen and this profile's best
     // are whichever format was just played, never the other one's numbers.
@@ -1745,7 +1770,7 @@ export default function PerfectSeason() {
       // ambiguity to probe.
       const trace = {
         mode: { kind: mode.kind, seed: mode.seed, code: mode.code, date: mode.date, gm: mode.gm },
-        history: finishedHistory, seq, gm: !!mode.gm, format: fmt,
+        history: finishedHistory, seq, gm: !!mode.gm, genius: !!mode.genius, format: fmt,
       };
       if (user) submitAndSync(userId, trace);
       else setPending(trace);
@@ -1816,14 +1841,24 @@ export default function PerfectSeason() {
   }, [bap]);
 
   // Ending an unlimited draft early is a DNF; the draft itself is cleared.
-  function abandonCurrent() {
-    if (mode && mode.kind === "free" && !result && history.length > 0) recordDnf(history.length);
+  // Charges a DNF for the saved Unlimited draft this is about to wipe, then wipes it.
+  //
+  // Reads the draft out of storage rather than trusting the live `mode`/`history`, because those
+  // describe whatever is loaded right now, which often isn't the draft being destroyed: sitting in
+  // a Daily and tapping Unlimited used to clear a half-finished Unlimited draft without charging
+  // anything for it. Same reasoning as openFree, which already does it this way.
+  //
+  // It is also the single place a DNF is charged for an abandoned free draft - resetDraft used to
+  // charge one itself and then call restart(), which charged a second one for the same draft.
+  async function abandonCurrent() {
+    const saved = await sget(FREE_PROGRESS, false);
+    if (validDraft(saved) && saved.mode.kind === "free") recordDnf(saved.history.length, saved.mode);
     clearDraftTracked("free", FREE_PROGRESS);
     setWip((w) => ({ ...w, free: 0 }));
   }
 
-  function restart(extra) {
-    abandonCurrent();
+  async function restart(extra) {
+    await abandonCurrent();
     clearDraft(DRAFT_KEY);
     setView("play");
     startDraft({ kind: "free", code: newCode(), format, ...extra });
@@ -2076,16 +2111,25 @@ export default function PerfectSeason() {
     startDraft({ kind: "free", code: newCode(), ...want });
   }
 
-  function startCode(raw) {
+  async function startCode(raw) {
     const code = (raw || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
     if (code.length < 4) return;
-    abandonCurrent();
+    // Awaited so the abandoned draft is read and charged before it's wiped.
+    await abandonCurrent();
     clearDraft(DRAFT_KEY);
     setCodeInput("");
     setView("play");
     // Carries the current format, so entering a code while Championship is selected doesn't
     // silently drop you back into full-PPR scoring.
     startDraft({ kind: "free", code, format });
+  }
+
+  async function loadLadder(m) {
+    const mk = LADDERS.includes(m) ? m : ladderMode;
+    setLadder({ loading: true, rows: [], mode: mk });
+    try {
+      setLadder({ loading: false, rows: await fetchLadderTop(mk, 10), mode: mk });
+    } catch (e) { setLadder({ loading: false, rows: [], mode: mk }); }
   }
 
   async function loadDailyBoard(f) {
@@ -2106,7 +2150,7 @@ export default function PerfectSeason() {
       return;
     }
     setConfirmReset(false);
-    recordDnf(history.length);
+    // restart() -> abandonCurrent() charges the DNF. Charging one here too double-counted it.
     restart();
   }
 
@@ -2179,7 +2223,7 @@ export default function PerfectSeason() {
         <nav className="nav" aria-label="Sections">
           {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"], ["stats", "Stats"]].map(([k, l]) => (
             <button key={k} className={`tab ${view === k ? "on" : ""}`} aria-current={view === k ? "page" : undefined}
-              onClick={() => { setView(k); if (k === "home") refreshWip(); if (k === "board") { loadLeaderboard(); loadDailyBoard(); } if (k === "stats" && !siteStats.loaded) loadSiteStats(); }}>
+              onClick={() => { setView(k); if (k === "home") refreshWip(); if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); } if (k === "stats" && !siteStats.loaded) loadSiteStats(); }}>
               {l}{k === "play" && view !== "play" && mode && open.length < 6 && !result && <span className="dot" aria-label="Draft in progress" />}
             </button>
           ))}
@@ -2391,7 +2435,7 @@ export default function PerfectSeason() {
                   {!dailyDone[otherFormat] && (
                     <button className="btn solid" onClick={() => startDaily(otherFormat)}>Play the {FORMAT_LABEL[otherFormat]} daily</button>
                   )}
-                  <button className="btn" onClick={restart}>Play an unlimited draft</button>
+                  <button className="btn" onClick={() => restart()}>Play an unlimited draft</button>
                   <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>Today's leaderboard</button>
                 </div>
               </div>
@@ -2540,6 +2584,19 @@ export default function PerfectSeason() {
                   </span></div>
                   <div className="outcome">{finished ? result.outcome : inPlayoffs ? "Playoffs" : "Playing the season…"}</div>
                   <div className="rating">Team score {result.score.toFixed(1)}</div>
+                  {/* Points are what the ladder ranks, so they're the headline once the season is
+                      done - and showing par next to them is what makes the number legible. */}
+                  {finished && result.par != null && (
+                    <div className="pts">
+                      <span className={`ptsval ${result.points >= 0 ? "up" : "down"}`}>
+                        {result.points >= 0 ? "+" : ""}{result.points.toLocaleString()} points
+                      </span>
+                      <span className="ptspar">
+                        you {result.score.toFixed(1)} · par {result.par.toFixed(1)}
+                        {result.score > result.par ? " · beat the bot" : ""}
+                      </span>
+                    </div>
+                  )}
                   {finished && (
                     <div className="place">
                       {lb.loading && !place ? "Ranking your season…" : place && (
@@ -2642,7 +2699,7 @@ export default function PerfectSeason() {
                     })()}
                     <div className="frow" style={{ marginTop: 16 }}>
                       <button className="btn solid" onClick={doShare}>{share.state === "copied" ? "Copied to clipboard" : share.state === "shared" ? "Shared" : "Share result"}</button>
-                      <button className="btn" onClick={restart}>Draft a new team</button>
+                      <button className="btn" onClick={() => restart()}>Draft a new team</button>
                       <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>See the leaderboard</button>
                     </div>
                     {mode.kind === "free" && (
@@ -2697,6 +2754,21 @@ export default function PerfectSeason() {
                   ))}
                   <div className="tile"><div className="n">{stats.dailyStreak && (stats.dailyLast === todayKey() || nextStreak(stats, todayKey()) > 1) ? stats.dailyStreak : 0}</div>
                     <div className="l">Daily streak{stats.dailyBestStreak ? `, best ${stats.dailyBestStreak}` : ""}</div></div>
+                </div>
+
+                <h2 className="h" style={{ marginTop: 20 }}>Points</h2>
+                <p className="note" style={{ marginTop: 0 }}>
+                  Your bank is every point you've ever earned and is what the shop will spend — spending
+                  it won't cost you ladder position. Each mode ranks separately.
+                </p>
+                <div className="tiles">
+                  <div className="tile"><div className="n">{Math.round(stats.pointsBank || 0).toLocaleString()}</div><div className="l">Bank</div></div>
+                  {LADDERS.map((m) => (
+                    <div className="tile" key={m}>
+                      <div className="n">{Math.round(pointsOf(stats, m)).toLocaleString()}</div>
+                      <div className="l">{LADDER_LABEL[m]} ladder</div>
+                    </div>
+                  ))}
                 </div>
 
                 {FORMATS.filter((f) => runOf(stats, f)).map((f) => {
@@ -2781,7 +2853,44 @@ export default function PerfectSeason() {
                   </table>
                 )}
 
-                <h2 className="h">Draft a friend's board</h2>
+                {/* The points ladder. Unlike team score, this doesn't saturate - it ranks how well
+                    you drafted the boards you were dealt, accumulated, so it stays contestable. */}
+                <div className="dayhead" style={{ marginTop: 24 }}>
+                  <h2 className="h">Points ladder — {LADDER_LABEL[ladder.mode]}</h2>
+                  <button className="linkbtn" onClick={() => loadLadder()} disabled={ladder.loading}>{ladder.loading ? "Loading…" : "Refresh"}</button>
+                </div>
+                <div className="fmtpick" role="group" aria-label="Points ladder mode">
+                  <span className="fmtlabel">Mode</span>
+                  {LADDERS.map((m) => (
+                    <button key={m} className={`fmtbtn ${ladderMode === m ? "on" : ""}`} aria-pressed={ladderMode === m}
+                      onClick={() => { setLadderMode(m); loadLadder(m); }}>{LADDER_LABEL[m]}</button>
+                  ))}
+                  <p className="fmtnote">
+                    Every draft is scored against a bot that played your six boards. Beat it and you gain
+                    points, draft badly and you lose them — so the top needs good drafts and a lot of them.
+                    Both scoring formats earn onto the same ladder.
+                  </p>
+                </div>
+                {ladder.rows.length === 0 ? (
+                  <p className="note" style={{ marginTop: 0 }}>
+                    {ladder.loading ? "Loading the ladder…" : `No one has earned points in ${LADDER_LABEL[ladder.mode]} yet.`}
+                  </p>
+                ) : (
+                  <table className="lb">
+                    <thead><tr><th></th><th>Player</th><th className="r">Points</th><th className="r hide">Drafts</th></tr></thead>
+                    <tbody>
+                      {ladder.rows.map((q, i) => (
+                        <tr key={q.id} className={q.id === myKey ? "me" : ""}>
+                          <td className="rk">{i + 1}</td><td>{q.username}</td>
+                          <td className="r">{Math.round(pointsOf(q, ladder.mode)).toLocaleString()}</td>
+                          <td className="r hide">{draftsOf(q)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                <h2 className="h" style={{ marginTop: 24 }}>Draft a friend's board</h2>
                 <p className="note" style={{ marginTop: 0 }}>Enter a challenge code to get the exact same six boards they had.</p>
                 <div className="frow" style={{ marginBottom: 18 }}>
                   <input className="inp" value={codeInput} maxLength={8} placeholder="Code, e.g. K3F9QZ" aria-label="Challenge code"

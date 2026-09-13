@@ -84,4 +84,33 @@ await runTest("a Championship draft clicked through the real UI persists to the 
   assert(!container.textContent.includes("couldn't be saved"), "expected no save-error banner, got: " + container.textContent.slice(0, 300));
 });
 
+await runTest("a real draft through the UI earns points on the right ladder and into the bank", async () => {
+  const before = { ...auth._profiles.get(userId) };
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  // Back to Fantasy so this doesn't depend on which format the previous test left selected.
+  await click([...container.querySelectorAll(".fmtbtn")].find((b) => b.textContent.includes("Fantasy")));
+  await flush();
+  await click(findButtonByText(container, "Start a draft"));
+  await flush();
+
+  for (let round = 0; round < 6; round++) await draftFirstEligible();
+  await flush(6);
+
+  const row = auth._profiles.get(userId);
+  const earned = row.points_unlimited - (before.points_unlimited || 0);
+  assert(earned !== 0, "expected an Unlimited draft to move the unlimited ladder, it didn't move at all");
+  assert(row.points_bank - (before.points_bank || 0) === earned, "the bank should move by the same amount the ladder did");
+  assert(row.points_daily === (before.points_daily || 0), "an Unlimited draft must not touch the daily ladder");
+  assert(row.points_gm === (before.points_gm || 0), "an Unlimited draft must not touch the GM ladder");
+
+  // The result screen should show the same points the server recorded, and par alongside them.
+  const shown = container.textContent;
+  assert(/[-+]?\d[\d,]*\s*points/.test(shown), "expected the result screen to show points, got: " + shown.slice(0, 400));
+  assert(shown.includes("par "), "expected the result screen to show the bot's par next to the score");
+
+  // Today's window is recorded so later drafts can displace this one.
+  assert(row.points_day?.byMode?.unlimited?.length >= 1, "expected the draft to be recorded in today's points window");
+});
+
 console.log("test-submit-run-integration.mjs done");

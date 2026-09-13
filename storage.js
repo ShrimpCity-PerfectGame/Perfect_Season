@@ -72,6 +72,11 @@ function rowToProfile(row) {
     champs: row.champs || 0, perfect: row.perfect || 0, playoffs: row.playoffs || 0,
     bestScore: row.best_score ?? null, bestRun: row.best_run ?? null, bestRecord: row.best_record ?? null,
     bestScoreStd: row.best_score_std ?? null, bestRunStd: row.best_run_std ?? null,
+    points: {
+      daily: row.points_daily || 0, unlimited: row.points_unlimited || 0,
+      genius: row.points_genius || 0, gm: row.points_gm || 0,
+    },
+    pointsBank: row.points_bank || 0, pointsDay: row.points_day ?? null,
     recent: row.recent || [], dailyStreak: row.daily_streak || 0, dailyLast: row.daily_last ?? null,
     dailyBestStreak: row.daily_best_streak || 0, id: row.id,
   };
@@ -82,6 +87,9 @@ function profileToRow(s) {
     champs: s.champs, perfect: s.perfect, playoffs: s.playoffs,
     best_score: s.bestScore, best_run: s.bestRun, best_record: s.bestRecord, recent: s.recent || [],
     best_score_std: s.bestScoreStd, best_run_std: s.bestRunStd,
+    points_daily: s.points?.daily || 0, points_unlimited: s.points?.unlimited || 0,
+    points_genius: s.points?.genius || 0, points_gm: s.points?.gm || 0,
+    points_bank: s.pointsBank || 0, points_day: s.pointsDay ?? null,
     daily_streak: s.dailyStreak, daily_last: s.dailyLast, daily_best_streak: s.dailyBestStreak,
   };
 }
@@ -89,6 +97,8 @@ function profileToRow(s) {
 // DB-column side of the boundary.
 const BEST_COL = { fantasy: "best_score", standard: "best_score_std" };
 const bestCol = (format) => BEST_COL[format] || BEST_COL.fantasy;
+// ...and which column ranks each points ladder.
+const LADDER_COL = { daily: "points_daily", unlimited: "points_unlimited", genius: "points_genius", gm: "points_gm" };
 
 export async function fetchProfile(userId) {
   const { data } = await getClient().from("profiles").select("*").eq("id", userId).single();
@@ -105,8 +115,11 @@ export async function submitRun(trace) {
   if (error) return { ok: false };
   return data;
 }
-export async function submitDnf(picks) {
-  const { data, error } = await getClient().functions.invoke("submit-run", { body: { dnf: true, picks } });
+// `mode` is the ladder the abandoned draft belonged to, so the points penalty lands on the right
+// board. It's a tag rather than a claim about a roster - the server falls back to "unlimited" for
+// anything it doesn't recognize.
+export async function submitDnf(picks, mode) {
+  const { data, error } = await getClient().functions.invoke("submit-run", { body: { dnf: true, picks, mode } });
   if (error) return false;
   return !!data?.ok;
 }
@@ -124,6 +137,14 @@ export async function fetchOwnRank(score, format = "fantasy") {
   const { data, error } = await getClient().from("profiles").select("*");
   if (error || !data) return 0;
   return data.filter((r) => r[col] != null && r[col] > score).length;
+}
+// One points ladder. Only players who have actually earned on it are listed - a table full of
+// zeroes from accounts that never played the mode isn't a leaderboard.
+export async function fetchLadderTop(mode = "unlimited", limit = 10) {
+  const col = LADDER_COL[mode] || LADDER_COL.unlimited;
+  const { data, error } = await getClient().from("profiles").select("*").gt(col, 0).order(col, { ascending: false }).limit(limit);
+  if (error || !data) return [];
+  return data.map(rowToProfile);
 }
 export async function fetchSiteTotals() {
   const { data, error } = await getClient().from("profiles").select("*");
@@ -176,7 +197,7 @@ export async function fetchStatsProfiles(limit = 300) {
   const { data, error } = await getClient().from("profiles")
     // NOTE: an explicit column list, not select("*") - a column missing here doesn't error, it
     // just makes every leaderboard built from it render empty. Both formats' bests must be listed.
-    .select("id, username, runs, dnf, best_score, best_run, best_score_std, best_run_std, wins, losses, champs, perfect, playoffs, daily_streak, daily_last, daily_best_streak, recent")
+    .select("id, username, runs, dnf, best_score, best_run, best_score_std, best_run_std, points_daily, points_unlimited, points_genius, points_gm, points_bank, wins, losses, champs, perfect, playoffs, daily_streak, daily_last, daily_best_streak, recent")
     .order("updated_at", { ascending: false }).limit(limit);
   if (error || !data) return [];
   return data.map(rowToProfile);

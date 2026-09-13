@@ -4,7 +4,7 @@
 // calls) refuses to write anything for a fabricated score/roster, and that a legitimate
 // submission for the same account still succeeds afterward.
 import { setupDom, makeStorage, mount, flush, click, type, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth } from "./helpers.mjs";
-import { submitRun } from "../storage.js";
+import { submitRun, submitDnf } from "../storage.js";
 
 setupDom();
 window.storage = makeStorage();
@@ -178,6 +178,34 @@ await runTest("a standard-format run never lands in the fantasy best score", asy
   assert(after.best_score_std === res.run.score, `expected best_score_std to hold the standard run's score, got ${after.best_score_std}`);
   // Career counters are deliberately shared across formats.
   assert(after.runs === before.runs + 1, "the run should still count toward career totals");
+});
+
+await runTest("fabricated points and par are ignored - the server recomputes both from the verified boards", async () => {
+  const { history, seq, gl } = await buildLegitTrace("POINTSGUARD");
+  const res = await submitRun({
+    mode: { kind: "free", code: "POINTSGUARD" }, history, seq, gm: false,
+    points: 999999, par: 1, // what a client would send if it could pick its own reward
+  });
+  assert(res.ok, "expected a legitimate submission to be accepted, got: " + JSON.stringify(res));
+
+  const truePar = gl.botPar(history.map((h) => h.key), { format: "fantasy", gm: false });
+  const truePoints = gl.draftPoints(res.run.score, truePar);
+  assert(res.run.points === truePoints, `expected the server's own points (${truePoints}), got ${res.run.points}`);
+  assert(res.run.points !== 999999, "the client's fabricated points must not be stored");
+  assert(Math.abs(res.run.par - truePar) < 1e-9, `expected the server's own par (${truePar}), got ${res.run.par}`);
+
+  const row = auth._profiles.get(userId);
+  assert(row.points_bank < 10000, "a fabricated points claim must not reach the bank, bank is " + row.points_bank);
+});
+
+await runTest("a DNF's claimed mode can move the penalty but never erase it", async () => {
+  const before = { ...auth._profiles.get(userId) };
+  // An unrecognized ladder falls back to unlimited rather than being dropped or creating a board.
+  await submitDnf(4, "not-a-real-ladder");
+  const after = auth._profiles.get(userId);
+  assert(after.dnf === before.dnf + 1, "the DNF should still be counted");
+  assert(after.points_unlimited < (before.points_unlimited || 0), "an unrecognized ladder should fall back to unlimited and still cost points");
+  assert(after.points_bank < (before.points_bank || 0), "the bank should take the penalty too");
 });
 
 console.log("test-tamper-resistance.mjs done");

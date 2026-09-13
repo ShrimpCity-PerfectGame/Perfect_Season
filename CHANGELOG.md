@@ -13,6 +13,49 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.3.0] — 2026-09-13
+
+### Added
+
+- **A points ladder.** Every finished draft is now scored against a bot that played your same six
+  boards. Beat it and you gain points; draft badly and you lose them. Because points accumulate and
+  bad drafts subtract, climbing takes good drafts *and* a lot of them — one lucky perfect draft
+  can't park someone at the top forever, and grinding sloppy drafts costs ground.
+- **Four separate ladders** — Daily, Unlimited, Genius and GM — each ranked on its own. Both
+  scoring formats earn onto the same ladder, since each is measured against par for that format.
+- **A points bank**: every point you've ever earned, across all modes, shown on your profile. It's
+  the currency a future shop will spend, and it's deliberately a separate number from the ladders —
+  spending it will never cost you ladder position.
+- The result screen now shows the points earned and the bot's par beside your team score.
+
+### Changed
+
+- In Unlimited, Genius and GM, only your **best five drafts a day** count toward the ladder.
+  Everything still banks. Without this an uncapped ladder would rank free time above skill.
+- Abandoning a draft costs a modest number of points, on the ladder it was abandoned in.
+
+### Why a bot and not a perfect roster
+
+Scoring against the theoretically best possible roster sounds right but doesn't work: simply taking
+the best available player every round already reaches 96.5% of it, so everyone competent bunches
+into 96–100% and 100% is a wall. A handicapped bot leaves room above par — strong play averages
+114% of it — so the top of the ladder has somewhere to go. It also makes GM mode fair, where the
+best roster is usually over the salary cap and therefore not something you're allowed to build.
+
+### Fixed
+
+- Resetting a draft recorded the DNF **twice**.
+- Abandoning an Unlimited draft by starting another mode silently discarded it without recording a
+  DNF at all.
+- Two buttons ("Draft a new team", "Play an unlimited draft") passed the click event itself into
+  the new draft's settings, which corrupted the saved-progress snapshot so that draft couldn't be
+  resumed.
+
+### Database
+
+- Adds the per-mode points columns, the bank, and a rolling daily window to `profiles`. Existing
+  rows start at zero. See `supabase/migration-points-ladder.sql`.
+
 ## [1.2.0] — 2026-09-13
 
 No gameplay changes — this release is the process around releases.
