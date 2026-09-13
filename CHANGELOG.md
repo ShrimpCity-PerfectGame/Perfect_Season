@@ -35,6 +35,11 @@ No gameplay changes — this release is the process around releases.
   versioned launch — including for one-line fixes, since the release that broke the live
   Leaderboard had a fully passing test suite.
 
+### Fixed
+
+- How to play still described only PPR scoring, so a new player had no way to learn what
+  Championship mode was before picking it. It now explains both formats. (Caught on staging.)
+
 ## [1.1.1] — 2026-09-13
 
 ### Fixed

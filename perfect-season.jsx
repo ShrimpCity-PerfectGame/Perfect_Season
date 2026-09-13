@@ -1318,9 +1318,10 @@ function HowTo({ onClose }) {
           <li>Every player shows <b>his best season</b> for that team in that era. The stats are real. The fantasy points are hidden.</li>
           <li>You get <b>one team re-spin and one era re-spin</b> per draft. Use them wisely.</li>
           <li>Play <b>unlimited</b> drafts any time, or take the <b>daily</b> — one draft a day, the same boards for everyone.</li>
+          <li>Pick a <b>scoring format</b> before you draft. <b>Fantasy</b> is full PPR, where every catch is worth a point. <b>Championship</b> is standard scoring, where catches count for nothing and only yards and touchdowns do — so volume receivers drop and big-play threats rise. Each has its own leaderboard and its own daily.</li>
           <li>Your six are graded, then your team plays <b>17 games against real NFL teams</b> and, if you're good enough, the playoffs. Win them all for a <b>perfect 20–0 season</b>.</li>
         </ol>
-        <p className="small">Grades are based on PPR fantasy points compared to the top players at that position in the same era, with a bump for efficiency (QB rating, completion %, yards per carry). Flex is graded on raw production instead, with no positional comparison. Your QB counts a little more than the others.</p>
+        <p className="small">Grades compare each season to the top players at that position in the same era, with a bump for efficiency (QB rating, completion %, yards per carry). Flex is graded on raw production instead, with no positional comparison. Your QB counts a little more than the others.</p>
         <button ref={btn} className="btn solid" onClick={onClose}>Got it, let's draft</button>
       </div>
     </div>
