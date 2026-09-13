@@ -13,6 +13,28 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.2.0] — 2026-09-13
+
+No gameplay changes — this release is the process around releases.
+
+### Added
+
+- **A staging site**, a full clone of the game on its own Supabase project (separate database,
+  accounts, and Edge Functions). Changes go there and are checked before production. Staging builds
+  announce themselves with a "Test site" banner, because the worst way a test site fails is quietly
+  looking like the real one.
+- **This changelog**, covering everything back to the first public release.
+- **Versioning.** The version lives in `package.json`, is baked into the bundle at build time, and
+  is shown in the app header — so you can always tell which release a site is running. Releases are
+  tagged in git.
+- `npm run deploy:fn:staging` / `deploy:fn:prod` to deploy the Edge Function to one environment.
+
+### Changed
+
+- `CLAUDE.md` documents the release process as a hard rule: staging first, changelog entry,
+  versioned launch — including for one-line fixes, since the release that broke the live
+  Leaderboard had a fully passing test suite.
+
 ## [1.1.1] — 2026-09-13
 
 ### Fixed
