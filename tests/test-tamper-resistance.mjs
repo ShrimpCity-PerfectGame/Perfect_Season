@@ -77,4 +77,51 @@ await runTest("a legitimate submission for the same account still succeeds after
   assert(after.runs === 1, "expected the legitimate run to actually be recorded, got runs=" + after.runs);
 });
 
+// Builds a real, legal draft trace the same way the client would - shared by the tests below.
+async function buildLegitTrace(seed, extra = {}) {
+  const gl = await import("../game-logic.mjs");
+  const { readFileSync } = await import("node:fs");
+  const data = JSON.parse(readFileSync(new URL("../data/players.json", import.meta.url), "utf8"));
+  gl.initGameData(data.players, data.opponents);
+  const seq = gl.seededSequence(seed);
+  const roster = {}; const drafted = new Set(); const history = [];
+  let seqIdx = gl.boardAt(seq, 0, roster);
+  for (const slot of gl.SLOTS) {
+    const key = seq[seqIdx];
+    const open = gl.SLOTS.filter((s) => !roster[s]);
+    const player = gl.BOARDS[key].find((p) => !drafted.has(p.id) && open.some((s) => gl.fits(p.pos, s)));
+    const pickedSlot = open.find((s) => gl.fits(player.pos, s));
+    history.push({ key, id: player.id, season: player.season, slot: pickedSlot });
+    roster[pickedSlot] = player; drafted.add(player.id);
+    if (history.length < gl.SLOTS.length) seqIdx = gl.boardAt(seq, seqIdx + 1, roster);
+  }
+  return { history, seq, roster, gl, ...extra };
+}
+const utcDateKeyOffset = (days) => {
+  const d = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+};
+
+await runTest("a daily submission for the server's UTC yesterday/tomorrow is accepted (real player timezones), but an old backdated claim is rejected", async () => {
+  for (const offset of [-1, 0, 1]) {
+    const date = utcDateKeyOffset(offset);
+    const { history, seq } = await buildLegitTrace(`daily-${date}`);
+    const res = await submitRun({ mode: { kind: "daily", date }, history, seq, gm: false });
+    assert(res.ok, `expected a daily submission for UTC offset ${offset} (${date}) to be accepted - a real player's local "today" can legitimately be the server's UTC yesterday or tomorrow, got: ` + JSON.stringify(res));
+  }
+
+  const oldDate = utcDateKeyOffset(-30);
+  const { history, seq } = await buildLegitTrace(`daily-${oldDate}`);
+  const res = await submitRun({ mode: { kind: "daily", date: oldDate }, history, seq, gm: false });
+  assert(!res.ok, "expected a daily submission backdated a month is still rejected, got: " + JSON.stringify(res));
+});
+
+await runTest("a fabricated capUsed is ignored - the server recomputes it from the verified roster", async () => {
+  const { history, seq, roster, gl } = await buildLegitTrace("GMCAPGUARD");
+  const res = await submitRun({ mode: { kind: "free", code: "GMCAPGUARD", gm: true }, history, seq, gm: true, capUsed: 1 });
+  assert(res.ok, "expected a legitimate GM-mode submission to be accepted, got: " + JSON.stringify(res));
+  const trueCapUsed = gl.SLOTS.reduce((sum, s) => sum + gl.playerSalary(roster[s]), 0);
+  assert(res.run.capUsed === trueCapUsed, `expected the server to ignore the fabricated capUsed:1 and report the true cost (${trueCapUsed}), got: ` + res.run.capUsed);
+});
+
 console.log("test-tamper-resistance.mjs done");

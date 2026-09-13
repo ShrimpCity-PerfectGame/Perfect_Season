@@ -60,10 +60,21 @@ function profileToRow(s: any) {
   };
 }
 
-const todayKey = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+// The client's todayKey() (perfect-season.jsx) uses the player's LOCAL calendar date; this
+// function runs in Deno's own timezone (UTC on Supabase's infra). A player anywhere off UTC can
+// have a different local "today" than the server's for a several-hour window each day (worse the
+// further from UTC), so this can't require an exact match - it accepts any date that some real
+// timezone offset (UTC-12 to UTC+14) could call "today" relative to the server's actual UTC
+// instant: UTC's own yesterday, today, or tomorrow. Still rejects an arbitrary backdated claim
+// (anything outside that 3-day window), which is all the seed-legitimacy check actually needs.
+function utcDateKey(d: Date) {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+function isPlausibleDailyDate(date: string) {
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  return [-1, 0, 1].some((offset) => utcDateKey(new Date(now + offset * DAY)) === date);
+}
 
 Deno.serve(async (req) => {
   const cors = corsHeaders(req);
@@ -95,30 +106,25 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
-  const { mode, history, seq, gm, capUsed } = bodyRaw || {};
+  const { mode, history, seq, gm } = bodyRaw || {};
   if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return json({ error: "malformed submission" }, 400);
 
   // Never trust a client-supplied seed directly - re-derive it exactly how startDraft() does
   // (perfect-season.jsx), so a fabricated seed or a backdated "daily" claim can't be smuggled in.
+  // The date itself still comes from the client (its own local calendar day, same as the boards
+  // it actually drafted from), only bounds-checked against the server's clock - see
+  // isPlausibleDailyDate's comment for why an exact match with the server's own "today" is wrong.
   let seed: string;
   if (mode.kind === "daily") {
-    const today = todayKey();
-    if (mode.date !== today) return json({ error: "a daily submission must be for today" }, 400);
-    seed = `daily-${today}`;
+    if (typeof mode.date !== "string" || !isPlausibleDailyDate(mode.date)) {
+      return json({ error: "a daily submission must be for today" }, 400);
+    }
+    seed = `daily-${mode.date}`;
   } else if (mode.kind === "free") {
     if (typeof mode.code !== "string" || !mode.code) return json({ error: "missing challenge code" }, 400);
     seed = mode.code;
   } else {
     return json({ error: "unknown mode" }, 400);
-  }
-
-  // The daily is one draft per day (CLAUDE.md's "Protect the daily") - the client's own dailyDone
-  // flag is just a courtesy gate, not a security boundary, so re-check here: if today's daily_runs
-  // row for this account already exists, reject outright rather than double-counting wins/losses
-  // into profiles on a retried or replayed submission.
-  if (mode.kind === "daily") {
-    const { data: already } = await service.from("daily_runs").select("date").eq("date", mode.date).eq("user_id", user.id).maybeSingle();
-    if (already) return json({ error: "today's daily is already recorded" }, 409);
   }
 
   const replay = GL.replayDraft(seed, history, seq);
@@ -131,6 +137,11 @@ Deno.serve(async (req) => {
   const lineup = GL.SLOTS.map((s) => `${roster[s].id}${roster[s].season}`).join("|");
   const sim = GL.withSeed(`${seed}#${lineup}`, () => GL.simulateSeason(score));
 
+  // Recomputed from the server-verified roster, not accepted from the client - capUsed feeds a
+  // competitive Stats-screen leaderboard (the GM-mode cap constraint), so it needs the same
+  // trust level as score/outcome, not the client's own report.
+  const finalCapUsed = gm ? GL.SLOTS.reduce((sum, s) => sum + GL.playerSalary(roster[s]), 0) : undefined;
+
   const run = {
     w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, perfect: sim.perfect, playoffs: sim.playoffs,
     date: Date.now(),
@@ -139,16 +150,17 @@ Deno.serve(async (req) => {
       ppr: roster[s].ppr, rating: GL.effectiveRating(s, roster[s]),
     })),
     mode: mode.kind, code: mode.kind === "free" ? mode.code : undefined,
-    gm: !!gm, capUsed: gm ? capUsed : undefined,
+    gm: !!gm, capUsed: finalCapUsed,
   };
 
   const { data: existingRow } = await service.from("profiles").select("*").eq("id", user.id).single();
   if (!existingRow) return json({ error: "no profile for this account" }, 400);
 
-  // For daily mode, insert into daily_runs FIRST and rely on its (date, user_id) primary key to
-  // atomically reject a genuine race (two near-simultaneous submissions for the same daily) -
-  // the earlier check above only closes the common case, not a true race, so profiles must never
-  // be updated before this succeeds, or a raced second request would double-count wins/losses.
+  // Daily is one draft per day (CLAUDE.md's "Protect the daily") - the client's own dailyDone flag
+  // is just a courtesy gate, not a security boundary. Insert into daily_runs FIRST and rely on its
+  // (date, user_id) primary key to atomically reject a duplicate/raced resubmission - profiles
+  // must never be updated before this succeeds, or a raced second request would double-count
+  // wins/losses.
   if (mode.kind === "daily") {
     const { error: dailyInsertError } = await service.from("daily_runs").insert({
       date: mode.date, user_id: user.id, username: existingRow.username,

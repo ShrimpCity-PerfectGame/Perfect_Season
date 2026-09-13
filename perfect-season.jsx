@@ -11,7 +11,7 @@ import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
   hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, rerollCandidate,
   flexRating, effectiveRating, winProb, shuffle, windowedShuffle, tagOpp, buildTimeline, simulateSeason,
-  applyDnf, LOSER_PTS, MARGINS, nextStreak,
+  applyDnf, LOSER_PTS, MARGINS, nextStreak, GM_CAP, playerSalary, REROLL_BUDGET,
 } from "./game-logic.mjs";
 initGameData(gameData.players, gameData.opponents);
 
@@ -167,18 +167,6 @@ function teamPosPlayers(team, pos) {
 }
 
 // ---------- GM mode (salary cap) ----------
-// No real salary data exists, so this derives a price from the player's own positional rating
-// - a player costs what he costs regardless of which slot (named or Flex) ends up using him,
-// same as a real contract doesn't change based on where he lines up on a given play. Curved
-// rather than linear so elite seasons cost more per rating point than average ones, but capped
-// low enough that even the best single season in the game (rating ~120) tops out around a
-// quarter of GM_CAP - one all-timer shouldn't eat half your budget by itself.
-const GM_CAP = 150; // in $M, for a 6-man "roster"
-function playerSalary(p) {
-  const r = Math.max(0, p.rating - 35);
-  return Math.max(1, Math.round(0.0055 * r * r));
-}
-
 const newCode = () => Math.floor(Math.random() * 36 ** 6).toString(36).toUpperCase().padStart(6, "0");
 const todayKey = () => {
   const d = new Date();
@@ -1307,7 +1295,7 @@ export default function PerfectSeason() {
   const [display, setDisplay] = useState(null);
   const [spinning, setSpinning] = useState(false);
   const [used, setUsed] = useState([]);
-  const [rerolls, setRerolls] = useState({ team: 1, years: 1 });
+  const [rerolls, setRerolls] = useState({ team: REROLL_BUDGET, years: REROLL_BUDGET });
   const [selected, setSelected] = useState(null);
   const [result, setResult] = useState(null);
   const [shown, setShown] = useState(0);
@@ -1471,13 +1459,22 @@ export default function PerfectSeason() {
   // parameter rather than closing over the `userId` state, since callers right after a fresh
   // login (onAuthed) run before that state has committed.
   async function submitAndSync(uid, trace) {
-    const res = await submitRun(trace);
-    if (res.ok) {
-      const fresh = await fetchProfile(uid);
-      if (fresh) setStats(fresh);
+    // Never let a raw exception (e.g. the network dropping mid-fetchProfile, right after a
+    // successful submitRun) escape uncaught - callers like onAuthed already cleared `pending`
+    // by this point, so an unhandled rejection here would lose track of whether the run was
+    // actually saved with no way for the caller to react.
+    try {
+      const res = await submitRun(trace);
+      if (res.ok) {
+        const fresh = await fetchProfile(uid);
+        if (fresh) setStats(fresh);
+      }
+      setSaveError(!res.ok);
+      return res;
+    } catch (e) {
+      setSaveError(true);
+      return { ok: false };
     }
-    setSaveError(!res.ok);
-    return res;
   }
 
   async function onAuthed(uid, username, isNew) {
@@ -1553,7 +1550,7 @@ export default function PerfectSeason() {
     const r = {};
     saved.history.forEach((h) => { r[h.slot] = findPlayer(h.key, h.id, h.season); });
     setRoster(r); setHistory(saved.history); setUsed(saved.used || []);
-    setRerolls(saved.rerolls || { team: 1, years: 1 });
+    setRerolls(saved.rerolls || { team: REROLL_BUDGET, years: REROLL_BUDGET });
     setMode(saved.mode); setSeq(saved.seq || []); setSeqIdx(saved.seqIdx || 0);
     setSpin(saved.spin); setDisplay(saved.spin); setResult(null); setSelected(null);
     setShown(0); setPo({ idx: 0, stage: "pre" }); setResumed(true);
@@ -1571,7 +1568,7 @@ export default function PerfectSeason() {
     const initialRoster = presetRoster || {};
     setMode({ ...m, seed }); setSeq(list);
     setRoster(initialRoster); setHistory([]); setUsed([]); setSelected(null); setResult(null);
-    setShown(0); setPo({ idx: 0, stage: "pre" }); setRerolls({ team: 1, years: 1 });
+    setShown(0); setPo({ idx: 0, stage: "pre" }); setRerolls({ team: REROLL_BUDGET, years: REROLL_BUDGET });
     setPending(null); setNotice(""); setResumed(false); setConfirmReset(false);
     setShare({ state: "idle", text: "" });
     const i = boardAt(list, 0, initialRoster);
@@ -1633,8 +1630,11 @@ export default function PerfectSeason() {
 
   // forcedScenario (admin-only) skips the real simulation for a scripted ending, and skips
   // every persistence side effect below so testing an animation never touches real stats,
-  // the leaderboard, or daily/draft progress.
-  function finish(r, forcedScenario, historyOverride) {
+  // the leaderboard, or daily/draft progress. `finishedHistory` is required whenever
+  // forcedScenario is falsy (draft()'s one real call site always passes it) - it must be the
+  // complete, up-to-the-final-pick history computed locally by the caller, never read back from
+  // the `history` state directly here, which is still one render behind on this exact tick.
+  function finish(r, forcedScenario, finishedHistory) {
     let tot = 0, wt = 0;
     for (const s of SLOTS) { const k = s === "QB" ? QB_WEIGHT : 1; tot += effectiveRating(s, r[s]) * k; wt += k; }
     const score = Math.round((tot / wt) * 10) / 10;
@@ -1653,17 +1653,15 @@ export default function PerfectSeason() {
         setDailyDone(rec);
         sset(DAILY_KEY(mode.date), rec, false);
       }
-      // The client never persists its own computed score/outcome directly - submit-run (a
+      // The client never persists its own computed score/outcome/capUsed directly - submit-run (a
       // Supabase Edge Function) independently replays this exact draft trace and recomputes
-      // everything server-side (see game-logic.mjs's replayDraft/simulateSeason). The animation
-      // above already rendered from that same shared logic + seed, so an honest client sees
-      // identical numbers either way - only a tampered submission is ever rejected.
+      // everything server-side, including capUsed from the verified roster (see game-logic.mjs's
+      // replayDraft/simulateSeason/playerSalary). The animation above already rendered from that
+      // same shared logic + seed, so an honest client sees identical numbers either way - only a
+      // tampered submission is ever rejected.
       const trace = {
         mode: { kind: mode.kind, seed: mode.seed, code: mode.code, date: mode.date, gm: mode.gm },
-        history: historyOverride || history, seq, gm: !!mode.gm,
-        // Informational only (not part of the verified score/roster path) - same trust level it
-        // always had, just reported by the client for the Stats screen's GM-mode leaderboard.
-        capUsed: mode.gm ? capUsed : undefined,
+        history: finishedHistory, seq, gm: !!mode.gm,
       };
       if (user) submitAndSync(userId, trace);
       else setPending(trace);

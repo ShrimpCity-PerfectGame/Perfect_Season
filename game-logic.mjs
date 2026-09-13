@@ -12,6 +12,9 @@ export const WINDOWS = [[1999, 2005], [2006, 2010], [2011, 2015], [2016, 2020], 
 export const SLOTS = ["QB", "RB", "WR", "TE", "FLEX1", "FLEX2"];
 export const QB_WEIGHT = 1.25;
 export const FLEX_POS = ["RB", "WR", "TE"];
+// One team re-spin and one era re-spin per draft. Shared so the client's initial rerolls budget
+// and replayDraft's enforcement of it can never independently drift out of sync.
+export const REROLL_BUDGET = 1;
 
 export const TEAMS = {
   ARI: ["Cardinals", "Arizona", "#97233F", "#FFB612"], ATL: ["Falcons", "Atlanta", "#A71930", "#1B1B1B"],
@@ -186,7 +189,7 @@ export function replayDraft(seed, history, seq) {
       if (Number(w) === Number(prevW) && team !== prevTeam) kind = "team";
       else if (team === prevTeam && Number(w) !== Number(prevW)) kind = "years";
       else return fail("reroll insertion doesn't share a team or era with the board it replaced");
-      if (rerollsUsed[kind] >= 1) return fail(`more than one ${kind} reroll used`);
+      if (rerollsUsed[kind] >= REROLL_BUDGET) return fail(`more than ${REROLL_BUDGET} ${kind} reroll(s) used`);
       const expected = rerollCandidate({ seed, kind, seqIdx: si - 1, spinTeam: prevTeam, spinW: Number(prevW), shown, drafted, open });
       if (expected !== key) return fail("reroll result doesn't match what this seed would produce");
       rerollsUsed[kind]++;
@@ -230,6 +233,20 @@ export function flexRating(p) {
 // positional grade for a named slot, or their stats-only flexRating for a Flex spot.
 export function effectiveRating(slot, p) {
   return slot.startsWith("FLEX") ? flexRating(p) : p.rating;
+}
+
+// ---------- GM mode (salary cap) ----------
+// No real salary data exists, so this derives a price from the player's own positional rating -
+// a player costs what he costs regardless of which slot (named or Flex) ends up using him, same
+// as a real contract doesn't change based on where he lines up on a given play. Curved rather
+// than linear so elite seasons cost more per rating point than average ones, but capped low
+// enough that even the best single season in the game (rating ~120) tops out around a quarter of
+// GM_CAP - one all-timer shouldn't eat half your budget by itself. Shared so submit-run can
+// recompute capUsed itself from the verified roster instead of trusting the client's report.
+export const GM_CAP = 150; // in $M, for a 6-man "roster"
+export function playerSalary(p) {
+  const r = Math.max(0, p.rating - 35);
+  return Math.max(1, Math.round(0.0055 * r * r));
 }
 
 // ---------- Season simulation ----------

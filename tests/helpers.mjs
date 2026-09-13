@@ -127,10 +127,17 @@ export function makeMockAuth() {
   // actual server-side verification logic (game-logic.mjs's replayDraft/simulateSeason/applyRun/
   // applyDnf/nextStreak), not a bypassed shortcut. Auth is `session.user.id` (this mock's stand-in
   // for the real function's JWT verification) instead of a forwarded Authorization header.
-  const todayKeyMock = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
+  // Mirrors submit-run/index.ts's isPlausibleDailyDate - a tolerant window (UTC yesterday/today/
+  // tomorrow), not an exact match with the mock's own clock, since a real player's local calendar
+  // date can legitimately differ from the server's UTC one for hours around midnight.
+  function utcDateKeyMock(d) {
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  }
+  function isPlausibleDailyDateMock(date) {
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    return [-1, 0, 1].some((offset) => utcDateKeyMock(new Date(now + offset * DAY)) === date);
+  }
   function mockRowToProfile(row) {
     return {
       runs: row?.runs || 0, dnf: row?.dnf || 0, wins: row?.wins || 0, losses: row?.losses || 0,
@@ -159,14 +166,15 @@ export function makeMockAuth() {
       return { data: { ok: true } };
     }
 
-    const { mode, history, seq, gm, capUsed } = body || {};
+    const { mode, history, seq, gm } = body || {};
     if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return { data: { error: "malformed submission" } };
 
     let seed;
     if (mode.kind === "daily") {
-      const today = todayKeyMock();
-      if (mode.date !== today) return { data: { error: "a daily submission must be for today" } };
-      seed = `daily-${today}`;
+      if (typeof mode.date !== "string" || !isPlausibleDailyDateMock(mode.date)) {
+        return { data: { error: "a daily submission must be for today" } };
+      }
+      seed = `daily-${mode.date}`;
     } else if (mode.kind === "free") {
       if (typeof mode.code !== "string" || !mode.code) return { data: { error: "missing challenge code" } };
       seed = mode.code;
@@ -188,12 +196,15 @@ export function makeMockAuth() {
     const lineup = GL.SLOTS.map((s) => `${roster[s].id}${roster[s].season}`).join("|");
     const sim = GL.withSeed(`${seed}#${lineup}`, () => GL.simulateSeason(score));
 
+    // Recomputed from the verified roster, mirroring submit-run/index.ts - never trusted from
+    // the client, since capUsed feeds a competitive Stats-screen leaderboard.
+    const finalCapUsed = gm ? GL.SLOTS.reduce((sum, s) => sum + GL.playerSalary(roster[s]), 0) : undefined;
     const run = {
       w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, perfect: sim.perfect, playoffs: sim.playoffs,
       date: Date.now(),
       roster: GL.SLOTS.map((s) => ({ slot: s, name: roster[s].name, team: roster[s].team, season: roster[s].season, ppr: roster[s].ppr, rating: GL.effectiveRating(s, roster[s]) })),
       mode: mode.kind, code: mode.kind === "free" ? mode.code : undefined,
-      gm: !!gm, capUsed: gm ? capUsed : undefined,
+      gm: !!gm, capUsed: finalCapUsed,
     };
 
     const existingRow = profiles.get(userId);
