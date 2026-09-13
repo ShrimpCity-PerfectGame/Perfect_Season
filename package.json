@@ -7,7 +7,9 @@
     "check": "esbuild perfect-season.jsx --bundle --format=esm --platform=node --jsx=automatic --outfile=build/app.js --external:react --external:react-dom",
     "build": "node build.mjs",
     "test": "node tests/test-accounts.mjs && node tests/test-daily.mjs && node tests/test-nav.mjs",
-    "test:difficulty": "node tests/test-difficulty.mjs"
+    "test:difficulty": "node tests/test-difficulty.mjs",
+    "deploy:fn:staging": "supabase functions deploy submit-run --no-verify-jwt --project-ref $STAGING_PROJECT_REF",
+    "deploy:fn:prod": "supabase functions deploy submit-run --no-verify-jwt --project-ref $PROD_PROJECT_REF"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
