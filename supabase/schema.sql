@@ -22,6 +22,16 @@ create table if not exists public.profiles (
   best_score_std numeric,
   best_run_std   jsonb,
   best_record   jsonb,
+  -- The points ladder: one running total per mode, ranked independently. points_bank is every
+  -- point ever earned across all of them and is the shop currency - deliberately a separate
+  -- number, so spending never costs ladder position. points_day holds today's per-mode earnings
+  -- so only the best few drafts a day count toward the uncapped ladders.
+  points_daily     numeric not null default 0,
+  points_unlimited numeric not null default 0,
+  points_genius    numeric not null default 0,
+  points_gm        numeric not null default 0,
+  points_bank      numeric not null default 0,
+  points_day       jsonb,
   recent        jsonb not null default '[]'::jsonb,
   daily_streak       integer default 0,
   daily_last         text,
@@ -31,6 +41,10 @@ create table if not exists public.profiles (
 );
 create index if not exists profiles_best_score_idx on public.profiles (best_score desc nulls last);
 create index if not exists profiles_best_score_std_idx on public.profiles (best_score_std desc nulls last);
+create index if not exists profiles_points_daily_idx     on public.profiles (points_daily desc);
+create index if not exists profiles_points_unlimited_idx on public.profiles (points_unlimited desc);
+create index if not exists profiles_points_genius_idx    on public.profiles (points_genius desc);
+create index if not exists profiles_points_gm_idx        on public.profiles (points_gm desc);
 
 -- One daily per format per day: the two formats deal different boards (seeds "daily-<date>" and
 -- "daily-<date>-std"), so `format` is part of the primary key that enforces "one daily a day".

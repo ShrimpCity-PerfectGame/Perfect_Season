@@ -359,6 +359,111 @@ export function playerSalary(p, format) {
   return Math.max(1, Math.round(0.0055 * r * r));
 }
 
+// ---------- Points ladder ----------
+// Every score-based leaderboard in this game ranks peak output against a dataset that doesn't
+// change, so they all saturate: there is a hard maximum team score, and position records are
+// already permanently frozen. Points rank something that can't saturate - how well you drafted the
+// boards you were actually dealt - and accumulate, so topping a board needs skill AND volume.
+//
+// Par is a BOT that played the same six boards, not the theoretically best roster. Measuring
+// against the true optimum compresses everyone good into 96-100% of it (mechanically taking the
+// best available player already scores 96.5%), and 100% is a ceiling you can't pass. A handicapped
+// bot leaves room above par, works under GM's salary cap (where the true optimum is often
+// unaffordable, i.e. not a legal target), and can't accidentally count a player twice.
+//
+// BOT_PICK_RANK is the handicap and the main balance knob. Measured over 250 drafts: at rank 2, a
+// player taking the best pick every round averages 114% of par and clears it 98% of the time, a
+// third-best drafter averages 90%, and random play 60%. At rank 1 the bot is unbeatable - nobody
+// clears it, ever - so it stops being an opponent and becomes a ceiling again.
+export const BOT_PICK_RANK = 2;
+// PAR_FLOOR sits below 1.0 on purpose: pinned at par, a competent player would earn exactly
+// nothing and the ladder would never move. Points are zero at PAR_FLOOR and rise from there.
+export const PAR_FLOOR = 0.85;
+export const POINT_SCALE = 500;
+export const MIN_POINTS = -300; // one catastrophic draft shouldn't erase a week
+export const DNF_POINTS = -50;
+// Only this many drafts a day count toward a ladder in the uncapped modes. Everything still banks.
+// Without it, an accumulating ladder in a mode you can play forever ranks free time above skill.
+export const DAILY_COUNTED_DRAFTS = 5;
+
+// Which ladder a run belongs to. Daily wins over the variant flags because it's the stricter
+// constraint (one a day); GM over Genius because the salary cap changes the draft more than hidden
+// stats do.
+export function modeKey(run) {
+  if (run?.mode === "daily") return "daily";
+  if (run?.gm) return "gm";
+  if (run?.genius) return "genius";
+  return "unlimited";
+}
+export const LADDERS = ["daily", "unlimited", "genius", "gm"];
+
+// The bot's team score on a given set of boards. Deterministic: the same boards always produce the
+// same par, so the server recomputes it rather than trusting anything the client says about it.
+//
+// Plays the boards the PLAYER actually drafted from (history[].key), not the seed's own sequence -
+// a reroll changes which boards you faced, and par has to move with it or rerolling into an easy
+// board would be free points.
+//
+// Returns null when the boards can't field a legal roster at all; callers treat that as "no points
+// for this draft" rather than an error.
+export function botPar(boardKeys, { format, gm } = {}) {
+  if (!Array.isArray(boardKeys) || boardKeys.length !== SLOTS.length) return null;
+  const roster = {};
+  const drafted = new Set();
+  let spent = 0;
+
+  for (const key of boardKeys) {
+    const open = SLOTS.filter((s) => !roster[s]);
+    const board = BOARDS[key] || [];
+    const remaining = open.length - 1; // every other slot still needs at least the $1M minimum
+    const cands = [];
+    for (const p of board) {
+      if (drafted.has(p.id)) continue;
+      const cost = gm ? playerSalary(p, format) : 0;
+      if (gm && spent + cost + remaining > GM_CAP) continue;
+      for (const s of open) if (fits(p.pos, s)) cands.push({ p, s, cost, r: effectiveRating(s, p, format) });
+    }
+    if (!cands.length) return null;
+    // Sorted by rating, then player id, then slot - the id/slot tiebreaks are what make this
+    // reproducible rather than dependent on board array order.
+    cands.sort((a, b) => b.r - a.r || a.p.id - b.p.id || a.s.localeCompare(b.s));
+    const choice = cands[Math.min(BOT_PICK_RANK - 1, cands.length - 1)];
+    roster[choice.s] = choice.p;
+    drafted.add(choice.p.id);
+    spent += choice.cost;
+  }
+
+  if (!SLOTS.every((s) => roster[s])) return null;
+  let tot = 0, wt = 0;
+  for (const s of SLOTS) { const k = s === "QB" ? QB_WEIGHT : 1; tot += effectiveRating(s, roster[s], format) * k; wt += k; }
+  return tot / wt;
+}
+
+// Points for one finished draft, from how the player's team score compared to the bot's.
+export function draftPoints(playerScore, par) {
+  if (!par || par <= 0 || !Number.isFinite(playerScore)) return 0;
+  return Math.max(MIN_POINTS, Math.round(POINT_SCALE * (playerScore / par - PAR_FLOOR)));
+}
+
+// Ladder bookkeeping for the uncapped modes: a rolling record of today's earnings per mode, from
+// which only the best DAILY_COUNTED_DRAFTS count. Returns the updated record plus how much the
+// ladder total should move - a delta, because a later draft can displace an earlier one from the
+// counted set, and the ladder column holds a running total rather than being recomputed.
+//
+// `day` is the player's own calendar date, the same string the daily uses.
+export function applyDayPoints(prev, mode, points, day) {
+  // `prev && ...`, not `prev?.date === day`: with no prior record and no day, that comparison is
+  // undefined === undefined, which would carry a non-existent record forward.
+  const fresh = prev && prev.date === day ? prev : { date: day, byMode: {} };
+  const before = (fresh.byMode?.[mode] || []).slice();
+  const after = [...before, points];
+  const counted = (xs) => [...xs].sort((a, b) => b - a).slice(0, DAILY_COUNTED_DRAFTS).reduce((t, x) => t + x, 0);
+  return {
+    day: { date: day, byMode: { ...(fresh.byMode || {}), [mode]: after } },
+    delta: counted(after) - counted(before),
+  };
+}
+
 // ---------- Season simulation ----------
 export const LOSER_PTS = [0, 3, 6, 7, 9, 10, 10, 13, 13, 14, 16, 17, 17, 20, 20, 21, 23, 24, 27];
 export const MARGINS = [1, 2, 3, 3, 3, 4, 5, 6, 7, 7, 7, 8, 10, 10, 11, 13, 14, 14, 17, 21];
@@ -508,8 +613,21 @@ export function nextStreak(stats, date) {
 // here, so submit-run applies this directly (a fabricated DNF count only makes an account's own
 // stats look worse, not a leaderboard-integrity issue) - but it's still the server, not the
 // client, that owns the profiles row from here on, so it goes through the same shared function.
-export function applyDnf(prev, picks) {
-  return { ...prev, dnf: (prev.dnf || 0) + 1, recent: [{ dnf: true, picks, date: Date.now() }, ...(prev.recent || [])].slice(0, 10), updated: Date.now() };
+// `mode` tags which ladder the penalty lands on - without it a DNF couldn't be attributed, since
+// an abandoned draft has no run to read a mode off.
+export function applyDnf(prev, picks, mode = "unlimited") {
+  const ladder = LADDERS.includes(mode) ? mode : "unlimited";
+  const s = {
+    ...prev,
+    dnf: (prev.dnf || 0) + 1,
+    recent: [{ dnf: true, picks, mode: ladder, points: DNF_POINTS, date: Date.now() }, ...(prev.recent || [])].slice(0, 10),
+    updated: Date.now(),
+  };
+  // A DNF hits the ladder directly rather than going through the best-of-the-day window: it isn't
+  // a performance, so it shouldn't be something a good draft later in the day can displace.
+  s.points = { ...(prev.points || {}), [ladder]: (prev.points?.[ladder] || 0) + DNF_POINTS };
+  s.pointsBank = (prev.pointsBank || 0) + DNF_POINTS;
+  return s;
 }
 const betterRecord = (a, b) => !b || a.w > b.w || (a.w === b.w && a.l < b.l);
 // Which profile fields hold each format's best score. Scores from the two formats aren't
@@ -519,7 +637,10 @@ export const BEST_FIELDS = {
   fantasy: { score: "bestScore", run: "bestRun" },
   standard: { score: "bestScoreStd", run: "bestRunStd" },
 };
-export function applyRun(prev, run) {
+// `day` is the calendar date this run is being counted against, supplied by the caller. The server
+// passes its own UTC date rather than anything from the client, so the best-of-the-day window can't
+// be widened by claiming a different date.
+export function applyRun(prev, run, day) {
   const s = {
     ...prev,
     runs: prev.runs + 1, wins: prev.wins + run.w, losses: prev.losses + run.l,
@@ -527,6 +648,20 @@ export function applyRun(prev, run) {
     playoffs: prev.playoffs + (run.playoffs ? 1 : 0),
     recent: [run, ...(prev.recent || [])].slice(0, 10), updated: Date.now(),
   };
+
+  const ladder = modeKey(run);
+  const points = Number(run.points) || 0;
+  // The bank is every point ever earned, uncapped - it's the shop currency, and rate-limiting what
+  // you can spend isn't the point. Only the competitive ladders use the best-of-the-day window.
+  s.pointsBank = (prev.pointsBank || 0) + points;
+  if (ladder === "daily") {
+    // Already one a day by construction, so no window needed.
+    s.points = { ...(prev.points || {}), daily: (prev.points?.daily || 0) + points };
+  } else {
+    const { day: nextDay, delta } = applyDayPoints(prev.pointsDay, ladder, points, day);
+    s.pointsDay = nextDay;
+    s.points = { ...(prev.points || {}), [ladder]: (prev.points?.[ladder] || 0) + delta };
+  }
   // Career counters above stay merged across formats - they count seasons played, not points
   // scored, and both formats run the identical simulation. Only the score-ranked bests split.
   const f = BEST_FIELDS[normFormat(run.format)];

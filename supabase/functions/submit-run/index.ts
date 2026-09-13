@@ -48,6 +48,11 @@ function rowToProfile(row: any) {
     champs: row?.champs || 0, perfect: row?.perfect || 0, playoffs: row?.playoffs || 0,
     bestScore: row?.best_score ?? null, bestRun: row?.best_run ?? null, bestRecord: row?.best_record ?? null,
     bestScoreStd: row?.best_score_std ?? null, bestRunStd: row?.best_run_std ?? null,
+    points: {
+      daily: row?.points_daily || 0, unlimited: row?.points_unlimited || 0,
+      genius: row?.points_genius || 0, gm: row?.points_gm || 0,
+    },
+    pointsBank: row?.points_bank || 0, pointsDay: row?.points_day ?? null,
     recent: row?.recent || [], dailyStreak: row?.daily_streak || 0, dailyLast: row?.daily_last ?? null,
     dailyBestStreak: row?.daily_best_streak || 0,
   };
@@ -58,6 +63,9 @@ function profileToRow(s: any) {
     champs: s.champs, perfect: s.perfect, playoffs: s.playoffs,
     best_score: s.bestScore, best_run: s.bestRun, best_record: s.bestRecord, recent: s.recent || [],
     best_score_std: s.bestScoreStd, best_run_std: s.bestRunStd,
+    points_daily: s.points?.daily || 0, points_unlimited: s.points?.unlimited || 0,
+    points_genius: s.points?.genius || 0, points_gm: s.points?.gm || 0,
+    points_bank: s.pointsBank || 0, points_day: s.pointsDay ?? null,
     daily_streak: s.dailyStreak, daily_last: s.dailyLast, daily_best_streak: s.dailyBestStreak,
   };
 }
@@ -102,13 +110,16 @@ Deno.serve(async (req) => {
   if (bodyRaw?.dnf) {
     const { data: row } = await service.from("profiles").select("*").eq("id", user.id).single();
     if (!row) return json({ error: "no profile for this account" }, 400);
-    const updated = GL.applyDnf(rowToProfile(row), Number(bodyRaw.picks) || 0);
+    // The mode is a tag, not a claim about a roster - it only decides which ladder eats the
+    // penalty, and lying about it can only move your own penalty sideways, never erase it.
+    // applyDnf falls back to unlimited for anything unrecognized.
+    const updated = GL.applyDnf(rowToProfile(row), Number(bodyRaw.picks) || 0, bodyRaw.mode);
     const { error: writeError } = await service.from("profiles").update(profileToRow(updated)).eq("id", user.id);
     if (writeError) return json({ error: "failed to save" }, 500);
     return json({ ok: true });
   }
 
-  const { mode, history, seq, gm, format: rawFormat } = bodyRaw || {};
+  const { mode, history, seq, gm, genius, format: rawFormat } = bodyRaw || {};
   if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return json({ error: "malformed submission" }, 400);
 
   // Read only from the top level, never mode.format - the format selects both the seed and the
@@ -156,6 +167,12 @@ Deno.serve(async (req) => {
   // trust level as score/outcome, not the client's own report.
   const finalCapUsed = gm ? GL.SLOTS.reduce((sum, s) => sum + GL.playerSalary(roster[s], format), 0) : undefined;
 
+  // Par and points are recomputed here from the verified board sequence, exactly like score and
+  // capUsed - the client never gets to say how well it did against the bot. The bot plays the
+  // boards actually drafted from (history[].key), so a reroll moves par with it.
+  const par = GL.botPar(history.map((h: any) => h.key), { format, gm: !!gm });
+  const points = GL.draftPoints(score, par);
+
   const run = {
     w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, perfect: sim.perfect, playoffs: sim.playoffs,
     date: Date.now(),
@@ -164,10 +181,11 @@ Deno.serve(async (req) => {
       ppr: roster[s].ppr, rating: GL.effectiveRating(s, roster[s], format),
     })),
     mode: mode.kind, code: mode.kind === "free" ? mode.code : undefined,
-    gm: !!gm, capUsed: finalCapUsed,
+    gm: !!gm, genius: !!genius, capUsed: finalCapUsed,
     // Always stamped, "fantasy" included, so the Stats screen can filter on it without having to
     // treat an absent tag as a third case.
     format,
+    par: par ?? undefined, points,
   };
 
   const { data: existingRow } = await service.from("profiles").select("*").eq("id", user.id).single();
@@ -188,7 +206,9 @@ Deno.serve(async (req) => {
   }
 
   const existing = rowToProfile(existingRow);
-  let updated = GL.applyRun(existing, run);
+  // The best-of-the-day window is keyed on THIS function's own UTC date, never the client's, so
+  // the window can't be widened by claiming a different day.
+  let updated = GL.applyRun(existing, run, utcDateKey(new Date()));
   if (mode.kind === "daily") {
     const streak = GL.nextStreak(existing, mode.date);
     updated = { ...updated, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
