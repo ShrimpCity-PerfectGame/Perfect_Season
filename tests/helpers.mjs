@@ -380,6 +380,12 @@ export async function loadPerfectSeason() {
       jsx: "automatic",
       platform: "browser",
       external: ["react", "react-dom", "react-dom/client"],
+      // Mirrors build.mjs: these are bare identifiers textually replaced at build time, so they
+      // have to be defined here too or the component throws a ReferenceError on render.
+      define: {
+        APP_VERSION: JSON.stringify("test"),
+        APP_ENV: JSON.stringify("production"),
+      },
       outfile,
     });
     cachedComponentPath = outfile;

@@ -16,6 +16,9 @@ import {
 } from "./game-logic.mjs";
 initGameData(gameData.players, gameData.opponents);
 
+// Baked in by build.mjs's esbuild `define` (same mechanism as SUPABASE_URL - see storage.js).
+const IS_STAGING = APP_ENV === "staging";
+
 const POS_NAME = { QB: "Quarterbacks", RB: "Running backs", WR: "Wide receivers", TE: "Tight ends" };
 const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
 // Stats O/U: the one headline counting stat each position gets quizzed on.
@@ -714,7 +717,11 @@ h2.h{font-family:var(--display);font-weight:800;font-size:24px;color:var(--ink);
 .modal li{margin-bottom:9px;font-size:15px;line-height:1.4}
 .modal li b{color:var(--ink)}
 .modal .small{font-size:13px;color:var(--muted);margin:0 0 14px;line-height:1.45}
-.hdr-links{display:flex;gap:14px;justify-content:flex-end;margin-top:6px}
+.hdr-links{display:flex;gap:14px;justify-content:flex-end;margin-top:6px;align-items:center}
+.ver{font-size:11.5px;color:var(--muted);opacity:.65;font-variant-numeric:tabular-nums}
+.stagebar{margin:0 0 12px;padding:9px 14px;border-radius:10px;font-size:13.5px;
+  background:repeating-linear-gradient(135deg,rgba(247,179,43,.16),rgba(247,179,43,.16) 12px,rgba(247,179,43,.08) 12px,rgba(247,179,43,.08) 24px);
+  border:1px solid rgba(247,179,43,.55);color:var(--ink)}
 .btn.reset{margin-left:auto;color:var(--muted);border-color:#3A404C;background:linear-gradient(180deg,#2B2F3A,#1F232B)}
 .btn.reset:hover:not(:disabled){color:var(--ink)}
 .btn.reset.armed{color:#FFD9D2;border-color:#B4483A;background:linear-gradient(180deg,#B4483A,#8E3225)}
@@ -2179,8 +2186,16 @@ export default function PerfectSeason() {
             <button className="linkbtn" onClick={() => setHowTo(true)}>How to play</button>
             {!user && authReady && <button className="linkbtn" onClick={() => setView("profile")}>Log in</button>}
             {user && <span className="whoami">{user}</span>}
+            <span className="ver" title={`Perfect Season v${APP_VERSION}`}>v{APP_VERSION}</span>
           </div>
         </nav>
+
+        {/* The worst way for a staging site to fail is quietly looking like the real one. */}
+        {IS_STAGING && (
+          <div className="stagebar">
+            <b>Test site</b> — separate database, nothing here counts. v{APP_VERSION}.
+          </div>
+        )}
 
         {saveError && <div className="panel"><p style={{ margin: 0 }}>Your last season couldn't be saved. It will be included the next time a save goes through.</p></div>}
         {notice && <div className="panel"><p style={{ margin: 0 }}>{notice}</p></div>}

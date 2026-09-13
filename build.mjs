@@ -10,6 +10,15 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
   console.warn("Warning: SUPABASE_URL / SUPABASE_ANON_KEY are not set - the built bundle will fail to sign in.");
 }
 
+// Baked in at build time so a running site can say exactly which release it is. APP_ENV is
+// "staging" on the test site, which makes it announce itself in the UI - the worst failure mode
+// for a staging setup is not knowing which of the two sites you're looking at.
+const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+const appEnv = process.env.APP_ENV || "production";
+if (appEnv !== "production" && appEnv !== "staging") {
+  throw new Error(`APP_ENV must be "production" or "staging", got "${appEnv}"`);
+}
+
 await esbuild.build({
   entryPoints: ["entry.jsx"],
   bundle: true,
@@ -20,6 +29,8 @@ await esbuild.build({
     "process.env.NODE_ENV": '"production"',
     SUPABASE_URL: JSON.stringify(process.env.SUPABASE_URL || ""),
     SUPABASE_ANON_KEY: JSON.stringify(process.env.SUPABASE_ANON_KEY || ""),
+    APP_VERSION: JSON.stringify(version),
+    APP_ENV: JSON.stringify(appEnv),
   },
 });
 
@@ -28,4 +39,4 @@ await esbuild.build({
 // rather than hand-maintain a second copy of the page.
 const html = readFileSync("page.html", "utf8").replace("build/page.js", "page.js");
 writeFileSync("public/page.html", html);
-console.log("Built public/page.js and public/page.html");
+console.log(`Built public/page.js and public/page.html (v${version}, ${appEnv})`);

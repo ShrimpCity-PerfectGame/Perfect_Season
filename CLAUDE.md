@@ -187,6 +187,31 @@ each-playoff-round/missed-playoffs) via `forceSeason()`. Forced outcomes skip ev
 side effect in `finish()` (stats, leaderboard, daily/draft storage) — use this account to check
 win/loss animations instead of fighting the RNG or hand-rolling a fixture.
 
+## Releasing
+
+**Nothing reaches production without going through staging first, getting a changelog entry, and
+shipping as a version.** This is a hard rule, not a preference — it applies to one-line fixes too.
+It exists because the Championship-scoring launch went straight to production with a green test
+suite and still broke the live Leaderboard for every existing account.
+
+- **`master` is production. `staging` is the test site.** Work lands on `staging`, gets verified on
+  the staging URL, and only then merges to `master`. Never push a feature branch straight to
+  `master`.
+- **Staging is fully isolated**: its own Supabase project (separate database, auth, and Edge
+  Functions) and its own Vercel deployment, built with `APP_ENV=staging`, which makes the app show
+  a "Test site" banner. Nothing done on staging can touch real accounts, scores, or leaderboards.
+- **Both halves have to be deployed.** A change touching `supabase/functions/submit-run` or
+  `game-logic.mjs` needs the Edge Function deployed to *that environment's* Supabase project as
+  well as the client — and a schema change needs its migration run there first. Order is always
+  migration → Edge Function → client (see the deploy-ordering note in
+  `supabase/migration-scoring-formats.sql` for why reversing it corrupts data).
+- **Version + changelog**: bump `version` in `package.json` (minor for features, patch for fixes),
+  add a `CHANGELOG.md` entry under that version, and tag the release (`git tag v1.2.0`). The
+  version is baked into the bundle by `build.mjs` and shown in the app's header, so you can always
+  tell which build a site is running.
+- **Automated tests are necessary but not sufficient.** The full suite passed on the release that
+  broke. Click through the actual changed screens on staging before promoting.
+
 ## Development Guidelines
 
 **Verify in a running app, not by reading code.** Every feature so far was checked by driving the
