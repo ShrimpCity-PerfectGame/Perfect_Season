@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchRecentRosters,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, upsertDailyRun, fetchSouTop, upsertSouRun, fetchRecentRosters, subscribeOnlineCount,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, updateProfile,
 } from "./storage.js";
@@ -1520,6 +1520,7 @@ export default function PerfectSeason() {
   const [codeInput, setCodeInput] = useState("");
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
   const [hof, setHof] = useState({ loading: false, loaded: false, top: [], drafted: [] });
+  const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   // Over/Under's daily game state while playing:
   // { date, roundIndex, lives, score, round, guess, correct, deadline, timeLeft }
   const [sou, setSou] = useState(null);
@@ -1576,7 +1577,8 @@ export default function PerfectSeason() {
       setDraftReady(true);
       if (!(await sget(HOWTO_KEY, false))) setHowTo(true);
     })();
-    return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); };
+    const unsubOnline = subscribeOnlineCount(setOnline);
+    return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); unsubOnline(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2267,6 +2269,7 @@ export default function PerfectSeason() {
                 <h1 className="title">Perfect Season</h1>
               </div>
               <p className="sub">Draft six players from random teams and eras. The stats are real, the fantasy points are hidden, and your lineup plays a full season against real NFL teams. Win all 20 and you've gone perfect.</p>
+              {online != null && <span className="pill" style={{ marginTop: 8, display: "inline-block" }}>🟢 {online} online now</span>}
             </header>
 
             <div className="modes">

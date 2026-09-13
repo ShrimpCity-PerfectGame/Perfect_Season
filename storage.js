@@ -140,3 +140,16 @@ export async function fetchRecentRosters(limit = 300) {
   if (error || !data) return [];
   return data.flatMap((r) => r.recent || []).filter((run) => !run.dnf && run.roster);
 }
+
+// A live concurrent-players count via Supabase Realtime Presence - every open tab (no auth
+// needed; guests count too) joins one shared channel and "tracks" itself, and every tab in the
+// channel gets a "sync" event with the full presence set whenever anyone joins/leaves. Unlike
+// every other export here, this is a long-lived subscription, not a one-shot request, so it
+// returns an unsubscribe function instead of a promise - call it on unmount.
+export function subscribeOnlineCount(onCount) {
+  const client = getClient();
+  const channel = client.channel("online-players");
+  channel.on("presence", { event: "sync" }, () => onCount(Object.keys(channel.presenceState()).length));
+  channel.subscribe(async (status) => { if (status === "SUBSCRIBED") await channel.track({}); });
+  return () => client.removeChannel(channel);
+}

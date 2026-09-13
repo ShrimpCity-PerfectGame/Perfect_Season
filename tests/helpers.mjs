@@ -72,8 +72,26 @@ export function makeMockAuth() {
     };
   }
 
+  // Minimal Realtime Presence fake for subscribeOnlineCount - enough to verify the UI reads *a*
+  // count once tracked, not a real multi-client simulation (see storage.js's own comment).
+  function channel(_name) {
+    const syncListeners = [];
+    const presence = {};
+    return {
+      on(_type, _opts, cb) { syncListeners.push(cb); return this; },
+      subscribe(cb) { if (cb) cb("SUBSCRIBED"); return this; },
+      async track(meta) {
+        presence["mock-self"] = [meta || {}];
+        syncListeners.forEach((cb) => cb());
+      },
+      presenceState() { return presence; },
+    };
+  }
+
   return {
     from,
+    channel,
+    removeChannel() {},
     _profiles: profiles, // test-only escape hatch for setup/assertions
     auth: {
       async signUp({ email, password, options }) {
