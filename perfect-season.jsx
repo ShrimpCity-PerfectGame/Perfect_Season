@@ -1339,7 +1339,11 @@ export default function PerfectSeason() {
   const [pending, setPending] = useState(null);
   const [notice, setNotice] = useState("");
   const [saveError, setSaveError] = useState(false);
-  const [lb, setLb] = useState({ loading: true, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1 });
+  // `format` records which scoring format `top`/`myRank` were actually fetched for. The board is
+  // always rendered from THAT, never from the live boardFormat state - switching format flips the
+  // state immediately while the refetch is still in flight, and rendering one format's rows under
+  // the other's accessors reads a null score (a profile with no run in that format yet).
+  const [lb, setLb] = useState({ loading: true, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1, format: "fantasy" });
   const timer = useRef(null);
   const recentSpins = useRef([]);
   const bapTimer = useRef(null);
@@ -1366,7 +1370,7 @@ export default function PerfectSeason() {
   function showBoardFormat(f) { boardFormatRef.current = f; setBoardFormat(f); }
   const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
-  const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [] });
+  const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [], format: "fantasy" });
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, profiles: [], buildCount: 0, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
@@ -1473,10 +1477,10 @@ export default function PerfectSeason() {
         const idx = top.findIndex((q) => q.id === myKey);
         myRank = idx >= 0 ? idx : mine != null ? await fetchOwnRank(mine, boardFormat) : -1;
       }
-      setLb({ loading: false, top, totals, myRank, error: false });
+      setLb({ loading: false, top, totals, myRank, error: false, format: boardFormat });
       setLiveDrafts(totals.runs);
     } catch (e) {
-      setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1, error: true });
+      setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1, error: true, format: boardFormat });
     }
   }
 
@@ -1710,7 +1714,9 @@ export default function PerfectSeason() {
     // are whichever format was just played, never the other one's numbers.
     const siteBest = scoreOf(lb.top[0], fmt) ?? 0;
     const myBest = scoreOf(stats, fmt);
-    sim.newSiteBest = !forcedScenario && !!user && lb.top.length > 0 && normFormat(boardFormatRef.current) === fmt && score > siteBest;
+    // Only claim a sitewide best when the loaded board is for the format just played - otherwise
+    // this would be comparing against the other format's numbers.
+    sim.newSiteBest = !forcedScenario && !!user && lb.top.length > 0 && normFormat(lb.format) === fmt && score > siteBest;
     sim.newBestScore = !forcedScenario && !!user && !!stats && (myBest == null || score > myBest);
     setNotice("");
     if (!forcedScenario) {
@@ -2075,11 +2081,12 @@ export default function PerfectSeason() {
   }
 
   async function loadDailyBoard(f) {
-    setDailyBoard({ loading: true, rows: [] });
+    const fmt = normFormat(f || boardFormatRef.current);
+    setDailyBoard({ loading: true, rows: [], format: fmt });
     try {
-      const rows = await fetchDailyTop(todayKey(), 10, normFormat(f || boardFormatRef.current));
-      setDailyBoard({ loading: false, rows });
-    } catch (e) { setDailyBoard({ loading: false, rows: [] }); }
+      const rows = await fetchDailyTop(todayKey(), 10, fmt);
+      setDailyBoard({ loading: false, rows, format: fmt });
+    } catch (e) { setDailyBoard({ loading: false, rows: [], format: fmt }); }
   }
 
   // Two taps to reset, so a stray tap can't wipe out a draft
@@ -2122,6 +2129,8 @@ export default function PerfectSeason() {
   // 0 = its own slot is open, 1 = own slot filled but Flex still open, 2 = nowhere left to put them
   const secState = (pos) => (!roster[pos] ? 0 : open.some((s) => fits(pos, s)) ? 1 : 2);
 
+  // Always paired: the rows and the accessor that reads them must describe the same format.
+  const lbFormat = normFormat(lb.format);
   const siteBest = lb.top[0];
   const totals = lb.totals;
   const perfectPct = totals.runs > 0 ? Math.round((100 * totals.perfect) / totals.runs) : 0;
@@ -2151,7 +2160,7 @@ export default function PerfectSeason() {
   // personal best this is exactly right; for a non-best run it shows the existing best's rank.
   // Only rank a result against a leaderboard loaded for its OWN format - the two score different
   // things, so a cross-format rank would be meaningless rather than merely imprecise.
-  const place = finished && !lb.error && myRank >= 0 && normFormat(result?.format) === normFormat(boardFormat)
+  const place = finished && !lb.error && myRank >= 0 && normFormat(result?.format) === lbFormat
     ? { rank: myRank + 1, total: totals.players } : null;
   function skipPlayoffs() { setShown(result.games.length); setPo({ idx: 0, stage: "done" }); }
 
@@ -2297,7 +2306,7 @@ export default function PerfectSeason() {
             <div className="hometiles">
               <div className="tile"><div className="n">{user && stats ? draftsOf(stats) : "–"}</div><div className="l">Your drafts</div></div>
               <div className="tile"><div className="n">{user && stats?.bestRecord ? `${stats.bestRecord.w}–${stats.bestRecord.l}` : "–"}</div><div className="l">Your best record</div></div>
-              <div className="tile"><div className="n">{scoreOf(siteBest, boardFormat) != null ? scoreOf(siteBest, boardFormat).toFixed(1) : "–"}</div><div className="l">Best {FORMAT_LABEL[boardFormat]} score sitewide</div></div>
+              <div className="tile"><div className="n">{scoreOf(siteBest, lbFormat) != null ? scoreOf(siteBest, lbFormat).toFixed(1) : "–"}</div><div className="l">Best {FORMAT_LABEL[lbFormat]} score sitewide</div></div>
             </div>
 
             {!lb.loading && totals.players > 0 && (
@@ -2667,7 +2676,7 @@ export default function PerfectSeason() {
                   {FORMATS.map((f) => (
                     <div className="tile" key={f}>
                       <div className="n">{scoreOf(stats, f) != null ? scoreOf(stats, f).toFixed(1) : "–"}</div>
-                      <div className="l">Best {FORMAT_LABEL[f]} score{normFormat(boardFormat) === f && myRank >= 0 ? `, #${myRank + 1} sitewide` : ""}</div>
+                      <div className="l">Best {FORMAT_LABEL[f]} score{lbFormat === f && myRank >= 0 ? `, #${myRank + 1} sitewide` : ""}</div>
                     </div>
                   ))}
                   <div className="tile"><div className="n">{stats.dailyStreak && (stats.dailyLast === todayKey() || nextStreak(stats, todayKey()) > 1) ? stats.dailyStreak : 0}</div>
@@ -2734,7 +2743,7 @@ export default function PerfectSeason() {
                 </div>
 
                 <div className="dayhead">
-                  <h2 className="h">Today's {FORMAT_LABEL[boardFormat]} daily</h2>
+                  <h2 className="h">Today's {FORMAT_LABEL[normFormat(dailyBoard.format)]} daily</h2>
                   <button className="linkbtn" onClick={() => loadDailyBoard()} disabled={dailyBoard.loading}>{dailyBoard.loading ? "Loading…" : "Refresh"}</button>
                 </div>
                 {dailyBoard.rows.length === 0 ? (
@@ -2774,10 +2783,10 @@ export default function PerfectSeason() {
                 {siteBest ? (
                   <div className="champion">
                     <div className="stripe" style={{ background: "var(--lamp)" }} />
-                    <div className="pickno">Sitewide best {FORMAT_LABEL[boardFormat]} team score</div>
-                    <div className="sc led-wrap"><span className="led">{scoreOf(siteBest, boardFormat).toFixed(1)}</span></div>
-                    <div className="by">{siteBest.username}{runOf(siteBest, boardFormat) ? `, went ${runOf(siteBest, boardFormat).w}–${runOf(siteBest, boardFormat).l}` : ""}</div>
-                    {runOf(siteBest, boardFormat) && <RosterChips roster={runOf(siteBest, boardFormat).roster} />}
+                    <div className="pickno">Sitewide best {FORMAT_LABEL[lbFormat]} team score</div>
+                    <div className="sc led-wrap"><span className="led">{scoreOf(siteBest, lbFormat).toFixed(1)}</span></div>
+                    <div className="by">{siteBest.username}{runOf(siteBest, lbFormat) ? `, went ${runOf(siteBest, lbFormat).w}–${runOf(siteBest, lbFormat).l}` : ""}</div>
+                    {runOf(siteBest, lbFormat) && <RosterChips roster={runOf(siteBest, lbFormat).roster} />}
                   </div>
                 ) : (
                   <div className="panel"><p style={{ margin: 0 }}>No scores yet. Finish a season while logged in to claim the top spot.</p></div>
@@ -2785,7 +2794,7 @@ export default function PerfectSeason() {
 
                 {lb.top.length > 0 && (
                   <>
-                    <h2 className="h">Top 10</h2>
+                    <h2 className="h">Top 10 — {FORMAT_LABEL[lbFormat]}</h2>
                     <table className="lb">
                       <thead><tr><th></th><th>Player</th><th className="r">Best score</th><th className="r">Best record</th><th className="r hide">Drafts</th><th className="r hide">20–0s</th></tr></thead>
                       <tbody>
@@ -2793,7 +2802,7 @@ export default function PerfectSeason() {
                           <tr key={q.id} className={q.id === myKey ? "me" : ""}>
                             <td className="rk">{i + 1}</td>
                             <td>{q.username}</td>
-                            <td className="r">{scoreOf(q, boardFormat).toFixed(1)}</td>
+                            <td className="r">{scoreOf(q, lbFormat) != null ? scoreOf(q, lbFormat).toFixed(1) : "–"}</td>
                             <td className="r">{q.bestRecord ? `${q.bestRecord.w}–${q.bestRecord.l}` : "–"}</td>
                             <td className="r hide">{draftsOf(q)}{q.dnf ? <span className="muted"> ({q.dnf} DNF)</span> : null}</td>
                             <td className="r hide">{q.perfect}</td>
@@ -2805,7 +2814,7 @@ export default function PerfectSeason() {
                 )}
 
                 {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
-                {user && myRank >= 10 && scoreOf(stats, boardFormat) != null && <p className="note">You're #{myRank + 1} with a best {FORMAT_LABEL[boardFormat]} score of {scoreOf(stats, boardFormat).toFixed(1)}.</p>}
+                {user && myRank >= 10 && scoreOf(stats, lbFormat) != null && <p className="note">You're #{myRank + 1} with a best {FORMAT_LABEL[lbFormat]} score of {scoreOf(stats, lbFormat).toFixed(1)}.</p>}
                 <button className="btn" onClick={loadLeaderboard} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
               </>
             )}
