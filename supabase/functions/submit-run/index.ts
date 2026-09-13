@@ -22,8 +22,20 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+// Edge Functions don't add CORS headers on their own - the browser calls this cross-origin (the
+// Vercel-hosted app calling *.supabase.co), so every response (including the preflight OPTIONS
+// the browser sends first) needs these or the fetch is blocked before this code even sees it.
+// Echoing the request's own Origin (rather than a literal "*") is the standard-compliant form -
+// a literal wildcard is invalid/ignored by the browser for a credentialed request, which supabase-
+// js's fetch turned out to be here even though this function only reads the Bearer token, not a
+// cookie - reflecting the real Origin works for both credentialed and non-credentialed requests.
+function corsHeaders(req: Request) {
+  return {
+    "Access-Control-Allow-Origin": req.headers.get("origin") || "*",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
 }
 
 // Mirrors storage.js's rowToProfile/profileToRow - duplicated rather than imported, since
@@ -54,6 +66,9 @@ const todayKey = () => {
 };
 
 Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors } });
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization");

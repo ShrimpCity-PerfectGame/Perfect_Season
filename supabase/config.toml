@@ -1,4 +1,7 @@
 [functions.submit-run]
 enabled = true
-verify_jwt = true
+# The platform's own verify_jwt gate runs before the function body and rejects the CORS preflight
+# OPTIONS request outright (it never carries a JWT) - handling auth ourselves (authClient.auth.
+# getUser(), already in index.ts) is the standard workaround so the preflight can still succeed.
+verify_jwt = false
 entrypoint = "./functions/submit-run/index.ts"

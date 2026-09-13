@@ -1615,21 +1615,26 @@ export default function PerfectSeason() {
   function draft(player, slot, keyOverride) {
     const key = keyOverride || `${spin.team}|${spin.w}`;
     const best = bestAvailable(key, [...drafted], open);
-    setHistory((hs) => [...hs, { key, id: player.id, season: player.season, slot, bestId: best ? best.id : player.id, bestSeason: best ? best.season : player.season }]);
+    // Computed locally (not read back from state) because finish() below needs the complete,
+    // up-to-the-final-pick history synchronously - setHistory's update wouldn't land in this
+    // render's closure until after this function returns, so finish() would otherwise submit a
+    // trace one pick short (replayDraft correctly rejects it as "wrong shape").
+    const newHistory = [...history, { key, id: player.id, season: player.season, slot, bestId: best ? best.id : player.id, bestSeason: best ? best.season : player.season }];
+    setHistory(newHistory);
     setResumed(false);
     const next = { ...roster, [slot]: player };
     setRoster(next);
     setSelected(null);
     const el = draftTop.current;
     if (el && el.scrollIntoView && el.getBoundingClientRect().top < 0) el.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
-    if (SLOTS.every((s) => next[s])) finish(next);
+    if (SLOTS.every((s) => next[s])) finish(next, undefined, newHistory);
     else advance(next, seqIdx + 1);
   }
 
   // forcedScenario (admin-only) skips the real simulation for a scripted ending, and skips
   // every persistence side effect below so testing an animation never touches real stats,
   // the leaderboard, or daily/draft progress.
-  function finish(r, forcedScenario) {
+  function finish(r, forcedScenario, historyOverride) {
     let tot = 0, wt = 0;
     for (const s of SLOTS) { const k = s === "QB" ? QB_WEIGHT : 1; tot += effectiveRating(s, r[s]) * k; wt += k; }
     const score = Math.round((tot / wt) * 10) / 10;
@@ -1655,7 +1660,7 @@ export default function PerfectSeason() {
       // identical numbers either way - only a tampered submission is ever rejected.
       const trace = {
         mode: { kind: mode.kind, seed: mode.seed, code: mode.code, date: mode.date, gm: mode.gm },
-        history, seq, gm: !!mode.gm,
+        history: historyOverride || history, seq, gm: !!mode.gm,
         // Informational only (not part of the verified score/roster path) - same trust level it
         // always had, just reported by the client for the Stats screen's GM-mode leaderboard.
         capUsed: mode.gm ? capUsed : undefined,
