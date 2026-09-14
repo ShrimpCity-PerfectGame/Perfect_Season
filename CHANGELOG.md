@@ -13,6 +13,13 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.4.3] — 2026-09-13
+
+### Changed
+
+- **A finished daily that didn't end in a title now says *See how it went*** instead of *See the
+  damage 💀*. The button opens that day's result, and the old wording didn't read that way.
+
 ## [1.4.2] — 2026-09-13
 
 ### Changed

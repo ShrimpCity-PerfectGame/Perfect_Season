@@ -54,7 +54,7 @@ await runTest("a finished daily can't be replayed", async () => {
   const { container } = await mount();
   await flush();
   const home = text(container);
-  assert(home.includes("See the damage"), "expected the home screen to show a finished daily, got: " + home.slice(0, 400));
+  assert(home.includes("See how it went"), "expected the home screen to show a finished daily, got: " + home.slice(0, 400));
 
   await click(findButtonByText(container, "Fantasy daily"));
   await flush();

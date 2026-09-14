@@ -2339,7 +2339,7 @@ export default function PerfectSeason() {
                       <button key={f} className="btn" onClick={() => startDaily(f)}>
                         {FORMAT_LABEL[f]} daily
                         <span className="go" style={{ marginLeft: 8 }}>
-                          {dailyDone[f] ? (wonItAll(dailyDone[f]) ? "Relive it 🏆" : "See the damage 💀") : picks > 0 ? `${picks} of 6` : "Let's go"}
+                          {dailyDone[f] ? (wonItAll(dailyDone[f]) ? "Relive it 🏆" : "See how it went") : picks > 0 ? `${picks} of 6` : "Let's go"}
                         </span>
                       </button>
                     );
