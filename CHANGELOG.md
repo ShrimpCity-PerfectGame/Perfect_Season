@@ -13,6 +13,19 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.9.1] — 2026-09-14
+
+### Added
+
+- **Gridspin can be found in search.** Search engines now get a clear title and description, the
+  one address to list (www.gridspin.app), a sitemap, and a description of Gridspin as a free game
+  played in the browser. The test site and the old vercel.app addresses ask search engines to skip
+  them, so they can't crowd out the real site.
+
+### Changed
+
+- **The site loads faster on phones:** the app download is about half the size.
+
 ## [1.9.0] — 2026-09-14
 
 The game is now **Gridspin**, at its own address: **[gridspin.app](https://gridspin.app)**. Accounts,

@@ -26,6 +26,16 @@ share text's link: `SITE_URL` if set, else `https://gridspin.app` for production
 `VERCEL_PROJECT_PRODUCTION_URL` (its vercel.app address) for staging. Tests and the UI harness build with
 `APP_SITE_URL` = `https://gridspin.test`.
 
+**Search engines (v1.9.1).** The site is one page, so all of this lives in `page.html` and `build.mjs`:
+production's canonical address is `https://www.gridspin.app` (Vercel forwards the apex to www; people
+still share gridspin.app), with a generated `robots.txt` and one-URL `sitemap.xml`, a search title
+("Gridspin – Football Draft Game: Can You Go 20–0?"; home screens get the short name via
+`apple-mobile-web-app-title`) and JSON-LD structured data. Staging builds add `noindex`, and
+`vercel.json` sends `X-Robots-Tag: noindex` on every `*.vercel.app` host, so staging and the old
+production addresses never compete with gridspin.app. Keep staging's robots.txt crawlable - a crawler
+has to fetch a page to see its noindex. The bundle is minified. The owner holds Google Search Console
+for the domain; `tests/test-build-seo.mjs` checks all of the above.
+
 The React component, all its screens, and every piece of game-specific display/UI logic live in
 one file: `perfect-season.jsx` (~175 KB, ~3,000 lines — still large enough that targeted
 `offset`/`limit` reads or grep beat a full-file read). Player and opponent data lives in
@@ -81,6 +91,7 @@ node tests/test-theme-contrast.mjs  # every text color in every theme scope is r
 node tests/test-result-moments.mjs  # record-first result: per-season rank, upset/streak moments, black Leaderboard, Share
 node tests/test-sou-leave.mjs       # Over/Under can't be replayed or left running: leaving/reloading mid-round is a miss
 node tests/test-sim-engine-independence.mjs  # the season sim rolls identically in every JS engine; pins a 2,000-season checksum
+node tests/test-build-seo.mjs      # runs build.mjs for production and staging: canonical, noindex, robots.txt, sitemap, structured data
 
 # Rebuild the game data from source (only when adding a season or changing grading)
 cd scripts && python3 build.py && python3 correct.py && python3 rate2.py \
