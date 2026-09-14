@@ -36,6 +36,17 @@ production addresses never compete with gridspin.app. Keep staging's robots.txt 
 has to fetch a page to see its noindex. The bundle is minified. The owner holds Google Search Console
 for the domain; `tests/test-build-seo.mjs` checks all of the above.
 
+**Sharing (v1.10.0).** `shareText` builds a Wordle-style card and must never name the players (that
+would spoil the daily): a title (`Gridspin Daily N`, numbered from `GRIDSPIN_DAY_ONE` = launch day
+2026-09-14, or the Unlimited variant), the record, the 17 regular-season games as squares in rows of
+six (🟩 win, 🟥 loss, 🟨 an upset win by `isUpsetWin`), the playoff squares, team score and rank, and
+a link last. Unlimited, Genius and GM shares link to `/c/CODE?beat=W-L[&mode=gm|genius][&scoring=
+championship]` (`challengeLink`); `vercel.json` rewrites `/c/:code` to the page (noindexed), which is
+why `build.mjs` makes every asset path root-relative. The app reads the link with
+`parseChallengeLink`, resets the address to `/`, and shows a challenge card on Modes; taking it runs
+like entering a code (it abandons an Unlimited draft in progress as a DNF, and the card warns
+signed-in players first). The `beat` record is the sharer's own claim, shown only as a headline.
+
 The React component, all its screens, and every piece of game-specific display/UI logic live in
 one file: `perfect-season.jsx` (~175 KB, ~3,000 lines — still large enough that targeted
 `offset`/`limit` reads or grep beat a full-file read). Player and opponent data lives in
@@ -92,6 +103,7 @@ node tests/test-result-moments.mjs  # record-first result: per-season rank, upse
 node tests/test-sou-leave.mjs       # Over/Under can't be replayed or left running: leaving/reloading mid-round is a miss
 node tests/test-sim-engine-independence.mjs  # the season sim rolls identically in every JS engine; pins a 2,000-season checksum
 node tests/test-build-seo.mjs      # runs build.mjs for production and staging: canonical, noindex, robots.txt, sitemap, structured data
+node tests/test-share.mjs          # the spoiler-free share card, challenge links in and out, and the challenge card on Modes
 
 # Rebuild the game data from source (only when adding a season or changing grading)
 cd scripts && python3 build.py && python3 correct.py && python3 rate2.py \

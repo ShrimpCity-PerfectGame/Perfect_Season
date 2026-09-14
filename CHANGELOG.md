@@ -13,6 +13,23 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.10.0] — 2026-09-14
+
+### Added
+
+- **A Wordle-style share card.** Share result now sends your record, a square for every game
+  (🟩 a win, 🟥 a loss, 🟨 an upset win), the playoffs, your team score and a link, and never your
+  players, so it can't spoil the daily for friends. Dailies are numbered from Gridspin's launch:
+  today is Daily 1.
+- **Challenge links.** Sharing an Unlimited, Genius or GM mode season sends a link to your exact
+  boards. A friend who opens it sees "They went 17–3. Can you beat it?" and drafts the same six
+  boards under the same rules with one tap, instead of typing in a code.
+
+### Changed
+
+- **The draft screen shows what you're playing:** Genius mode and GM mode get colored chips, and the
+  scoring format is always named (Fantasy as well as Championship).
+
 ## [1.9.1] — 2026-09-14
 
 ### Added
