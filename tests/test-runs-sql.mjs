@@ -173,6 +173,12 @@ await runTest("site_stats and site_totals match the mock exactly, past 300 accou
   const acct5 = Number((await db.query("select count(*) as c from runs where user_id = $1", [uuid(5)])).rows[0].c);
   assert(acct5 === 14, `account 5's 14 runs should all be logged, got ${acct5}`);
   assert(sqlStats.best_win_pct.every((r) => r.wins + r.losses >= 3), "win % board honours the 3-game minimum");
+  for (const f of ["fantasy", "standard"]) {
+    const upsets = sqlStats.by_format[f].biggest_upsets;
+    const lowestTitle = Number((await db.query("select min(score) as s from runs where champ and not dnf and format = $1", [f])).rows[0].s);
+    assert(upsets.length > 0 && Number(upsets[0].score) === lowestTitle, `${f}: biggest upset should be the lowest title-winning score (${lowestTitle}), got ${upsets[0]?.score}`);
+    assert(upsets.every((u, i) => i === 0 || Number(u.score) >= Number(upsets[i - 1].score)), `${f}: upsets must be ordered lowest score first`);
+  }
   assert(sqlStats.by_format.fantasy.best_lineups.length === 15 && sqlStats.most_wins.length === 10, "boards are capped at their limits");
 });
 

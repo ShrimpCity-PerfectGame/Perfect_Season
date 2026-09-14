@@ -287,20 +287,15 @@ export function makeMockAuth() {
     const by_format = {};
     for (const f of ["fantasy", "standard"]) {
       const col = f === "standard" ? "best_score_std" : "best_score";
-      const pos = {};
-      for (const e of entries.filter((x) => x.format === f)) {
-        const bucket = String(e.entry.slot).startsWith("FLEX") ? "FLEX" : e.entry.slot;
-        const cur = pos[bucket];
-        const r = e.entry.rating ?? -Infinity, cr = cur?.rating ?? -Infinity;
-        if (!cur || r > cr || (r === cr && e.username < cur.username)) pos[bucket] = { ...e.entry, username: e.username };
-      }
       by_format[f] = {
         best_lineups: all.filter((p) => p[col] != null).sort((a, b) => b[col] - a[col] || byName(a, b)).slice(0, 15)
           .map((p) => ({ ...card(p), best_score: p.best_score ?? null, best_run: p.best_run ?? null, best_score_std: p.best_score_std ?? null, best_run_std: p.best_run_std ?? null })),
         best_gm: logged.filter((r) => r.gm && r.format === f && r.score != null)
           .sort((a, b) => b.score - a.score || (a.created_at < b.created_at ? -1 : 1)).slice(0, limit)
           .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l })),
-        pos_records: pos,
+        biggest_upsets: logged.filter((r) => r.champ && r.format === f && r.score != null)
+          .sort((a, b) => a.score - b.score || (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0)).slice(0, limit)
+          .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l, perfect: !!r.perfect, ladder: r.ladder, roster: r.roster ?? null })),
       };
     }
 

@@ -122,13 +122,15 @@ client-writable — lower-stakes minigames, not roster-scoring, a candidate for 
 account's last 10 runs. Every finished draft and DNF is also appended to the `runs` table
 (`supabase/migration-runs-log.sql`) by `submit-run`, after the profile write and through
 `game-logic.mjs`'s `runLogRow` — a failed log insert is logged, never fails the season. Anything
-per-run on the Stats screen (most-drafted, GM scores, position records, and future boards like
-biggest upset) must read `runs`, not `recent`. Stats aggregates run in the database: `site_stats()`
+per-run on the Stats screen (most-drafted, GM scores, biggest upsets) must read `runs`, not
+`recent`. Stats aggregates run in the database: `site_stats()`
 and `site_totals()`, called via `storage.js`'s `fetchSiteStats`/`fetchSiteTotals`. The jsdom mock
 in `tests/helpers.mjs` reimplements both, and `tests/test-runs-sql.mjs` runs the real SQL in PGlite
 and fails if the mock and the SQL return different JSON — **change both together**, and keep every
 `order by` fully tiebroken (the test is how the missing team tiebreak in most-drafted was found).
-The log starts partway through the site's life: the migration backfilled each account's `recent`
+The Stats functions are defined only in `migration-runs-log.sql`; change them by editing that file
+and re-running all of it in each environment (its backfill is a no-op the second time). The log
+starts partway through the site's life: the migration backfilled each account's `recent`
 plus best runs, and nothing older exists.
 
 **Reads retry themselves; writes don't.** supabase-js (postgrest-js's `fetchWithRetry`) retries a
@@ -344,8 +346,9 @@ build would have helped them win it — see `rollBapRound`/`playBapSim`), a **Pl
 `BOARDS`), a live **online-players + total-drafts pill** in the home hero (`subscribeSiteActivity`
 — one Realtime channel, Presence for the online count and a broadcast for the drafts count so
 every open tab ticks up the instant anyone finishes a season), and a **Stats** screen (its own nav
-tab — sitewide totals plus leaderboards for best lineups ever, most-drafted players, position
-records, career wins/championships/playoff appearances, longest daily streak, best win percentage,
+tab — sitewide totals plus leaderboards for best lineups ever, most-drafted players, biggest
+upsets (lowest team score to win the title, per format — it replaced position records, which
+maxed out and stopped changing), career wins/championships/playoff appearances, longest daily streak, best win percentage,
 best GM-mode score, and Build-a-player's sitewide "created players" tally/highest-OVR build — one
 `fetchSiteStats` call, computed in the database by `site_stats()` — see the runs-log note under
 Architecture — plus the separate `builds` table and `logBuild`). See `AdminPanel`, `SOU_STAT`, `BAP_ATTRS`, and `GM_CAP`/`playerSalary()` in the

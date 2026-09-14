@@ -10,6 +10,11 @@
 -- lost was anything per-run - most-drafted players, GM-mode scores, position records.
 --
 -- Backward-compatible with the currently-deployed Edge Function and client: this only adds objects.
+--
+-- Revisions - this file stays the single definition of the Stats functions, so a change to them is
+-- an edit here plus re-running the whole file (the backfill is a no-op the second time):
+--   1.6.0  site_stats returns biggest_upsets instead of pos_records. A client older than 1.6.0 shows
+--          its position-records section empty until the 1.6.0 client ships a few minutes later.
 
 create table if not exists public.runs (
   id          uuid primary key default gen_random_uuid(),
@@ -155,12 +160,15 @@ returns jsonb language sql stable security invoker set search_path = public as $
             from (select * from runs where gm and not dnf and format = f.format and score is not null
                    order by score desc, created_at limit p_limit) g
         ),
-        'pos_records', (
-          select coalesce(jsonb_object_agg(x.bucket, x.entry || jsonb_build_object('username', x.username)), '{}'::jsonb)
-            from (select distinct on (bucket) bucket, entry, username
-                    from (select case when entry->>'slot' like 'FLEX%' then 'FLEX' else entry->>'slot' end as bucket, entry, username
-                            from entries where format = f.format) b
-                   order by bucket, (entry->>'rating')::numeric desc nulls last, username) x
+        -- Title-winning runs, lowest team score first: the lower the score, the bigger the upset.
+        -- Every mode counts. The season sim only looks at team score, so a title at a given score is
+        -- exactly as unlikely from GM, Genius or a daily as from Unlimited.
+        'biggest_upsets', (
+          select coalesce(jsonb_agg(jsonb_build_object('username', u.username, 'score', u.score, 'w', u.w, 'l', u.l,
+                                                       'perfect', coalesce(u.perfect, false), 'ladder', u.ladder, 'roster', u.roster)
+                                    order by u.score, u.created_at), '[]'::jsonb)
+            from (select * from runs where champ and not dnf and format = f.format and score is not null
+                   order by score, created_at limit p_limit) u
         )
       )) from fmt f
     ),

@@ -195,16 +195,16 @@ export async function fetchBuildCount() {
 
 // Every Stats-screen board, computed in the database by site_stats() (supabase/migration-runs-log.sql)
 // over every account and every logged run - not a browser-side pass over a recent sample. Career
-// boards come from profiles; per-run boards (most-drafted, GM scores, position records) from the
+// boards come from profiles; per-run boards (most-drafted, GM scores, biggest upsets) from the
 // runs log. Returns the shape the Stats screen renders, or null if the request failed.
-const EMPTY_FORMAT = { bestLineups: [], bestGm: [], posRecords: {} };
+const EMPTY_FORMAT = { bestLineups: [], bestGm: [], biggestUpsets: [] };
 export async function fetchSiteStats(limit = 10) {
   const { data, error } = await getClient().rpc("site_stats", { p_limit: limit }, READ);
   if (error || !data) return null;
   const profilesOf = (rows) => (rows || []).map(rowToProfile);
   const byFormat = {};
   for (const [f, v] of Object.entries(data.by_format || {})) {
-    byFormat[f] = { bestLineups: profilesOf(v.best_lineups), bestGm: v.best_gm || [], posRecords: v.pos_records || {} };
+    byFormat[f] = { bestLineups: profilesOf(v.best_lineups), bestGm: v.best_gm || [], biggestUpsets: v.biggest_upsets || [] };
   }
   return {
     totals: { runs: Number(data.totals?.runs) || 0, perfect: Number(data.totals?.perfect) || 0, players: Number(data.totals?.players) || 0 },

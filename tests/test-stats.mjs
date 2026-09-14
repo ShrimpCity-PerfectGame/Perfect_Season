@@ -1,5 +1,5 @@
 // The Stats screen: one call (fetchSiteStats -> site_stats(), mirrored by the mock in helpers.mjs)
-// feeds every board - career boards from profiles, most-drafted / GM scores / position records from
+// feeds every board - career boards from profiles, most-drafted / GM scores / biggest upsets from
 // the runs log. Seeds two profiles plus their runs, with numbers picked so every board has a clear,
 // checkable #1. tests/test-runs-sql.mjs checks the mock against the real SQL.
 import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
@@ -60,6 +60,21 @@ for (const [id, p] of auth._profiles) {
   }
 }
 
+// Title-winning runs for the biggest-upset board, plus two that must never appear on the Fantasy one:
+// a lower score that didn't win the title, and a Championship-format title. Rosters avoid the
+// players above so the most-drafted counts are unchanged.
+const upsetRoster = [{ slot: "QB", name: "Kyle Orton", season: 2009, team: "DEN", rating: 70 }];
+for (const [id, username, entry] of [
+  ["alice-id", "alice", { w: 13, l: 4, score: 71.2, champ: true, playoffs: true, format: "fantasy", roster: upsetRoster }],
+  ["bob-id", "bob", { w: 12, l: 5, score: 64.8, champ: true, playoffs: true, format: "fantasy", mode: "daily", roster: upsetRoster }],
+  ["alice-id", "alice", { w: 20, l: 0, score: 90.0, champ: true, perfect: true, playoffs: true, format: "fantasy", roster: upsetRoster }],
+  ["bob-id", "bob", { w: 11, l: 6, score: 50.0, champ: false, playoffs: true, format: "fantasy", roster: upsetRoster }],
+  ["alice-id", "alice", { w: 12, l: 5, score: 58.3, champ: true, playoffs: true, format: "standard", roster: upsetRoster }],
+]) {
+  const row = runLogRow(id, username, { ...entry, date: clock += 1000 }, entry.mode === "daily" ? "2026-09-01" : null);
+  auth._runs.set(`${row.user_id}|${row.created_at}|${row.dnf}`, row);
+}
+
 // Build-a-player results live in their own table, unrelated to profiles - seed a couple directly
 // the same way logBuild would insert them, to test the Stats screen's read side independent of
 // running the actual slow multi-round build flow (see test-build-a-player.mjs for that).
@@ -86,11 +101,33 @@ await runTest("best lineups ever ranks by best score, most-drafted players aggre
   assert(t.includes("Tom Brady") && t.includes("3 drafts"), "expected Tom Brady drafted 3 times (2 from alice's recent, 1 from bob's), got: " + t.slice(0, 1200));
 });
 
-await runTest("position records show the highest-rated player ever at each slot", async () => {
+const upsetSection = () => {
   const t = text(container);
-  assert(t.includes("position records"), "expected a position-records section");
-  assert(t.includes("Tom Brady"), "expected Tom Brady (rating 140) to hold the QB record over Drew Brees (130)");
-  assert(t.includes("Priest Holmes"), "expected Priest Holmes to hold the RB record");
+  const start = t.indexOf("Biggest ");
+  return start < 0 ? "" : t.slice(start, t.indexOf("Career records", start));
+};
+
+await runTest("biggest upsets rank title-winning runs from the lowest team score up", async () => {
+  const s = upsetSection();
+  assert(s.startsWith("🚨 Biggest Fantasy upsets") || s.includes("Biggest Fantasy upsets"), "expected a Biggest Fantasy upsets section, got: " + s.slice(0, 200));
+  assert(!text(container).includes("position records"), "the old position-records section should be gone");
+  const order = ["64.8", "71.2", "90.0"].map((score) => s.indexOf(score));
+  assert(order.every((i) => i >= 0) && order[0] < order[1] && order[1] < order[2], "expected 64.8, then 71.2, then 90.0, got: " + s.slice(0, 600));
+  assert(!s.includes("50.0"), "a run that didn't win the title is not an upset, got: " + s.slice(0, 600));
+  assert(!s.includes("58.3"), "a Championship-format title must not appear on the Fantasy board");
+  assert(/64\.8, 12–5 🏆 · Daily/.test(s), "expected bob's daily title tagged Daily, got: " + s.slice(0, 600));
+  assert(/90\.0, 20–0 🏆 perfect season/.test(s), "expected the 20–0 run marked as a perfect season, got: " + s.slice(0, 600));
+  assert(s.includes("Kyle Orton"), "expected the upset lineup's roster chips");
+});
+
+await runTest("each scoring format has its own upset board", async () => {
+  await click([...container.querySelectorAll(".fmtbtn")].find((b) => b.textContent.startsWith("Championship")));
+  await flush();
+  const s = upsetSection();
+  assert(s.includes("Biggest Championship upsets") && s.includes("58.3"), "expected alice's Championship title on its own board, got: " + s.slice(0, 400));
+  assert(!s.includes("64.8") && !s.includes("71.2"), "Fantasy titles must not appear on the Championship board, got: " + s.slice(0, 400));
+  await click([...container.querySelectorAll(".fmtbtn")].find((b) => b.textContent.startsWith("Fantasy")));
+  await flush();
 });
 
 await runTest("wins/championships/playoffs/streak leaderboards rank by their own stat", async () => {

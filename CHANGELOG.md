@@ -13,6 +13,26 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.6.0] — 2026-09-14
+
+### Added
+
+- **🚨 Biggest upsets.** A new Stats board for each scoring format listing the lowest team scores
+  that still won the championship: the lower the score, the bigger the upset. Each entry shows the
+  record, the lineup, and whether it was a daily, Genius or GM run or a perfect season. Unlike a
+  best-ever score, it never tops out, because someone can always win it all with a weaker team.
+
+### Removed
+
+- **Position records.** The best-ever player at each position stopped changing once the top rated
+  seasons had been drafted. Biggest upsets takes its place.
+
+### Deploy notes
+
+Re-run `supabase/migration-runs-log.sql` (it now defines the upsets board), then ship the client. No
+Edge Function change. Between the two steps an older client shows its position-records section
+empty.
+
 ## [1.5.1] — 2026-09-14
 
 ### Fixed

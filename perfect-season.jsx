@@ -947,10 +947,9 @@ const topPct = (rank, total) => {
 // storage.js's fetchSiteStats returns, every board empty.
 const EMPTY_SITE_STATS = {
   totals: { runs: 0, perfect: 0, players: 0 },
-  byFormat: Object.fromEntries(FORMATS.map((f) => [f, { bestLineups: [], bestGm: [], posRecords: {} }])),
+  byFormat: Object.fromEntries(FORMATS.map((f) => [f, { bestLineups: [], bestGm: [], biggestUpsets: [] }])),
   mostDrafted: [], mostWins: [], mostChamps: [], mostPlayoffs: [], longestStreaks: [], bestWinPct: [], avgWinPct: 0,
 };
-const POS_RECORD_SLOTS = [["QB", "QB"], ["RB", "RB"], ["WR", "WR"], ["TE", "TE"], ["FLEX", "Flex"]];
 const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const USER_RE = /^[a-zA-Z0-9_]{3,16}$/;
 
@@ -2936,7 +2935,7 @@ export default function PerfectSeason() {
                 </div>
                 {siteStats.error
                   ? <p className="note">Stats couldn't be loaded. Try Refresh.</p>
-                  : <p className="note">Career boards count every account. Most-drafted players, GM scores and position records count every run since the run log started in September 2026, plus each account's last 10 runs from before then.</p>}
+                  : <p className="note">Career boards count every account. Most-drafted players, GM scores and biggest upsets count every run since the run log started in September 2026, plus each account's last 10 runs from before then.</p>}
                 <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>
 
                 {/* Only the score-ranked boards split by format; the career records further down
@@ -2989,25 +2988,27 @@ export default function PerfectSeason() {
                   </div>
                 )}
 
-                <h2 className="h" style={{ marginTop: 22 }}>{FORMAT_LABEL[boardFormat]} position records</h2>
-                <div className="recap">
-                  {POS_RECORD_SLOTS.map(([bucket, label]) => {
-                    const p = fmtStats.posRecords[bucket];
-                    return (
-                      <div className="rc" key={bucket}>
-                        <div className="n">{label}</div>
-                        {p ? (
-                          <>
-                            <div><div className="bd">{p.season} {TEAMS[p.team] ? TEAMS[p.team][0] : p.team}</div><div className="tk">{p.name}</div></div>
-                            <div className="alt">{p.username}</div>
-                          </>
-                        ) : (
-                          <div className="alt">No record yet.</div>
-                        )}
+                {/* The lowest team scores that still won the title. Unlike a best-ever score this never
+                    tops out: someone can always win it all with a weaker team. */}
+                <h2 className="h" style={{ marginTop: 22 }}>🚨 Biggest {FORMAT_LABEL[boardFormat]} upsets</h2>
+                <p className="note" style={{ marginTop: 0 }}>The lowest team scores that still won the championship. The lower the score, the bigger the upset.</p>
+                {fmtStats.biggestUpsets.length === 0 ? (
+                  <p className="note" style={{ marginTop: 0 }}>No title-winning {FORMAT_LABEL[boardFormat]} runs yet.</p>
+                ) : (
+                  <div className="recap">
+                    {fmtStats.biggestUpsets.map((u, i) => (
+                      <div key={i} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+                        <div style={{ fontWeight: 700 }}>
+                          #{i + 1} {u.username}{" "}
+                          <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+                            — {Number(u.score).toFixed(1)}, {u.w}–{u.l}{u.perfect ? " 🏆 perfect season" : " 🏆"}{u.ladder !== "unlimited" ? ` · ${LADDER_LABEL[u.ladder] || u.ladder}` : ""}
+                          </span>
+                        </div>
+                        {Array.isArray(u.roster) && u.roster.length > 0 && <RosterChips roster={u.roster} />}
                       </div>
-                    );
-                  })}
-                </div>
+                    ))}
+                  </div>
+                )}
 
                 <h2 className="h" style={{ marginTop: 22 }}>Career records</h2>
                 <p className="note" style={{ marginTop: 0 }}>Combined across both scoring formats - a season played is a season played, and both run the same simulation.</p>
