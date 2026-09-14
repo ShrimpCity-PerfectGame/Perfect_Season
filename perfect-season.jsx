@@ -2813,7 +2813,7 @@ export default function PerfectSeason() {
                     : <>Can you beat<br />their boards?</>}
                 </h2>
                 <p>
-                  {[challenge.gm && "GM mode", challenge.genius && "Genius mode", FORMAT_LABEL[challenge.format]].filter(Boolean).join(" · ")}.{" "}
+                  {[challenge.gm && "GM mode", challenge.genius && "Genius mode", `${FORMAT_LABEL[challenge.format]} scoring`].filter(Boolean).join(" · ")}.{" "}
                   The same six team-and-era boards they drafted from, in the same order. Your season is your own.
                 </p>
                 {user && challengeAbandons && <p className="warn">You have an Unlimited draft in progress. Drafting these boards counts it as a DNF.</p>}
