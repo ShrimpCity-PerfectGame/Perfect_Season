@@ -1459,7 +1459,10 @@ export default function PerfectSeason() {
         myRank = idx >= 0 ? idx : mine != null ? await fetchOwnRank(mine, boardFormat) : -1;
       }
       setLb({ loading: false, top, totals, myRank, error: false, format: boardFormat });
-      setLiveDrafts(totals.runs);
+      // Never lower the live count. finish() calls this while its own submit-run is still in flight,
+      // so these totals can predate the draft that just finished - and that draft's broadcast echo
+      // has usually already bumped the count past them.
+      setLiveDrafts((n) => (n == null ? totals.runs : Math.max(n, totals.runs)));
     } catch (e) {
       setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1, error: true, format: boardFormat });
     }

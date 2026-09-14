@@ -223,8 +223,8 @@ export async function fetchSiteStats(limit = 10) {
 // broadcaster for the "a draft just finished" side.
 export function subscribeSiteActivity({ onOnlineCount, onDraftFinished }) {
   const client = getClient();
-  // self: true - Supabase doesn't echo a broadcast back to its sender by default, so without it the
-  // tab that just finished a draft was the one tab whose drafts count didn't go up.
+  // self: true - Supabase doesn't echo a broadcast back to its sender by default, and the tab that
+  // just finished a draft should count it too (see loadLeaderboard's setLiveDrafts for the other half).
   const channel = client.channel("site-activity", { config: { broadcast: { self: true } } });
   channel.on("presence", { event: "sync" }, () => onOnlineCount(Object.keys(channel.presenceState()).length));
   channel.on("broadcast", { event: "draft_finished" }, onDraftFinished);

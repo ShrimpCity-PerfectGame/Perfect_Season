@@ -31,7 +31,8 @@ Nothing yet.
 ### Fixed
 
 - **Your own draft now counts in the live drafts number.** The tab you finished a season in was
-  the only open tab that didn't tick up.
+  the only open tab that didn't tick up: it never heard its own "draft finished" announcement, and
+  the leaderboard refresh that follows a finished draft read the total from before that draft saved.
 
 ### Deploy notes
 
