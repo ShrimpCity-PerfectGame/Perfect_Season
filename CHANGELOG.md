@@ -13,6 +13,25 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.3.2] — 2026-09-13
+
+### Fixed
+
+- **Championship dailies never saved.** Since Championship scoring launched in 1.1.0, every
+  Championship daily was rejected by the server: the game dealt its boards from one seed
+  (`daily-<date>:std`) while the server checked the draft against a different one
+  (`daily-<date>-std`), so the roster looked illegal. The result screen still played out, but
+  nothing reached your profile, streak, points or the daily leaderboard. Fantasy dailies were
+  unaffected. Both sides now get the seed from a single shared function, so they can't disagree
+  again.
+- A Championship daily already in progress under the old seed now starts fresh instead of resuming
+  into a draft the server would reject.
+
+### Known effect
+
+- Championship dailies finished before this fix are not recoverable — the server never received
+  them — and today's stays locked on that device. From tomorrow they save normally.
+
 ## [1.3.1] — 2026-09-13
 
 No scoring changes — this release explains a rule that was already in effect.

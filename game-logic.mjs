@@ -30,6 +30,12 @@ export const REROLL_BUDGET = 1;
 export const FORMATS = ["fantasy", "standard"];
 export const normFormat = (f) => (f === "standard" ? "standard" : "fantasy");
 
+// The seed for a day's daily draft. One definition, called by the client that deals the boards and
+// by submit-run that replays them - the two must agree exactly or the server replays different
+// boards and rejects every submission. They did once disagree (the client built "daily-<date>:std"
+// while the server built "daily-<date>-std"), which silently discarded every Championship daily.
+export const dailySeed = (date, format) => `daily-${date}${normFormat(format) === "standard" ? "-std" : ""}`;
+
 // A rating is capped here before it reaches team-score math. Note the stored `rating` in
 // data/players.json already has this applied (nothing in the file exceeds 130), so this only
 // bites when computing a rating here.

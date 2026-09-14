@@ -144,7 +144,7 @@ Deno.serve(async (req) => {
     }
     // The two formats' dailies are deliberately different drafts, so playing one doesn't spoil
     // the other's boards. Derived here, never taken from the client.
-    seed = `daily-${mode.date}${format === "standard" ? "-std" : ""}`;
+    seed = GL.dailySeed(mode.date, format);
   } else if (mode.kind === "free") {
     if (typeof mode.code !== "string" || !mode.code) return json({ error: "missing challenge code" }, 400);
     seed = mode.code;

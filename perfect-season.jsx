@@ -13,7 +13,7 @@ import {
   flexRating, effectiveRating, winProb, shuffle, windowedShuffle, tagOpp, buildTimeline, simulateSeason,
   applyDnf, LOSER_PTS, MARGINS, nextStreak, GM_CAP, playerSalary, REROLL_BUDGET,
   passerRating, normFormat, BEST_FIELDS, FORMATS,
-  botPar, draftPoints, modeKey, LADDERS,
+  botPar, draftPoints, modeKey, LADDERS, dailySeed,
 } from "./game-logic.mjs";
 initGameData(gameData.players, gameData.opponents);
 
@@ -1453,7 +1453,7 @@ export default function PerfectSeason() {
       const saved = await sget(DRAFT_KEY, false);
       const ok = saved && saved.spin && BOARDS[`${saved.spin.team}|${saved.spin.w}`] && Array.isArray(saved.history)
         && saved.history.every((h) => findPlayer(h.key, h.id, h.season));
-      if (ok && saved.history.length > 0 && saved.mode) restoreDraft(saved);
+      if (ok && saved.history.length > 0 && validDraft(saved)) restoreDraft(saved);
       refreshWip();
       setDraftReady(true);
       if (!(await sget(HOWTO_KEY, false))) setHowTo(true);
@@ -1645,8 +1645,12 @@ export default function PerfectSeason() {
     setWip((w) => ({ ...w, [slotId(saved.mode)]: saved.history.length }));
   }
 
+  // A saved daily whose seed isn't the one the server will derive can never be submitted - the
+  // server would replay different boards and reject it - so it's treated as no saved draft at all
+  // rather than resumed into a guaranteed rejection.
   const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history) && s.history.length > 0
-    && BOARDS[`${s.spin.team}|${s.spin.w}`] && s.history.every((h) => findPlayer(h.key, h.id, h.season));
+    && BOARDS[`${s.spin.team}|${s.spin.w}`] && s.history.every((h) => findPlayer(h.key, h.id, h.season))
+    && (s.mode.kind !== "daily" || s.mode.seed === dailySeed(s.mode.date, s.mode.format));
 
   // presetRoster (Build-a-player) pre-fills one slot before the sequence is walked, so boardAt
   // correctly treats that position as already spoken for from the very first board.
@@ -1655,7 +1659,7 @@ export default function PerfectSeason() {
     // The two formats' dailies are deliberately different drafts, so playing one doesn't spoil
     // the other's boards. Free-mode seeds are unchanged - boards there don't depend on format,
     // and an existing challenge code must keep dealing the same boards it always did.
-    const seed = m.kind === "daily" ? `daily-${m.date}${fmtSuffix(fmt)}` : m.code;
+    const seed = m.kind === "daily" ? dailySeed(m.date, fmt) : m.code;
     const list = seededSequence(seed);
     const initialRoster = presetRoster || {};
     setMode({ ...m, format: fmt, seed }); setSeq(list);

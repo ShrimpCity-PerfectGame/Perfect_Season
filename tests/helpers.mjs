@@ -195,7 +195,7 @@ export function makeMockAuth() {
       if (typeof mode.date !== "string" || !isPlausibleDailyDateMock(mode.date)) {
         return { data: { error: "a daily submission must be for today" } };
       }
-      seed = `daily-${mode.date}${format === "standard" ? "-std" : ""}`;
+      seed = GL.dailySeed(mode.date, format);
     } else if (mode.kind === "free") {
       if (typeof mode.code !== "string" || !mode.code) return { data: { error: "missing challenge code" } };
       seed = mode.code;
@@ -258,6 +258,7 @@ export function makeMockAuth() {
     removeChannel() {},
     _profiles: profiles, // test-only escape hatch for setup/assertions
     _builds: builds, // test-only escape hatch for setup/assertions
+    _dailyRuns: dailyRuns, // test-only escape hatch for setup/assertions
     _channels: channels, // test-only escape hatch, e.g. auth._channels.get("site-activity").send({event:"draft_finished", payload:{}})
     auth: {
       async signUp({ email, password, options }) {
