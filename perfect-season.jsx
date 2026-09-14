@@ -739,7 +739,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 
 /* ===== play screen: roster, spin reel, player board ===== */
 .brand{display:flex;align-items:center;gap:12px}
-.roster{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:12px}
+.roster{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin-bottom:12px}
 .slot{border:1.5px dashed var(--line2);border-radius:10px;padding:7px 9px;min-height:58px;background:transparent;text-align:left;color:var(--ink)}
 .slot .k{font-weight:800;font-size:12px;color:var(--pc,var(--muted))}
 .slot .v{font-weight:600;font-size:14px;line-height:1.15;margin-top:3px}
@@ -986,10 +986,11 @@ button.pill{font-family:inherit;transition:border-color .12s}
   .hometiles .tile:last-child:nth-child(odd){grid-column:1/-1}
 }
 /* ===== mobile pass (1.8.0): fixes from the phone-size audit ===== */
-/* Draft: roster slots share width evenly however long a surname is, and read top-down. */
-.roster{grid-template-columns:repeat(6,minmax(0,1fr))}
+/* Draft: slots read top-down, and a long surname breaks rather than widening its column (the
+   columns themselves are minmax(0,1fr) in the base .roster rule and its phone override). */
 .slot{min-width:0;display:flex;flex-direction:column;justify-content:flex-start}
-.slot .v{overflow-wrap:anywhere;hyphens:auto}
+.slot .v{overflow-wrap:break-word;hyphens:auto}
+.rerolls .left{font-weight:600;opacity:.75}
 /* The whole card is the tap target, not just the area inside its padding. */
 .card{padding:0}
 .card>.hit{padding:10px 12px;box-sizing:border-box}
@@ -1033,6 +1034,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .pickerbar{position:sticky;top:0;z-index:5;background:var(--bg);padding-block:8px;margin-bottom:6px}
 @media (max-width:720px){
   .cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;gap:8px 6px}.cell{width:auto}
+  .cell .l,.pp{font-size:12px}
 }
 @media (max-width:640px){
   .rc.rank{grid-template-columns:24px minmax(0,1fr) auto}.rc.rank .alt{grid-column:auto}
@@ -1046,6 +1048,8 @@ button.pill{font-family:inherit;transition:border-color .12s}
   .drafts .btn.solid{min-width:0}
   .rerolls{display:grid;grid-template-columns:1fr 1fr}
   .rerolls .btn.reset,.rerolls .note{grid-column:1/-1}
+  .rerolls .btn:not(.reset){flex-direction:column;gap:0;line-height:1.15}
+  .rerolls .left{font-size:12px}
   .reel{padding:12px 14px 12px 16px}.reel .team{font-size:40px}.reel .years{font-size:26px}.reel::after{right:3%}
   .seedline{flex-basis:100%;margin-left:0;flex-wrap:wrap}
   .fmtpick .fmtlabel{flex-basis:100%;margin:0}
@@ -1092,9 +1096,10 @@ button.pill{font-family:inherit;transition:border-color .12s}
 }
 /* Touch screens: 44px targets. Text links keep their look and get a larger invisible hit area. */
 @media (pointer:coarse){
-  .btn,.fmtbtn,.seg button,.tab,.mb{min-height:44px}
-  .linkbtn{position:relative}
+  .btn,.fmtbtn,.seg button,.tab,.mb,.inp{min-height:44px}
+  .linkbtn,button.pill{position:relative}
   .linkbtn::after{content:'';position:absolute;left:-6px;right:-6px;top:-13px;bottom:-13px}
+  button.pill::after{content:'';position:absolute;left:-4px;right:-4px;top:-8px;bottom:-8px}
 }
 
 /* ===== reduced motion ===== */
@@ -1425,7 +1430,8 @@ export function SeasonStrip({ result, ladderName }) {
   if (result.rank !== null) {
     const r = result.rank;
     cells.push(r
-      ? { key: "rank", n: `#${r.rank.toLocaleString()}`, l: "This season", s: `of ${r.total.toLocaleString()}`, s2: r.total >= 20 ? topPct(r.rank, r.total) : null }
+      // A percentile only when it says something: over a real sample, and for the top half ("Top 100%" isn't a boast).
+      ? { key: "rank", n: `#${r.rank.toLocaleString()}`, l: "This season", s: `of ${r.total.toLocaleString()}`, s2: r.total >= 20 && r.rank <= r.total / 2 ? topPct(r.rank, r.total) : null }
       : { key: "rank", n: "…", l: "This season", s: "Ranking" });
   }
   return (
@@ -2843,8 +2849,8 @@ export default function PerfectSeason() {
                   <div><span className="years led-wrap"><span className="led">{WINDOWS[disp.w][0]}–{WINDOWS[disp.w][1]}</span></span>{cityRange(disp.team, disp.w) && <span className="city">{cityRange(disp.team, disp.w)}</span>}</div>
                 </div>
                 <div className="rerolls">
-                  <button className="btn" disabled={spinning || rerolls.team < 1} onClick={() => reroll("team")}>Re-spin team ({rerolls.team} left)</button>
-                  <button className="btn" disabled={spinning || rerolls.years < 1} onClick={() => reroll("years")}>Re-spin years ({rerolls.years} left)</button>
+                  <button className="btn" disabled={spinning || rerolls.team < 1} onClick={() => reroll("team")}>Re-spin team <span className="left">({rerolls.team} left)</span></button>
+                  <button className="btn" disabled={spinning || rerolls.years < 1} onClick={() => reroll("years")}>Re-spin years <span className="left">({rerolls.years} left)</span></button>
                   {mode.kind === "daily" ? (
                     <span className="note" style={{ marginLeft: "auto", alignSelf: "center" }}>One shot. No resets on the daily.</span>
                   ) : (
