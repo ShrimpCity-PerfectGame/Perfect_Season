@@ -13,6 +13,26 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.3.1] — 2026-09-13
+
+No scoring changes — this release explains a rule that was already in effect.
+
+### Fixed
+
+- **Flex's grading was never explained**, so it looked like a bug. Flex compares raw production
+  across every RB, WR and TE of an era rather than grading a player against his own position, and
+  it's the only slot with no 130 ceiling. So an all-time season is worth more in Flex than in its
+  natural spot — Christian McCaffrey's 2019 is capped at 130 as a running back but rates 168 in
+  Flex — and the draft recap's "best possible order" would move your best player there with no
+  reason given. That's now stated in the note under your graded roster, in the "best possible
+  order" note, and in How to play.
+
+### Changed
+
+- `SCORING.md` documents uncapped Flex as a deliberate rule, and why it's safe: the named slots are
+  still capped, so a team score can't realistically climb to the level that would beat every
+  opponent automatically.
+
 ## [1.3.0] — 2026-09-13
 
 ### Added
