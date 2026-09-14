@@ -22,8 +22,8 @@ strings like "Perfect season. 20–0.".
 as `GridspinMark` in `perfect-season.jsx`; change both together. `node tools/brand/render.mjs`
 rebuilds every PNG in `static/` from the SVG (favicon, home-screen icons, the 1200x630 `og.png` link
 preview). `build.mjs` copies `static/` to the site root and fills the page's link-preview tags and the
-share text's link from `SITE_URL`, falling back to Vercel's `VERCEL_PROJECT_PRODUCTION_URL` (the
-project's custom domain once added, else its vercel.app address). Tests and the UI harness build with
+share text's link: `SITE_URL` if set, else `https://gridspin.app` for production and Vercel's
+`VERCEL_PROJECT_PRODUCTION_URL` (its vercel.app address) for staging. Tests and the UI harness build with
 `APP_SITE_URL` = `https://gridspin.test`.
 
 The React component, all its screens, and every piece of game-specific display/UI logic live in
@@ -345,9 +345,8 @@ suite and still broke the live Leaderboard for every existing account.
      to the apex), add the DNS records Vercel shows at the registrar, and wait for the certificate.
   3. Production Supabase → Authentication → URL Configuration: Site URL `https://gridspin.app`, and
      add it to the redirect URLs. Keep the vercel.app entry until the redirect in step 5 is live.
-  4. Merge v1.9.0 to `master`. The build log's "Built ... (v1.9.0, production, <url>)" line must name
-     `https://gridspin.app`; if it still says vercel.app, set `SITE_URL` in the Vercel project's
-     Production environment and redeploy.
+  4. Merge v1.9.0 to `master`. build.mjs names `https://gridspin.app` for production itself, so no
+     Vercel setting is needed; the build log's "Built ... (v1.9.0, production, <url>)" line shows it.
   5. Verify on gridspin.app: header version, `og:image` in the page source is an absolute gridspin.app
      URL, the share text ends with the address, sign-in works. Then set both old addresses of the
      production project, `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`

@@ -20,11 +20,12 @@ if (appEnv !== "production" && appEnv !== "staging") {
 }
 
 // The site's own address, for link previews (crawlers need absolute image URLs) and the link at the
-// end of the share text. SITE_URL wins when set - that's how the custom domain is pinned. Otherwise
-// Vercel's VERCEL_PROJECT_PRODUCTION_URL: this project's production domain (its custom domain once
-// one is added, the *.vercel.app address until then), so staging names itself and production names
-// itself with no per-environment config.
+// end of the share text. SITE_URL wins when set. Production is always gridspin.app, named here rather
+// than read from Vercel, so it doesn't matter whether Vercel serves the apex or www as the primary
+// domain. Staging names itself from VERCEL_PROJECT_PRODUCTION_URL (its *.vercel.app address).
+const PRODUCTION_SITE_URL = "https://gridspin.app";
 const siteUrl = (process.env.SITE_URL
+  || (appEnv === "production" ? PRODUCTION_SITE_URL : "")
   || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")).replace(/\/+$/, "");
 if (!siteUrl) console.warn("Warning: no SITE_URL - link previews get relative image paths and the share text has no link.");
 
