@@ -126,6 +126,7 @@ export async function loadPerfectSeason() {
       define: {
         APP_VERSION: JSON.stringify("test"),
         APP_ENV: JSON.stringify("production"),
+        APP_SITE_URL: JSON.stringify("https://gridspin.test"),
       },
       outfile,
     });

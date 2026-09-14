@@ -1614,7 +1614,7 @@ function shareText(result, roster, place, mode) {
   // full-PPR one - the two don't rank against each other.
   const fmt = normFormat(mode?.format) === "standard" ? " · Championship" : "";
   const lines = [
-    mode && mode.kind === "daily" ? `Perfect Season 🏈 Daily ${mode.date}${fmt} · ${result.w}–${result.l}` : `Perfect Season 🏈${fmt} ${result.w}–${result.l}`,
+    mode && mode.kind === "daily" ? `Gridspin 🏈 Daily ${mode.date}${fmt} · ${result.w}–${result.l}` : `Gridspin 🏈${fmt} ${result.w}–${result.l}`,
     result.outcome,
     `Team score ${result.score.toFixed(1)}${place ? ` · #${place.rank.toLocaleString()} of ${place.total.toLocaleString()}` : ""}`,
     reg,
@@ -1622,7 +1622,25 @@ function shareText(result, roster, place, mode) {
   if (po) lines.push(`Playoffs ${po}`);
   lines.push(SLOTS.map((s) => `${s.startsWith("FLEX") ? "FX" : s} ${lastName(roster[s].name)} ${shortYr(roster[s].season)}`).join(", "));
   if (mode && mode.kind !== "daily") lines.push(`Draft the same boards: code ${mode.code}`);
+  // The site's address last, where chat apps turn it into a link. Only a build with no SITE_URL
+  // (a bare local build) leaves it out; see build.mjs.
+  if (APP_SITE_URL) lines.push(APP_SITE_URL);
   return lines.join("\n");
+}
+
+// The Gridspin mark: the re-spin arrow around a football. static/icon.svg is the same drawing, and
+// tools/brand/render.mjs makes the favicon, home-screen icons and link preview from that file -
+// change the two together.
+function GridspinMark({ size = 38 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+      <rect x="2" y="2" width="60" height="60" rx="15" fill={PALETTE.lime} stroke={PALETTE.ink} strokeWidth="3" />
+      <path d="M43.57 18.21A18 18 0 1 1 20.43 18.21" fill="none" stroke={PALETTE.ink} strokeWidth="6" strokeLinecap="round" />
+      <path d="M25.9 12.6 16.2 13.9 22.4 22.2Z" fill={PALETTE.ink} />
+      <ellipse cx="32" cy="33.5" rx="9.5" ry="6.2" transform="rotate(-35 32 33.5)" fill={PALETTE.ink} />
+      <path d="M29 35.8 35 31.2" stroke={PALETTE.lime} strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 function HowTo({ onClose }) {
@@ -2687,7 +2705,7 @@ export default function PerfectSeason() {
                 <span className="whoname">{user}</span>
               </button>
             )}
-            <span className="ver" title={`Perfect Season v${APP_VERSION}`}>v{APP_VERSION}</span>
+            <span className="ver" title={`Gridspin v${APP_VERSION}`}>v{APP_VERSION}</span>
           </div>
         </nav>
 
@@ -2713,21 +2731,15 @@ export default function PerfectSeason() {
               <div className="yardnums" aria-hidden="true">{[20, 19, 18, 17, 16].map((n) => <span key={n}>{n}</span>)}</div>
               <div className="blob" aria-hidden="true" />
               <div className="eyebrow">
-                <svg width="34" height="34" viewBox="0 0 48 48" aria-hidden="true">
-                  <ellipse cx="24" cy="24" rx="21" ry="13" transform="rotate(-35 24 24)" fill={PALETTE.lime} stroke={PALETTE.ink} strokeWidth="2.5" />
-                  <g transform="rotate(-35 24 24)" stroke={PALETTE.ink} strokeWidth="2.4" strokeLinecap="round">
-                    <line x1="15" y1="24" x2="33" y2="24" />
-                    <line x1="18" y1="21" x2="18" y2="27" /><line x1="22" y1="21" x2="22" y2="27" /><line x1="26" y1="21" x2="26" y2="27" /><line x1="30" y1="21" x2="30" y2="27" />
-                  </g>
-                </svg>
-                <h1 className="wordmark">Perfect Season</h1>
+                <GridspinMark size={38} />
+                <h1 className="wordmark">Gridspin</h1>
                 <span className="kicker">🏈 The ultimate season challenge</span>
               </div>
               <h2 className="headline">
                 <span className="hl1">Can you go</span>
                 <span className="big20"><span className="num">20–0</span>?</span>
               </h2>
-              <p className="herosub">Draft six real seasons. Play a full slate. Don't take the L.</p>
+              <p className="herosub">Spin an era. Draft the greats. Go 20–0.</p>
               <p className="heroexplain">Each round spins a random team and era. The stats are real, the fantasy points are hidden, and your six play a full season against real NFL teams. Win all 20 and you've gone perfect.</p>
               <div className="herocta">
                 <button className="btn solid xl" onClick={() => openFree()}>Start my season 🏈</button>

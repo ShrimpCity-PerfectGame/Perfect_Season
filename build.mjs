@@ -2,7 +2,7 @@
 // alongside it. A Node script (not a shell-substituted esbuild CLI flag) so the env-var
 // injection works identically on Windows/PowerShell, macOS, Linux, and Vercel's build image.
 import * as esbuild from "esbuild";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
 
 mkdirSync("public", { recursive: true });
 
@@ -19,6 +19,15 @@ if (appEnv !== "production" && appEnv !== "staging") {
   throw new Error(`APP_ENV must be "production" or "staging", got "${appEnv}"`);
 }
 
+// The site's own address, for link previews (crawlers need absolute image URLs) and the link at the
+// end of the share text. SITE_URL wins when set - that's how the custom domain is pinned. Otherwise
+// Vercel's VERCEL_PROJECT_PRODUCTION_URL: this project's production domain (its custom domain once
+// one is added, the *.vercel.app address until then), so staging names itself and production names
+// itself with no per-environment config.
+const siteUrl = (process.env.SITE_URL
+  || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")).replace(/\/+$/, "");
+if (!siteUrl) console.warn("Warning: no SITE_URL - link previews get relative image paths and the share text has no link.");
+
 await esbuild.build({
   entryPoints: ["entry.jsx"],
   bundle: true,
@@ -31,12 +40,20 @@ await esbuild.build({
     SUPABASE_ANON_KEY: JSON.stringify(process.env.SUPABASE_ANON_KEY || ""),
     APP_VERSION: JSON.stringify(version),
     APP_ENV: JSON.stringify(appEnv),
+    APP_SITE_URL: JSON.stringify(siteUrl),
   },
 });
 
-// page.html (used as-is for local dev, next to build/page.js) points at "build/page.js";
-// public/ is flat, so page.js sits right next to it - rewrite the one path that differs
-// rather than hand-maintain a second copy of the page.
-const html = readFileSync("page.html", "utf8").replace("build/page.js", "page.js");
+// Icons, the web manifest and the link preview image (see tools/brand/render.mjs) are served from
+// the site root.
+cpSync("static", "public", { recursive: true });
+
+// page.html (used as-is for local dev, next to build/page.js and static/) points at "build/page.js"
+// and "static/..."; public/ is flat, so rewrite the paths that differ rather than hand-maintain a
+// second copy of the page, and fill in the absolute address link previews need.
+const html = readFileSync("page.html", "utf8")
+  .replace("build/page.js", "page.js")
+  .replace(/(["/])static\//g, "$1")
+  .replaceAll("%SITE_URL%", siteUrl);
 writeFileSync("public/page.html", html);
-console.log(`Built public/page.js and public/page.html (v${version}, ${appEnv})`);
+console.log(`Built public/page.js and public/page.html (v${version}, ${appEnv}, ${siteUrl || "no SITE_URL"})`);

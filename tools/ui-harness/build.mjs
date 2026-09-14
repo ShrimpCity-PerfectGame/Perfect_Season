@@ -13,6 +13,7 @@ await esbuild.build({
     SUPABASE_URL: '""',
     SUPABASE_ANON_KEY: '""',
     APP_VERSION: '"harness"',
+    APP_SITE_URL: '"https://gridspin.test"',
     // "staging" shows the Test site banner; production layout is the default being audited.
     APP_ENV: JSON.stringify(process.env.APP_ENV === "staging" ? "staging" : "production"),
   },

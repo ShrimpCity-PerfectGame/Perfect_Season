@@ -175,8 +175,10 @@ await runTest("a finished season shows its real rank among every logged season",
   await click(findButtonByText(actions, "Share result"));
   await flush(4);
   const shared = container.querySelector(".sharebox")?.value || "";
-  assert(shared.includes("Perfect Season 🏈") && shared.includes("Team score") && shared.includes(`#${expectedRank} of ${scores.length + 1}`),
+  assert(shared.includes("Gridspin 🏈") && shared.includes("Team score") && shared.includes(`#${expectedRank} of ${scores.length + 1}`),
     "expected the share text (here the copy-by-hand fallback, since the test DOM has no clipboard) to include the season's rank, got: " + shared);
+  // The site's address closes the share, so a friend can tap straight in (tests build with a stand-in).
+  assert(shared.trimEnd().endsWith("https://gridspin.test"), "expected the share text to end with the site's address, got: " + shared);
 });
 
 await runTest("the Leaderboard is black, crowns #1 and marks your own row", async () => {
