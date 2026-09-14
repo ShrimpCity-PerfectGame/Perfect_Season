@@ -135,7 +135,7 @@ export async function fetchLeaderboardTop(limit = 10, format = "fantasy") {
 export async function fetchOwnRank(score, format = "fantasy") {
   const col = bestCol(format);
   // Counted server-side (head: no rows come back) rather than downloading every profile to count
-  // them here - that unfiltered select("*") was failing on production.
+  // them here.
   const { count, error } = await getClient().from("profiles").select("id", { count: "exact", head: true }).gt(col, score);
   return error || count == null ? 0 : count;
 }
@@ -149,7 +149,7 @@ export async function fetchLadderTop(mode = "unlimited", limit = 10) {
 }
 export async function fetchSiteTotals() {
   // Only the three columns summed below - select("*") also dragged every profile's `recent` run
-  // history along, and that request was failing on production.
+  // history along.
   const { data, error } = await getClient().from("profiles").select("runs, dnf, perfect");
   const rows = error || !data ? [] : data;
   const totals = rows.reduce((t, r) => ({ runs: t.runs + (r.runs || 0) + (r.dnf || 0), perfect: t.perfect + (r.perfect || 0) }), { runs: 0, perfect: 0 });

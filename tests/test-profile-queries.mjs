@@ -1,6 +1,6 @@
 // fetchSiteTotals and fetchOwnRank run on every home/leaderboard load. Both used to download every
-// column of every profile (an unfiltered select("*")), and that request was failing on production.
-// This pins that they now ask for only what they need, and still compute the same numbers.
+// column of every profile (an unfiltered select("*")). This pins that they now ask for only what
+// they need, and still compute the same numbers.
 import { makeMockAuth } from "./helpers.mjs";
 import { fetchSiteTotals, fetchOwnRank } from "../storage.js";
 

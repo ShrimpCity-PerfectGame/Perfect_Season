@@ -22,12 +22,13 @@ Nothing yet.
 
 ## [1.4.1] — 2026-09-13
 
-### Fixed
+### Changed
 
-- **Site totals and your leaderboard rank failed to load.** Both downloaded every column of every
-  account just to add up a few numbers, and that request was failing on the live site. Site totals
-  now fetch only the three columns they sum, and your rank is counted by the database instead of in
-  the browser.
+- **Site totals and your leaderboard rank download far less.** Both used to pull every column of
+  every account just to add up a few numbers. Site totals now fetch only the three columns they sum,
+  and your rank is counted by the database instead of in the browser. This was aimed at the site
+  totals request that intermittently fails to load, but that failure still happens occasionally, so
+  it is not fixed yet.
 
 ## [1.4.0] — 2026-09-13
 
