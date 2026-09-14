@@ -223,7 +223,9 @@ export async function fetchSiteStats(limit = 10) {
 // broadcaster for the "a draft just finished" side.
 export function subscribeSiteActivity({ onOnlineCount, onDraftFinished }) {
   const client = getClient();
-  const channel = client.channel("site-activity");
+  // self: true - Supabase doesn't echo a broadcast back to its sender by default, so without it the
+  // tab that just finished a draft was the one tab whose drafts count didn't go up.
+  const channel = client.channel("site-activity", { config: { broadcast: { self: true } } });
   channel.on("presence", { event: "sync" }, () => onOnlineCount(Object.keys(channel.presenceState()).length));
   channel.on("broadcast", { event: "draft_finished" }, onDraftFinished);
   channel.subscribe(async (status) => { if (status === "SUBSCRIBED") await channel.track({}); });

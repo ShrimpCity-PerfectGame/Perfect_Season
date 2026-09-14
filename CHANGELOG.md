@@ -28,6 +28,11 @@ Nothing yet.
   10 runs from before then.
 - Sitewide totals are added up by the database instead of in the browser.
 
+### Fixed
+
+- **Your own draft now counts in the live drafts number.** The tab you finished a season in was
+  the only open tab that didn't tick up.
+
 ### Deploy notes
 
 Order matters: run `supabase/migration-runs-log.sql` in the SQL editor, then deploy the
