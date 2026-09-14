@@ -82,4 +82,15 @@ await runTest("a Championship score appears on its own board and never on the Fa
   assert(!t.includes("70.2"), "bob's Championship score must not appear on the Fantasy board");
 });
 
+await runTest("sitewide totals sit on the Stats screen, not the Leaderboard", async () => {
+  const headings = () => [...container.querySelectorAll("h2.h")].map((h) => h.textContent);
+  assert(!headings().includes("All time"), "the Leaderboard should no longer carry the All time tiles");
+
+  await click(findButtonByText(container, "Stats"));
+  await flush(6);
+  assert(headings().includes("Sitewide"), "expected the Stats screen's Sitewide tiles, got headings: " + headings().join(" | "));
+  const t = text(container);
+  assert(t.includes("Accounts") && t.includes("Perfect seasons"), "expected the totals tiles on Stats, got: " + t.slice(0, 600));
+});
+
 console.log("test-leaderboard-format.mjs done");

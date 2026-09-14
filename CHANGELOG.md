@@ -13,6 +13,13 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.4.2] — 2026-09-13
+
+### Changed
+
+- **Sitewide totals moved to Stats.** The Leaderboard's "All time" tiles (players, drafts, perfect
+  seasons) repeated the Stats screen's Sitewide tiles, so the Leaderboard now shows rankings only.
+
 ## [1.4.1] — 2026-09-13
 
 ### Fixed

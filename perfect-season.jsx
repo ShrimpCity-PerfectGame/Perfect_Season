@@ -2930,13 +2930,8 @@ export default function PerfectSeason() {
                   <button className="btn solid" disabled={codeInput.trim().length < 4} onClick={() => { setView("play"); startCode(codeInput); }}>Draft this board</button>
                 </div>
 
-                <h2 className="h">All time</h2>
-                <div className="tiles">
-                  <div className="tile"><div className="n">{totals.players}</div><div className="l">Players</div></div>
-                  <div className="tile"><div className="n">{totals.runs.toLocaleString()}</div><div className="l">Drafts</div></div>
-                  <div className="tile"><div className="n">{totals.perfect}</div><div className="l">Perfect seasons</div></div>
-                </div>
-
+                {/* Sitewide totals (accounts, drafts, perfect seasons) live on the Stats screen;
+                    this screen is rankings only. */}
                 {siteBest ? (
                   <div className="champion">
                     <div className="stripe" style={{ background: "var(--lamp)" }} />
