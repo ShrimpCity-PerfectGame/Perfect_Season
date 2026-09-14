@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
   fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
@@ -6,6 +6,7 @@ import {
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, submitRun, submitDnf,
+  fetchPlayerProfile, fetchProfileDetails, checkUsername, isModerator, fetchModQueue,
 } from "./storage.js";
 import gameData from "./data/players.json";
 import { cssVars, PALETTE } from "./theme.mjs";
@@ -13,18 +14,19 @@ import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
   hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, rerollCandidate,
   flexRating, effectiveRating, winProb, shuffle, windowedShuffle, tagOpp, buildTimeline, simulateSeason,
-  applyDnf, LOSER_PTS, MARGINS, nextStreak, GM_CAP, playerSalary, REROLL_BUDGET,
+  applyDnf, LOSER_PTS, MARGINS, GM_CAP, playerSalary, REROLL_BUDGET,
   passerRating, normFormat, BEST_FIELDS, FORMATS,
   botPar, draftPoints, modeKey, LADDERS, dailySeed,
 } from "./game-logic.mjs";
 import {
-  SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr, fmtDate,
+  SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips,
 } from "./ui-common.jsx";
-import { PROFILE_CSS } from "./profile.jsx";
-import { AVATAR_CSS } from "./avatars.jsx";
+import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
+import { AVATAR_CSS, Avatar } from "./avatars.jsx";
 import { PICKER_CSS } from "./avatar-picker.jsx";
-import { MODERATION_CSS } from "./moderation.jsx";
+import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
+import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
 initGameData(gameData.players, gameData.opponents);
 
 // Baked in by build.mjs's esbuild `define` (same mechanism as SUPABASE_URL - see storage.js).
@@ -576,6 +578,11 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
 .btn.reset.armed{color:var(--bg);background:var(--loss);border-color:var(--loss)}
 .linkbtn{background:none;border:none;padding:0;color:var(--accent-ink);font-weight:700;font-size:14px;text-decoration:underline;
   text-decoration-thickness:2px;text-underline-offset:3px}
+/* A username that opens that player's profile. It reads as the name itself wherever it sits - a leaderboard
+   cell, a card, a ranked row - so it takes that spot's type, color and wrapping (overflow-wrap is inherited, so
+   the narrow-screen rules on .lb td.nm and .rc.rank .tk still apply) and has no button look of its own. */
+.namelink{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit}
+@media (hover:hover){.namelink:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
 .pill{font-size:13px;font-weight:700;color:var(--ink);background:var(--surface);border:2px solid var(--line2);border-radius:999px;padding:4px 12px}
 button.pill{font-family:inherit;transition:border-color .12s}
 @media (hover:hover){button.pill:hover{border-color:var(--ink)}}
@@ -591,13 +598,12 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .hdr-links{display:flex;gap:10px;justify-content:flex-end;margin-top:6px;align-items:center;min-width:0}
 .nav .hdr-links{margin-left:auto;margin-top:0}
 /* The header's own controls speak the pill vocabulary (like the live drafts pill), not bare links:
-   How to play and Log in are chips, you are a lime initial, the version is a quiet tag. */
+   How to play and Log in are chips, you are your picture (avatars.jsx) and name, the version is a quiet tag. */
 .hdrchip{display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap}
 .hdrchip.help{padding-left:4px}
 .hdrchip.help::before{content:"?";display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--ink);color:var(--bg);font-family:var(--display);font-size:12px;line-height:1}
 .hdrchip.login{border-color:var(--ink)}
 .whoami{display:inline-flex;align-items:center;gap:7px;min-width:0;max-width:44vw;background:none;border:none;padding:0;font-weight:700;font-size:14px;color:var(--ink)}
-.whoami::before{content:attr(data-initial);flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--on-accent);box-shadow:inset 0 0 0 2px var(--ink);font-family:var(--display);font-size:13px;line-height:1}
 .whoname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (hover:hover){.whoami:hover .whoname{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
 .ver{flex:none;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--surface2);border-radius:6px;padding:2px 7px;font-variant-numeric:tabular-nums}
@@ -1146,9 +1152,11 @@ button.pill{font-family:inherit;transition:border-color .12s}
   /* Real controls sit above the invisible link hit areas below, so a tap near a button's edge
      never lands on a neighbouring link (e.g. "Skip to the end" under "Kick off"). */
   .btn,.fmtbtn,.tab{position:relative;z-index:1}
-  .linkbtn,button.pill,.mb,.whoami{position:relative}
+  .linkbtn,button.pill,.mb,.whoami,.namelink{position:relative}
   .mb::after{content:'';position:absolute;left:-3px;right:-3px;top:-6px;bottom:-6px}
   .whoami::after{content:'';position:absolute;left:-4px;right:-4px;top:-10px;bottom:-4px}
+  /* Names sit in rows about 40px apart, so their hit areas stop short of the next row's. */
+  .namelink::after{content:'';position:absolute;left:-6px;right:-6px;top:-10px;bottom:-10px}
   /* The header chips sit just above the tab grid on phones: keep their hit areas off the tabs. */
   .nav button.pill::after{bottom:-4px}
   .nav .tab{min-height:40px}
@@ -1201,7 +1209,9 @@ const EMPTY_SITE_STATS = {
   byFormat: Object.fromEntries(FORMATS.map((f) => [f, { bestLineups: [], bestGm: [], biggestUpsets: [] }])),
   mostDrafted: [], mostWins: [], mostChamps: [], mostPlayoffs: [], longestStreaks: [], bestWinPct: [], avgWinPct: 0,
 };
-const USER_RE = /^[a-zA-Z0-9_]{3,16}$/;
+// Signup's refusals. The username rule itself is profile-rules.mjs's USERNAME_RE, the one the database uses.
+const USERNAME_RULE = "Usernames are 3 to 16 characters: letters, numbers, and underscores.";
+const NAME_NOT_ALLOWED = "That username isn't allowed. Try another one.";
 
 const OUTCOME_BUTTONS = [
   ["perfect", "Force 20–0 (perfect)"],
@@ -1321,6 +1331,38 @@ function PlayerIndex() {
   );
 }
 
+// ---------- Profile links and addresses (PROFILES.md 7) ----------
+// Every username shown for an account opens that player's profile. The boards that show them are
+// module-scope components (PlayerName, RankRows, ...) with no route to the app's navigation, so the
+// app hands its openProfile down through this context instead of threading a prop through each board.
+const OpenProfile = createContext(null);
+function NameLink({ name }) {
+  const openProfile = useContext(OpenProfile);
+  if (!name || !openProfile) return name || null;
+  return <button type="button" className="namelink" onClick={() => openProfile(name)}>{name}</button>;
+}
+
+// The screens history entries describe: a player's profile, at profilePath(name), or any other view, at "/".
+// The address alone can only name a profile or Modes, so an entry without a screen of its own (a typed
+// address, or one written before this) is read from its address.
+const HISTORY_VIEWS = ["home", "play", "profile", "players", "board", "stats", "statsou", "buildplayer", "reports"];
+function screenOf(state, pathname) {
+  if (state?.ps === "profile" && typeof state.name === "string" && state.name) return state;
+  if (state?.ps === "view" && HISTORY_VIEWS.includes(state.view)) return state;
+  const name = parseProfilePath(pathname);
+  return name ? { ps: "profile", name } : { ps: "view", view: "home" };
+}
+const sameScreen = (a, b) => a.ps === b.ps && (a.ps === "profile" ? a.name === b.name : a.view === b.view);
+// A profile's sitewide rank in each format before it's known, or when the player has no score in it.
+const NO_RANK = Object.fromEntries(FORMATS.map((f) => [f, null]));
+// History writes are best effort. A page opened from a file (the UI harness) can't change its path, so the
+// entry is then written at the address it already has, and Back and Forward still move between screens.
+function writeHistory(method, state, url) {
+  if (url != null) {
+    try { window.history[method](state, "", url); return; } catch (e) { /* this page can't take that address */ }
+  }
+  try { window.history[method](state, ""); } catch (e) { /* no history API */ }
+}
 
 // A plain "#rank — username — value" leaderboard, shared by every zero-frills Stats leaderboard
 // (wins, championships, playoffs, streak, win %, GM score) - the same .rc grid every other
@@ -1332,7 +1374,7 @@ function RankRows({ rows, empty, value }) {
       {rows.map((r, i) => (
         <div className="rc rank" key={r.id || i}>
           <div className="n">{i + 1}</div>
-          <div className="tk">{r.username}</div>
+          <div className="tk"><NameLink name={r.username} /></div>
           <div className="alt">{value(r)}</div>
         </div>
       ))}
@@ -1354,14 +1396,21 @@ function AuthPanel({ onAuthed, title, blurb }) {
     const emailTrim = email.trim();
     const username = u.trim();
     if (!emailTrim || !emailTrim.includes("@")) return setErr("Enter a valid email address.");
-    if (mode === "signup" && !USER_RE.test(username)) return setErr("Usernames are 3 to 16 characters: letters, numbers, and underscores.");
+    if (mode === "signup" && !USERNAME_RE.test(username)) return setErr(USERNAME_RULE);
     if (pw.length < 6) return setErr("Passwords need at least 6 characters.");
     if (mode === "signup" && pw !== pw2) return setErr("The two passwords don't match.");
     setBusy(true);
     try {
       if (mode === "signup") {
+        // Asked before signing up so the form can say why a name won't do. The database checks the name
+        // again at signup, so a check that couldn't run (null) just goes ahead.
+        const check = await checkUsername(username);
+        const refused = { taken: "That username is taken. Try another one.", blocked: NAME_NOT_ALLOWED, invalid: USERNAME_RULE }[check];
+        if (refused) { setBusy(false); return setErr(refused); }
         const { data, error } = await authSignUp(emailTrim, pw, username);
-        if (error) { setBusy(false); return setErr(mapAuthError(error)); }
+        // A blocked name that got past the check is refused by the signup trigger, which Supabase Auth
+        // only reports as a database error.
+        if (error) { setBusy(false); return setErr(/Database error saving new user/i.test(error.message || "") ? NAME_NOT_ALLOWED : mapAuthError(error)); }
         await onAuthed(data.user.id, username, true);
       } else {
         const { data, error } = await authSignIn(emailTrim, pw);
@@ -1514,7 +1563,7 @@ function RankCell({ i }) {
   return <td className="rk">{i === 0 && <span className="crown" aria-hidden="true">👑</span>}{i + 1}</td>;
 }
 function PlayerName({ name, mine }) {
-  return <>{name}{mine && <span className="you">You</span>}</>;
+  return <><NameLink name={name} />{mine && <span className="you">You</span>}</>;
 }
 const HOWTO_KEY = "ps-howto-seen";
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
@@ -1682,7 +1731,11 @@ function HowTo({ onClose }) {
 }
 
 export default function PerfectSeason() {
-  const [view, setView] = useState("home");
+  // A profile's address (/u/<name>) opens that profile, for guests too; every other address opens Modes.
+  const [view, setView] = useState(() => (typeof window !== "undefined" && parseProfilePath(window.location.pathname) ? "profile" : "home"));
+  // Whose profile the profile view shows. null there is your own profile from the Profile tab, or the
+  // Account tab's login for a guest - see shownProfile below.
+  const [profileOf, setProfileOf] = useState(() => (typeof window === "undefined" ? null : parseProfilePath(window.location.pathname)));
   const [roster, setRoster] = useState({});
   const [spin, setSpin] = useState(null);
   const [display, setDisplay] = useState(null);
@@ -1697,6 +1750,13 @@ export default function PerfectSeason() {
   const [userId, setUserId] = useState(null); // Supabase auth user id - the real key for profile reads/writes
   const [stats, setStats] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  const [myDetails, setMyDetails] = useState(null); // your own bio/team/picture (fetchProfileDetails), for the header picture
+  const [isMod, setIsMod] = useState(false); // a moderator, as isModerator() answered at sign-in
+  const [openReports, setOpenReports] = useState(null); // how many players the Reports queue holds, once loaded
+  // The profile on screen: whose it is (`name`, so an answer for someone else is never shown), fetchPlayerProfile's
+  // status and profile, and the rank of each of the player's best scores.
+  const [profileData, setProfileData] = useState({ name: null, status: "loading", profile: null, rank: NO_RANK });
+  const [scrollBack, setScrollBack] = useState(null); // { y } - where Back or Forward returns a screen to
   const [pending, setPending] = useState(null);
   const [notice, setNotice] = useState("");
   const [saveError, setSaveError] = useState(false);
@@ -1779,12 +1839,12 @@ export default function PerfectSeason() {
       const { data } = await authGetSession();
       if (data?.session?.user) {
         const prof = await fetchProfile(data.session.user.id);
-        if (prof) { setUserId(data.session.user.id); setUser(prof.username); setStats(prof); }
+        if (prof) { setUserId(data.session.user.id); setUser(prof.username); setStats(prof); loadAccountExtras(data.session.user.id); }
       }
       setAuthReady(true);
     })();
     const { data: authSub } = authOnChange((event) => {
-      if (event === "SIGNED_OUT") { setUserId(null); setUser(null); setStats(null); }
+      if (event === "SIGNED_OUT") { setUserId(null); setUser(null); setStats(null); clearAccountExtras(); }
     });
     loadLeaderboard();
     (async () => {
@@ -1819,6 +1879,130 @@ export default function PerfectSeason() {
     try { window.history.replaceState(null, "", "/"); } catch (e) { /* no history API */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---------- Profiles: addresses, history and data (PROFILES.md 7) ----------
+  // Whose profile is on screen: the one opened, else your own (the Profile tab). null on the profile view
+  // means a guest on the Account tab, who gets the login instead.
+  const shownProfile = view === "profile" ? profileOf || user || null : null;
+  const screenKey = shownProfile ? `profile:${shownProfile}` : `view:${view}`;
+  // The screen the current history entry describes, and how far down the page was when the player last
+  // left a screen (a tab or a name), so Back can return to that spot.
+  const historyScreen = useRef(null);
+  const leftAt = useRef(0);
+
+  // Opening a profile pushes an entry for it, after recording the screen being left in the current entry, so
+  // Back returns there and Forward works. Leaving a profile for any other screen pushes "/". Moving between
+  // other screens just keeps the current entry up to date. Done here rather than in each click handler, so
+  // every route in or out counts: the tabs, the header, the names, and the profile's own buttons.
+  useEffect(() => {
+    const next = shownProfile ? { ps: "profile", name: shownProfile } : { ps: "view", view };
+    const prev = historyScreen.current;
+    historyScreen.current = next;
+    if (!prev) {
+      // The entry the page opened in: a profile's address loses any trailing slash, and an address under /u/
+      // that isn't a username (Modes is showing) goes back to "/".
+      const tidy = next.ps === "profile" ? profilePath(next.name) : window.location.pathname.startsWith("/u/") ? "/" : null;
+      writeHistory("replaceState", next, tidy);
+    } else if (sameScreen(prev, next)) {
+      // Already written: Back or Forward landed here, or nothing that has an entry changed.
+    } else if (next.ps === "profile" && prev.ps === "view" && prev.view === "profile") {
+      // Signing in on the Account tab turns that screen into your profile: the same entry, at your address.
+      writeHistory("replaceState", next, profilePath(next.name));
+    } else if (next.ps === "profile") {
+      if (prev.ps === "view") writeHistory("replaceState", { ...prev, scroll: leftAt.current });
+      writeHistory("pushState", next, profilePath(next.name));
+    } else if (prev.ps === "profile") {
+      writeHistory("pushState", next, "/");
+    } else {
+      writeHistory("replaceState", next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenKey]);
+
+  // Back and Forward put back the screen the entry describes, opening it the way its tab or tile would -
+  // Over/Under and Build-a-player through their own openers, since leaving them dropped the round or build.
+  const onHistoryMove = useRef(null);
+  onHistoryMove.current = (state) => {
+    const s = screenOf(state, window.location.pathname);
+    historyScreen.current = s;
+    if (s.ps === "profile") { setProfileOf(s.name); setView("profile"); }
+    else if (s.view === "statsou") openSou();
+    else if (s.view === "buildplayer") openBuildPicker();
+    else openTab(s.view === "reports" && !isMod ? "home" : s.view);
+    if (s.scroll > 0) setScrollBack({ y: s.scroll });
+  };
+  useEffect(() => {
+    const onPop = (e) => onHistoryMove.current(e.state);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // A tab, or anything that opens a screen the way its tab does. "profile" is your own profile (or, for a
+  // guest, the Account tab's login).
+  function openTab(k) {
+    leftAt.current = window.scrollY || 0;
+    if (k === "profile") setProfileOf(null);
+    setView(k);
+    if (k === "home") refreshWip();
+    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); }
+    if (k === "stats" && !siteStats.loaded) loadSiteStats();
+  }
+  function openProfile(name) {
+    leftAt.current = window.scrollY || 0;
+    setProfileOf(name);
+    setView("profile");
+  }
+
+  // Fresh every time the profile view opens or shows someone else. `req` drops an answer that arrives after
+  // the player has moved on; the ranks follow the profile, since they need its best scores.
+  const profileReq = useRef(0);
+  async function loadProfile(name) {
+    const req = ++profileReq.current;
+    setProfileData({ name, status: "loading", profile: null, rank: NO_RANK });
+    const res = await fetchPlayerProfile(name);
+    if (req !== profileReq.current) return;
+    setProfileData({ name, status: res.status, profile: res.profile || null, rank: NO_RANK });
+    if (res.status !== "ok") return;
+    const ranks = await Promise.all(FORMATS.map(async (f) => {
+      const score = scoreOf(res.profile.stats, f);
+      if (score == null) return null;
+      try { return (await fetchOwnRank(score, f)) + 1; } catch (e) { return null; }
+    }));
+    if (req !== profileReq.current) return;
+    setProfileData((p) => ({ ...p, rank: Object.fromEntries(FORMATS.map((f, i) => [f, ranks[i]])) }));
+  }
+  useEffect(() => {
+    if (shownProfile) loadProfile(shownProfile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownProfile]);
+
+  const shownData = profileData.name === shownProfile ? profileData : null;
+  const ownProfileShown = !!userId && !!shownData?.profile && shownData.profile.id === userId;
+  // A moderator's own profile shows how many players the Reports queue holds, counted each time it opens.
+  useEffect(() => {
+    if (!isMod || !ownProfileShown) return;
+    let live = true;
+    fetchModQueue().then((queue) => { if (live && queue) setOpenReports(queue.length); });
+    return () => { live = false; };
+  }, [isMod, ownProfileShown, shownData?.profile]);
+
+  // The share sheet where the device has one, otherwise the address copied.
+  async function shareProfile(name) {
+    const url = `${APP_SITE_URL || window.location.origin}${profilePath(name)}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: `${name} on Gridspin`, url }); return "shared"; }
+      // Closing the share sheet is a choice, not a failure; anything else falls back to copying.
+      catch (e) { if (e?.name === "AbortError") return "shared"; }
+    }
+    try { await navigator.clipboard.writeText(url); return "copied"; } catch (e) { return "failed"; }
+  }
+
+  // After any bio, team or picture save on your own profile: the header picture and the card both show it.
+  function onDetailsSaved(details) {
+    detailsReq.current++;
+    setMyDetails(details);
+    setProfileData((p) => (p.profile && p.profile.id === userId ? { ...p, profile: { ...p.profile, details } } : p));
+  }
 
   // Keep the draft in progress on this device so a reload doesn't lose it
   useEffect(() => {
@@ -1942,6 +2126,7 @@ export default function PerfectSeason() {
     // Not closing over the `userId` state here - it hasn't committed yet in this same
     // synchronous pass (setUserId above is async). Use the fresh `uid` directly throughout.
     setStats(s);
+    loadAccountExtras(uid);
     if (pending) {
       const trace = pending;
       setPending(null);
@@ -1953,7 +2138,26 @@ export default function PerfectSeason() {
 
   async function logOut() {
     await authSignOut();
-    setUserId(null); setUser(null); setStats(null); setNotice("");
+    setUserId(null); setUser(null); setStats(null); setNotice(""); clearAccountExtras();
+    // Logging out of your own profile leaves the Account tab's login, not a visitor's view of yourself.
+    if (ownProfileShown) setProfileOf(null);
+  }
+
+  // The header picture and the moderator check, for whoever just signed in or came back signed in. Both
+  // answers are dropped if the account has changed by the time they arrive; a picture saved meanwhile
+  // (onDetailsSaved) also outranks a slower read of the old one.
+  const accountReq = useRef(0);
+  const detailsReq = useRef(0);
+  function loadAccountExtras(uid) {
+    const account = ++accountReq.current;
+    const details = ++detailsReq.current;
+    fetchProfileDetails(uid).then((d) => { if (account === accountReq.current && details === detailsReq.current) setMyDetails(d); });
+    isModerator().then((m) => { if (account === accountReq.current) setIsMod(m); });
+  }
+  function clearAccountExtras() {
+    accountReq.current++;
+    setMyDetails(null); setIsMod(false); setOpenReports(null);
+    setView((v) => (v === "reports" ? "home" : v));
   }
 
   // pin holds one axis fixed at target's value during the animation - used by reroll() so
@@ -2691,12 +2895,18 @@ export default function PerfectSeason() {
   const finished = !!result && shown >= result.games.length && !inPlayoffs;
 
   // Screen changes open at the top (see scrollToTop): a new view, a new draft, each
-  // Build-a-player step. Not on first load, which is already at the top.
+  // Build-a-player step, another player's profile. Not on first load, which is already at the top.
   const didMount = useRef(false);
   useEffect(() => {
     if (!didMount.current) { didMount.current = true; return; }
     scrollToTop();
-  }, [view, mode?.seed, bap?.stage, bap?.seen?.length]);
+  }, [view, mode?.seed, bap?.stage, bap?.seen?.length, shownProfile]);
+  // ...except a screen Back or Forward returns to, which goes back to where it was scrolled. After the
+  // effect above, so this one has the last word.
+  useEffect(() => {
+    if (!scrollBack) return;
+    try { if (window.scrollY !== scrollBack.y) window.scrollTo(0, scrollBack.y); } catch (e) { /* no layout */ }
+  }, [scrollBack]);
 
   // Leaving Over/Under or Build-a-player by ANY route - a tab, the header's Log in link, their own
   // buttons - stops their clocks and drops the round or build. (Only the tabs did this at first, so a
@@ -2750,23 +2960,29 @@ export default function PerfectSeason() {
   const otherFormat = mode && normFormat(mode.format) === "standard" ? "fantasy" : "standard";
   function skipPlayoffs() { setShown(result.games.length); setPo({ idx: 0, stage: "done" }); }
 
+  // The Profile tab is lit on your own profile and its Reports queue (or a guest's login), not on someone else's.
+  const tabOn = (k) => (k === "profile"
+    ? view === "reports" || (view === "profile" && (!profileOf || profileOf === user || ownProfileShown))
+    : view === k);
+
   return (
+    <OpenProfile.Provider value={openProfile}>
     <div className={`ps${view === "play" ? " dark" : view === "board" ? " night" : ""}`}>
       <style>{APP_CSS}</style>
       <div className="wrap">
         <nav className="nav" aria-label="Sections">
           {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"], ["stats", "Stats"]].map(([k, l]) => (
-            <button key={k} className={`tab ${view === k ? "on" : ""}`} aria-current={view === k ? "page" : undefined}
-              onClick={() => {
-                setView(k); if (k === "home") refreshWip(); if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); } if (k === "stats" && !siteStats.loaded) loadSiteStats(); }}>
+            <button key={k} className={`tab ${tabOn(k) ? "on" : ""}`} aria-current={tabOn(k) ? "page" : undefined} onClick={() => openTab(k)}>
               {l}{k === "play" && view !== "play" && mode && !result && !modeDailyDone && <span className="dot" aria-label="Draft in progress" />}
             </button>
           ))}
           <div className="hdr-links">
             <button className="pill hdrchip help" onClick={() => setHowTo(true)}>How to play</button>
-            {!user && authReady && <button className="pill hdrchip login" onClick={() => setView("profile")}>Log in</button>}
+            {!user && authReady && <button className="pill hdrchip login" onClick={() => openTab("profile")}>Log in</button>}
             {user && (
-              <button className="whoami" data-initial={user.charAt(0).toUpperCase()} aria-label={`Your profile, ${user}`} onClick={() => setView("profile")}>
+              <button className="whoami" aria-label={`Your profile, ${user}`} onClick={() => openTab("profile")}>
+                {/* The button is labeled, so the picture beside the name is decorative. */}
+                <Avatar username={user} photoUrl={myDetails?.avatarUrl ?? null} preset={myDetails?.avatarPreset ?? null} size={24} decorative />
                 <span className="whoname">{user}</span>
               </button>
             )}
@@ -2952,7 +3168,7 @@ export default function PerfectSeason() {
               </div>
             )}
             {!user && authReady && (
-              <p className="note">Playing as a guest. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> to save your drafts, keep a daily streak, and get on the leaderboard.</p>
+              <p className="note">Playing as a guest. <button className="linkbtn" onClick={() => openTab("profile")}>Log in or create an account</button> to save your drafts, keep a daily streak, and get on the leaderboard.</p>
             )}
           </>
         )}
@@ -3294,94 +3510,29 @@ export default function PerfectSeason() {
           </>
         )}
 
-        {/* ---------------- ACCOUNT / PROFILE ---------------- */}
-        {view === "profile" && authReady && !user && (
+        {/* ---------------- PROFILE / ACCOUNT ---------------- */}
+        {view === "profile" && !shownProfile && authReady && (
           <AuthPanel onAuthed={onAuthed} title="Your account"
             blurb="Log in to track your seasons, best lineup, and championships, and to appear on the leaderboard." />
         )}
 
-        {view === "profile" && user && stats && (
-          <>
-            <div className="who">
-              <span className="nm">{user}</span>
-              <button className="linkbtn" onClick={logOut}>Log out</button>
+        {view === "profile" && shownProfile && (() => {
+          const status = shownData ? shownData.status : "loading";
+          const profile = shownData?.profile || null;
+          return (
+            // data-status says which state the screen is in, whatever its copy says (a test hook).
+            <div className="profile-route" data-status={status}>
+              <ProfileScreen status={status} profile={profile} isOwner={ownProfileShown} userId={userId}
+                rank={shownData?.rank || NO_RANK}
+                moderator={ownProfileShown && isMod && openReports != null ? { openReports } : null}
+                onRetry={() => loadProfile(shownProfile)} onShare={() => shareProfile(profile?.username || shownProfile)}
+                onDetailsSaved={onDetailsSaved} onLogOut={logOut} onPlay={() => openTab("play")} onOpenReports={() => openTab("reports")} />
             </div>
+          );
+        })()}
 
-            {draftsOf(stats) === 0 ? (
-              <div className="panel"><p style={{ margin: 0 }}>Play your first season to start your record.</p>
-                <div style={{ marginTop: 10 }}><button className="btn solid" onClick={() => setView("play")}>Go to the draft</button></div></div>
-            ) : (
-              <>
-                <div className="tiles">
-                  <div className="tile"><div className="n">{draftsOf(stats).toLocaleString()}</div><div className="l">Drafts{stats.dnf ? `, ${stats.dnf} DNF` : ""}</div></div>
-                  <div className="tile"><div className="n">{stats.champs}</div><div className="l">Championships</div></div>
-                  <div className="tile"><div className="n">{stats.perfect}</div><div className="l">Perfect seasons</div></div>
-                  <div className="tile"><div className="n">{Math.round((100 * stats.playoffs) / draftsOf(stats))}%</div><div className="l">Made the playoffs</div></div>
-                  <div className="tile"><div className="n">{stats.runs ? `${(stats.wins / stats.runs).toFixed(1)}–${(stats.losses / stats.runs).toFixed(1)}` : "–"}</div><div className="l">Average record, finished seasons</div></div>
-                  {/* One tile per format rather than a toggle - on your own page both are worth
-                      seeing at a glance, and they never rank against each other anyway. */}
-                  {FORMATS.map((f) => (
-                    <div className="tile" key={f}>
-                      <div className="n">{scoreOf(stats, f) != null ? scoreOf(stats, f).toFixed(1) : "–"}</div>
-                      <div className="l">Best {FORMAT_LABEL[f]} score{lbFormat === f && myRank >= 0 ? `, #${myRank + 1} sitewide` : ""}</div>
-                    </div>
-                  ))}
-                  <div className="tile"><div className="n">{stats.dailyStreak && (stats.dailyLast === todayKey() || nextStreak(stats, todayKey()) > 1) ? stats.dailyStreak : 0}</div>
-                    <div className="l">Daily streak{stats.dailyBestStreak ? `, best ${stats.dailyBestStreak}` : ""}</div></div>
-                </div>
-
-                <h2 className="h" style={{ marginTop: 20 }}>Points</h2>
-                <p className="note" style={{ marginTop: 0 }}>
-                  Your bank is every point you've ever earned and is what the shop will spend — spending
-                  it won't cost you ladder position. Each mode ranks separately.
-                </p>
-                <div className="tiles">
-                  <div className="tile"><div className="n">{Math.round(stats.pointsBank || 0).toLocaleString()}</div><div className="l">Bank</div></div>
-                  {LADDERS.map((m) => (
-                    <div className="tile" key={m}>
-                      <div className="n">{Math.round(pointsOf(stats, m)).toLocaleString()}</div>
-                      <div className="l">{LADDER_LABEL[m]} ladder</div>
-                    </div>
-                  ))}
-                </div>
-
-                {FORMATS.filter((f) => runOf(stats, f)).map((f) => {
-                  const best = runOf(stats, f);
-                  return (
-                    <div key={f}>
-                      <h2 className="h">Best {FORMAT_LABEL[f]} lineup</h2>
-                      <p className="note" style={{ marginTop: 0 }}>{best.w}–{best.l}, team score {best.score.toFixed(1)}, {fmtDate(best.date)}. {outcomeSentence(best.outcome)}</p>
-                      <RosterRows roster={best.roster} />
-                    </div>
-                  );
-                })}
-
-                {stats.recent?.length > 0 && (
-                  <>
-                    <h2 className="h" style={{ marginTop: 20 }}>Recent drafts</h2>
-                    <div className="recent">
-                      {stats.recent.map((r, i) => r.dnf ? (
-                        <div className="rr dnf" key={i}>
-                          <span className="muted">{fmtDate(r.date)}</span>
-                          <span className="rec2">DNF</span>
-                          <span className="muted">Reset {r.picks ? `after ${r.picks} pick${r.picks > 1 ? "s" : ""}` : "before the first pick"}</span>
-                          <span className="sc2 muted">–</span>
-                        </div>
-                      ) : (
-                        <div className="rr" key={i}>
-                          <span className="muted">{fmtDate(r.date)}</span>
-                          <span className="rec2">{r.w}–{r.l}</span>
-                          <span>{r.mode === "daily" ? "Daily: " : ""}{r.outcome}</span>
-                          <span className="sc2 muted">{r.score.toFixed(1)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </>
-        )}
+        {/* ---------------- REPORTS (moderators) ---------------- */}
+        {view === "reports" && isMod && <ModerationQueue onOpenProfile={openProfile} />}
 
         {/* ---------------- LEADERBOARD ---------------- */}
         {view === "board" && (
@@ -3410,7 +3561,7 @@ export default function PerfectSeason() {
                   <div className="champion">
                     <div className="pickno">👑 Best {FORMAT_LABEL[lbFormat]} team ever</div>
                     <div className="sc led-wrap"><span className="led">{scoreOf(siteBest, lbFormat).toFixed(1)}</span></div>
-                    <div className="by">{siteBest.username}{runOf(siteBest, lbFormat) ? `, went ${runOf(siteBest, lbFormat).w}–${runOf(siteBest, lbFormat).l}` : ""}</div>
+                    <div className="by"><NameLink name={siteBest.username} />{runOf(siteBest, lbFormat) ? `, went ${runOf(siteBest, lbFormat).w}–${runOf(siteBest, lbFormat).l}` : ""}</div>
                     {runOf(siteBest, lbFormat) && <RosterChips roster={runOf(siteBest, lbFormat).roster} />}
                   </div>
                 ) : (
@@ -3440,7 +3591,7 @@ export default function PerfectSeason() {
                     </table>
                   </>
                 )}
-                {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
+                {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => openTab("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
                 {user && myRank >= 10 && scoreOf(stats, lbFormat) != null && <p className="note">You're #{myRank + 1} with a best {FORMAT_LABEL[lbFormat]} score of {scoreOf(stats, lbFormat).toFixed(1)}.</p>}
                 {user && stats && scoreOf(stats, lbFormat) == null && <p className="note">Finish a {FORMAT_LABEL[lbFormat]} season to get on this board.</p>}
 
@@ -3556,7 +3707,7 @@ export default function PerfectSeason() {
                       return (
                         <div key={q.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
                           <div style={{ fontWeight: 700 }}>
-                            #{i + 1} {q.username}{" "}
+                            #{i + 1} <NameLink name={q.username} />{" "}
                             <span style={{ color: "var(--muted)", fontWeight: 400 }}>
                               — {scoreOf(q, boardFormat).toFixed(1)}{best ? `, ${best.w}–${best.l}` : ""}
                             </span>
@@ -3595,7 +3746,7 @@ export default function PerfectSeason() {
                     {fmtStats.biggestUpsets.map((u, i) => (
                       <div key={i} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
                         <div style={{ fontWeight: 700 }}>
-                          #{i + 1} {u.username}{" "}
+                          #{i + 1} <NameLink name={u.username} />{" "}
                           <span style={{ color: "var(--muted)", fontWeight: 400 }}>
                             — {Number(u.score).toFixed(1)}, {u.w}–{u.l}{u.perfect ? " 🏆 perfect season" : " 🏆"}{u.ladder !== "unlimited" ? ` · ${LADDER_LABEL[u.ladder] || u.ladder}` : ""}
                           </span>
@@ -3865,7 +4016,7 @@ export default function PerfectSeason() {
                 <tbody>
                   {souBoard.rows.map((q, i) => (
                     <tr key={i} className={user && q.username === user ? "me" : ""}>
-                      <td className="rk">{i + 1}</td><td>{q.username}</td><td className="r">{q.score}</td>
+                      <td className="rk">{i + 1}</td><td><NameLink name={q.username} /></td><td className="r">{q.score}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -3876,5 +4027,6 @@ export default function PerfectSeason() {
         )}
       </div>
     </div>
+    </OpenProfile.Provider>
   );
 }

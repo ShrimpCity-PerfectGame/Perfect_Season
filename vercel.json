@@ -4,7 +4,9 @@
   "rewrites": [
     { "source": "/", "destination": "/page.html" },
     { "source": "/c/:code", "destination": "/page.html" },
-    { "source": "/c/:code/", "destination": "/page.html" }
+    { "source": "/c/:code/", "destination": "/page.html" },
+    { "source": "/u/:name", "destination": "/page.html" },
+    { "source": "/u/:name/", "destination": "/page.html" }
   ],
   "headers": [
     {
@@ -14,6 +16,10 @@
     },
     {
       "source": "/c/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
+    },
+    {
+      "source": "/u/(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
     }
   ]
