@@ -13,10 +13,11 @@ CLAUDE.md.
 
 Nothing yet.
 
-## [1.9.0] — staging, not yet released
+## [1.9.0] — 2026-09-14
 
-The game is now **Gridspin**. It goes live together with its own domain; until then it runs only on
-the staging site.
+The game is now **Gridspin**, at its own address: **[gridspin.app](https://gridspin.app)**. The old
+vercel.app addresses forward there. Because browsers keep sign-ins per address, everyone signs in once
+more on gridspin.app; accounts, stats and leaderboards are all still there.
 
 ### Changed
 
