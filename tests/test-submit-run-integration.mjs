@@ -96,6 +96,11 @@ await runTest("a real draft through the UI earns points on the right ladder and 
 
   for (let round = 0; round < 6; round++) await draftFirstEligible();
   await flush(6);
+  // The draft's code is random, so some runs make the playoffs: skip them to reach the finished result.
+  for (let i = 0; i < 6 && findButtonByText(container, "Skip to the end"); i++) {
+    await click(findButtonByText(container, "Skip to the end"));
+    await flush(4);
+  }
 
   const row = auth._profiles.get(userId);
   const earned = row.points_unlimited - (before.points_unlimited || 0);

@@ -593,16 +593,24 @@ button.pill{font-family:inherit;transition:border-color .12s}
 
 /* ===== nav ===== */
 .nav{display:flex;align-items:center;flex-wrap:wrap;gap:6px 4px;border-bottom:2px solid var(--ink);margin-bottom:18px;padding-bottom:8px}
-.tab,.nav .linkbtn,.whoami,.ver{white-space:nowrap}
-.whoami{max-width:40vw;overflow:hidden;text-overflow:ellipsis}
+.tab,.ver{white-space:nowrap}
 .tab{background:none;border:none;border-radius:999px;padding:7px 13px;font-weight:700;font-size:14.5px;color:var(--muted);transition:background-color .12s,color .12s}
 @media (hover:hover){.tab:hover{color:var(--ink)}}
 .tab.on{background:var(--accent);color:var(--on-accent)}
 .tab .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--orange);margin-left:6px;vertical-align:middle;box-shadow:0 0 0 2px var(--bg)}
-.hdr-links{display:flex;gap:14px;justify-content:flex-end;margin-top:6px;align-items:center}
+.hdr-links{display:flex;gap:10px;justify-content:flex-end;margin-top:6px;align-items:center;min-width:0}
 .nav .hdr-links{margin-left:auto;margin-top:0}
-.whoami{font-weight:700;font-size:14px;color:var(--ink)}
-.ver{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+/* The header's own controls speak the pill vocabulary (like the live drafts pill), not bare links:
+   How to play and Log in are chips, you are a lime initial, the version is a quiet tag. */
+.hdrchip{display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap}
+.hdrchip.help{padding-left:4px}
+.hdrchip.help::before{content:"?";display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--ink);color:var(--bg);font-family:var(--display);font-size:12px;line-height:1}
+.hdrchip.login{border-color:var(--ink)}
+.whoami{display:inline-flex;align-items:center;gap:7px;min-width:0;max-width:44vw;background:none;border:none;padding:0;font-weight:700;font-size:14px;color:var(--ink)}
+.whoami::before{content:attr(data-initial);flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--on-accent);box-shadow:inset 0 0 0 2px var(--ink);font-family:var(--display);font-size:13px;line-height:1}
+.whoname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (hover:hover){.whoami:hover .whoname{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
+.ver{flex:none;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--surface2);border-radius:6px;padding:2px 7px;font-variant-numeric:tabular-nums}
 .stagebar{margin:0 0 14px;padding:9px 14px;border-radius:12px;font-size:13.5px;color:var(--ink);border:2px solid var(--orange);
   background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--orange) 26%,transparent) 0 12px,color-mix(in srgb,var(--orange) 12%,transparent) 12px 24px)}
 
@@ -696,7 +704,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .fine{font-size:12.5px!important;margin:10px 0 0!important}
 .guest{font-size:14px;color:var(--muted);margin:0 0 12px}
 .lb{width:100%;border-collapse:collapse;font-size:14.5px;margin-bottom:20px}
-.lb th{text-align:left;font-weight:800;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:2px solid var(--ink)}
+.lb th{text-align:left;font-weight:800;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:2px solid var(--ink)}
 .lb td{padding:10px 8px;border-bottom:1px solid var(--line)}
 .lb td.r,.lb th.r{text-align:right}
 .lb tr.me td{background:color-mix(in srgb,var(--accent) 30%,transparent)}
@@ -991,6 +999,24 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .slot{min-width:0;display:flex;flex-direction:column;justify-content:flex-start}
 .slot .v{overflow-wrap:break-word;-webkit-hyphens:auto;hyphens:auto}
 .rerolls .left{font-weight:600;opacity:.75}
+.rs-short{display:none}
+/* GM mode: the budget rides along in the sticky bar while you browse a long board */
+.sticky .stcap{font-size:12px;font-weight:800;color:var(--ink);background:color-mix(in srgb,var(--ink) 14%,transparent);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.sticky .stcap.over{color:var(--loss)}
+/* Leaderboard: record under the name, shown only on the narrowest phones (see the 360px rule) */
+.lb .subrec{display:none}
+/* The admin panel collapses (its heading is the summary) */
+.adminpanel>summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between}
+.adminpanel>summary::-webkit-details-marker{display:none}
+.adminpanel>summary::after{content:'▸';font-size:16px;color:var(--muted);transition:transform .15s}
+.adminpanel[open]>summary::after{transform:rotate(90deg)}
+.adminpanel>summary h3{margin:0}
+.adminpanel[open]>summary{margin-bottom:8px}
+/* Salary reads as a tag, not a button */
+.card .pill{border:0;background:color-mix(in srgb,var(--ink) 12%,transparent);font-size:12px;padding:2px 8px}
+.result-hero .cel.bapcel{text-align:left}
+.reel .years{margin-right:10px}
+.reel .city{margin-left:0}
 /* The whole draft card is the tap target, not just the area inside its padding. Only cards built
    around a .hit button - the Players index renders plain cards that keep their own padding. */
 .card:has(>.hit){padding:0}
@@ -1050,8 +1076,11 @@ button.pill{font-family:inherit;transition:border-color .12s}
   .rerolls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
   .rerolls .note{grid-column:1/-1}
   .rerolls .btn.reset{margin-left:0}
-  .rerolls .btn:not(.reset){flex-direction:column;gap:0;line-height:1.15}
-  .rerolls .left{font-size:12px}
+  .rs-long{display:none}.rs-short{display:inline}
+  .rs-short b{font-weight:800;margin-left:3px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--ink) 14%,transparent)}
+  .rerolls .btn{padding:8px 6px;font-size:13.5px}
+  .slot .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .reel .pickno{padding-right:44px}
   .reel{padding:12px 14px 12px 16px}.reel .team{font-size:40px}.reel .years{font-size:26px}.reel::after{right:3%}
   .fmtpick .fmtlabel{flex-basis:100%;margin:0}
   .fmtpick.ladderpick .fmtbtn{flex:1 1 calc(50% - 4px);align-items:center}
@@ -1077,14 +1106,21 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .nowrap{white-space:nowrap}
 @media (max-width:359px){.modal h2{font-size:34px}.dailycta .btn{flex-direction:column;align-items:flex-start}
   .seedline{flex-basis:100%;margin-left:0;flex-wrap:wrap}
-  .rerolls{grid-template-columns:repeat(2,minmax(0,1fr))}.rerolls .btn.reset{grid-column:1/-1}
-  .slot .v{font-size:13px}}
+  .hdr-links{gap:7px}.hdrchip.help{padding-right:9px}.whoami{gap:5px}.ver{padding:2px 5px}
+  .slot .v{font-size:13px}
+  .modebar{gap:4px}.mb{padding:5px 10px;font-size:13px}
+  .reel{padding:10px 12px 10px 14px}.reel .team{font-size:36px}.reel .years{font-size:22px}
+  .lb .lbrec{display:none}.lb .subrec{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-top:1px}
+  .lb td.nm{overflow-wrap:anywhere}}
 /* Build-a-player */
 .frow.bap-pos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .frow.bap-pos .btn{min-height:52px}
-.frow.bap-attrs{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
-.frow.bap-attrs .btn{min-height:48px;justify-content:space-between;text-align:left;text-transform:none;font-family:'Inter',system-ui,sans-serif;font-weight:700;font-size:14px;letter-spacing:0}
-.bapgrade{font-family:'Inter',system-ui,sans-serif;font-weight:800;font-size:14px;min-width:34px;text-align:center;border-radius:6px;padding:3px 6px;background:var(--surface);color:var(--ink)}
+/* One card-like choice per attribute: the name on the left, its grade as a big tier-colored chip on the right.
+   Plain buttons rather than lime - lime stays reserved for the one main action on a screen. */
+.frow.bap-attrs{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;max-width:760px}
+.frow.bap-attrs .btn{min-height:52px;justify-content:space-between;gap:12px;padding:8px 8px 8px 14px;text-align:left;font-size:15px;box-shadow:2px 2px 0 var(--hard)}
+.frow.bap-attrs .btn>span:first-child{min-width:0;overflow-wrap:anywhere}
+.bapgrade{flex:none;font-weight:800;font-size:17px;line-height:1;min-width:46px;text-align:center;border-radius:8px;padding:8px 8px 7px;background:var(--surface2);color:var(--ink)}
 .rc.bap{grid-template-columns:minmax(0,1fr) auto;align-items:baseline}
 .rc.bap .bd{font-size:14px;color:var(--ink);margin:0}
 .rc.bap .tk{margin-left:6px}
@@ -1106,9 +1142,11 @@ button.pill{font-family:inherit;transition:border-color .12s}
   /* Real controls sit above the invisible link hit areas below, so a tap near a button's edge
      never lands on a neighbouring link (e.g. "Skip to the end" under "Kick off"). */
   .btn,.fmtbtn,.tab{position:relative;z-index:1}
-  .linkbtn,button.pill,.mb{position:relative}
+  .linkbtn,button.pill,.mb,.whoami{position:relative}
   .mb::after{content:'';position:absolute;left:-3px;right:-3px;top:-6px;bottom:-6px}
-  .nav .linkbtn::after{bottom:-4px}
+  .whoami::after{content:'';position:absolute;left:-4px;right:-4px;top:-10px;bottom:-4px}
+  /* The header chips sit just above the tab grid on phones: keep their hit areas off the tabs. */
+  .nav button.pill::after{bottom:-4px}
   .nav .tab{min-height:40px}
   .linkbtn::after{content:'';position:absolute;left:-6px;right:-6px;top:-13px;bottom:-13px}
   button.pill::after{content:'';position:absolute;left:-4px;right:-4px;top:-8px;bottom:-8px}
@@ -1157,6 +1195,9 @@ const EMPTY_SITE_STATS = {
   mostDrafted: [], mostWins: [], mostChamps: [], mostPlayoffs: [], longestStreaks: [], bestWinPct: [], avgWinPct: 0,
 };
 const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+// An outcome as the end of a sentence. Stored outcomes can't change, and the perfect one already ends
+// in a period and repeats the record the sentence has just given.
+const outcomeSentence = (o) => (!o ? "" : o === "Perfect season. 20–0." ? "Perfect season." : `${o}.`);
 const USER_RE = /^[a-zA-Z0-9_]{3,16}$/;
 
 const OUTCOME_BUTTONS = [
@@ -1176,9 +1217,11 @@ function AdminPanel({ openSlots, onForceBoard, onForcePlayer, onForceOutcome }) 
   const [w, setW] = useState(0);
   const [query, setQuery] = useState("");
   const matches = adminSearchPlayers(query);
+  // Collapsed by default on phones, where the open panel pushed the whole draft off the first screen.
+  const startOpen = typeof window !== "undefined" && !!window.matchMedia?.("(min-width: 641px)").matches;
   return (
-    <div className="panel">
-      <h3>Admin tools</h3>
+    <details className="panel adminpanel" open={startOpen}>
+      <summary><h3>Admin tools</h3></summary>
       <div className="frow" style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}>
         <select className="inp" value={team} onChange={(e) => setTeam(e.target.value)}>
           {TEAM_CODES.map((t) => <option key={t} value={t}>{TEAMS[t][0]}</option>)}
@@ -1208,7 +1251,7 @@ function AdminPanel({ openSlots, onForceBoard, onForcePlayer, onForceOutcome }) 
           <button key={key} className="btn sm" onClick={() => onForceOutcome(key)}>{label}</button>
         ))}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -1928,8 +1971,10 @@ export default function PerfectSeason() {
 
   // A saved daily whose seed isn't the one the server will derive can never be submitted - the
   // server would replay different boards and reject it - so it's treated as no saved draft at all
-  // rather than resumed into a guaranteed rejection.
-  const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history) && s.history.length > 0
+  // rather than resumed into a guaranteed rejection. A draft with no picks yet still counts: its
+  // boards are already dealt, so coming back must resume them and abandoning it is a DNF. (Treating
+  // it as nothing let you look at the first board, leave, and come back to new boards for free.)
+  const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history)
     && BOARDS[`${s.spin.team}|${s.spin.w}`] && s.history.every((h) => findPlayer(h.key, h.id, h.season))
     && (s.mode.kind !== "daily" || s.mode.seed === dailySeed(s.mode.date, s.mode.format));
 
@@ -2195,6 +2240,13 @@ export default function PerfectSeason() {
     startDraft({ kind: "free", code: newCode(), format, ...extra });
   }
 
+  // After an Unlimited season its saved draft is already cleared, so this deals fresh boards. After a
+  // daily, an Unlimited draft left in progress is still saved, and gets resumed rather than abandoned.
+  function runItBack() {
+    if (mode?.kind === "free") restart();
+    else openFree();
+  }
+
   // Stats O/U: "career" here means the sum of a player's appearances across every board he
   // qualified for (at most one season per team per era window) - a real but partial slice of
   // his career, not his true full stat line, since only qualifying seasons make the boards.
@@ -2454,7 +2506,8 @@ export default function PerfectSeason() {
     const want = { ...extra, format: normFormat(extra?.format ?? format) };
     const sameVariant = (m) => !!m?.genius === !!want.genius && !!m?.gm === !!want.gm
       && normFormat(m?.format) === want.format;
-    if (mode && mode.kind === "free" && sameVariant(mode) && !result && history.length > 0) return;
+    // The draft on screen, picks or not: once a board is dealt, leaving and tapping back in is a resume.
+    if (mode && mode.kind === "free" && sameVariant(mode) && !result) return;
     const saved = await sget(FREE_PROGRESS, false);
     if (validDraft(saved) && saved.mode.kind === "free") {
       if (sameVariant(saved.mode)) { restoreDraft(saved); return; }
@@ -2627,9 +2680,13 @@ export default function PerfectSeason() {
             </button>
           ))}
           <div className="hdr-links">
-            <button className="linkbtn" onClick={() => setHowTo(true)}>How to play</button>
-            {!user && authReady && <button className="linkbtn" onClick={() => setView("profile")}>Log in</button>}
-            {user && <span className="whoami">{user}</span>}
+            <button className="pill hdrchip help" onClick={() => setHowTo(true)}>How to play</button>
+            {!user && authReady && <button className="pill hdrchip login" onClick={() => setView("profile")}>Log in</button>}
+            {user && (
+              <button className="whoami" data-initial={user.charAt(0).toUpperCase()} aria-label={`Your profile, ${user}`} onClick={() => setView("profile")}>
+                <span className="whoname">{user}</span>
+              </button>
+            )}
             <span className="ver" title={`Perfect Season v${APP_VERSION}`}>v{APP_VERSION}</span>
           </div>
         </nav>
@@ -2826,7 +2883,13 @@ export default function PerfectSeason() {
                 {mode.kind === "daily" ? (
                   <span className="seedline">{FORMAT_LABEL[normFormat(mode.format)]} · {prettyDate(mode.date)} · same boards for everyone</span>
                 ) : (
-                  <span className="seedline">{normFormat(mode.format) === "standard" && "Championship · "}{mode.genius && "Genius mode · "}{mode.gm && "GM mode · "}<span className="codechip">Code <code>{mode.code}</code></span></span>
+                  <span className="seedline">
+                    {/* Each separator leads its group, so a wrapped line never ends on a dangling "·". */}
+                    {[normFormat(mode.format) === "standard" && "Championship", mode.genius && "Genius mode", mode.gm && "GM mode"].filter(Boolean).map((t, i) => (
+                      <span key={t} className="nowrap">{i ? "· " : ""}{t}</span>
+                    ))}
+                    <span className="codechip">{normFormat(mode.format) === "standard" || mode.genius || mode.gm ? "· " : ""}Code <code>{mode.code}</code></span>
+                  </span>
                 )}
               </div>
             )}
@@ -2838,13 +2901,14 @@ export default function PerfectSeason() {
             {modeDailyDone && !result && (
               <div className="locked">
                 <h3>Today's {FORMAT_LABEL[normFormat(mode.format)]} daily is done</h3>
-                <p className="note" style={{ marginTop: 0 }}>You went {modeDailyDone.w}–{modeDailyDone.l} with a team score of {modeDailyDone.score.toFixed(1)}. {modeDailyDone.outcome}.</p>
+                <p className="note" style={{ marginTop: 0 }}>You went {modeDailyDone.w}–{modeDailyDone.l} with a team score of {modeDailyDone.score.toFixed(1)}. {outcomeSentence(modeDailyDone.outcome)}</p>
                 <RosterRows roster={modeDailyDone.roster} />
                 <div className="frow" style={{ marginTop: 12 }}>
                   {!dailyDone[otherFormat] && (
                     <button className="btn solid" onClick={() => startDaily(otherFormat)}>Play the {FORMAT_LABEL[otherFormat]} daily</button>
                   )}
-                  <button className="btn" onClick={() => restart()}>Play an unlimited draft</button>
+                  {/* openFree, not restart: an Unlimited draft already in progress is resumed, not charged as a DNF. */}
+                  <button className="btn" onClick={() => openFree()}>Play an unlimited draft</button>
                   <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>Today's leaderboard</button>
                 </div>
               </div>
@@ -2883,6 +2947,7 @@ export default function PerfectSeason() {
                     <div className="stripe" style={{ background: TEAMS[disp.team][2] }} />
                     <span className="tm">{TEAMS[disp.team][0]}</span>
                     <span className="yr">{WINDOWS[disp.w][0]}–{WINDOWS[disp.w][1]}</span>
+                    {mode.gm && <span className={`stcap ${capRemaining < 0 ? "over" : ""}`}>${Math.max(0, capRemaining)}M left</span>}
                     <span className="pk">Pick {pickNo} of 6</span>
                     <span className="brk" />
                     <div className="chips">
@@ -2901,8 +2966,16 @@ export default function PerfectSeason() {
                   <div><span className="years led-wrap"><span className="led">{WINDOWS[disp.w][0]}–{WINDOWS[disp.w][1]}</span></span>{cityRange(disp.team, disp.w) && <span className="city">{cityRange(disp.team, disp.w)}</span>}</div>
                 </div>
                 <div className="rerolls">
-                  <button className="btn" disabled={spinning || rerolls.team < 1} onClick={() => reroll("team")}>Re-spin team <span className="left">({rerolls.team} left)</span></button>
-                  <button className="btn" disabled={spinning || rerolls.years < 1} onClick={() => reroll("years")}>Re-spin years <span className="left">({rerolls.years} left)</span></button>
+                  {/* Phones show the short "↻ Team 1" form so all three controls fit one row; the
+                      aria-label keeps the full wording for screen readers either way. */}
+                  <button className="btn" aria-label={`Re-spin team (${rerolls.team} left)`} disabled={spinning || rerolls.team < 1} onClick={() => reroll("team")}>
+                    <span className="rs-long">Re-spin team <span className="left">({rerolls.team} left)</span></span>
+                    <span className="rs-short" aria-hidden="true">↻ Team <b>{rerolls.team}</b></span>
+                  </button>
+                  <button className="btn" aria-label={`Re-spin years (${rerolls.years} left)`} disabled={spinning || rerolls.years < 1} onClick={() => reroll("years")}>
+                    <span className="rs-long">Re-spin years <span className="left">({rerolls.years} left)</span></span>
+                    <span className="rs-short" aria-hidden="true">↻ Years <b>{rerolls.years}</b></span>
+                  </button>
                   {mode.kind === "daily" ? (
                     <span className="note" style={{ marginLeft: "auto", alignSelf: "center" }}>One shot. No resets on the daily.</span>
                   ) : (
@@ -3014,7 +3087,7 @@ export default function PerfectSeason() {
                 {finished && (
                   <div className="frow resultactions">
                     <button className="btn solid" onClick={doShare}>{share.state === "copied" ? "Copied to clipboard" : share.state === "shared" ? "Shared" : "Share result"}</button>
-                    <button className="btn" onClick={() => restart()}>Run it back 🔁</button>
+                    <button className="btn" onClick={runItBack}>Run it back 🔁</button>
                     <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>See the leaderboard</button>
                   </div>
                 )}
@@ -3110,7 +3183,7 @@ export default function PerfectSeason() {
                       );
                     })()}
                     <div className="frow" style={{ marginTop: 16 }}>
-                      <button className="btn" onClick={() => restart()}>Run it back 🔁</button>
+                      <button className="btn" onClick={runItBack}>Run it back 🔁</button>
                     </div>
                     {mode.kind === "free" && (
                       <p className="note">Send a friend the code <b>{mode.code}</b> and they'll draft the exact same six boards.</p>
@@ -3180,7 +3253,7 @@ export default function PerfectSeason() {
                   return (
                     <div key={f}>
                       <h2 className="h">Best {FORMAT_LABEL[f]} lineup</h2>
-                      <p className="note" style={{ marginTop: 0 }}>{best.w}–{best.l}, team score {best.score.toFixed(1)}, {fmtDate(best.date)}. {best.outcome}.</p>
+                      <p className="note" style={{ marginTop: 0 }}>{best.w}–{best.l}, team score {best.score.toFixed(1)}, {fmtDate(best.date)}. {outcomeSentence(best.outcome)}</p>
                       <RosterRows roster={best.roster} />
                     </div>
                   );
@@ -3251,16 +3324,16 @@ export default function PerfectSeason() {
                   <>
                     <h2 className="h">Top 10{" "}— {FORMAT_LABEL[lbFormat]}</h2>
                     <table className="lb">
-                      <thead><tr><th></th><th>Player</th><th className="r">Best score</th><th className="r">Best record</th><th className="r hide">Drafts</th><th className="r hide">20–0s</th></tr></thead>
+                      <thead><tr><th></th><th>Player</th><th className="r">Best score</th><th className="r lbrec">Best record</th><th className="r hide">Drafts</th><th className="r hide">Perfect</th></tr></thead>
                       <tbody>
                         {lb.top.map((q, i) => {
                           const mine = !!userId && q.id === userId;
                           return (
                             <tr key={q.id} className={rankRowClass(i, mine)}>
                               <RankCell i={i} />
-                              <td><PlayerName name={q.username} mine={mine} /></td>
+                              <td className="nm"><PlayerName name={q.username} mine={mine} />{q.bestRecord && <span className="subrec">{q.bestRecord.w}–{q.bestRecord.l}</span>}</td>
                               <td className="r v">{scoreOf(q, lbFormat) != null ? scoreOf(q, lbFormat).toFixed(1) : "–"}</td>
-                              <td className="r">{q.bestRecord ? `${q.bestRecord.w}–${q.bestRecord.l}` : "–"}</td>
+                              <td className="r lbrec">{q.bestRecord ? `${q.bestRecord.w}–${q.bestRecord.l}` : "–"}</td>
                               <td className="r hide">{draftsOf(q)}{q.dnf ? <span className="muted"> ({q.dnf} DNF)</span> : null}</td>
                               <td className="r hide">{q.perfect}</td>
                             </tr>
@@ -3285,14 +3358,14 @@ export default function PerfectSeason() {
                   </p>
                 ) : (
                   <table className="lb">
-                    <thead><tr><th></th><th>Player</th><th className="r">Team score</th><th className="r">Record</th></tr></thead>
+                    <thead><tr><th></th><th>Player</th><th className="r">Team score</th><th className="r lbrec">Record</th></tr></thead>
                     <tbody>
                       {dailyBoard.rows.slice(0, 10).map((q, i) => {
                         const mine = !!user && q.username === user;
                         return (
                           <tr key={i} className={rankRowClass(i, mine)}>
-                            <RankCell i={i} /><td><PlayerName name={q.username} mine={mine} /></td>
-                            <td className="r v">{q.score.toFixed(1)}</td><td className="r">{q.w}–{q.l}</td>
+                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} /><span className="subrec">{q.w}–{q.l}</span></td>
+                            <td className="r v">{q.score.toFixed(1)}</td><td className="r lbrec">{q.w}–{q.l}</td>
                           </tr>
                         );
                       })}
@@ -3330,7 +3403,7 @@ export default function PerfectSeason() {
                         const mine = !!userId && q.id === userId;
                         return (
                           <tr key={q.id} className={rankRowClass(i, mine)}>
-                            <RankCell i={i} /><td><PlayerName name={q.username} mine={mine} /></td>
+                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} /></td>
                             <td className="r v">{Math.round(pointsOf(q, ladder.mode)).toLocaleString()}</td>
                             <td className="r hide">{draftsOf(q)}</td>
                           </tr>
@@ -3361,9 +3434,7 @@ export default function PerfectSeason() {
                   <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
                   <div className="tile"><div className="n">{siteStats.buildCount}</div><div className="l">Created players</div></div>
                 </div>
-                {siteStats.error
-                  ? <p className="note">Stats couldn't be loaded. Try Refresh.</p>
-                  : <p className="note">Career boards count every account. Most-drafted players, GM scores and biggest upsets count every run since the run log started in September 2026, plus each account's last 10 runs from before then.</p>}
+                {siteStats.error && <p className="note">Stats couldn't be loaded. Try Refresh.</p>}
                 <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>
 
                 {/* Only the score-ranked boards split by format; the career records further down
@@ -3520,7 +3591,7 @@ export default function PerfectSeason() {
                     <p className="note" style={{ margin: "0 0 4px" }}>{cat}</p>
                     <div className="frow bap-attrs">
                       {attrs.map(([k, label, , calc]) => (
-                        <button key={k} className="btn solid" aria-label={`Take his ${label}, graded ${grade(calc(bap.player))}`} onClick={() => pickBapAttr(k)}>
+                        <button key={k} className="btn" aria-label={`Take his ${label}, graded ${grade(calc(bap.player))}`} onClick={() => pickBapAttr(k)}>
                           <span>{label}</span><span className={`bapgrade ${gradeTier(calc(bap.player))}`}>{grade(calc(bap.player))}</span>
                         </button>
                       ))}

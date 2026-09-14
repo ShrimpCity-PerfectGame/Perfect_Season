@@ -131,4 +131,107 @@ await runTest("finishing a draft is not a DNF", async () => {
   assert(auth._profiles.get(userId).dnf === 0, "starting a fresh draft after finishing one must not record a DNF");
 });
 
+const codeOf = (container) => container.querySelector(".seedline code")?.textContent;
+const boardOf = (container) => `${container.querySelector(".reel .team")?.textContent} ${container.querySelector(".reel .years")?.textContent}`;
+const respinTeam = (container) => [...container.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || "").startsWith("Re-spin team"));
+
+// Regression 3: a draft with no picks yet didn't count as a draft. Looking at the first board, going
+// back to Modes and tapping Unlimited again dealt a brand-new draft - a free redo of the first board,
+// with the re-spin handed back too - and Reset or switching modes did the same without a DNF.
+await runTest("leaving an Unlimited draft before the first pick and coming back resumes the same boards", async () => {
+  const { container, auth, userId } = await signedInApp("dnfpeek");
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "Unlimited"));
+  await flush(3);
+  const code = codeOf(container);
+  assert(code, "expected an Unlimited draft with a code on screen");
+  // Spend the team re-spin first: coming back must not hand it back.
+  await click(respinTeam(container));
+  await flush(3);
+  const board = boardOf(container);
+  assert(respinTeam(container).disabled, "expected the team re-spin to be used up");
+
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "Unlimited"));
+  await flush(3);
+  assert(codeOf(container) === code, `expected the same draft back, got code ${codeOf(container)} instead of ${code}`);
+  assert(boardOf(container) === board, `expected the same board back, got ${boardOf(container)} instead of ${board}`);
+  assert(respinTeam(container).disabled, "a used re-spin must stay used after leaving and coming back");
+  assert(auth._profiles.get(userId).dnf === 0, "resuming must not charge a DNF");
+
+  // A reload is no different: the saved draft comes back.
+  const storage = window.storage;
+  setupDom();
+  window.storage = storage;
+  window.__ps_supabase__ = auth;
+  const reloaded = await mount();
+  await flush(3);
+  await click(findButtonByText(reloaded.container, "Modes"));
+  await flush();
+  await click(modeButton(reloaded.container, "Unlimited"));
+  await flush(3);
+  assert(codeOf(reloaded.container) === code, `expected the same draft after a reload, got code ${codeOf(reloaded.container)} instead of ${code}`);
+  assert(boardOf(reloaded.container) === board, "expected the same board after a reload");
+  assert(respinTeam(reloaded.container).disabled, "a used re-spin must stay used after a reload");
+  assert(auth._profiles.get(userId).dnf === 0, "resuming after a reload must not charge a DNF");
+});
+
+await runTest("resetting a draft before the first pick still counts as a DNF", async () => {
+  const { container, auth, userId } = await signedInApp("dnfresetzero");
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "Unlimited"));
+  await flush(3);
+  const code = codeOf(container);
+
+  await click(findButtonByText(container, "Reset draft"));
+  await flush();
+  await click(findButtonByText(container, "Tap again"));
+  await flush(6);
+  assert(codeOf(container) && codeOf(container) !== code, "expected a fresh draft after the reset");
+  assert(auth._profiles.get(userId).dnf === 1, `expected one DNF for resetting a dealt draft, got ${auth._profiles.get(userId).dnf}`);
+});
+
+await runTest("switching modes before the first pick counts the dealt draft as a DNF", async () => {
+  // Otherwise Unlimited -> GM mode -> Unlimited would be the same free redo by a longer route.
+  const { container, auth, userId } = await signedInApp("dnfswitchzero");
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "Unlimited"));
+  await flush(3);
+
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "GM mode"));
+  await flush(6);
+  assert(text(container).includes("GM mode"), "expected a GM mode draft");
+  assert(auth._profiles.get(userId).dnf === 1, `expected one DNF for abandoning the dealt Unlimited draft, got ${auth._profiles.get(userId).dnf}`);
+});
+
+await runTest("Play an unlimited draft after the daily resumes the Unlimited draft in progress", async () => {
+  // It used to call restart(), which charged a DNF for the draft it threw away.
+  const { container, auth, userId } = await signedInApp("dnfafterdaily");
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "Unlimited"));
+  await flush();
+  await draftOne(container);
+  const code = codeOf(container);
+
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(findButtonByText(container, "Fantasy daily"));
+  await flush(3);
+  for (let i = 0; i < 6; i++) await draftOne(container);
+  await flush(6);
+  await finishSeason(container);
+  await click(findButtonByText(container, "Run it back"));
+  await flush(6);
+  assert(codeOf(container) === code, `expected the Unlimited draft in progress back, got code ${codeOf(container)} instead of ${code}`);
+  assert(text(container).includes("Pick 2 of 6"), "expected its pick to still be there");
+  assert(auth._profiles.get(userId).dnf === 0, `expected no DNF, got ${auth._profiles.get(userId).dnf}`);
+});
+
 console.log("test-dnf.mjs done");
