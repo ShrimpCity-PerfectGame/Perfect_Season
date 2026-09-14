@@ -62,7 +62,8 @@ node tools/ui-harness/build.mjs   # bundle the harness into build/ui-harness.js 
 node tools/ui-harness/audit.mjs --as player --width 375 --tab Leaderboard --out build/ui-audit
 # For a change's final check, still click through the real staging site at desktop and mobile widths.
 node tests/test-theme-contrast.mjs  # every text color in every theme scope is readable (WCAG AA) - see Design system
-node tests/test-result-moments.mjs  # record-first result: per-season rank, upset/streak moments, black Leaderboard
+node tests/test-result-moments.mjs  # record-first result: per-season rank, upset/streak moments, black Leaderboard, Share
+node tests/test-sou-leave.mjs       # Over/Under can't be replayed or left running: leaving/reloading mid-round is a miss
 
 # Rebuild the game data from source (only when adding a season or changing grading)
 cd scripts && python3 build.py && python3 correct.py && python3 rate2.py \
@@ -256,7 +257,24 @@ shadow, and navy "scoreboard" moments.
   their exact text. An upset is a win with a 35% chance or less (`UPSET_CHANCE`), computed from the
   opponent's rating at display time by `gameWinChance` — never by changing the simulation.
 - **Motion:** hover lift and press on buttons and tiles. Every new transform or animation goes in
-  the `prefers-reduced-motion` block at the bottom of the stylesheet.
+  the `prefers-reduced-motion` block at the bottom of the stylesheet. Hover rules go inside
+  `@media (hover:hover)` - on touch screens `:hover` sticks after a tap.
+- **Mobile rules (from the 1.8.0 phone audit - keep them):**
+  - The button reset is `:where(.ps) button`, element specificity. As `.ps button` it silently beat
+    `.fmtbtn`, `.linkbtn` and `.tab` for three releases.
+  - Touch targets live in `@media (pointer:coarse)`: real controls get `min-height:44px` and
+    `position:relative;z-index:1`; text links, pills and mode pills keep their look and get an
+    invisible `::after` hit area. The z-index is what stops a hit area stealing taps from a
+    neighbouring control ("Skip to the end" under "Kick off", "How to play" over the tabs).
+  - Inputs are 16px (iOS zooms anything smaller). Tabular digits are applied only to the numeric
+    selectors listed at the top of the stylesheet - on the whole page they widen hyphens in names.
+  - **Base rules must come before the responsive `@media` blocks that override them.** A base
+    `.roster` rule added below the phone query forced six columns on phones.
+  - Screens change on one page, so one effect scrolls to the top when `view`, `mode.seed` or the
+    Build-a-player step changes; `html:has(.result-hero)` turns off scroll anchoring so a season
+    ticking in doesn't drag the view down. Leaving Over/Under or Build-a-player by any route is
+    cleaned up in a `view` effect, not in individual click handlers.
+  - Check changes with `tools/ui-harness` at 320, 375, 430, 768 and 667x375 before shipping.
 
 ## Releasing
 

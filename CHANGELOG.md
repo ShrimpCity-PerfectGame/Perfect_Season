@@ -13,6 +13,49 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.8.0] — 2026-09-14
+
+A full pass over every screen on phones: small and large phones, tablets and landscape. Five
+review agents checked each screen against a checklist, the issues were fixed, and the same agents
+re-checked the fixes.
+
+### Fixed
+
+- **Share result did nothing** since 1.7.0: the button hit an error and never shared or copied.
+- **The draft screen's Unlimited button wiped your draft in progress and counted a DNF.** It now
+  takes you back to that draft, the same as the Unlimited tile on the home screen.
+- **Over/Under could be replayed for points and kept running in the background.** Leaving and coming
+  back re-dealt the round you had just answered, and leaving through the top menu kept the clock
+  running. Walking away mid-round (or reloading) now counts as a miss, and an answered round is
+  never dealt again.
+- **The page opened in the wrong place on phones:** screens kept the previous screen's scroll
+  position, the next draft board could open deep in the list, the season result slid off the top
+  while games ticked in, and How to play opened scrolled to the bottom.
+- **Things ran off the screen or overlapped:** the top menu between 481 and 760px wide (landscape
+  phones, split-screen tablets), the leaderboard tables at 320px, the roster with long surnames,
+  a 20–0 record, points and ranks on the result screen, the season game tiles, the Players
+  menus, and several headings.
+- **iPhones zoomed in on every text field**, and many buttons and links were too small to tap
+  reliably. Buttons are now at least 44px tall on touch screens, and links have larger tap areas.
+- **Styles lost since 1.4.0:** the scoring toggle's display font, link colors and muted tabs were
+  being overridden by a CSS rule and now show as designed.
+- The live playoff scoreboard's score and the "Your roster, graded" rows were misaligned by a
+  leftover rule; refreshing a leaderboard no longer collapses the page while it reloads.
+
+### Changed
+
+- **Share, Run it back and See the leaderboard sit right under the result** instead of below the
+  grades and recap.
+- On phones the top menu is an even three-by-two grid.
+- A player who can play Flex gets one "Lock in · Flex" button instead of two identical ones.
+- Over/Under's Over and Under buttons are large and equal, and stay in the same place between
+  answering and moving on. Build-a-player's attribute and position buttons are a grid.
+- The Stats boards show rank, name and value on one row on phones.
+
+### Deploy notes
+
+App only. No database migration or Edge Function change.
+
 ## [1.7.0] — 2026-09-14
 
 A new look, part two: the Leaderboard and the season result get their own personality.
