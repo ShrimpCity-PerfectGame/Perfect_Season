@@ -543,7 +543,7 @@ const CSS = `
   overflow-x:clip}
 /* Tabular digits only where numbers line up. On the whole page they also widen Inter's hyphen, so
    prose read "re - spin" and names "Valdes - Scantling". */
-.lb td,.tile .n,.strip .n,.rec,.sc,.rr,.cell .n,.g .w,.sb,.clock,.fin,.sou-score,.sou-timer,.rc .n,.gr,.rv .pts,.recap-sum b,.streak b,.ver,.pill,.slot .sub{font-variant-numeric:tabular-nums}
+.lb td,.tile .n,.strip .n,.rec,.sc,.rr,.cell .n,.g .w,.sb,.clock,.fin,.sou-score,.sou-timer,.rc .n,.gr,.rv .pts,.recap-sum b,.streak b,.ver,.slot .sub{font-variant-numeric:tabular-nums}
 /* Stop the browser pinning the view to the bottom while a season's tiles tick in under it. */
 html:has(.result-hero){overflow-anchor:none}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
@@ -827,7 +827,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .recbox .rec .led:first-child,.wl span:first-child{justify-self:end}
 .recbox .rec .led:nth-child(2){justify-self:center}
 .recbox .rec .led:last-child,.wl span:last-child{justify-self:start}
-.wl{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+.wl{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:6px}
 .outrow{display:flex;justify-content:center;align-items:baseline;gap:8px;margin-top:12px}
 .outrow .outcome{margin-top:0;text-wrap:balance}
 .oe{font-size:20px;line-height:1}
@@ -841,7 +841,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .strip .n{font-family:var(--display);font-weight:400;font-size:28px;line-height:1.05}
 .strip .n.up{color:var(--win)}
 .strip .n.down{color:var(--loss)}
-.strip .l{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.strip .l{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
 .strip .s{font-size:12px;color:var(--muted)}
 .moments{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:14px}
 .mo{font-size:13px;font-weight:700;color:var(--ink);border-radius:999px;padding:4px 11px;box-shadow:inset 0 0 0 1px var(--line2)}
@@ -870,7 +870,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .rv .p{font-weight:700}
 .rv .t{font-size:13px;color:var(--muted)}
 .rv .pts{text-align:right;font-weight:700}
-.rv .pts small{display:block;font-weight:400;font-size:11px;color:var(--muted)}
+.rv .pts small{display:block;font-weight:400;font-size:12px;color:var(--muted)}
 .gr{font-family:var(--display);font-weight:400;font-size:26px;min-width:38px;text-align:right}
 .recap{border-top:1px solid var(--line);margin-bottom:8px}
 .rc{display:grid;grid-template-columns:28px 1fr 1fr;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;align-items:start}
@@ -950,7 +950,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 @keyframes sou-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.22)}}
 .sou-hud{flex-wrap:wrap}
 .sou-timer{margin-left:auto}
-.sou-teams{max-width:none}
+.sou-teams{max-width:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .panel p.sou-line{font-size:18px;margin:10px 0 12px;color:var(--ink);max-width:none}
 /* Big, equal answer buttons: a mis-tap costs a life. */
 .sou-slot{min-height:108px}
@@ -960,7 +960,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .panel p.sou-fb.ok{color:var(--win)}
 .panel p.sou-fb.miss{color:var(--loss)}
 @media (max-width:360px){.sou-hearts{font-size:22px;letter-spacing:1px}}
-@media (max-height:500px) and (orientation:landscape){.sou-hud{margin-bottom:6px}.sou-timer{font-size:28px}.sou-hearts{font-size:22px}}
+@media (max-height:500px) and (orientation:landscape){.sou-hud{margin-bottom:6px}.sou-timer{font-size:28px}.sou-hearts{font-size:22px}.sou-slot{min-height:auto}.sou-answers .btn{min-height:44px;font-size:18px}.panel p.sou-fb{min-height:0}}
 
 /* ===== responsive ===== */
 @media (max-width:640px){
@@ -978,7 +978,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
   .nav .hdr-links{margin-left:0;width:100%;justify-content:flex-start}
 }
 /* Phones: links on top, then the six tabs as an even 3x2 grid instead of a ragged wrap. */
-@media (max-width:480px){
+@media (max-width:520px){
   .nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
   .nav .hdr-links{grid-column:1/-1;order:-1;justify-content:flex-end;margin-bottom:2px}
   .tab{padding:8px 4px;font-size:14px;text-align:center}
@@ -989,10 +989,11 @@ button.pill{font-family:inherit;transition:border-color .12s}
 /* Draft: slots read top-down, and a long surname breaks rather than widening its column (the
    columns themselves are minmax(0,1fr) in the base .roster rule and its phone override). */
 .slot{min-width:0;display:flex;flex-direction:column;justify-content:flex-start}
-.slot .v{overflow-wrap:break-word;hyphens:auto}
+.slot .v{overflow-wrap:break-word;-webkit-hyphens:auto;hyphens:auto}
 .rerolls .left{font-weight:600;opacity:.75}
-/* The whole card is the tap target, not just the area inside its padding. */
-.card{padding:0}
+/* The whole draft card is the tap target, not just the area inside its padding. Only cards built
+   around a .hit button - the Players index renders plain cards that keep their own padding. */
+.card:has(>.hit){padding:0}
 .card>.hit{padding:10px 12px;box-sizing:border-box}
 .card>.drafts{padding:0 12px 12px;margin-top:0}
 .drafts{scroll-margin:110px 0 16px}
@@ -1027,12 +1028,12 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .night .lb tr.me td{box-shadow:inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
 .night .lb tr.me td:first-child{box-shadow:inset 2px 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
 /* Stats rank boards: rank, name and value on one row */
-.rc.rank{grid-template-columns:28px minmax(0,1fr) auto;align-items:baseline}
+.rc.rank{grid-template-columns:28px minmax(0,1fr) auto;align-items:center}
 .rc.rank .alt{text-align:right}
 .rc.rank .tk{overflow-wrap:anywhere}
 /* Players: the chooser stays reachable on a long board */
-.pickerbar{position:sticky;top:0;z-index:5;background:var(--bg);padding-block:8px;margin-bottom:6px}
-@media (max-width:720px){
+.pickerbar{position:sticky;top:0;z-index:5;background:var(--bg);padding-block:8px;margin-bottom:6px;box-shadow:0 1px 0 var(--line)}
+@media (max-width:720px) and (orientation:portrait){
   .cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;gap:8px 6px}.cell{width:auto}
   .cell .l,.pp{font-size:12px}
 }
@@ -1044,24 +1045,25 @@ button.pill{font-family:inherit;transition:border-color .12s}
 }
 @media (max-width:480px){
   .sticky .sp,.sticky .brk{display:none}
-  .drafts{display:grid;grid-template-columns:minmax(0,1fr) auto}
-  .drafts .btn.solid{min-width:0}
-  .rerolls{display:grid;grid-template-columns:1fr 1fr}
-  .rerolls .btn.reset,.rerolls .note{grid-column:1/-1}
+  .drafts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .drafts .btn.solid{grid-column:1/-1;min-width:0}
+  .rerolls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .rerolls .note{grid-column:1/-1}
+  .rerolls .btn.reset{margin-left:0}
   .rerolls .btn:not(.reset){flex-direction:column;gap:0;line-height:1.15}
   .rerolls .left{font-size:12px}
   .reel{padding:12px 14px 12px 16px}.reel .team{font-size:40px}.reel .years{font-size:26px}.reel::after{right:3%}
-  .seedline{flex-basis:100%;margin-left:0;flex-wrap:wrap}
   .fmtpick .fmtlabel{flex-basis:100%;margin:0}
   .fmtpick.ladderpick .fmtbtn{flex:1 1 calc(50% - 4px);align-items:center}
   .dayhead{flex-wrap:nowrap;align-items:flex-start}.dayhead .linkbtn{flex:none;margin-top:6px}
-  .ps select.inp{flex:1 1 150px;max-width:none}
+  .ps select.inp{flex:1 1 120px;max-width:none}
   .resultactions .btn{flex:1 1 auto}
 }
 @media (max-width:400px){
   .night .lb .rk{width:44px;font-size:32px;padding:6px 0}
   .night .lb tr.first .rk{font-size:38px}
   .lb th,.lb td{padding-left:5px;padding-right:5px}
+  .lb .crown{left:-6px;top:-9px;font-size:14px}
 }
 /* Home */
 .dailycta{display:grid;gap:10px}
@@ -1073,10 +1075,14 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .modal-x{position:absolute;top:10px;right:10px;width:44px;height:44px;border-radius:12px;border:2px solid var(--line2);background:var(--surface);
   color:var(--ink);font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center}
 .nowrap{white-space:nowrap}
+@media (max-width:359px){.modal h2{font-size:34px}.dailycta .btn{flex-direction:column;align-items:flex-start}
+  .seedline{flex-basis:100%;margin-left:0;flex-wrap:wrap}
+  .rerolls{grid-template-columns:repeat(2,minmax(0,1fr))}.rerolls .btn.reset{grid-column:1/-1}
+  .slot .v{font-size:13px}}
 /* Build-a-player */
 .frow.bap-pos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .frow.bap-pos .btn{min-height:52px}
-.frow.bap-attrs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.frow.bap-attrs{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
 .frow.bap-attrs .btn{min-height:48px;justify-content:space-between;text-align:left;text-transform:none;font-family:'Inter',system-ui,sans-serif;font-weight:700;font-size:14px;letter-spacing:0}
 .bapgrade{font-family:'Inter',system-ui,sans-serif;font-weight:800;font-size:14px;min-width:34px;text-align:center;border-radius:6px;padding:3px 6px;background:var(--surface);color:var(--ink)}
 .rc.bap{grid-template-columns:minmax(0,1fr) auto;align-items:baseline}
@@ -1096,8 +1102,14 @@ button.pill{font-family:inherit;transition:border-color .12s}
 }
 /* Touch screens: 44px targets. Text links keep their look and get a larger invisible hit area. */
 @media (pointer:coarse){
-  .btn,.fmtbtn,.seg button,.tab,.mb,.inp{min-height:44px}
-  .linkbtn,button.pill{position:relative}
+  .btn,.fmtbtn,.seg button,.tab,.inp{min-height:44px}
+  /* Real controls sit above the invisible link hit areas below, so a tap near a button's edge
+     never lands on a neighbouring link (e.g. "Skip to the end" under "Kick off"). */
+  .btn,.fmtbtn,.tab{position:relative;z-index:1}
+  .linkbtn,button.pill,.mb{position:relative}
+  .mb::after{content:'';position:absolute;left:-3px;right:-3px;top:-6px;bottom:-6px}
+  .nav .linkbtn::after{bottom:-4px}
+  .nav .tab{min-height:40px}
   .linkbtn::after{content:'';position:absolute;left:-6px;right:-6px;top:-13px;bottom:-13px}
   button.pill::after{content:'';position:absolute;left:-4px;right:-4px;top:-8px;bottom:-8px}
 }
@@ -1208,19 +1220,26 @@ function PlayerIndex() {
   const [w, setW] = useState("");
   const key = team && w !== "" ? `${team}|${w}` : null;
   const board = key ? BOARDS[key] || [] : [];
+  // The chooser is sticky, so changing team deep in a long board would otherwise open the new
+  // board at the same depth. Jump back to its top instead.
+  const topRef = useRef(null);
+  const backToTop = () => {
+    const el = topRef.current;
+    if (el?.getBoundingClientRect && el.getBoundingClientRect().top < 0) el.scrollIntoView?.({ block: "start" });
+  };
   return (
     <>
-      <h2 className="h">Players</h2>
+      <h2 className="h" ref={topRef}>Players</h2>
       <p className="note" style={{ marginTop: 0 }}>
         Browse every player who's ever qualified for a board, by team and era.
       </p>
       <div className="frow pickerbar" style={{ flexWrap: "wrap", gap: 8 }}>
-        <select className="inp" value={team} onChange={(e) => setTeam(e.target.value)} aria-label="Team">
-          <option value="">Choose a team</option>
+        <select className="inp" value={team} onChange={(e) => { setTeam(e.target.value); backToTop(); }} aria-label="Team">
+          <option value="">Team</option>
           {TEAM_CODES.map((t) => <option key={t} value={t}>{TEAMS[t][0]}</option>)}
         </select>
-        <select className="inp" value={w} onChange={(e) => setW(e.target.value)} aria-label="Era">
-          <option value="">Choose an era</option>
+        <select className="inp" value={w} onChange={(e) => { setW(e.target.value); backToTop(); }} aria-label="Era">
+          <option value="">Era</option>
           {WINDOWS.map((win, i) => <option key={i} value={i}>{win[0]}–{win[1]}</option>)}
         </select>
       </div>
@@ -2194,6 +2213,9 @@ export default function PerfectSeason() {
     clearInterval(souTimer.current);
     const round = souRoundFor(`sou-${date}`, roundIndex);
     const deadline = Date.now() + SOU_ROUND_SECONDS * 1000;
+    // Saved as if this round were already missed; answering overwrites it. So reloading the page
+    // mid-round lands on the next round a life down, rather than re-dealing this one with a fresh clock.
+    sset(SOU_PROGRESS(date), { roundIndex: roundIndex + 1, lives: lives - 1, score }, false);
     setSou({ date, roundIndex, lives, score, round, guess: null, correct: undefined, deadline, timeLeft: SOU_ROUND_SECONDS });
     souTimer.current = setInterval(() => {
       setSou((s) => {
@@ -2224,6 +2246,9 @@ export default function PerfectSeason() {
     if (souDone) { loadSouBoard(todayKey()); return; }
     const date = todayKey();
     const wip = await sget(SOU_PROGRESS(date), false);
+    setSou(null);
+    // A round abandoned on the last life (page closed or reloaded) leaves no lives to resume with.
+    if (wip && wip.lives <= 0) { finishSouDay(date, wip.score); return; }
     setSouIntro(wip ? { date, ...wip } : { date, roundIndex: 0, lives: SOU_LIVES, score: 0 });
   }
 
@@ -2256,6 +2281,7 @@ export default function PerfectSeason() {
   // the shared leaderboard. The screen used to wait on that network write and sat blank meanwhile.
   async function finishSouDay(date, score) {
     await sset(SOU_DONE_KEY(date), { score }, false);
+    setSouBoard({ loading: true, rows: [] });
     setSouDone({ score });
     await sdel(SOU_PROGRESS(date), false);
     // Wait for the leaderboard write to land before re-fetching it, or the read can race ahead of
@@ -2457,7 +2483,7 @@ export default function PerfectSeason() {
 
   async function loadLadder(m) {
     const mk = LADDERS.includes(m) ? m : ladderMode;
-    setLadder({ loading: true, rows: [], mode: mk });
+    setLadder((l) => ({ loading: true, rows: l.mode === mk ? l.rows : [], mode: mk }));
     try {
       setLadder({ loading: false, rows: await fetchLadderTop(mk, 10), mode: mk });
     } catch (e) { setLadder({ loading: false, rows: [], mode: mk }); }
@@ -2465,7 +2491,9 @@ export default function PerfectSeason() {
 
   async function loadDailyBoard(f) {
     const fmt = normFormat(f || boardFormatRef.current);
-    setDailyBoard({ loading: true, rows: [], format: fmt });
+    // A refresh of the same board keeps its rows on screen until the new ones arrive, so the page
+    // doesn't collapse under the reader. Switching format still clears them - they'd be the wrong board.
+    setDailyBoard((d) => ({ loading: true, rows: d.format === fmt ? d.rows : [], format: fmt }));
     try {
       const rows = await fetchDailyTop(todayKey(), 10, fmt);
       setDailyBoard({ loading: false, rows, format: fmt });
@@ -2488,7 +2516,9 @@ export default function PerfectSeason() {
   function closeHowTo() { setHowTo(false); sset(HOWTO_KEY, true, false); }
 
   async function doShare() {
-    const text = shareText(result, roster, place, mode);
+    // result.rank is this season's rank from the runs log ({rank,total}), or null/undefined when
+    // there isn't one yet. (This read an undefined `place` after 1.7.0, so Share threw and did nothing.)
+    const text = shareText(result, roster, result.rank || null, mode);
     try {
       if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
         await navigator.share({ text });
@@ -2534,11 +2564,36 @@ export default function PerfectSeason() {
     scrollToTop();
   }, [view, mode?.seed, bap?.stage, bap?.seen?.length]);
 
+  // Leaving Over/Under or Build-a-player by ANY route - a tab, the header's Log in link, their own
+  // buttons - stops their clocks and drops the round or build. (Only the tabs did this at first, so a
+  // guest leaving through Log in came back to the rules stacked on top of a stale round.)
+  const prevView = useRef(view);
+  useEffect(() => {
+    const was = prevView.current;
+    prevView.current = view;
+    if (was === "statsou" && view !== "statsou") leaveSouState();
+    if (was === "buildplayer" && view !== "buildplayer") { clearTimeout(bapTimer.current); setBap(null); }
+  }, [view]);
+
+  // A new Over/Under round brings its answer buttons into view - on a short landscape phone they
+  // otherwise start below the fold.
+  useEffect(() => {
+    if (!sou || sou.guess || typeof document === "undefined") return;
+    document.querySelector(".sou-slot")?.scrollIntoView?.({ block: "nearest" });
+  }, [sou?.roundIndex, sou?.date]);
+
   // Tapping a player low on the screen would leave his Lock in buttons below the fold.
   useEffect(() => {
     if (!selected || typeof document === "undefined") return;
     document.querySelector(".card.sel .drafts")?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
   }, [selected]);
+
+  // When the regular season ends in a playoff berth, make sure "Kick off" is on screen: on a short
+  // phone it otherwise lands just under the fold.
+  useEffect(() => {
+    if (!inPlayoffs || po.stage !== "pre" || typeof document === "undefined") return;
+    document.querySelector(".pre")?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+  }, [inPlayoffs, po.stage]);
 
   // When the season ends, bring the record back into view if the season log pushed it off the top.
   const heroRef = useRef(null);
@@ -2567,9 +2622,6 @@ export default function PerfectSeason() {
           {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"], ["stats", "Stats"]].map(([k, l]) => (
             <button key={k} className={`tab ${view === k ? "on" : ""}`} aria-current={view === k ? "page" : undefined}
               onClick={() => {
-                // Leaving Over/Under or Build-a-player through the tabs cleans up like their own buttons.
-                if (view === "statsou" && k !== "statsou") leaveSouState();
-                if (view === "buildplayer" && k !== "buildplayer") { clearTimeout(bapTimer.current); setBap(null); }
                 setView(k); if (k === "home") refreshWip(); if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); } if (k === "stats" && !siteStats.loaded) loadSiteStats(); }}>
               {l}{k === "play" && view !== "play" && mode && open.length < 6 && !result && <span className="dot" aria-label="Draft in progress" />}
             </button>
@@ -2713,7 +2765,7 @@ export default function PerfectSeason() {
                 <div className="mt"><span className="icon" aria-hidden="true">🔗</span><span className="mn">Challenge a friend</span></div>
                 <p>Enter a code to draft the exact same boards someone else had.</p>
                 <div className="frow">
-                  <input className="inp" value={codeInput} maxLength={8} placeholder="Code, e.g. K3F9QZ" aria-label="Challenge code"
+                  <input className="inp" value={codeInput} maxLength={8} placeholder="e.g. K3F9QZ" aria-label="Challenge code"
                     onChange={(e) => setCodeInput(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && startCode(codeInput)} />
                   <button className="btn solid" disabled={codeInput.trim().length < 4} onClick={() => startCode(codeInput)}>Draft it</button>
                 </div>
@@ -3197,7 +3249,7 @@ export default function PerfectSeason() {
 
                 {lb.top.length > 0 && (
                   <>
-                    <h2 className="h">Top 10 — {FORMAT_LABEL[lbFormat]}</h2>
+                    <h2 className="h">Top 10{" "}— {FORMAT_LABEL[lbFormat]}</h2>
                     <table className="lb">
                       <thead><tr><th></th><th>Player</th><th className="r">Best score</th><th className="r">Best record</th><th className="r hide">Drafts</th><th className="r hide">20–0s</th></tr></thead>
                       <tbody>
@@ -3251,7 +3303,7 @@ export default function PerfectSeason() {
                 {/* The points ladder. Unlike team score, this doesn't saturate - it ranks how well
                     you drafted the boards you were dealt, accumulated, so it stays contestable. */}
                 <div className="dayhead" style={{ marginTop: 24 }}>
-                  <h2 className="h">Points ladder — {LADDER_LABEL[ladder.mode]}</h2>
+                  <h2 className="h">Points ladder{" "}— {LADDER_LABEL[ladder.mode]}</h2>
                   <button className="linkbtn" onClick={() => loadLadder()} disabled={ladder.loading}>{ladder.loading ? "Loading…" : "Refresh"}</button>
                 </div>
                 <div className="fmtpick ladderpick" role="group" aria-label="Points ladder mode">
@@ -3437,7 +3489,7 @@ export default function PerfectSeason() {
 
         {view === "buildplayer" && bap && bap.stage === "rolling" && (
           <>
-            <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
+            <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
             <div className="panel" style={{ textAlign: "center" }}>
               <p className="note" style={{ marginTop: 0 }}>{bap.spinPhase === "team" ? "Rolling a team..." : "Rolling their player..."}</p>
               <h1 key={bap.displayTeam} className="title" style={{ margin: "10px 0", animation: "pop .15s ease-out" }}>{TEAMS[bap.displayTeam][0]}</h1>
@@ -3450,7 +3502,7 @@ export default function PerfectSeason() {
 
         {view === "buildplayer" && bap && bap.stage === "build" && (
           <>
-            <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
+            <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
             <p className="note" style={{ marginTop: 0 }}>
               Take one of his attributes for your build. {bap.remaining.length} attribute{bap.remaining.length === 1 ? "" : "s"} left.
             </p>
@@ -3468,8 +3520,8 @@ export default function PerfectSeason() {
                     <p className="note" style={{ margin: "0 0 4px" }}>{cat}</p>
                     <div className="frow bap-attrs">
                       {attrs.map(([k, label, , calc]) => (
-                        <button key={k} className="btn solid" onClick={() => pickBapAttr(k)}>
-                          <span>Take his {label}</span><span className={`bapgrade ${gradeTier(calc(bap.player))}`}>{grade(calc(bap.player))}</span>
+                        <button key={k} className="btn solid" aria-label={`Take his ${label}, graded ${grade(calc(bap.player))}`} onClick={() => pickBapAttr(k)}>
+                          <span>{label}</span><span className={`bapgrade ${gradeTier(calc(bap.player))}`}>{grade(calc(bap.player))}</span>
                         </button>
                       ))}
                     </div>
@@ -3493,7 +3545,7 @@ export default function PerfectSeason() {
 
         {view === "buildplayer" && bap && bap.stage === "done" && (
           <>
-            <h2 className="h">Build complete - {POS_NAME[bap.pos]}</h2>
+            <h2 className="h">Build complete - {POS_NAME[bap.pos]}</h2>
             <p className="note" style={{ marginTop: 0 }}>
               Assembled from {new Set(Object.values(bap.filled).map((f) => f.fromName)).size} different real players' last-season attributes. Overall: <b>{grade(bapOverallScore(bap.filled))}</b>
             </p>
@@ -3540,8 +3592,15 @@ export default function PerfectSeason() {
                 )}
               </div>
               {/* Right under the record, so it doesn't slide off the screen as the season log grows. */}
-              {!bapDone && (
+              {/* Skip, then Build another / Done, in the same spot under the card - so the season log
+                  below doesn't jump when the reveal finishes. */}
+              {!bapDone ? (
                 <button className="btn" style={{ marginBottom: 14 }} onClick={() => setBap((b) => ({ ...b, shown: b.sim.games.length }))}>Skip to the end ⏩</button>
+              ) : (
+                <div className="frow" style={{ marginBottom: 14 }}>
+                  <button className="btn solid" onClick={openBuildPicker}>Build another</button>
+                  <button className="btn" onClick={cancelBap}>Done</button>
+                </div>
               )}
               <h2 className="h">Season</h2>
               <div className="log">
@@ -3553,12 +3612,6 @@ export default function PerfectSeason() {
                   </div>
                 ))}
               </div>
-              {bapDone && (
-                <div className="frow" style={{ marginTop: 12 }}>
-                  <button className="btn solid" onClick={openBuildPicker}>Build another</button>
-                  <button className="btn" onClick={cancelBap}>Done</button>
-                </div>
-              )}
             </>
           );
         })()}
@@ -3582,7 +3635,7 @@ export default function PerfectSeason() {
           </>
         )}
 
-        {view === "statsou" && sou && (
+        {view === "statsou" && sou && !souIntro && (
           <>
             <h2 className="h">Over/Under</h2>
             <div className="sou-hud">

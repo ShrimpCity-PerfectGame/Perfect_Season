@@ -152,6 +152,11 @@ await runTest("a finished season shows its real rank among every logged season",
   await flush();
   for (let round = 0; round < 6; round++) await draftFirstEligible();
   await flush(8);
+  // The draft's code is random, so some runs make the playoffs: skip them to reach the finished result.
+  for (let i = 0; i < 6 && findButtonByText(container, "Skip to the end"); i++) {
+    await click(findButtonByText(container, "Skip to the end"));
+    await flush(4);
+  }
 
   const score = Number(stripCell("Team score")?.querySelector(".n").textContent);
   const expectedRank = scores.filter((s) => s > score).length + 1;
@@ -162,6 +167,16 @@ await runTest("a finished season shows its real rank among every logged season",
   assert(container.querySelector(".result-hero .rec")?.textContent.match(/^\d+–\d+$/), "the record text stays exactly W–L");
   assert(container.querySelector(".result-hero .wl")?.textContent === "WinsLosses", "expected Wins and Losses labels under the record");
   assert(!text(container).includes("season played sitewide"), "the old best-ever rank line should be gone");
+
+  // Share result sits right under the hero and actually produces the share text. In 1.7.0 it read
+  // a removed variable and threw, so the most prominent button on the screen did nothing.
+  const actions = container.querySelector(".result-hero + .resultactions");
+  assert(actions && findButtonByText(actions, "Share result") && findButtonByText(actions, "Run it back"), "expected Share and Run it back directly under the result");
+  await click(findButtonByText(actions, "Share result"));
+  await flush(4);
+  const shared = container.querySelector(".sharebox")?.value || "";
+  assert(shared.includes("Perfect Season 🏈") && shared.includes("Team score") && shared.includes(`#${expectedRank} of ${scores.length + 1}`),
+    "expected the share text (here the copy-by-hand fallback, since the test DOM has no clipboard) to include the season's rank, got: " + shared);
 });
 
 await runTest("the Leaderboard is black, crowns #1 and marks your own row", async () => {

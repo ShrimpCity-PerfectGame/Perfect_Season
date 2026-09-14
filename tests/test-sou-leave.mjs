@@ -20,6 +20,9 @@ const openSou = async () => {
   await flush(4);
 };
 
+// Progress right after answering round 0 - the baseline the later checks count from.
+let afterAnswer = null;
+
 await runTest("an answered round is never dealt again after leaving", async () => {
   await openSou();
   await click(findButtonByText(container, "I'm ready - start the clock"));
@@ -28,7 +31,7 @@ await runTest("an answered round is never dealt again after leaving", async () =
   await click(findButtonByText(panel, "Over"));
   await flush(3);
   assert(/Correct!|Wrong\./.test(panel.textContent), "expected a reveal after guessing");
-  const afterAnswer = progress();
+  afterAnswer = progress();
   assert(afterAnswer?.roundIndex === 1, "expected progress to point at the next round (1), got " + JSON.stringify(afterAnswer));
 
   await click(findButtonByText(container, "Back to modes"));
@@ -41,9 +44,17 @@ await runTest("an answered round is never dealt again after leaving", async () =
   assert(text(container).includes(`Score ${scoreBefore}`), `expected the score carried over (${scoreBefore}), got: ` + container.querySelector(".sou-hud")?.textContent);
 });
 
-await runTest("leaving through the nav mid-round costs that round and stops the clock", async () => {
-  const before = progress();
+await runTest("a round in progress is already saved as missed, so a reload can't re-deal it", async () => {
+  // Round 1 is on screen (resumed above). Saved progress already points past it, a life down, so
+  // closing or reloading the page mid-round is no better than letting the clock run out.
+  const now = progress();
   assert(container.querySelector(".sou-timer"), "expected a round in progress");
+  assert(now.roundIndex === afterAnswer.roundIndex + 1 && now.lives === afterAnswer.lives - 1,
+    `expected round ${afterAnswer.roundIndex} to be saved as missed while it plays, got ${JSON.stringify(afterAnswer)} -> ${JSON.stringify(now)}`);
+});
+
+await runTest("leaving through the nav mid-round costs that round and stops the clock", async () => {
+  const before = afterAnswer;
   await click(findButtonByText(container, "Modes"));
   await flush(3);
   const after = progress();
@@ -58,6 +69,22 @@ await runTest("leaving through the nav mid-round costs that round and stops the 
 
   await openSou();
   assert(findButtonByText(container, "Resume - start the clock"), "coming back offers to resume at the next round, not the abandoned one");
+});
+
+await runTest("leaving by any route - even the header's Log in link - cleans up the round", async () => {
+  await click(findButtonByText(container, "Resume - start the clock"));
+  await flush();
+  assert(container.querySelector(".sou-timer"), "expected a round in progress");
+  const logIn = [...container.querySelectorAll(".hdr-links button")].find((b) => b.textContent === "Log in");
+  assert(logIn, "expected the guest header's Log in link");
+  await click(logIn);
+  await flush(3);
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await openSou();
+  const headings = [...container.querySelectorAll("h2.h")].filter((h) => h.textContent === "Over/Under").length;
+  assert(headings === 1, "expected just the resume screen, not the rules stacked on a stale round, got " + headings + " Over/Under headings");
+  assert(!container.querySelector(".sou-answers"), "no stale round's answer buttons should be on screen");
 });
 
 console.log("test-sou-leave.mjs done");

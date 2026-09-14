@@ -37,7 +37,8 @@ await runTest("choosing a position rolls a team and player, then lets you build 
 
   await waitForBuildStage();
   const heading = container.querySelector("h2.h")?.textContent;
-  assert(/^Build-a-player - /.test(heading), "expected the build screen heading after the roll animation, got: " + heading);
+  // \s: the space before the dash is non-breaking, so the heading never wraps with the dash first.
+  assert(/^Build-a-player\s- /.test(heading), "expected the build screen heading after the roll animation, got: " + heading);
 
   for (let i = 0; i < 9; i++) {
     const btn = container.querySelector(".panel .frow button");
