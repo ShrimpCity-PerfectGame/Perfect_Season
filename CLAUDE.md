@@ -2,13 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# Perfect Season
+# Gridspin (formerly Perfect Season)
 
 An NFL roster-drafting game modeled on 20-0.com. Each round spins a random **team + five-year
 era**; you draft one player from that board to fill **QB, RB, WR, TE, and two Flex**. Every player
 shows his best real season for that team in that era, with full stats but **no fantasy points**.
 Once six are picked, the roster is graded and plays a 17-game season against real NFL team-seasons,
 then the playoffs. Win all 20 and you've gone perfect.
+
+**The brand is Gridspin** (from v1.9.0; tagline "Spin an era. Draft the greats. Go 20–0."). It was
+renamed because the Patriots' owners hold a "Perfect Season" trademark and another football game
+already uses the name. Only what players see says Gridspin: everything internal keeps
+`perfect-season` - the repo, package, file names, Supabase projects, the `.ps` root class and the
+`ps-*` storage keys. Never rename those (renaming a storage key throws away every player's saved
+drafts). Descriptive uses of the phrase stay ("a perfect 20–0 season"), and so do stored outcome
+strings like "Perfect season. 20–0.".
+
+**Brand assets:** the mark (the re-spin ↻ arrow around a football) is `static/icon.svg`, drawn again
+as `GridspinMark` in `perfect-season.jsx`; change both together. `node tools/brand/render.mjs`
+rebuilds every PNG in `static/` from the SVG (favicon, home-screen icons, the 1200x630 `og.png` link
+preview). `build.mjs` copies `static/` to the site root and fills the page's link-preview tags and the
+share text's link from `SITE_URL`, falling back to Vercel's `VERCEL_PROJECT_PRODUCTION_URL` (the
+project's custom domain once added, else its vercel.app address). Tests and the UI harness build with
+`APP_SITE_URL` = `https://gridspin.test`.
 
 The React component, all its screens, and every piece of game-specific display/UI logic live in
 one file: `perfect-season.jsx` (~175 KB, ~3,000 lines — still large enough that targeted
@@ -322,6 +338,22 @@ suite and still broke the live Leaderboard for every existing account.
   broke. Click through the actual changed screens on staging before promoting — this replaces
   clicking through production, it isn't extra work on top of it. After promoting, confirm the
   version in the header matches the release.
+- **Going live on gridspin.gg (one time; v1.9.0 waits on staging for it).** The rename and the domain
+  ship together, in this order:
+  1. The user buys gridspin.gg (optionally gridspin.app, which only forwards).
+  2. Production Vercel project → Domains: add `gridspin.gg` and `www.gridspin.gg` (www redirects
+     to the apex), add the DNS records Vercel shows at the registrar, and wait for the certificate.
+  3. Production Supabase → Authentication → URL Configuration: Site URL `https://gridspin.gg`, and
+     add it to the redirect URLs. Keep the vercel.app entry until the redirect in step 5 is live.
+  4. Merge v1.9.0 to `master`. The build log's "Built ... (v1.9.0, production, <url>)" line must name
+     `https://gridspin.gg`; if it still says vercel.app, set `SITE_URL` in the Vercel project's
+     Production environment and redeploy.
+  5. Verify on gridspin.gg: header version, `og:image` in the page source is an absolute gridspin.gg
+     URL, the share text ends with the address, sign-in works. Then set the old
+     `perfect-season-t9sk.vercel.app` domain to redirect to gridspin.gg.
+
+  Sign-ins and unfinished drafts live in each browser's storage for the old address, so everyone
+  signs in once more after the move. Accounts and stats are server-side and unaffected.
 
 ## Development Guidelines
 

@@ -13,6 +13,25 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.9.0] — staging, not yet released
+
+The game is now **Gridspin**. It goes live together with its own domain; until then it runs only on
+the staging site.
+
+### Changed
+
+- **New name and mark.** Perfect Season is now Gridspin: "Spin an era. Draft the greats. Go 20–0."
+  The mark is the re-spin arrow around a football, in the site's lime. It was renamed because the
+  Patriots' owners hold a "Perfect Season" trademark and another football game already uses the name.
+- Accounts, stats, points, streaks, leaderboards and the game itself are unchanged.
+
+### Added
+
+- **A tab icon and a home-screen icon** for phones.
+- **Link previews:** pasting the site's link into iMessage, Discord or X shows a Gridspin card
+  instead of a bare address.
+- **Shared results end with the site's link,** so friends can tap straight in.
+
 ## [1.8.1] — 2026-09-14
 
 ### Fixed
