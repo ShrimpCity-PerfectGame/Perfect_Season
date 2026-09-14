@@ -1,19 +1,31 @@
-// Reports and moderation. Contract: PROFILES.md. reports and moderators have no client policies at all;
-// everything goes through the database functions in supabase/migration-moderation.sql, which check
-// who is asking. Nothing here throws.
+// Reports and moderation. Contract: PROFILES.md (4.2). reports and moderators have no client policies at
+// all; everything goes through the database functions in supabase/migration-moderation.sql, which check
+// who is asking. Nothing here throws: every failure comes back as a reason the screens put into words.
 import { getClient, READ, rpcReason } from "./storage-core.js";
 import { avatarUrl } from "./storage-profile.js";
 import { AVATAR_BUCKET } from "./profile-rules.mjs";
 
-const REPORT_REASONS = { limit: "limit", duplicate: "duplicate", self: "self", not_signed_in: "signed_out", no_such_player: "missing", bad_reason: "invalid", note_too_long: "invalid" };
-const MOD_REASONS = { not_moderator: "not_moderator", taken: "taken", blocked: "blocked", invalid: "invalid", no_such_player: "missing", bad_action: "invalid" };
+// What each database refusal means to the app. Anything else - a dropped connection, a server error, a
+// function that isn't deployed yet - is "network" (storage-core.js's rpcReason).
+const REPORT_REFUSALS = {
+  limit: "limit", duplicate: "duplicate", self: "self", not_signed_in: "signed_out",
+  no_such_player: "missing", bad_reason: "invalid", note_too_long: "invalid",
+};
+const MOD_REFUSALS = {
+  not_moderator: "not_moderator", taken: "taken", blocked: "blocked", invalid: "invalid",
+  no_such_player: "missing", bad_action: "invalid",
+};
+
+// PostgREST answers a request whose sign-in token has expired or doesn't verify with HTTP 401 (codes
+// PGRST301-303) before any function runs, so there's no refusal code to read.
+const signedOut = (res) => res?.status === 401 || /^PGRST30[123]$/.test(String(res?.error?.code || ""));
 
 // Reports a player. reason is one of profile-rules.mjs's REPORT_REASONS.
 //   { ok: true } | { ok: false, reason: "limit" | "duplicate" | "self" | "signed_out" | "missing" | "invalid" | "network" }
 export async function reportPlayer(username, reason, note) {
   try {
-    const { error } = await getClient().rpc("report_player", { p_username: username, p_reason: reason, p_note: note || "" });
-    if (error) return { ok: false, reason: rpcReason(error, REPORT_REASONS) };
+    const res = await getClient().rpc("report_player", { p_username: username, p_reason: reason, p_note: note || "" });
+    if (res?.error) return { ok: false, reason: signedOut(res) ? "signed_out" : rpcReason(res.error, REPORT_REFUSALS) };
     return { ok: true };
   } catch (e) {
     return { ok: false, reason: "network" };
@@ -23,41 +35,53 @@ export async function reportPlayer(username, reason, note) {
 // Whether the signed-in player is a moderator. false whenever it can't be checked.
 export async function isModerator() {
   try {
-    const { data, error } = await getClient().rpc("is_moderator", {}, READ);
-    return !error && data === true;
+    const res = await getClient().rpc("is_moderator", {}, READ);
+    return !res?.error && res?.data === true;
   } catch (e) {
     return false;
   }
 }
 
-// Open reports grouped by reported player, oldest first. null if it can't be loaded.
+const text = (v) => (typeof v === "string" ? v : v == null ? "" : String(v));
+
+// Open reports grouped by reported player, oldest first (the database orders them). null if they can't be
+// loaded - including for anyone who isn't a moderator.
 //   [{ userId, username, avatarPath, avatarUrl, avatarPreset, bio, favoriteTeam, reports: [{ id, reason, note, reporter, createdAt }] }]
 export async function fetchModQueue() {
   try {
-    const { data, error } = await getClient().rpc("mod_queue", {}, READ);
-    if (error || !Array.isArray(data)) return null;
-    return data.map((r) => ({
-      userId: r.user_id, username: r.username, avatarPath: r.avatar_path ?? null, avatarUrl: avatarUrl(r.avatar_path),
-      avatarPreset: r.avatar_preset ?? null, bio: r.bio || "", favoriteTeam: r.favorite_team ?? null,
-      reports: (r.reports || []).map((x) => ({ id: x.id, reason: x.reason, note: x.note || "", reporter: x.reporter, createdAt: x.created_at })),
-    }));
+    const res = await getClient().rpc("mod_queue", {}, READ);
+    if (res?.error || !Array.isArray(res?.data)) return null;
+    return res.data
+      .filter((r) => r && r.user_id && r.username)
+      .map((r) => ({
+        userId: r.user_id, username: text(r.username),
+        avatarPath: r.avatar_path ?? null, avatarUrl: avatarUrl(r.avatar_path), avatarPreset: r.avatar_preset ?? null,
+        bio: text(r.bio), favoriteTeam: r.favorite_team ?? null,
+        reports: (Array.isArray(r.reports) ? r.reports : []).filter((x) => x && x.id).map((x) => ({
+          id: x.id, reason: text(x.reason), note: text(x.note), reporter: x.reporter ?? null, createdAt: x.created_at ?? null,
+        })),
+      }));
   } catch (e) {
     return null;
   }
 }
 
-// A moderator action on one player: "remove_picture" | "clear_bio" | "rename" | "dismiss".
-// newName is only for "rename". Removing a picture also deletes the file.
+// A moderator action on one player: "remove_picture" | "clear_bio" | "rename" | "dismiss". newName is only
+// for "rename". Removing a picture also deletes the file, which the moderator storage policy allows.
 //   { ok: true } | { ok: false, reason: "not_moderator" | "taken" | "blocked" | "invalid" | "missing" | "network" }
 export async function modAction(userId, action, newName) {
+  let res;
   try {
-    const { data, error } = await getClient().rpc("mod_act", { p_user_id: userId, p_action: action, p_new_name: newName ?? null });
-    if (error) return { ok: false, reason: rpcReason(error, MOD_REASONS) };
-    if (data?.removed_path) {
-      try { Promise.resolve(getClient().storage.from(AVATAR_BUCKET).remove([data.removed_path])).catch(() => {}); } catch (e) { /* best effort */ }
-    }
-    return { ok: true };
+    res = await getClient().rpc("mod_act", { p_user_id: userId, p_action: action, p_new_name: action === "rename" ? newName ?? null : null });
   } catch (e) {
     return { ok: false, reason: "network" };
   }
+  if (res?.error) return { ok: false, reason: rpcReason(res.error, MOD_REFUSALS) };
+  // The action has landed by now, so a file that can't be deleted doesn't make it a failure. Best effort,
+  // like storage-profile.js's removal of a replaced photo.
+  const removed = res?.data?.removed_path;
+  if (typeof removed === "string" && removed) {
+    try { Promise.resolve(getClient().storage.from(AVATAR_BUCKET).remove([removed])).catch(() => {}); } catch (e) { /* best effort */ }
+  }
+  return { ok: true };
 }
