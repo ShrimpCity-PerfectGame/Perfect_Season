@@ -338,20 +338,20 @@ suite and still broke the live Leaderboard for every existing account.
   broke. Click through the actual changed screens on staging before promoting — this replaces
   clicking through production, it isn't extra work on top of it. After promoting, confirm the
   version in the header matches the release.
-- **Going live on gridspin.gg (one time; v1.9.0 waits on staging for it).** The rename and the domain
+- **Going live on gridspin.app (one time; v1.9.0 waits on staging for it).** The rename and the domain
   ship together, in this order:
-  1. The user buys gridspin.gg (optionally gridspin.app, which only forwards).
-  2. Production Vercel project → Domains: add `gridspin.gg` and `www.gridspin.gg` (www redirects
+  1. The user bought gridspin.app through Vercel on 2026-09-14 (.gg was $130/yr). .app is HTTPS-only (HSTS preloaded), which Vercel handles.
+  2. Production Vercel project → Domains: add `gridspin.app` and `www.gridspin.app` (www redirects
      to the apex), add the DNS records Vercel shows at the registrar, and wait for the certificate.
-  3. Production Supabase → Authentication → URL Configuration: Site URL `https://gridspin.gg`, and
+  3. Production Supabase → Authentication → URL Configuration: Site URL `https://gridspin.app`, and
      add it to the redirect URLs. Keep the vercel.app entry until the redirect in step 5 is live.
   4. Merge v1.9.0 to `master`. The build log's "Built ... (v1.9.0, production, <url>)" line must name
-     `https://gridspin.gg`; if it still says vercel.app, set `SITE_URL` in the Vercel project's
+     `https://gridspin.app`; if it still says vercel.app, set `SITE_URL` in the Vercel project's
      Production environment and redeploy.
-  5. Verify on gridspin.gg: header version, `og:image` in the page source is an absolute gridspin.gg
+  5. Verify on gridspin.app: header version, `og:image` in the page source is an absolute gridspin.app
      URL, the share text ends with the address, sign-in works. Then set both old addresses of the
      production project, `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`
-     (same project, identical deployment), to redirect to gridspin.gg. The staging project is
+     (same project, identical deployment), to redirect to gridspin.app. The staging project is
      `perfect-season-staging.vercel.app`; the domain never goes on it.
 
   Sign-ins and unfinished drafts live in each browser's storage for the old address, so everyone
