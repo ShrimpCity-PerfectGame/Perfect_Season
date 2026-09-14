@@ -1,5 +1,5 @@
 // GM mode: a player's salary is shown before selecting them, doesn't change based on which
-// slot (named or Flex) they'd fill, and the "Draft to X" cost matches what was shown up front.
+// slot (named or Flex) they'd fill, and the "Lock in" button cost matches what was shown up front.
 import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 
 setupDom();
@@ -24,7 +24,7 @@ await runTest("a Flex-eligible player's salary is identical for its named slot a
   const shown = card.querySelector(".pill").textContent;
   await click(card.querySelector("button.hit"));
   await flush();
-  const slotButtons = [...card.querySelectorAll(".drafts button")].filter((b) => b.textContent.startsWith("Draft to"));
+  const slotButtons = [...card.querySelectorAll(".drafts button")].filter((b) => b.textContent.includes("Lock in"));
   assert(slotButtons.length >= 2, "expected at least a named-slot and a Flex button for this player");
   for (const b of slotButtons) {
     assert(b.textContent.includes(shown), `expected "${shown}" in every slot button, got: ${b.textContent}`);

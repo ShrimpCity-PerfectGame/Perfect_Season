@@ -50,13 +50,13 @@ const modeButton = (container, name) =>
 // The season reveal is animated; the post-result controls only exist once it finishes. Skip
 // playoff rounds when offered, otherwise let the regular-season ticker catch up.
 async function finishSeason(container) {
-  for (let i = 0; i < 30 && !findButtonByText(container, "Draft a new team"); i++) {
-    const skip = findButtonByText(container, "Skip to the result");
+  for (let i = 0; i < 30 && !findButtonByText(container, "Run it back"); i++) {
+    const skip = findButtonByText(container, "Skip to the end");
     if (skip) { await click(skip); continue; }
     await new Promise((r) => setTimeout(r, 120));
     await flush(1);
   }
-  assert(findButtonByText(container, "Draft a new team"), "the season never finished revealing");
+  assert(findButtonByText(container, "Run it back"), "the season never finished revealing");
 }
 
 await runTest("resetting a draft records exactly one DNF, not two", async () => {
@@ -122,7 +122,7 @@ await runTest("finishing a draft is not a DNF", async () => {
   // And starting the next draft from the result screen shouldn't retroactively charge one either -
   // finish() already cleared the saved draft, so there's nothing left to abandon.
   await finishSeason(container);
-  await click(findButtonByText(container, "Draft a new team"));
+  await click(findButtonByText(container, "Run it back"));
   await flush(6);
   assert(auth._profiles.get(userId).dnf === 0, "starting a fresh draft after finishing one must not record a DNF");
 });

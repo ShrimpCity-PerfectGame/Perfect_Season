@@ -1,7 +1,7 @@
 // Flex slots must grade on raw production alone: whichever Flex pick has more PPR points
 // should never grade lower than the other Flex pick, regardless of position (a TE and a WR
 // in Flex are on equal footing - no positional curve should be able to flip that order).
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth, clickMode } from "./helpers.mjs";
 
 async function draftOneSeason() {
   setupDom();
@@ -9,7 +9,7 @@ async function draftOneSeason() {
   window.__ps_supabase__ = makeMockAuth();
   const { container } = await mount();
   await flush();
-  await click(findButtonByText(container, "Start a draft"));
+  await clickMode(container, "Unlimited");
   await flush();
 
   for (let pick = 0; pick < 6; pick++) {
@@ -24,8 +24,8 @@ async function draftOneSeason() {
     await click(card.querySelector(".drafts button.btn.solid"));
     await flush();
   }
-  for (let i = 0; i < 20 && !findButtonByText(container, "Draft a new team"); i++) {
-    const skip = findButtonByText(container, "Skip to the result");
+  for (let i = 0; i < 20 && !findButtonByText(container, "Run it back"); i++) {
+    const skip = findButtonByText(container, "Skip to the end");
     if (skip) { await click(skip); continue; }
     await new Promise((r) => setTimeout(r, 150));
     await flush(1);

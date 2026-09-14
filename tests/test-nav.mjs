@@ -1,5 +1,5 @@
 // Landing page, mode switching, and draft resume.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, selectOption } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, selectOption, clickMode } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -25,7 +25,7 @@ await runTest("nav tabs switch views", async () => {
 });
 
 await runTest("starting an unlimited draft shows a live board", async () => {
-  await click(findButtonByText(container, "Start a draft"));
+  await clickMode(container, "Unlimited");
   await flush();
   const t = text(container);
   assert(t.includes("Pick 1 of 6"), "expected to be on pick 1 of 6, got: " + t.slice(0, 200));

@@ -3,7 +3,7 @@
 // refreshWip(), which used to blindly trust whatever it read - including a stale pre-clear
 // snapshot if its read raced ahead of the (slow, real-world) clear. Simulate that by making
 // the storage shim's writes to the free-draft-progress key artificially slow.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, clickMode } from "./helpers.mjs";
 
 const WRITE_DELAY_MS = 300;
 setupDom();
@@ -12,7 +12,7 @@ window.storage = makeStorage(["ps-free-wip"], WRITE_DELAY_MS);
 const { container } = await mount();
 await flush();
 
-await click(findButtonByText(container, "Start a draft"));
+await clickMode(container, "Unlimited");
 await flush();
 
 for (let pick = 0; pick < 5; pick++) {

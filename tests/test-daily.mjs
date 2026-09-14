@@ -1,5 +1,5 @@
 // Seeded boards, the daily lock, and challenge codes.
-import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, makeMockAuth, clickMode } from "./helpers.mjs";
 
 function boardOf(container) {
   const team = container.querySelector(".reel .team")?.textContent;
@@ -54,7 +54,7 @@ await runTest("a finished daily can't be replayed", async () => {
   const { container } = await mount();
   await flush();
   const home = text(container);
-  assert(home.includes("See result"), "expected the home screen to show a finished daily, got: " + home.slice(0, 400));
+  assert(home.includes("See the damage"), "expected the home screen to show a finished daily, got: " + home.slice(0, 400));
 
   await click(findButtonByText(container, "Fantasy daily"));
   await flush();
@@ -99,7 +99,7 @@ await runTest("a challenge code deals the same board to whoever enters it", asyn
   window.__ps_supabase__ = makeMockAuth();
   const host = await mount();
   await flush();
-  await click(findButtonByText(host.container, "Start a draft"));
+  await clickMode(host.container, "Unlimited");
   await flush();
   const code = codeOf(host.container);
   const hostBoard = boardOf(host.container);

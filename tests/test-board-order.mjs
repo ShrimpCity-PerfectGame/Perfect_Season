@@ -1,14 +1,14 @@
 // Board section ordering: a position should only sink to the bottom once it's truly
 // unfillable (no open slot fits it anymore), not just because its own named slot filled while
 // a FLEX slot could still take it.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth, clickMode } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
   window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
-await click(findButtonByText(container, "Start a draft"));
+await clickMode(container, "Unlimited");
 await flush();
 
 function sectionOrder() {
@@ -16,7 +16,7 @@ function sectionOrder() {
 }
 
 // Draft the first card whose position matches `pos` into the slot literally named `slotLabel`
-// ("Draft to <slotLabel>"), waiting for the board to render first.
+// ("Lock in · <slotLabel>"), waiting for the board to render first.
 async function draftPosToSlot(pos, slotLabel) {
   let card = null;
   for (let i = 0; i < 10 && !card; i++) {
@@ -29,7 +29,7 @@ async function draftPosToSlot(pos, slotLabel) {
   await click(card.querySelector("button.hit"));
   await flush();
   const btn = [...card.querySelectorAll(".drafts button.btn.solid")].find((b) => b.textContent.includes(slotLabel));
-  if (!btn) throw new Error(`no "Draft to ${slotLabel}" button for a ${pos}`);
+  if (!btn) throw new Error(`no "Lock in · ${slotLabel}" button for a ${pos}`);
   await click(btn);
   await flush();
 }

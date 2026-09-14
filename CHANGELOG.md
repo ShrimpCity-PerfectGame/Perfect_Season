@@ -13,6 +13,36 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.4.0] — 2026-09-13
+
+A new look, part one. No gameplay changes.
+
+### Changed
+
+- **Redesigned visual system.** A cream foundation with ink type, electric lime as the accent, and
+  game blue, orange and violet in small doses. New typefaces: Anton for headlines and scores, Inter
+  for everything else. Subtle grain texture.
+- **The draft is now a scoreboard.** The whole play screen, the season result, playoff games and the
+  leaderboard's sitewide-best block use a navy stadium treatment with lime LED numbers.
+- **New home hero:** "Can you go 20–0?" with a giant lime 20–0 and a single *Start my season 🏈*
+  button.
+- **Mode tiles each have their own treatment** instead of looking identical: the daily is a lime
+  featured block, Unlimited a navy card, Over/Under orange, and the challenge-a-friend box is just
+  content with no container.
+- **Buttons feel physical:** solid borders, a hard offset shadow, and a small lift when you hover.
+  Hover motion is turned off for anyone with reduced motion enabled.
+- **Some buttons got personality:** *Let's go*, *🔒 Lock in*, *Run it back 🔁*, *Skip to the end ⏩*,
+  and a finished daily reads *Relive it 🏆* or *See the damage 💀* depending on how it went.
+  Everyday controls kept their plain labels.
+- The browser tab now says "Perfect Season" instead of "Perfect Season (dev)".
+
+### Accessibility
+
+- Every text color in both the cream and navy themes meets WCAG AA contrast, and an automated test
+  now checks it. Position and grade colors were darkened for the cream background, where the old
+  bright versions were hard to read.
+- Keyboard focus shows a clear outline on every button.
+
 ## [1.3.2] — 2026-09-13
 
 ### Fixed

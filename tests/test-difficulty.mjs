@@ -2,7 +2,7 @@
 // and reports average wins / perfect-season rate. This is a floor, not the tuning benchmark:
 // CLAUDE.md's ~15 avg wins / 2-4% perfect rate is measured against a "fantasy-savvy" drafter
 // that picks the best available player, not merely the first eligible one.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, makeMockAuth, clickMode } from "./helpers.mjs";
 
 const N = Number(process.argv[2]) || 15;
 // "fantasy" (full PPR, the default) or "standard" (Championship mode). Grading changes between
@@ -23,7 +23,7 @@ async function draftOneSeason() {
   if (GM) {
     await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "GM mode").closest("button"));
   } else {
-    await click(findButtonByText(container, "Start a draft"));
+    await clickMode(container, "Unlimited");
   }
   await flush();
 
@@ -37,7 +37,7 @@ async function draftOneSeason() {
     await click(card.querySelector("button.hit"));
     await flush();
     const draftBtn = card.querySelector(".drafts button.btn.solid");
-    if (!draftBtn) throw new Error(`no "Draft to" button after selecting a player on pick ${pick + 1}`);
+    if (!draftBtn) throw new Error(`no "Lock in" button after selecting a player on pick ${pick + 1}`);
     await click(draftBtn);
     await flush();
   }
@@ -45,13 +45,13 @@ async function draftOneSeason() {
   // The season and any playoffs resolve synchronously in finish(); only the reveal is animated.
   // Fast-forward it: skip playoff rounds when offered, otherwise give the 90ms-per-game regular
   // season ticker time to catch up.
-  for (let i = 0; i < 20 && !findButtonByText(container, "Draft a new team"); i++) {
-    const skip = findButtonByText(container, "Skip to the result");
+  for (let i = 0; i < 20 && !findButtonByText(container, "Run it back"); i++) {
+    const skip = findButtonByText(container, "Skip to the end");
     if (skip) { await click(skip); continue; }
     await new Promise((r) => setTimeout(r, 150));
     await flush(1);
   }
-  assert(findButtonByText(container, "Draft a new team"), "season never finished after 20 fast-forward attempts");
+  assert(findButtonByText(container, "Run it back"), "season never finished after 20 fast-forward attempts");
 
   const recText = container.querySelector(".result-hero .rec")?.textContent || "";
   const [w, l] = (recText.match(/\d+/g) || []).map(Number);

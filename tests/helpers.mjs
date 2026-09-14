@@ -483,6 +483,14 @@ export async function broadcast(auth, channelName, event, payload) {
   });
 }
 
+// Opens a home-screen mode by its tile name ("Unlimited", "Genius mode", "GM mode", ...). Tests use
+// this rather than clicking a tile's call-to-action text, because that copy is designed to change.
+export async function clickMode(container, name) {
+  const tile = [...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === name)?.closest("button");
+  if (!tile) throw new Error(`no "${name}" mode tile on screen`);
+  await click(tile);
+}
+
 export function findButtonByText(container, needle) {
   const buttons = [...container.querySelectorAll("button")];
   return buttons.find((b) => b.textContent.includes(needle)) || null;

@@ -51,8 +51,11 @@ node tests/test-difficulty.mjs [N] [fantasy|standard] [gm]  # plays N drafts wit
 node tests/test-replay-verification.mjs  # game-logic.mjs's replayDraft: legit traces (incl. rerolls) accepted, tampered ones rejected
 node tests/test-tamper-resistance.mjs    # end-to-end: a fabricated submission never reaches profiles; a legit one still works
 
-# Browser checks (Playwright, screenshots + motion checks)
-python3 tests/shots.py
+# Visual checks: there is no screenshot script (an older tests/shots.py never existed in this
+# checkout). Build with build.mjs, serve the repo root (.claude/launch.json's "static" config),
+# open /public/page.html in the preview browser, and click through the changed screens at
+# desktop and mobile widths.
+node tests/test-theme-contrast.mjs  # every text color in both themes is readable (WCAG AA) - see Design system
 
 # Rebuild the game data from source (only when adding a season or changing grading)
 cd scripts && python3 build.py && python3 correct.py && python3 rate2.py \
@@ -186,6 +189,38 @@ specific named player into any open slot, or force a scripted season ending (per
 each-playoff-round/missed-playoffs) via `forceSeason()`. Forced outcomes skip every persistence
 side effect in `finish()` (stats, leaderboard, daily/draft storage) — use this account to check
 win/loss animations instead of fighting the RNG or hand-rolling a fixture.
+
+## Design system
+
+The look is "playful sports app + premium streetwear": a cream foundation, ink type, electric lime
+used sparingly, the Anton display face with Inter for body copy, tactile buttons with a hard offset
+shadow, and navy "scoreboard" moments.
+
+- **Tokens live in `theme.mjs`**, as data with two scopes, and `perfect-season.jsx` turns them into
+  CSS variables. Don't hardcode colors in the stylesheet; add a token to both scopes (a test fails
+  if the scopes' token sets differ).
+- **Lime is a fill, never text on cream.** `--accent` is lime and only goes behind `--on-accent`
+  text. For accent-colored words, links or underlines use `--accent-ink`: game blue on cream, lime
+  only in the dark scope. Lime on cream is ~1.2:1. `tests/test-theme-contrast.mjs` enforces WCAG AA
+  for every text token in both scopes.
+- **Where the dark scope applies:** the whole play screen (the root gets `.dark` when
+  `view === "play"`), plus components that are stadium-dark wherever they appear — `.reel`,
+  `.sticky`, `.result-hero`, `.champion`, `.pg`, `.pre`, `.cel`, and the Unlimited tile. Everything
+  else is cream.
+- **Vary the treatment instead of making every block the same card:** one featured lime block (the
+  daily), a navy card (Unlimited), orange for a special moment (Over/Under), and plain typography
+  with a ruled top edge for stats (`.tile`).
+- **Copy:** author labels in sentence case in the JSX and uppercase them with CSS, so screen readers
+  and tests see normal text. Playful wording goes on big moments only ("Start my season 🏈",
+  "🔒 Lock in", "Run it back 🔁"); everyday controls like Refresh, Log in, Cancel and Reset stay
+  plain. Tests open modes with `clickMode(container, name)` rather than clicking tile copy, because
+  that copy is meant to change.
+- **Emoji vocabulary**, used deliberately rather than sprinkled: 🏆 championship/achievement ·
+  🔥 streak · ⚡ high-impact · 😈 risky · 💀 disaster · 👑 #1 · 🚨 upset · 🏈 football · 📈 rising ·
+  🧊 cold. Add emoji at display time only — outcome strings from `simulateSeason` are stored in runs
+  and `daily_runs` and must not change.
+- **Motion:** hover lift and press on buttons and tiles. Every new transform or animation goes in
+  the `prefers-reduced-motion` block at the bottom of the stylesheet.
 
 ## Releasing
 

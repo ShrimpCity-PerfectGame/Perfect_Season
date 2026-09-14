@@ -7,7 +7,7 @@
 // gets right from its own roster parameter regardless of this bug - only the SUBMITTED TRACE was
 // wrong. This test is the one that actually clicks through a full draft in the real UI and checks
 // the account's stored profile afterward, the way a real player's session would.
-import { setupDom, makeStorage, mount, flush, click, type, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth, clickMode } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -31,7 +31,7 @@ await waitForCrypto();
 const userId = [...auth._profiles.keys()][0];
 
 // Mirrors test-reroll-pool.mjs's draftFirstEligible: click a card to select it, then its own
-// "Draft to X" button (scoped to the card, since a slot might offer more than one fitting player).
+// "Lock in" button (scoped to the card, since a slot might offer more than one fitting player).
 async function draftFirstEligible() {
   let card = null;
   for (let i = 0; i < 10 && !card; i++) {
@@ -48,7 +48,7 @@ async function draftFirstEligible() {
 await runTest("completing a real draft by clicking through the UI actually persists via submit-run", async () => {
   await click(findButtonByText(container, "Modes"));
   await flush();
-  await click(findButtonByText(container, "Start a draft"));
+  await clickMode(container, "Unlimited");
   await flush();
 
   for (let round = 0; round < 6; round++) await draftFirstEligible();
@@ -70,7 +70,7 @@ await runTest("a Championship draft clicked through the real UI persists to the 
   await flush();
   await click([...container.querySelectorAll(".fmtbtn")].find((b) => b.textContent.includes("Championship")));
   await flush();
-  await click(findButtonByText(container, "Start a draft"));
+  await clickMode(container, "Unlimited");
   await flush();
 
   for (let round = 0; round < 6; round++) await draftFirstEligible();
@@ -91,7 +91,7 @@ await runTest("a real draft through the UI earns points on the right ladder and 
   // Back to Fantasy so this doesn't depend on which format the previous test left selected.
   await click([...container.querySelectorAll(".fmtbtn")].find((b) => b.textContent.includes("Fantasy")));
   await flush();
-  await click(findButtonByText(container, "Start a draft"));
+  await clickMode(container, "Unlimited");
   await flush();
 
   for (let round = 0; round < 6; round++) await draftFirstEligible();

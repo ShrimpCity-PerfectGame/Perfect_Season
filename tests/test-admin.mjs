@@ -1,6 +1,6 @@
 // Admin tools: gated to the "admin" account, can jump to any board, force a specific player
 // into a slot, and force a scripted season ending for testing win/loss animations.
-import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth, clickMode } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -25,7 +25,7 @@ await runTest("a regular account sees no admin panel", async () => {
 
   await click(findButtonByText(container, "Modes"));
   await flush();
-  await click(findButtonByText(container, "Start a draft"));
+  await clickMode(container, "Unlimited");
   await flush();
   assert(!text(container).includes("Admin tools"), "a regular account should not see the admin panel");
 });
@@ -50,7 +50,7 @@ await runTest("logging in as admin shows the admin panel", async () => {
 
   await click(findButtonByText(container, "Modes"));
   await flush();
-  await click(findButtonByText(container, "Start a draft"));
+  await clickMode(container, "Unlimited");
   await flush();
   assert(text(container).includes("Admin tools"), "the admin account should see the admin panel");
 });
@@ -67,7 +67,7 @@ await runTest("forcing an outcome auto-fills the roster and skips to the scripte
 });
 
 await runTest("forcing a board and a specific player lands them in the chosen slot", async () => {
-  await click(findButtonByText(container, "Draft a new team"));
+  await click(findButtonByText(container, "Run it back"));
   await flush();
 
   const input = panel().querySelector('input[placeholder="Force a player by name"]');

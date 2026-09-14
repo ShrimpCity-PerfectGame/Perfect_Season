@@ -1,5 +1,5 @@
 // A reroll should never land back on a team+years board already shown earlier this draft.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth, clickMode } from "./helpers.mjs";
 
 function boardOf(container) {
   const team = container.querySelector(".reel .team")?.textContent;
@@ -28,7 +28,7 @@ await runTest("no board repeats within a draft, across rerolls and normal advanc
   window.__ps_supabase__ = makeMockAuth();
     const { container } = await mount();
     await flush();
-    await click(findButtonByText(container, "Start a draft"));
+    await clickMode(container, "Unlimited");
     await flush();
 
     const seen = [];
