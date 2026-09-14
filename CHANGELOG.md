@@ -13,6 +13,33 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.10.1] — 2026-09-14
+
+Fixes from a full review of the 1.8.1–1.10.0 releases.
+
+### Fixed
+
+- **A daily could be lost by switching drafts mid-spin.** Tapping Daily while an Unlimited board was
+  still spinning let that spin finish on the daily, saving the wrong board; the finished daily was then
+  rejected and couldn't be replayed.
+- **DNFs landed on the wrong points ladder** when a draft was abandoned while another mode was open
+  (for example, a GM draft's penalty went to the Daily ladder).
+- **Unlimited drafts were thrown away instead of resumed.** Run it back and Play an unlimited draft after
+  a daily, and the Unlimited tile or Start my season for a GM, Genius or challenge draft, replaced the
+  draft with a DNF. They now take you back to it.
+- **A dealt draft with no picks disappeared after a reload** while still counting against you. It now
+  comes back, and Modes shows it.
+- **A board looked at as a guest counted as a DNF** for the account created right after.
+- **Run it back after a GM or Genius season** now deals the same mode and scoring again.
+- **The challenge card:** its DNF warning now stays current and warns guests too, and Draft these boards
+  waits until your account has loaded. It no longer promises the exact same boards - a sharer's
+  re-spins don't carry over.
+- Admin test endings no longer lead to a DNF; challenge links with a trailing slash open.
+
+### Changed
+
+- **Re-spin years is now Re-spin era** ("↻ Era" on phones).
+
 ## [1.10.0] — 2026-09-14
 
 ### Added

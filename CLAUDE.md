@@ -66,7 +66,8 @@ npx esbuild perfect-season.jsx --bundle --format=esm --platform=node \
 # injected at build time - use build.mjs, NOT a raw esbuild CLI call, or those come back
 # undefined and every auth/leaderboard call throws at page load)
 SUPABASE_URL=... SUPABASE_ANON_KEY=... node build.mjs
-# then open public/page.html, which loads public/page.js
+# then serve public/ as the web root (.claude/launch.json's "static" config) and open /page.html - its
+# asset paths are root-relative (challenge links live at /c/CODE), so opening the file directly is blank
 
 # Headless DOM tests (jsdom + react-dom/client, drive the real UI via tests/helpers.mjs) - these
 # never touch a real Supabase project or a real Deno runtime; window.__ps_supabase__ is a mock
@@ -269,7 +270,7 @@ tiny 3-4 team pool, to avoid the same few dynasty teams dominating the champions
 unlocks an `AdminPanel` on the active draft screen: jump to any team+era board instantly, force a
 specific named player into any open slot, or force a scripted season ending (perfect/champ/lose-
 each-playoff-round/missed-playoffs) via `forceSeason()`. Forced outcomes skip every persistence
-side effect in `finish()` (stats, leaderboard, daily/draft storage) — use this account to check
+side effect in `finish()` (stats, leaderboard, daily storage) — a forced Unlimited ending does clear its saved draft, so it can't resurface or be charged as a DNF later — use this account to check
 win/loss animations instead of fighting the RNG or hand-rolling a fixture.
 
 ## Design system
@@ -396,7 +397,13 @@ resumes rather than restarts. Any new navigation path
 must not give a player a second crack at it. Unlimited drafts may be reset, but a reset counts as a
 **DNF** against their stats. **A draft counts from the moment its first board is dealt, picks or
 not:** leaving and coming back (or reloading) resumes it with its re-spins as they were, and Reset,
-switching Unlimited/Genius/GM or scoring format, or entering a code abandons it as a DNF. Before
+switching Unlimited/Genius/GM or scoring format, or entering a code abandons it as a DNF - charged to
+the saved draft's own ladder, and for a no-pick draft only if this account dealt it (`chargeableDraft`;
+a guest's board isn't charged to the account they create). Run it back after a daily and Play an unlimited
+draft resume whatever is in the Unlimited slot (`resumeFree`); the Unlimited tile and Start my season
+resume it in any variant when it is in the selected scoring format (`playUnlimited`) - switching the
+format first still asks for a new draft - and taking a challenge link selects the link's format. `restoreDraft` stops any reel still
+spinning first, or the other draft's interval would overwrite the restored board. Before
 1.8.1 a no-pick draft didn't count, which made looking at the first board and leaving a free redo.
 
 **Stat columns follow one shape at every position:** main-role yards, TDs, per-attempt average,
