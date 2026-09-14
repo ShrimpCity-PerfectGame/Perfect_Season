@@ -4,32 +4,51 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" content="#F7F4EA" />
-<title>Gridspin</title>
-<meta name="description" content="Spin an era. Draft the greats. Go 20–0. A free football draft game: spin a team and an era, draft six real seasons, then play 17 games and the playoffs." />
+<!-- build.mjs fills in the %...% placeholders per environment and drops the static/ prefix. -->
+<title>Gridspin – Football Draft Game: Can You Go 20–0?</title>
+<meta name="description" content="Spin a team and an era, draft six real NFL seasons, then play a full season and the playoffs. A free daily challenge with leaderboards. Can you go 20–0?" />
+%ROBOTS%<link rel="canonical" href="%CANONICAL_URL%/" />
 <link rel="icon" href="static/icon.svg" type="image/svg+xml" />
 <link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="apple-touch-icon" href="static/apple-touch-icon.png" />
 <link rel="manifest" href="static/site.webmanifest" />
-<!-- Link previews. build.mjs fills in %SITE_URL% (crawlers need absolute image URLs) and drops the static/ prefix. -->
+<!-- The long title is for search results; home screens and app switchers get the short name. -->
+<meta name="apple-mobile-web-app-title" content="Gridspin" />
+<meta name="application-name" content="Gridspin" />
+<!-- Link previews: crawlers need absolute URLs. -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Gridspin" />
 <meta property="og:title" content="Gridspin: can you go 20–0?" />
 <meta property="og:description" content="Spin an era. Draft the greats. Go 20–0." />
-<meta property="og:url" content="%SITE_URL%/" />
-<meta property="og:image" content="%SITE_URL%/static/og.png" />
+<meta property="og:url" content="%CANONICAL_URL%/" />
+<meta property="og:image" content="%CANONICAL_URL%/static/og.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta property="og:image:alt" content="Gridspin: can you go 20–0?" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Gridspin: can you go 20–0?" />
 <meta name="twitter:description" content="Spin an era. Draft the greats. Go 20–0." />
-<meta name="twitter:image" content="%SITE_URL%/static/og.png" />
+<meta name="twitter:image" content="%CANONICAL_URL%/static/og.png" />
+<!-- Tells search engines what this is: the site's name, and that it's a free game played in the browser. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"WebSite","@id":"%CANONICAL_URL%/#website","name":"Gridspin","url":"%CANONICAL_URL%/"},
+{"@type":"WebApplication","name":"Gridspin","url":"%CANONICAL_URL%/","image":"%CANONICAL_URL%/static/og.png",
+"description":"Spin a team and an era, draft six real NFL seasons, then play a 17-game season and the playoffs. Can you go 20–0?",
+"applicationCategory":"GameApplication","genre":"Sports","operatingSystem":"Any","browserRequirements":"Requires JavaScript",
+"isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
+]}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap" />
 <style>html,body{margin:0;background:#F7F4EA}body{overflow-x:hidden}</style>
 </head>
 <body>
+<noscript>
+<h1>Gridspin</h1>
+<p>Spin an era. Draft the greats. Go 20–0. Gridspin is a free football draft game: each round spins a random NFL team and a five-year era, you draft one real player season from that board, and your six-man roster plays a 17-game season and the playoffs. Turn on JavaScript to play.</p>
+</noscript>
 <div id="root"></div>
 <script src="build/page.js"></script>
 </body>
