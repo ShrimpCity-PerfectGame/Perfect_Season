@@ -37,6 +37,8 @@ check("structured data is valid JSON naming the site", ld && ld["@graph"].some((
 check("the share link people see stays gridspin.app", prod.js.includes('"https://gridspin.app"'));
 check("the bundle is minified", prod.js.length < 1_000_000, `${prod.js.length} bytes`);
 check("the tab title leads with the name", /<title>Gridspin – /.test(prod.html));
+// The same page answers challenge links (/c/CODE), where relative asset paths would break.
+check("the app and icons load from root-relative paths", prod.html.includes('<script src="/page.js">') && prod.html.includes('href="/icon.svg"') && prod.html.includes('href="/site.webmanifest"') && !/(src|href)="(?!\/|https?:)[^"]+\.(js|svg|png|webmanifest)"/.test(prod.html), prod.html.match(/(src|href)="[^"]+"/g));
 
 console.log("staging build");
 const stg = build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app" });
@@ -51,6 +53,8 @@ const rule = (vercel.headers || []).find((h) => h.headers.some((x) => x.key === 
 const hostRe = rule && new RegExp(`^${rule.has.find((c) => c.type === "host").value}$`);
 check("every *.vercel.app address sends noindex", !!hostRe && ["perfect-season-t9sk.vercel.app", "perfect-season-beta.vercel.app", "perfect-season-staging.vercel.app"].every((h) => hostRe.test(h)));
 check("gridspin.app itself is never noindexed", !!hostRe && !hostRe.test("gridspin.app") && !hostRe.test("www.gridspin.app"));
+check("challenge links (/c/CODE) serve the app", (vercel.rewrites || []).some((r) => r.source === "/c/:code" && r.destination === "/page.html"));
+check("challenge links are kept out of search results", (vercel.headers || []).some((h) => h.source === "/c/(.*)" && h.headers.some((x) => x.key === "X-Robots-Tag" && x.value === "noindex")));
 
 if (failures) { console.log(`${failures} failure(s)`); process.exit(1); }
 console.log("test-build-seo.mjs: all passed");

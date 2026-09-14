@@ -175,10 +175,15 @@ await runTest("a finished season shows its real rank among every logged season",
   await click(findButtonByText(actions, "Share result"));
   await flush(4);
   const shared = container.querySelector(".sharebox")?.value || "";
-  assert(shared.includes("Gridspin 🏈") && shared.includes("Team score") && shared.includes(`#${expectedRank} of ${scores.length + 1}`),
+  assert(shared.startsWith("Gridspin Unlimited") && shared.includes("Team score") && shared.includes(`#${expectedRank} of ${scores.length + 1} seasons`),
     "expected the share text (here the copy-by-hand fallback, since the test DOM has no clipboard) to include the season's rank, got: " + shared);
-  // The site's address closes the share, so a friend can tap straight in (tests build with a stand-in).
-  assert(shared.trimEnd().endsWith("https://gridspin.test"), "expected the share text to end with the site's address, got: " + shared);
+  // An Unlimited share ends with a link to these exact boards and the record to beat (tests build with a
+  // stand-in address), and never lists the players.
+  const code = container.querySelector(".seedline code")?.textContent;
+  const record = container.querySelector(".result-hero .rec")?.textContent.replace("–", "-");
+  assert(shared.trimEnd().endsWith(`Beat my boards: https://gridspin.test/c/${code}?beat=${record}`), "expected the share to end with the challenge link, got: " + shared);
+  const drafted = [...container.querySelectorAll(".rv .p, .slot .v")].map((v) => v.textContent).filter((t) => t && t !== "Open");
+  assert(drafted.length > 0 && drafted.every((name) => !shared.includes(name.split(" ").pop())), "the share must not name the players, got: " + shared);
 });
 
 await runTest("the Leaderboard is black, crowns #1 and marks your own row", async () => {

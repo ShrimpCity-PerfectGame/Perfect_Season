@@ -61,9 +61,12 @@ cpSync("static", "public", { recursive: true });
 // and "static/..."; public/ is flat, so rewrite the paths that differ rather than hand-maintain a
 // second copy of the page, and fill in the absolute address link previews need.
 // Staging must never be indexed: it would compete with the real site in search results.
+// Asset paths are root-relative: the same page also answers challenge links (/c/CODE, see vercel.json),
+// where a relative "page.js" would resolve to /c/page.js.
 const html = readFileSync("page.html", "utf8")
-  .replace("build/page.js", "page.js")
-  .replace(/(["/])static\//g, "$1")
+  .replace("build/page.js", "/page.js")
+  .replace(/"static\//g, '"/')
+  .replace(/\/static\//g, "/")
   .replaceAll("%CANONICAL_URL%", canonicalUrl)
   .replace("%ROBOTS%", appEnv === "staging" ? '<meta name="robots" content="noindex, nofollow" />\n' : "");
 writeFileSync("public/page.html", html);

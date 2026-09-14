@@ -547,7 +547,7 @@ const CSS = `
 /* Stop the browser pinning the view to the bottom while a season's tiles tick in under it. */
 html:has(.result-hero){overflow-anchor:none}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
-.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited{${cssVars("dark")};color:var(--ink)}
+.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.challenge{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
 /* Leaderboard scope: true black. After the dark list so its champion block takes night tokens. */
 .ps.night,.night .champion{${cssVars("night")};color:var(--ink)}
@@ -613,6 +613,14 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .ver{flex:none;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--surface2);border-radius:6px;padding:2px 7px;font-variant-numeric:tabular-nums}
 .stagebar{margin:0 0 14px;padding:9px 14px;border-radius:12px;font-size:13.5px;color:var(--ink);border:2px solid var(--orange);
   background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--orange) 26%,transparent) 0 12px,color-mix(in srgb,var(--orange) 12%,transparent) 12px 24px)}
+
+/* A friend's challenge link, waiting at the top of the Modes screen: a navy scoreboard card (dark tokens). */
+.challenge{border-radius:18px;padding:18px 20px;margin:0 0 18px;display:grid;gap:10px;background:var(--bg);border:2px solid ${PALETTE.ink};box-shadow:4px 4px 0 ${PALETTE.ink}}
+.challenge .k{font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.challenge .big{font-family:var(--display);font-weight:400;font-size:clamp(34px,7vw,52px);line-height:.95;text-transform:uppercase;margin:0;color:var(--ink)}
+.challenge .big em{font-style:normal;color:var(--accent-ink)}
+.challenge p{margin:0;color:var(--muted);max-width:60ch}
+.challenge .warn{color:var(--ink);font-weight:600}
 
 /* ===== hero ===== */
 .hero{position:relative;margin:6px 0 28px;padding:14px 0 6px;isolation:isolate}
@@ -760,6 +768,12 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .mb.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .seedline{font-size:13px;color:var(--muted);margin-left:auto;display:flex;align-items:center;gap:8px}
 .seedline code{font-family:ui-monospace,Menlo,monospace;font-size:14px;letter-spacing:1px;color:var(--accent-ink);background:var(--surface2);border-radius:6px;padding:3px 8px}
+/* The draft's variant and scoring format as chips - Genius and GM mode in the colors of their Modes
+   tiles, so the draft you're in reads at a glance. */
+.seedline{flex-wrap:wrap;justify-content:flex-end;row-gap:6px}
+.modechip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:800;line-height:1.2;white-space:nowrap;border-radius:999px;padding:3px 10px;border:1.5px solid var(--line2);color:var(--ink);background:var(--surface)}
+.modechip.genius{color:var(--genius);border-color:color-mix(in srgb,var(--genius) 60%,transparent);background:color-mix(in srgb,var(--genius) 16%,transparent)}
+.modechip.gm{color:var(--gm);border-color:color-mix(in srgb,var(--gm) 60%,transparent);background:color-mix(in srgb,var(--gm) 16%,transparent)}
 .reel{position:relative;overflow:hidden;margin-bottom:10px;padding:18px 20px 16px 22px;border-radius:16px;
   background:linear-gradient(102deg,var(--tc1) 0%,color-mix(in srgb,var(--tc1) 62%,var(--bg)) 46%,color-mix(in srgb,var(--tc1) 18%,var(--bg)) 82%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 12px 30px rgba(0,0,0,.35)}
@@ -1105,7 +1119,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
   color:var(--ink);font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center}
 .nowrap{white-space:nowrap}
 @media (max-width:359px){.modal h2{font-size:34px}.dailycta .btn{flex-direction:column;align-items:flex-start}
-  .seedline{flex-basis:100%;margin-left:0;flex-wrap:wrap}
+  .seedline{flex-basis:100%;margin-left:0;flex-wrap:wrap;justify-content:flex-start}
   .hdr-links{gap:7px}.hdrchip.help{padding-right:9px}.whoami{gap:5px}.ver{padding:2px 5px}
   .slot .v{font-size:13px}
   .modebar{gap:4px}.mb{padding:5px 10px;font-size:13px}
@@ -1607,24 +1621,63 @@ function Confetti({ n = 26 }) {
   );
 }
 
-function shareText(result, roster, place, mode) {
-  const reg = result.games.filter((g) => !g.playoff).map((g) => (g.win ? "🟩" : "🟥")).join("");
-  const po = result.games.filter((g) => g.playoff).map((g) => (g.win ? "🟩" : "🟥")).join("");
-  // The format is named whenever it isn't the default, so a shared score can't be mistaken for a
-  // full-PPR one - the two don't rank against each other.
-  const fmt = normFormat(mode?.format) === "standard" ? " · Championship" : "";
-  const lines = [
-    mode && mode.kind === "daily" ? `Gridspin 🏈 Daily ${mode.date}${fmt} · ${result.w}–${result.l}` : `Gridspin 🏈${fmt} ${result.w}–${result.l}`,
-    result.outcome,
-    `Team score ${result.score.toFixed(1)}${place ? ` · #${place.rank.toLocaleString()} of ${place.total.toLocaleString()}` : ""}`,
-    reg,
-  ];
-  if (po) lines.push(`Playoffs ${po}`);
-  lines.push(SLOTS.map((s) => `${s.startsWith("FLEX") ? "FX" : s} ${lastName(roster[s].name)} ${shortYr(roster[s].season)}`).join(", "));
-  if (mode && mode.kind !== "daily") lines.push(`Draft the same boards: code ${mode.code}`);
-  // The site's address last, where chat apps turn it into a link. Only a build with no SITE_URL
-  // (a bare local build) leaves it out; see build.mjs.
-  if (APP_SITE_URL) lines.push(APP_SITE_URL);
+// ---------- Sharing ----------
+// Daily 1 is the day Gridspin launched, and the number counts up a day at a time, like Wordle's.
+export const GRIDSPIN_DAY_ONE = "2026-09-14";
+export function dailyNumber(date) {
+  const utc = (key) => { const [y, m, d] = key.split("-").map(Number); return Date.UTC(y, m - 1, d); };
+  return Math.round((utc(date) - utc(GRIDSPIN_DAY_ONE)) / 86400000) + 1;
+}
+
+// An Unlimited season's link: its boards (the code), the variant and scoring they were drafted
+// under, and the sharer's record to beat. The record is only ever a friendly headline on the friend's
+// screen - nothing scores from it.
+export function challengeLink(base, mode, w, l) {
+  const q = new URLSearchParams({ beat: `${w}-${l}` });
+  if (mode.gm) q.set("mode", "gm");
+  else if (mode.genius) q.set("mode", "genius");
+  if (normFormat(mode.format) === "standard") q.set("scoring", "championship");
+  return `${base}/c/${mode.code}?${q}`;
+}
+export function parseChallengeLink(pathname, search) {
+  const m = /^\/c\/([A-Za-z0-9]{4,8})\/?$/.exec(pathname || "");
+  if (!m) return null;
+  const q = new URLSearchParams(search || "");
+  const beat = /^(\d{1,2})-(\d{1,2})$/.exec(q.get("beat") || "");
+  const games = beat ? Number(beat[1]) + Number(beat[2]) : 0;
+  return {
+    code: m[1].toUpperCase(),
+    // A real season is 17 games plus up to 4 playoff games; anything else was typed in by hand.
+    beat: games >= 17 && games <= 21 ? { w: Number(beat[1]), l: Number(beat[2]) } : null,
+    gm: q.get("mode") === "gm",
+    genius: q.get("mode") === "genius",
+    format: q.get("scoring") === "championship" ? "standard" : "fantasy",
+  };
+}
+
+// The Wordle-style share: the record, a square per game, the playoffs and a link - never the players,
+// so it can't spoil the daily's boards. 🟩 a win, 🟥 a loss, 🟨 an upset win (isUpsetWin, the rule
+// behind the result screen's 🚨 tiles).
+export function shareText(result, mode, place) {
+  const squares = (games) => games.map((g) => (!g.win ? "🟥" : isUpsetWin(result.score, g) ? "🟨" : "🟩")).join("");
+  const regular = result.games.filter((g) => !g.playoff);
+  const playoffs = result.games.filter((g) => g.playoff);
+  // Scores from the two formats don't rank against each other, so Championship is always named.
+  const championship = normFormat(result.format ?? mode?.format) === "standard" ? " · Championship" : "";
+  const n = mode?.kind === "daily" ? dailyNumber(mode.date) : null;
+  const title = mode?.kind === "daily"
+    ? `Gridspin Daily ${n >= 1 ? n : prettyDate(mode.date)}${championship}`
+    : `Gridspin ${mode?.gm ? "GM mode" : mode?.genius ? "Genius mode" : "Unlimited"}${championship}`;
+  const emoji = outcomeEmoji(result);
+  const lines = [`${title}${emoji ? ` ${emoji} ` : " · "}${result.w}–${result.l}${result.w === 20 && result.l === 0 ? " PERFECT" : ""}`];
+  // Rows of six, so the card keeps its shape in a chat bubble on a phone.
+  for (let i = 0; i < regular.length; i += 6) lines.push(squares(regular.slice(i, i + 6)));
+  lines.push(playoffs.length ? `Playoffs ${squares(playoffs)}` : "Missed the playoffs");
+  lines.push(`Team score ${result.score.toFixed(1)}${place ? ` · #${place.rank.toLocaleString()} of ${place.total.toLocaleString()} seasons` : ""}`);
+  // The link goes last, where chat apps turn it into a preview. Only a build with no SITE_URL (a bare
+  // local build) has no address to give; see build.mjs.
+  if (mode?.kind !== "daily") lines.push(APP_SITE_URL ? `Beat my boards: ${challengeLink(APP_SITE_URL, mode, result.w, result.l)}` : `Draft the same boards: code ${mode.code}`);
+  else if (APP_SITE_URL) lines.push(APP_SITE_URL);
   return lines.join("\n");
 }
 
@@ -1724,6 +1777,10 @@ export default function PerfectSeason() {
   function showBoardFormat(f) { boardFormatRef.current = f; setBoardFormat(f); }
   const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
+  // A friend's boards from a challenge link (gridspin.app/c/CODE?beat=7-10), waiting on the Modes screen.
+  const [challenge, setChallenge] = useState(() => (typeof window === "undefined" ? null : parseChallengeLink(window.location.pathname, window.location.search)));
+  // Whether taking the challenge would abandon a saved Unlimited draft (a DNF), so the card can say so.
+  const [challengeAbandons, setChallengeAbandons] = useState(false);
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [], format: "fantasy" });
   // The points ladder currently being viewed, and its rows. Paired the same way lb/lbFormat are,
   // so the rows and the column that reads them can never describe different ladders.
@@ -1799,6 +1856,15 @@ export default function PerfectSeason() {
       onDraftFinished: () => setLiveDrafts((n) => (n == null ? n : n + 1)),
     });
     return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); siteActivity.current?.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A challenge link opens on the Modes screen with the friend's boards ready. The address goes back to
+  // "/" straight away, so a reload or a bookmark doesn't keep offering the same challenge.
+  useEffect(() => {
+    if (!challenge) return;
+    try { window.history.replaceState(null, "", "/"); } catch (e) { /* no history API */ }
+    sget(FREE_PROGRESS, false).then((saved) => setChallengeAbandons(!!(validDraft(saved) && saved.mode.kind === "free")));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2552,6 +2618,18 @@ export default function PerfectSeason() {
     startDraft({ kind: "free", code, format });
   }
 
+  // Takes a challenge link's boards under the variant and scoring they were shared with. Like entering a
+  // code, it abandons any Unlimited draft in progress (a DNF; the card warns first).
+  async function acceptChallenge() {
+    const c = challenge;
+    if (!c) return;
+    setChallenge(null);
+    await abandonCurrent();
+    clearDraft(DRAFT_KEY);
+    setView("play");
+    startDraft({ kind: "free", code: c.code, format: c.format, gm: c.gm, genius: c.genius });
+  }
+
   async function loadLadder(m) {
     const mk = LADDERS.includes(m) ? m : ladderMode;
     setLadder((l) => ({ loading: true, rows: l.mode === mk ? l.rows : [], mode: mk }));
@@ -2589,7 +2667,7 @@ export default function PerfectSeason() {
   async function doShare() {
     // result.rank is this season's rank from the runs log ({rank,total}), or null/undefined when
     // there isn't one yet. (This read an undefined `place` after 1.7.0, so Share threw and did nothing.)
-    const text = shareText(result, roster, result.rank || null, mode);
+    const text = shareText(result, mode, result.rank || null);
     try {
       if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
         await navigator.share({ text });
@@ -2726,6 +2804,25 @@ export default function PerfectSeason() {
         {/* ---------------- HOME ---------------- */}
         {view === "home" && (
           <>
+            {challenge && (
+              <section className="challenge" aria-labelledby="challenge-title">
+                <span className="k">A friend's boards · code {challenge.code}</span>
+                <h2 id="challenge-title" className="big">
+                  {challenge.beat
+                    ? <>They went <em>{challenge.beat.w}–{challenge.beat.l}</em>.<br />Can you beat it?</>
+                    : <>Can you beat<br />their boards?</>}
+                </h2>
+                <p>
+                  {[challenge.gm && "GM mode", challenge.genius && "Genius mode", FORMAT_LABEL[challenge.format]].filter(Boolean).join(" · ")}.{" "}
+                  The same six team-and-era boards they drafted from, in the same order. Your season is your own.
+                </p>
+                {user && challengeAbandons && <p className="warn">You have an Unlimited draft in progress. Drafting these boards counts it as a DNF.</p>}
+                <div className="frow">
+                  <button className="btn solid" onClick={acceptChallenge}>Draft these boards</button>
+                  <button className="btn" onClick={() => setChallenge(null)}>Not now</button>
+                </div>
+              </section>
+            )}
             <header className="hero">
               {/* Decorative only: faint countdown yard numbers and a lime glow behind the headline. */}
               <div className="yardnums" aria-hidden="true">{[20, 19, 18, 17, 16].map((n) => <span key={n}>{n}</span>)}</div>
@@ -2892,17 +2989,16 @@ export default function PerfectSeason() {
                   Daily{stats?.dailyStreak && stats.dailyLast === todayKey() ? ` · ${stats.dailyStreak}🔥` : ""}
                 </button>
                 <button className="mb" onClick={() => { refreshWip(); setView("home"); }}>All modes</button>
-                {mode.kind === "daily" ? (
-                  <span className="seedline">{FORMAT_LABEL[normFormat(mode.format)]} · {prettyDate(mode.date)} · same boards for everyone</span>
-                ) : (
-                  <span className="seedline">
-                    {/* Each separator leads its group, so a wrapped line never ends on a dangling "·". */}
-                    {[normFormat(mode.format) === "standard" && "Championship", mode.genius && "Genius mode", mode.gm && "GM mode"].filter(Boolean).map((t, i) => (
-                      <span key={t} className="nowrap">{i ? "· " : ""}{t}</span>
-                    ))}
-                    <span className="codechip">{normFormat(mode.format) === "standard" || mode.genius || mode.gm ? "· " : ""}Code <code>{mode.code}</code></span>
-                  </span>
-                )}
+                {/* What kind of draft this is, at a glance: the variant (Genius or GM) and the scoring format
+                    as chips - both formats named, not just Championship - then the daily's date or the code. */}
+                <span className="seedline">
+                  {mode.genius && <span className="modechip genius"><span aria-hidden="true">🧠</span>Genius mode</span>}
+                  {mode.gm && <span className="modechip gm"><span aria-hidden="true">💼</span>GM mode</span>}
+                  <span className="modechip fmt">{FORMAT_LABEL[normFormat(mode.format)]}</span>
+                  {mode.kind === "daily"
+                    ? <span className="nowrap">{prettyDate(mode.date)} · same boards for everyone</span>
+                    : <span className="codechip">Code <code>{mode.code}</code></span>}
+                </span>
               </div>
             )}
 
@@ -3198,7 +3294,7 @@ export default function PerfectSeason() {
                       <button className="btn" onClick={runItBack}>Run it back 🔁</button>
                     </div>
                     {mode.kind === "free" && (
-                      <p className="note">Send a friend the code <b>{mode.code}</b> and they'll draft the exact same six boards.</p>
+                      <p className="note">Share result sends a link to these exact six boards (code <b>{mode.code}</b>), with your record to beat.</p>
                     )}
                   </>
                 )}

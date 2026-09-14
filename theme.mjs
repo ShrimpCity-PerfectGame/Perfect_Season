@@ -47,6 +47,9 @@ export const THEME = {
     wr: "#2350D8",
     te: "#B4470F",
     flex: "#6D3FD6",
+    // Draft variants in the mode bar: Genius mode violet, GM mode blue (the colors of their Modes tiles).
+    genius: "#6D3FD6",
+    gm: "#2350D8",
     ga: "#1B6E37",
     gb: "#0A6E60",
     gc: "#735800",
@@ -79,6 +82,8 @@ export const THEME = {
     wr: "#5AA9FF",
     te: "#F5A04A",
     flex: "#B18CFF",
+    genius: "#B18CFF",
+    gm: "#5AA9FF",
     ga: "#4ADE80",
     gb: "#2FD3B5",
     gc: "#F7B32B",
@@ -110,6 +115,8 @@ export const THEME = {
     wr: "#5AA9FF",
     te: "#F5A04A",
     flex: "#B18CFF",
+    genius: "#B18CFF",
+    gm: "#5AA9FF",
     ga: "#4ADE80",
     gb: "#2FD3B5",
     gc: "#F7B32B",
@@ -123,7 +130,7 @@ export const THEME = {
 };
 
 // Tokens used as text colors, and the backgrounds text sits on - what the contrast test checks.
-export const TEXT_TOKENS = ["ink", "muted", "accentInk", "win", "loss", "qb", "rb", "wr", "te", "flex", "ga", "gb", "gc", "gd"];
+export const TEXT_TOKENS = ["ink", "muted", "accentInk", "win", "loss", "qb", "rb", "wr", "te", "flex", "genius", "gm", "ga", "gb", "gc", "gd"];
 export const SURFACE_TOKENS = ["bg", "surface", "surface2"];
 
 const kebab = (k) => k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
