@@ -13,6 +13,40 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.7.0] — 2026-09-14
+
+A new look, part two: the Leaderboard and the season result get their own personality.
+
+### Changed
+
+- **The Leaderboard is black.** The best team ever leads the screen with a 👑, every table has big
+  rank numbers with #1 in lime, and your own row is outlined and tagged "You".
+- **Results are built around the record.** The win–loss record fills the top of the screen with
+  Wins and Losses labels, a title run gets a 🏆 Champions stamp, and team score, points and rank sit
+  in one strip underneath.
+- **Your rank now means this season.** The result screen ranks this season against every logged
+  season in its format ("#212 of 1,874 · Top 11%"). It used to show your best-ever rank and count
+  players instead of seasons, so a 0–17 season could read "#1 · Best ever".
+- "Draft a friend's board" is only on the Modes screen now; the Leaderboard is rankings only.
+
+### Added
+
+- **🚨 Upsets.** Any win where you had a 35% chance or less gets a 🚨 on its game, the biggest playoff
+  upset gets a callout, and a title that lands on the Biggest upsets board says where it ranks.
+- **🔥 Daily streaks on the result screen**, with a bigger moment at 3, 7, 14 and 30 days and "new
+  best" when you pass your longest streak.
+- Outcome emoji: 🏆 for a title, 🧊 for missing the playoffs, 💀 for four wins or fewer.
+
+### Fixed
+
+- **Your own row was never highlighted** on the Top 10 or the points ladder: it compared account IDs
+  against usernames, which never match. Only the daily table got it right.
+- The Leaderboard's Refresh button could switch the board back to Fantasy scoring.
+
+### Deploy notes
+
+App only. No database migration or Edge Function change.
+
 ## [1.6.0] — 2026-09-14
 
 ### Added

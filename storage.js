@@ -139,6 +139,23 @@ export async function fetchOwnRank(score, format = "fantasy") {
   const { count, error } = await getClient().from("profiles").select("id", { count: "exact", head: true }).gt(col, score);
   return error || count == null ? 0 : count;
 }
+
+// Where one season lands among every logged season in its format, from the runs log: how many
+// scored strictly higher, and how many there are. Two HEAD counts, retried by supabase-js if a
+// request drops. null if either fails - the result screen then just leaves the rank out.
+const loggedSeasons = (format) => getClient().from("runs").select("id", { count: "exact", head: true })
+  .eq("format", format).eq("dnf", false);
+export async function fetchSeasonRank(score, format = "fantasy") {
+  const [above, all] = await Promise.all([loggedSeasons(format).gt("score", score), loggedSeasons(format)]);
+  if (above.error || all.error || above.count == null || all.count == null) return null;
+  return { above: above.count, total: all.count };
+}
+// Title-winning seasons in this format scoring at or below this one - i.e. this season's position
+// on the Biggest upsets board once it's logged (lowest score first, earlier ties ahead of it).
+export async function fetchUpsetRank(score, format = "fantasy") {
+  const { count, error } = await loggedSeasons(format).eq("champ", true).lte("score", score);
+  return error || count == null ? null : count;
+}
 // One points ladder. Only players who have actually earned on it are listed - a table full of
 // zeroes from accounts that never played the mode isn't a leaderboard.
 export async function fetchLadderTop(mode = "unlimited", limit = 10) {

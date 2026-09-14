@@ -104,10 +104,15 @@ await runTest("a real draft through the UI earns points on the right ladder and 
   assert(row.points_daily === (before.points_daily || 0), "an Unlimited draft must not touch the daily ladder");
   assert(row.points_gm === (before.points_gm || 0), "an Unlimited draft must not touch the GM ladder");
 
-  // The result screen should show the same points the server recorded, and par alongside them.
-  const shown = container.textContent;
-  assert(/[-+]?\d[\d,]*\s*points/.test(shown), "expected the result screen to show points, got: " + shown.slice(0, 400));
-  assert(shown.includes("par "), "expected the result screen to show the bot's par next to the score");
+  // The result screen's stat strip shows the same points the server banked, with par beside the
+  // team score.
+  const cells = [...container.querySelectorAll(".result-hero .strip > div")];
+  const ptsCell = cells.find((c) => c.querySelector(".l")?.textContent === "Points");
+  assert(ptsCell, "expected a Points cell in the result screen's stat strip, got: " + cells.map((c) => c.textContent).join(" | "));
+  const shownPoints = Number(ptsCell.querySelector(".n").textContent.replace(/[^\d-]/g, ""));
+  const banked = row.points_bank - (before.points_bank || 0);
+  assert(shownPoints === banked, `expected the result screen to show the ${banked} points the server banked, got ${shownPoints}`);
+  assert(container.querySelector(".result-hero .strip")?.textContent.includes("par "), "expected the bot's par next to the team score");
 
   // Today's window is recorded so later drafts can displace this one.
   assert(row.points_day?.byMode?.unlimited?.length >= 1, "expected the draft to be recorded in today's points window");

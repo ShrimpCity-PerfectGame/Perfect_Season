@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
   fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
+  fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, submitRun, submitDnf,
@@ -543,6 +544,9 @@ const CSS = `
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
 .ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
+/* Leaderboard scope: true black. After the dark list so its champion block takes night tokens. */
+.ps.night,.night .champion{${cssVars("night")};color:var(--ink)}
+.ps.night{background-color:var(--bg);background-image:none}
 .ps *{box-sizing:border-box}
 .ps button{font-family:inherit;cursor:pointer;color:inherit}
 .ps button:focus-visible{outline:3px solid var(--accent-ink);outline-offset:3px}
@@ -687,6 +691,19 @@ button.pill:hover{border-color:var(--ink)}
 .lb td.r,.lb th.r{text-align:right}
 .lb tr.me td{background:color-mix(in srgb,var(--accent) 30%,transparent)}
 .lb .rk{font-family:var(--display);font-weight:400;font-size:22px;width:36px}
+.you{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--on-accent);background:var(--accent);
+  border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:2px}
+.lb .crown{position:absolute;left:2px;top:0;font-size:16px;transform:rotate(-14deg)}
+/* Leaderboard in black: giant ranks, lime for #1 only, and your own row outlined. */
+.night .champion{background:radial-gradient(ellipse 80% 100% at 0% 0%,var(--glow),transparent 60%),var(--surface);box-shadow:inset 0 0 0 1px var(--line2)}
+.night .champion .pickno{font-size:12px;font-weight:800;letter-spacing:.07em;text-transform:uppercase}
+.night .lb th{border-bottom-color:var(--line2)}
+.night .lb td{border-bottom-color:var(--line);vertical-align:middle}
+.night .lb .rk{position:relative;font-size:40px;line-height:1;width:64px;text-align:center;color:var(--muted);padding:6px 4px}
+.night .lb tr.first .rk{color:var(--accent);font-size:48px}
+.night .lb td.v{font-family:var(--display);font-weight:400;font-size:22px}
+.night .lb tr.me td{background:none}
+.night .lb tr.me{outline:2px solid var(--accent);outline-offset:-2px}
 .recent{border-top:2px solid var(--ink);margin-bottom:18px}
 .rr{display:grid;grid-template-columns:70px 64px 1fr auto;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;align-items:center}
 .rr .rec2{font-family:var(--display);font-weight:400;font-size:22px}
@@ -797,9 +814,40 @@ button.pill:hover{border-color:var(--ink)}
 .rec{font-family:var(--display);font-weight:400;font-size:clamp(96px,24vw,156px);line-height:.85;color:var(--accent);--dot:7px}
 .outcome{font-size:19px;font-weight:700;margin-top:10px}
 .rating{font-size:14px;color:var(--muted);margin-top:4px}
-.place{margin-top:10px;font-size:15px;color:var(--ink);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.place b{font-family:var(--display);font-weight:400;font-size:28px;color:var(--accent-ink)}
-.place .pct{font-size:13px;font-weight:800;color:var(--on-accent);background:var(--accent);border-radius:6px;padding:2px 7px}
+/* Record first (the main draft's result; Build-a-player keeps the plain .rec above). */
+.result-hero:has(.recbox){text-align:center}
+.recbox{--rs:clamp(112px,36vw,196px)}
+.recbox .rec,.wl{display:grid;grid-template-columns:1fr calc(var(--rs)*.5) 1fr}
+.recbox .rec{font-size:var(--rs);--dot:8px}
+.recbox .rec .led:first-child,.wl span:first-child{justify-self:end}
+.recbox .rec .led:nth-child(2){justify-self:center}
+.recbox .rec .led:last-child,.wl span:last-child{justify-self:start}
+.wl{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+.outrow{display:flex;justify-content:center;align-items:baseline;gap:8px;margin-top:12px}
+.outrow .outcome{margin-top:0;text-wrap:balance}
+.oe{font-size:20px;line-height:1}
+.result-hero .cel{position:static;overflow:visible;padding:0;margin:0 0 12px;border-radius:0;background:none;box-shadow:none}
+.stamp{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--on-accent);background:var(--accent);
+  border-radius:6px;padding:4px 10px;transform:rotate(-3deg);animation:stamp .5s cubic-bezier(.2,1.5,.4,1) both}
+@keyframes stamp{from{opacity:0;transform:scale(1.8) rotate(-10deg)}to{opacity:1;transform:rotate(-3deg)}}
+.strip{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;margin-top:16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.strip>div{padding:10px 6px;min-width:0}
+.strip>div+div{border-left:1px solid var(--line)}
+.strip .n{font-family:var(--display);font-weight:400;font-size:28px;line-height:1.05}
+.strip .n.up{color:var(--win)}
+.strip .n.down{color:var(--loss)}
+.strip .l{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.strip .s{font-size:12px;color:var(--muted)}
+.moments{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:14px}
+.mo{font-size:13px;font-weight:700;color:var(--ink);border-radius:999px;padding:4px 11px;box-shadow:inset 0 0 0 1px var(--line2)}
+.mo.crown{color:var(--on-accent);background:var(--accent);box-shadow:none}
+.mo.upset{color:var(--orange);background:color-mix(in srgb,var(--orange) 14%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--orange) 55%,transparent)}
+.mo.streak{color:var(--gc);background:color-mix(in srgb,var(--gc) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gc) 50%,transparent)}
+.mo.streak.milestone{font-size:15px;padding:6px 14px;box-shadow:inset 0 0 0 2px var(--gc)}
+.mo.best{color:var(--win);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--win) 45%,transparent)}
+.alarm{margin-top:12px;text-align:left;font-size:14px;border-radius:12px;padding:10px 14px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--orange) 22%,transparent),transparent);box-shadow:inset 3px 0 0 var(--orange)}
+.alarm b{color:var(--orange)}
 .log{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:6px;margin:8px 0 22px}
 .g{border-radius:9px;padding:6px 8px;font-size:12px;background:var(--surface);border:1.5px solid var(--line);border-left:3px solid transparent;animation:pop .25s ease-out both}
 .g .w{font-weight:800;font-size:15px}
@@ -807,6 +855,8 @@ button.pill:hover{border-color:var(--ink)}
 .g.loss{background:linear-gradient(90deg,color-mix(in srgb,var(--gd) 16%,var(--surface)),var(--surface) 70%);border-left-color:var(--gd)}
 .g.win .w{color:var(--ga)} .g.loss .w{color:var(--gd)}
 .g.po{box-shadow:0 0 0 1px var(--accent) inset}
+.g.up{border-color:var(--orange);box-shadow:0 0 0 1px var(--orange) inset}
+.g.up .w::after{content:" 🚨"}
 .g .o{color:var(--muted)}
 @keyframes pop{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .reveal{border-top:1px solid var(--line)}
@@ -915,6 +965,7 @@ button.pill:hover{border-color:var(--ink)}
 /* ===== reduced motion ===== */
 @media (prefers-reduced-motion:reduce){
   .confetti{display:none}
+  .stamp{animation:none}
   .cel.perfect .big{animation:none;background:none;color:var(--accent)}
   .sou-timer.danger{animation:none}
   .g,.flash,.ball{animation:none}
@@ -1190,6 +1241,99 @@ const LADDER_LABEL = { daily: "Daily", unlimited: "Unlimited", genius: "Genius",
 // `champ` from the sim; ones saved before that field existed fall back to the outcome text.
 const wonItAll = (rec) => rec?.champ ?? /^(Won the championship|Perfect season)/.test(rec?.outcome || "");
 const pointsOf = (p, ladder) => (p?.points?.[ladder] ?? 0);
+
+// ---------- Result moments (display only) ----------
+// A game's pre-kickoff win chance, from the same opponent rating simulateSeason used for it (the
+// regular-season rating, or the playoff one). Worked out when the result is shown, so the
+// simulation, the seed and the saved outcome are all untouched.
+const OPP_BY_KEY = new Map(OPPS.map((o) => [`${o.season}|${o.team}`, o]));
+export const UPSET_CHANCE = 0.35; // a win this unlikely, or less, is an upset
+export function gameWinChance(score, g) {
+  const o = OPP_BY_KEY.get(`${parseInt(g.opp, 10)}|${g.oppTeam}`);
+  const rating = o && (g.playoff ? o.po : o.reg);
+  return rating == null ? null : winProb(score, rating);
+}
+export const isUpsetWin = (score, g) => g.win && (gameWinChance(score, g) ?? 1) <= UPSET_CHANCE;
+export const STREAK_MILESTONES = [3, 7, 14, 30];
+// Emoji go on at display time only - the outcome strings are stored in runs and daily_runs.
+// 🏆 a title, 💀 four wins or fewer, 🧊 any other missed playoffs; a playoff exit gets none.
+export const outcomeEmoji = (r) => (wonItAll(r) ? "🏆" : r.w <= 4 ? "💀" : r.outcome === "Missed the playoffs" ? "🧊" : null);
+
+// The oversized record. Wins and losses sit in their own columns either side of the dash so the
+// labels underneath line up whatever the digits - and the record's text is still exactly "16–4".
+function RecordLine({ games }) {
+  const w = games.filter((g) => g.win).length;
+  return (
+    <div className="recbox">
+      <div className="rec led-wrap"><span className="led">{w}</span><span className="led">–</span><span className="led">{games.length - w}</span></div>
+      <div className="wl" aria-hidden="true"><span>Wins</span><span /><span>Losses</span></div>
+    </div>
+  );
+}
+
+// Team score, points and this season's rank, in one strip under the record. The rank arrives a
+// moment after the season ends (it needs the runs log): undefined while loading, null when it
+// can't be worked out, which leaves the cell out rather than showing a wrong number.
+export function SeasonStrip({ result, ladderName }) {
+  const cells = [{ key: "score", n: result.score.toFixed(1), l: "Team score", s: result.par != null ? `par ${result.par.toFixed(1)}` : null }];
+  if (result.par != null) {
+    const p = result.points;
+    cells.push({ key: "pts", n: `${p > 0 ? "📈 +" : ""}${p.toLocaleString()}`, tone: p > 0 ? "up" : p < 0 ? "down" : "", l: "Points", s: `${ladderName} ladder` });
+  }
+  if (result.rank !== null) {
+    const r = result.rank;
+    cells.push(r
+      ? { key: "rank", n: `#${r.rank.toLocaleString()}`, l: "This season", s: `of ${r.total.toLocaleString()}${r.total >= 20 ? ` · ${topPct(r.rank, r.total)}` : ""}` }
+      : { key: "rank", n: "…", l: "This season", s: "Ranking" });
+  }
+  return (
+    <div className="strip">
+      {cells.map((c) => (
+        <div key={c.key}><div className={`n ${c.tone || ""}`}>{c.n}</div><div className="l">{c.l}</div>{c.s && <div className="s">{c.s}</div>}</div>
+      ))}
+    </div>
+  );
+}
+
+// The moments that actually happened this season - nothing renders for a season without any.
+export function SeasonMoments({ result, formatLabel }) {
+  const chips = [];
+  if (result.newSiteBest) chips.push({ key: "crown", t: "👑 New sitewide best score" });
+  if (result.upsetRank != null && result.upsetRank <= 10) {
+    chips.push({ key: "upset", t: result.upsetRank === 1 ? `🚨 Biggest ${formatLabel} upset ever` : `🚨 #${result.upsetRank} biggest ${formatLabel} upset` });
+  }
+  if (result.streak && result.streak.days >= 2) {
+    const { days, newBest } = result.streak;
+    chips.push({ key: `streak${STREAK_MILESTONES.includes(days) ? " milestone" : ""}`, t: `🔥 ${days}-day streak${newBest ? " · new best" : ""}` });
+  }
+  if (result.newBestScore && !result.newSiteBest) chips.push({ key: "best", t: "📈 New personal best score" });
+  // The least likely playoff win, if any playoff win was an upset.
+  const upset = result.games
+    .filter((g) => g.playoff && isUpsetWin(result.score, g))
+    .map((g) => ({ g, p: gameWinChance(result.score, g) }))
+    .sort((a, b) => a.p - b.p)[0];
+  if (!chips.length && !upset) return null;
+  return (
+    <>
+      {chips.length > 0 && <div className="moments">{chips.map((c) => <span key={c.key} className={`mo ${c.key}`}>{c.t}</span>)}</div>}
+      {upset && (
+        <div className="alarm">
+          <b>🚨 Upset in the {upset.g.label === "Championship" ? "Championship" : `${upset.g.label} round`}.</b>{" "}
+          You beat the {upset.g.opp} with a {Math.max(1, Math.round(upset.p * 100))}% chance to win.
+        </div>
+      )}
+    </>
+  );
+}
+
+// Leaderboard rows: #1 gets the crown, and your own row is called out wherever it appears.
+const rankRowClass = (i, mine) => [i === 0 ? "first" : "", mine ? "me" : ""].filter(Boolean).join(" ");
+function RankCell({ i }) {
+  return <td className="rk">{i === 0 && <span className="crown" aria-hidden="true">👑</span>}{i + 1}</td>;
+}
+function PlayerName({ name, mine }) {
+  return <>{name}{mine && <span className="you">You</span>}</>;
+}
 const HOWTO_KEY = "ps-howto-seen";
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
@@ -1450,11 +1594,11 @@ export default function PerfectSeason() {
     setLb((x) => ({ ...x, loading: true, error: false }));
     try {
       const [top, totals] = await Promise.all([fetchLeaderboardTop(10, boardFormat), fetchSiteTotals()]);
-      const myKey = user ? user.toLowerCase() : null;
       let myRank = -1;
-      if (myKey) {
+      if (userId) {
         const mine = scoreOf(stats, boardFormat);
-        const idx = top.findIndex((q) => q.id === myKey);
+        // Rows are keyed by the account's id - comparing against the username never matched.
+        const idx = top.findIndex((q) => q.id === userId);
         myRank = idx >= 0 ? idx : mine != null ? await fetchOwnRank(mine, boardFormat) : -1;
       }
       // totals is null when it couldn't be loaded - keep whatever was showing rather than zeros.
@@ -1506,12 +1650,15 @@ export default function PerfectSeason() {
     // actually saved with no way for the caller to react.
     try {
       const res = await submitRun(trace);
+      let fresh = null;
       if (res.ok) {
-        const fresh = await fetchProfile(uid);
+        fresh = await fetchProfile(uid);
         if (fresh) setStats(fresh);
       }
       setSaveError(!res.ok);
-      return res;
+      // `fresh` is the server's profile after this run, so the result screen can show the streak
+      // it actually extended rather than a locally guessed one.
+      return { ...res, fresh };
     } catch (e) {
       setSaveError(true);
       return { ok: false };
@@ -1717,6 +1864,10 @@ export default function PerfectSeason() {
     // this would be comparing against the other format's numbers.
     sim.newSiteBest = !forcedScenario && !!user && lb.top.length > 0 && normFormat(lb.format) === fmt && score > siteBest;
     sim.newBestScore = !forcedScenario && !!user && !!stats && (myBest == null || score > myBest);
+    // Ties late answers (rank, upset, streak) to this exact season; see addSeasonContext.
+    sim.runId = `${Date.now()}:${Math.random()}`;
+    // A forced admin ending is never saved, so there is nothing to rank it against.
+    if (forcedScenario) sim.rank = null;
     setNotice("");
     if (!forcedScenario) {
       siteActivity.current?.broadcastDraftFinished();
@@ -1738,8 +1889,9 @@ export default function PerfectSeason() {
         mode: { kind: mode.kind, seed: mode.seed, code: mode.code, date: mode.date, gm: mode.gm },
         history: finishedHistory, seq, gm: !!mode.gm, genius: !!mode.genius, format: fmt,
       };
-      if (user) submitAndSync(userId, trace);
-      else setPending(trace);
+      const saving = user ? submitAndSync(userId, trace) : Promise.resolve(null);
+      if (!user) setPending(trace);
+      addSeasonContext(sim, fmt, saving, mode.kind === "daily" && user ? (stats?.dailyBestStreak || 0) : null);
       // Point the leaderboard at the format just played before refreshing it, so the rank shown
       // beside this result ranks it against its own format rather than the other one's numbers.
       showBoardFormat(fmt);
@@ -1752,6 +1904,35 @@ export default function PerfectSeason() {
     setResult(sim);
     setPo({ idx: 0, stage: "pre" });
     setShown(reducedMotion() ? sim.games.filter((g) => !g.playoff).length : 0);
+  }
+
+  // The result screen's "where does this season land" details, which need the runs log: this
+  // season's rank in its format, its place on the Biggest upsets board, and for a daily the streak
+  // it extended. Waits for the save first so the counts include this run; a guest's unsaved run is
+  // ranked as if it had been saved. Matched to its season by runId, so a slow answer can never
+  // land on a newer result.
+  async function addSeasonContext(sim, fmt, saving, prevBestStreak) {
+    const ctx = { rank: null };
+    try {
+      const res = await saving;
+      const saved = !!res?.ok;
+      const [place, atOrBelow] = await Promise.all([
+        fetchSeasonRank(sim.score, fmt),
+        sim.champ ? fetchUpsetRank(sim.score, fmt) : Promise.resolve(null),
+      ]);
+      if (place) {
+        const rank = place.above + 1;
+        ctx.rank = { rank, total: Math.max(place.total + (saved ? 0 : 1), rank) };
+      }
+      if (atOrBelow != null) ctx.upsetRank = atOrBelow + (saved ? 0 : 1);
+      if (prevBestStreak != null && res?.fresh) {
+        const days = res.fresh.dailyStreak || 0;
+        ctx.streak = { days, newBest: days > prevBestStreak };
+      }
+    } catch (e) {
+      // Leave the extras out; the season itself is already on screen.
+    }
+    setResult((r) => (r && r.runId === sim.runId ? { ...r, ...ctx } : r));
   }
 
   // ---------- Admin testing tools ----------
@@ -2155,7 +2336,6 @@ export default function PerfectSeason() {
   const site = siteStats.data || EMPTY_SITE_STATS;
   // The score-ranked half of the Stats screen, for whichever format is selected there.
   const fmtStats = site.byFormat[normFormat(boardFormat)];
-  const myKey = user ? user.toLowerCase() : null;
   const myRank = lb.myRank;
   const regGames = result ? result.games.filter((g) => !g.playoff) : [];
   const poGames = result ? result.games.filter((g) => g.playoff) : [];
@@ -2172,18 +2352,10 @@ export default function PerfectSeason() {
   // whose daily is still available to offer next.
   const modeDailyDone = mode && mode.kind === "daily" ? dailyDone[normFormat(mode.format)] : null;
   const otherFormat = mode && normFormat(mode.format) === "standard" ? "fantasy" : "standard";
-  // Ranks this run against everyone's BEST-ever score (via myRank, already refreshed by the
-  // loadLeaderboard() call in finish()) rather than against every run ever played - a real
-  // per-run leaderboard would need a full runs log table this schema doesn't have. For a new
-  // personal best this is exactly right; for a non-best run it shows the existing best's rank.
-  // Only rank a result against a leaderboard loaded for its OWN format - the two score different
-  // things, so a cross-format rank would be meaningless rather than merely imprecise.
-  const place = finished && !lb.error && myRank >= 0 && normFormat(result?.format) === lbFormat
-    ? { rank: myRank + 1, total: totals.players } : null;
   function skipPlayoffs() { setShown(result.games.length); setPo({ idx: 0, stage: "done" }); }
 
   return (
-    <div className={`ps${view === "play" ? " dark" : ""}`}>
+    <div className={`ps${view === "play" ? " dark" : view === "board" ? " night" : ""}`}>
       <style>{CSS}</style>
       <div className="wrap">
         <nav className="nav" aria-label="Sections">
@@ -2547,47 +2719,28 @@ export default function PerfectSeason() {
 
             {result && (
               <>
-                {finished && (result.perfect || result.champ) && (
-                  <div className={`cel ${result.perfect ? "perfect" : ""}`}>
-                    <Confetti n={result.perfect ? 34 : 22} />
-                    <div className="big">{result.perfect ? "20–0" : "Champions"}</div>
-                    <div className="sml">{result.perfect ? "A perfect season. Nobody touched you." : `You won it all at ${result.w}–${result.l}.`}</div>
-                  </div>
-                )}
+                {/* Record first: it's the number people screenshot. Team score, points and this
+                    season's rank share one strip under it, and the moments only appear when they
+                    happened. */}
                 <div className="result-hero" aria-live="polite">
-                  <div className="rec led-wrap"><span className="led">
-                    {result.games.slice(0, shown).filter((g) => g.win).length}–{result.games.slice(0, shown).filter((g) => !g.win).length}
-                  </span></div>
-                  <div className="outcome">{finished ? result.outcome : inPlayoffs ? "Playoffs" : "Playing the season…"}</div>
-                  <div className="rating">Team score {result.score.toFixed(1)}</div>
-                  {/* Points are what the ladder ranks, so they're the headline once the season is
-                      done - and showing par next to them is what makes the number legible. */}
-                  {finished && result.par != null && (
-                    <div className="pts">
-                      <span className={`ptsval ${result.points >= 0 ? "up" : "down"}`}>
-                        {result.points >= 0 ? "+" : ""}{result.points.toLocaleString()} points
-                      </span>
-                      <span className="ptspar">
-                        you {result.score.toFixed(1)} · par {result.par.toFixed(1)}
-                        {result.score > result.par ? " · beat the bot" : ""}
-                      </span>
+                  {finished && (result.perfect || result.champ) && (
+                    <div className={`cel ${result.perfect ? "perfect" : ""}`}>
+                      <Confetti n={result.perfect ? 34 : 22} />
+                      <span className="stamp">🏆 {result.perfect ? "Perfect season" : "Champions"}</span>
                     </div>
                   )}
-                  {finished && (
-                    <div className="place">
-                      {lb.loading && !place ? "Ranking your season…" : place && (
-                        <>
-                          <b>#{place.rank.toLocaleString()}</b> of {place.total.toLocaleString()} season{place.total === 1 ? "" : "s"} played sitewide
-                          <span className="pct">{place.rank === 1 ? "Best ever" : topPct(place.rank, place.total)}</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {finished && (
-                    <div>
-                      {result.newSiteBest && <span className="badge">New sitewide best score</span>}
-                      {result.newBestScore && !result.newSiteBest && <span className="badge">New personal best score</span>}
-                    </div>
+                  <RecordLine games={result.games.slice(0, shown)} />
+                  <div className="outrow">
+                    {finished && outcomeEmoji(result) && <span className="oe" aria-hidden="true">{outcomeEmoji(result)}</span>}
+                    <div className="outcome">{finished ? result.outcome : inPlayoffs ? "Playoffs" : "Playing the season…"}</div>
+                  </div>
+                  {finished ? (
+                    <>
+                      <SeasonStrip result={result} ladderName={LADDER_LABEL[modeKey({ mode: mode.kind, gm: mode.gm, genius: mode.genius })]} />
+                      <SeasonMoments result={result} formatLabel={FORMAT_LABEL[normFormat(result.format)]} />
+                    </>
+                  ) : (
+                    <div className="rating">Team score {result.score.toFixed(1)}</div>
                   )}
                 </div>
 
@@ -2617,7 +2770,8 @@ export default function PerfectSeason() {
                 <h2 className="h">Season</h2>
                 <div className="log">
                   {result.games.slice(0, shown).map((g, i) => (
-                    <div key={i} className={`g ${g.win ? "win" : "loss"} ${g.playoff ? "po" : ""}`}>
+                    <div key={i} className={`g ${g.win ? "win" : "loss"} ${g.playoff ? "po" : ""} ${isUpsetWin(result.score, g) ? "up" : ""}`}
+                      title={isUpsetWin(result.score, g) ? `Upset: a ${Math.max(1, Math.round(gameWinChance(result.score, g) * 100))}% chance to win` : undefined}>
                       <div className="o">{g.label}</div>
                       <div className="w">{g.win ? "W" : "L"} {g.us}–{g.them}</div>
                       <div className="o">{g.playoff || g.home ? "vs" : "at"} {g.opp}</div>
@@ -2807,7 +2961,46 @@ export default function PerfectSeason() {
                   ))}
                 </div>
 
-                <div className="dayhead">
+                {/* The best team ever leads the screen. Sitewide totals live on Stats and "draft a
+                    friend's board" on Modes - this screen is rankings only. */}
+                {siteBest ? (
+                  <div className="champion">
+                    <div className="pickno">👑 Best {FORMAT_LABEL[lbFormat]} team ever</div>
+                    <div className="sc led-wrap"><span className="led">{scoreOf(siteBest, lbFormat).toFixed(1)}</span></div>
+                    <div className="by">{siteBest.username}{runOf(siteBest, lbFormat) ? `, went ${runOf(siteBest, lbFormat).w}–${runOf(siteBest, lbFormat).l}` : ""}</div>
+                    {runOf(siteBest, lbFormat) && <RosterChips roster={runOf(siteBest, lbFormat).roster} />}
+                  </div>
+                ) : (
+                  <div className="panel"><p style={{ margin: 0 }}>No scores yet. Finish a season while logged in to claim the top spot.</p></div>
+                )}
+
+                {lb.top.length > 0 && (
+                  <>
+                    <h2 className="h">Top 10 — {FORMAT_LABEL[lbFormat]}</h2>
+                    <table className="lb">
+                      <thead><tr><th></th><th>Player</th><th className="r">Best score</th><th className="r">Best record</th><th className="r hide">Drafts</th><th className="r hide">20–0s</th></tr></thead>
+                      <tbody>
+                        {lb.top.map((q, i) => {
+                          const mine = !!userId && q.id === userId;
+                          return (
+                            <tr key={q.id} className={rankRowClass(i, mine)}>
+                              <RankCell i={i} />
+                              <td><PlayerName name={q.username} mine={mine} /></td>
+                              <td className="r v">{scoreOf(q, lbFormat) != null ? scoreOf(q, lbFormat).toFixed(1) : "–"}</td>
+                              <td className="r">{q.bestRecord ? `${q.bestRecord.w}–${q.bestRecord.l}` : "–"}</td>
+                              <td className="r hide">{draftsOf(q)}{q.dnf ? <span className="muted"> ({q.dnf} DNF)</span> : null}</td>
+                              <td className="r hide">{q.perfect}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+                {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
+                {user && myRank >= 10 && scoreOf(stats, lbFormat) != null && <p className="note">You're #{myRank + 1} with a best {FORMAT_LABEL[lbFormat]} score of {scoreOf(stats, lbFormat).toFixed(1)}.</p>}
+
+                <div className="dayhead" style={{ marginTop: 24 }}>
                   <h2 className="h">Today's {FORMAT_LABEL[normFormat(dailyBoard.format)]} daily</h2>
                   <button className="linkbtn" onClick={() => loadDailyBoard()} disabled={dailyBoard.loading}>{dailyBoard.loading ? "Loading…" : "Refresh"}</button>
                 </div>
@@ -2820,12 +3013,15 @@ export default function PerfectSeason() {
                   <table className="lb">
                     <thead><tr><th></th><th>Player</th><th className="r">Team score</th><th className="r">Record</th></tr></thead>
                     <tbody>
-                      {dailyBoard.rows.slice(0, 10).map((q, i) => (
-                        <tr key={i} className={user && q.username === user ? "me" : ""}>
-                          <td className="rk">{i + 1}</td><td>{q.username}</td>
-                          <td className="r">{q.score.toFixed(1)}</td><td className="r">{q.w}–{q.l}</td>
-                        </tr>
-                      ))}
+                      {dailyBoard.rows.slice(0, 10).map((q, i) => {
+                        const mine = !!user && q.username === user;
+                        return (
+                          <tr key={i} className={rankRowClass(i, mine)}>
+                            <RankCell i={i} /><td><PlayerName name={q.username} mine={mine} /></td>
+                            <td className="r v">{q.score.toFixed(1)}</td><td className="r">{q.w}–{q.l}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -2856,63 +3052,21 @@ export default function PerfectSeason() {
                   <table className="lb">
                     <thead><tr><th></th><th>Player</th><th className="r">Points</th><th className="r hide">Drafts</th></tr></thead>
                     <tbody>
-                      {ladder.rows.map((q, i) => (
-                        <tr key={q.id} className={q.id === myKey ? "me" : ""}>
-                          <td className="rk">{i + 1}</td><td>{q.username}</td>
-                          <td className="r">{Math.round(pointsOf(q, ladder.mode)).toLocaleString()}</td>
-                          <td className="r hide">{draftsOf(q)}</td>
-                        </tr>
-                      ))}
+                      {ladder.rows.map((q, i) => {
+                        const mine = !!userId && q.id === userId;
+                        return (
+                          <tr key={q.id} className={rankRowClass(i, mine)}>
+                            <RankCell i={i} /><td><PlayerName name={q.username} mine={mine} /></td>
+                            <td className="r v">{Math.round(pointsOf(q, ladder.mode)).toLocaleString()}</td>
+                            <td className="r hide">{draftsOf(q)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
 
-                <h2 className="h" style={{ marginTop: 24 }}>Draft a friend's board</h2>
-                <p className="note" style={{ marginTop: 0 }}>Enter a challenge code to get the exact same six boards they had.</p>
-                <div className="frow" style={{ marginBottom: 18 }}>
-                  <input className="inp" value={codeInput} maxLength={8} placeholder="Code, e.g. K3F9QZ" aria-label="Challenge code"
-                    onChange={(e) => setCodeInput(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && (setView("play"), startCode(codeInput))} />
-                  <button className="btn solid" disabled={codeInput.trim().length < 4} onClick={() => { setView("play"); startCode(codeInput); }}>Draft this board</button>
-                </div>
-
-                {/* Sitewide totals (accounts, drafts, perfect seasons) live on the Stats screen;
-                    this screen is rankings only. */}
-                {siteBest ? (
-                  <div className="champion">
-                    <div className="stripe" style={{ background: "var(--lamp)" }} />
-                    <div className="pickno">Sitewide best {FORMAT_LABEL[lbFormat]} team score</div>
-                    <div className="sc led-wrap"><span className="led">{scoreOf(siteBest, lbFormat).toFixed(1)}</span></div>
-                    <div className="by">{siteBest.username}{runOf(siteBest, lbFormat) ? `, went ${runOf(siteBest, lbFormat).w}–${runOf(siteBest, lbFormat).l}` : ""}</div>
-                    {runOf(siteBest, lbFormat) && <RosterChips roster={runOf(siteBest, lbFormat).roster} />}
-                  </div>
-                ) : (
-                  <div className="panel"><p style={{ margin: 0 }}>No scores yet. Finish a season while logged in to claim the top spot.</p></div>
-                )}
-
-                {lb.top.length > 0 && (
-                  <>
-                    <h2 className="h">Top 10 — {FORMAT_LABEL[lbFormat]}</h2>
-                    <table className="lb">
-                      <thead><tr><th></th><th>Player</th><th className="r">Best score</th><th className="r">Best record</th><th className="r hide">Drafts</th><th className="r hide">20–0s</th></tr></thead>
-                      <tbody>
-                        {lb.top.map((q, i) => (
-                          <tr key={q.id} className={q.id === myKey ? "me" : ""}>
-                            <td className="rk">{i + 1}</td>
-                            <td>{q.username}</td>
-                            <td className="r">{scoreOf(q, lbFormat) != null ? scoreOf(q, lbFormat).toFixed(1) : "–"}</td>
-                            <td className="r">{q.bestRecord ? `${q.bestRecord.w}–${q.bestRecord.l}` : "–"}</td>
-                            <td className="r hide">{draftsOf(q)}{q.dnf ? <span className="muted"> ({q.dnf} DNF)</span> : null}</td>
-                            <td className="r hide">{q.perfect}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </>
-                )}
-
-                {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => setView("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
-                {user && myRank >= 10 && scoreOf(stats, lbFormat) != null && <p className="note">You're #{myRank + 1} with a best {FORMAT_LABEL[lbFormat]} score of {scoreOf(stats, lbFormat).toFixed(1)}.</p>}
-                <button className="btn" onClick={loadLeaderboard} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
+                <button className="btn" style={{ marginTop: 8 }} onClick={() => loadLeaderboard()} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
               </>
             )}
           </>

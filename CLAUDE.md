@@ -57,7 +57,8 @@ node tests/test-runs-sql.mjs             # runs log + Stats SQL in real Postgres
 # checkout). Build with build.mjs, serve the repo root (.claude/launch.json's "static" config),
 # open /public/page.html in the preview browser, and click through the changed screens at
 # desktop and mobile widths.
-node tests/test-theme-contrast.mjs  # every text color in both themes is readable (WCAG AA) - see Design system
+node tests/test-theme-contrast.mjs  # every text color in every theme scope is readable (WCAG AA) - see Design system
+node tests/test-result-moments.mjs  # record-first result: per-season rank, upset/streak moments, black Leaderboard
 
 # Rebuild the game data from source (only when adding a season or changing grading)
 cd scripts && python3 build.py && python3 correct.py && python3 rate2.py \
@@ -231,8 +232,10 @@ shadow, and navy "scoreboard" moments.
   for every text token in both scopes.
 - **Where the dark scope applies:** the whole play screen (the root gets `.dark` when
   `view === "play"`), plus components that are stadium-dark wherever they appear — `.reel`,
-  `.sticky`, `.result-hero`, `.champion`, `.pg`, `.pre`, `.cel`, and the Unlimited tile. Everything
-  else is cream.
+  `.sticky`, `.result-hero`, `.champion`, `.pg`, `.pre`, `.cel`, and the Unlimited tile. The
+  Leaderboard is the exception: the root gets `.night` when `view === "board"`, a true-black third
+  scope (its `.champion` takes night tokens too) with lime reserved for #1 and your own row. Everything
+  else is cream. Every scope in `theme.mjs` must define the same tokens; the contrast test checks all.
 - **Vary the treatment instead of making every block the same card:** one featured lime block (the
   daily), a navy card (Unlimited), orange for a special moment (Over/Under), and plain typography
   with a ruled top edge for stats (`.tile`).
@@ -244,7 +247,10 @@ shadow, and navy "scoreboard" moments.
 - **Emoji vocabulary**, used deliberately rather than sprinkled: 🏆 championship/achievement ·
   🔥 streak · ⚡ high-impact · 😈 risky · 💀 disaster · 👑 #1 · 🚨 upset · 🏈 football · 📈 rising ·
   🧊 cold. Add emoji at display time only — outcome strings from `simulateSeason` are stored in runs
-  and `daily_runs` and must not change.
+  and `daily_runs` and must not change. The result screen does this in separate elements
+  (`outcomeEmoji` into the `.oe` span, CSS `::after` on upset tiles) so `.outcome` and `.rec` keep
+  their exact text. An upset is a win with a 35% chance or less (`UPSET_CHANCE`), computed from the
+  opponent's rating at display time by `gameWinChance` — never by changing the simulation.
 - **Motion:** hover lift and press on buttons and tiles. Every new transform or animation goes in
   the `prefers-reduced-motion` block at the bottom of the stylesheet.
 

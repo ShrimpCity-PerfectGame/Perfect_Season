@@ -38,7 +38,7 @@ export function makeMockAuth() {
   const notify = (event) => listeners.forEach((cb) => cb(event, session));
 
   function from(table) {
-    const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : table === "builds" ? builds : dailyRuns;
+    const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : table === "builds" ? builds : table === "runs" ? runs : dailyRuns;
     return {
       select(_cols, opts) {
         const state = { filters: [], order: null, limit: null };
@@ -56,6 +56,8 @@ export function makeMockAuth() {
           not(col, _op, val) { state.filters.push((r) => (r[col] ?? null) !== val); return builder; },
           // An unset column is 0 for the numeric points ladders, matching their `not null default 0`.
           gt(col, val) { state.filters.push((r) => (r[col] ?? 0) > val); return builder; },
+          // NULL never satisfies a comparison in Postgres, so an unset column is excluded here.
+          lte(col, val) { state.filters.push((r) => r[col] != null && r[col] <= val); return builder; },
           order(col, opts) { state.order = { col, asc: opts?.ascending !== false }; return builder; },
           limit(n) { state.limit = n; return builder; },
           single() {
@@ -484,6 +486,13 @@ export async function loadPerfectSeason() {
   }
   const mod = await import(pathToFileURL(cachedComponentPath).href + `?t=${Date.now()}`);
   return mod.default;
+}
+
+// The component module itself, for tests of its exported display helpers (SeasonStrip,
+// SeasonMoments, gameWinChance, ...). Call setupDom() first, like mount().
+export async function loadAppModule() {
+  await loadPerfectSeason();
+  return import(pathToFileURL(cachedComponentPath).href + `?t=${Date.now()}`);
 }
 
 // Mounts a fresh PerfectSeason instance. Call setupDom() first.

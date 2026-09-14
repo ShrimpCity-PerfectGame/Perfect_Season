@@ -2,10 +2,12 @@
 // tests/test-theme-contrast.mjs reads the same object to prove every text color stays readable -
 // so the palette can't quietly regress into something illegible.
 //
-// Two scopes:
-//   light - the cream default for home, profile, stats, leaderboard tables, auth.
-//   dark  - the navy "scoreboard" treatment for the draft/play screen and the leaderboard's
-//           champion block, applied by the `.dark` class.
+// Three scopes:
+//   light - the cream default for home, profile, stats, auth.
+//   dark  - the navy "scoreboard" treatment for the draft/play screen, the season result and the
+//           other always-dark components, applied by the `.dark` class.
+//   night - true black for the Leaderboard, the one screen that is all about ranking. A step darker
+//           than the navy, with lime saved for whoever is on top. Applied by the `.night` class.
 //
 // THE ONE RULE: `accent` (electric lime) is a FILL. It sits behind `onAccent` text and is never used
 // as a text or line color on cream - lime on cream is ~1.2:1, effectively invisible. Anything that
@@ -86,6 +88,37 @@ export const THEME = {
     bevel: "inset 0 1px 0 rgba(255,255,255,.08), inset 0 -1px 0 rgba(0,0,0,.45)",
     btnLine: "#36416A",
     hard: "rgba(0,0,0,.55)",
+  },
+  night: {
+    bg: "#0A0A0C",
+    surface: "#15171C",
+    surface2: "#1E2027",
+    line: "#24262D",
+    line2: "#363943",
+    ink: PALETTE.cream,
+    muted: "#A3A59C",
+    accent: PALETTE.lime,
+    onAccent: PALETTE.ink,
+    accentInk: PALETTE.lime,
+    blue: PALETTE.blue,
+    orange: PALETTE.orange,
+    violet: PALETTE.violet,
+    win: "#6FD49B",
+    loss: "#F07B6B",
+    qb: "#F2557A",
+    rb: "#2FD3B5",
+    wr: "#5AA9FF",
+    te: "#F5A04A",
+    flex: "#B18CFF",
+    ga: "#4ADE80",
+    gb: "#2FD3B5",
+    gc: "#F7B32B",
+    gd: "#F07B6B",
+    glow: "rgba(184,245,0,.16)",
+    shadow: "0 1px 0 rgba(0,0,0,.5), 0 8px 22px rgba(0,0,0,.55)",
+    bevel: "inset 0 1px 0 rgba(255,255,255,.07), inset 0 -1px 0 rgba(0,0,0,.5)",
+    btnLine: "#3A3D46",
+    hard: "rgba(0,0,0,.6)",
   },
 };
 

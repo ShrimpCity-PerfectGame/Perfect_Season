@@ -17,7 +17,7 @@ const contrast = (a, b) => {
   return (hi + 0.05) / (lo + 0.05);
 };
 
-for (const scope of ["light", "dark"]) {
+for (const scope of Object.keys(THEME)) {
   await runTest(`${scope} theme: every text color is readable on every surface`, async () => {
     const t = THEME[scope];
     for (const text of TEXT_TOKENS) {
@@ -44,12 +44,15 @@ await runTest("lime is never a text color in the light theme", async () => {
   assert(contrast(PALETTE.lime, THEME.light.bg) < 2, "sanity: lime on cream really is unreadable, which is why this rule exists");
 });
 
-await runTest("both scopes define exactly the same tokens", async () => {
-  // A token missing from one scope silently inherits the other scope's value inside `.dark`
-  // panels - e.g. cream text on cream.
+await runTest("every scope defines exactly the same tokens", async () => {
+  // A token missing from one scope silently inherits another scope's value inside `.dark` or
+  // `.night` panels - e.g. cream text on cream.
   const light = Object.keys(THEME.light).sort().join(",");
-  const dark = Object.keys(THEME.dark).sort().join(",");
-  assert(light === dark, `token sets differ:\n light: ${light}\n dark:  ${dark}`);
+  for (const scope of Object.keys(THEME)) {
+    const keys = Object.keys(THEME[scope]).sort().join(",");
+    assert(keys === light, `token sets differ:\n light: ${light}\n ${scope}: ${keys}`);
+  }
+  assert("night" in THEME, "expected the Leaderboard's night scope to exist and be checked");
   assert(cssVars("light").includes("--accent-ink:") && cssVars("dark").includes("--on-accent:"), "cssVars should emit kebab-case names");
 });
 
