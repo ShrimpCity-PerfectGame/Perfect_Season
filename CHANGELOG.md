@@ -52,6 +52,13 @@ re-checked the fixes.
   answering and moving on. Build-a-player's attribute and position buttons are a grid.
 - The Stats boards show rank, name and value on one row on phones.
 
+### Correction to 1.5.1
+
+- 1.5.1 said the intermittent failed requests came only from the in-app browser used for testing.
+  Checking this release on staging in real Chrome caught one as well: rare, but real. The automatic
+  retry added in 1.5.1 recovered it and the page loaded normally, which is the protection that
+  matters; the underlying cause on the Supabase side is still unknown.
+
 ### Deploy notes
 
 App only. No database migration or Edge Function change.
