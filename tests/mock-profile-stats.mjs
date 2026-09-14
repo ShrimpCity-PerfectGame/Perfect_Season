@@ -95,7 +95,8 @@ export function playerStats(state, userId) {
     }];
   }));
 
-  // daily_runs.format defaults to fantasy, so a mock row without one is a fantasy daily.
+  // daily_runs.format defaults to fantasy, so a mock row without one is a fantasy daily. Rows the mock's
+  // submit-run writes have no created_at either (the database fills in now()); they sort after dated ones.
   const formatOf = (r) => r.format ?? "fantasy";
   const allDailies = [...state.dailyRuns.values()];
   const dailies = allDailies.filter((r) => r.user_id === userId);
