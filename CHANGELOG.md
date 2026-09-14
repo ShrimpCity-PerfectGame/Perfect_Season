@@ -13,6 +13,42 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.8.1] — 2026-09-14
+
+### Fixed
+
+- **The season on screen could differ from the one saved.** In current Chrome, a season that reached
+  the playoffs could show a different result from the one recorded on your profile and the
+  leaderboards: one daily showed a 19–1 championship loss and was saved as a perfect 20–0. Each
+  playoff game's play-by-play is shuffled using the browser's own sort, and Chrome 152 sorts short
+  lists with fewer steps than the server does. Each step draws a random number, so after the first
+  playoff game the browser and the server were rolling different numbers. That affected about one
+  season in eight, and more than a third of seasons with two or more playoff games. The shuffle now
+  draws exactly the way the server always has, in every browser. What was saved was always the
+  server's result, so no saved season or challenge code changes. On a device that showed a
+  mismatch, today's daily card can still show the on-screen record until tomorrow.
+- **Leaving an Unlimited draft before your first pick dealt new boards without a DNF.** Going back
+  to Modes and tapping Unlimited again, reloading, resetting, or switching between Unlimited, Genius
+  and GM mode all threw the dealt boards away for free, and handed back a used re-spin. A draft now
+  counts from the moment its first board is dealt: coming back picks it up where you left it, and
+  resetting or switching modes counts as a DNF, the same as after a pick.
+- **Play an unlimited draft and Run it back, after a daily, threw away an Unlimited draft you had in
+  progress** and counted a DNF. They now take you back to it.
+- A perfect season's summary on the profile and the daily card read "Perfect season. 20–0..".
+
+### Changed
+
+- **Build-a-player's attribute buttons were redesigned:** each attribute is a card with its grade
+  in a large colored chip, three to a row on wide screens and one per row on phones.
+- **The header matches the rest of the site:** How to play and Log in are chips, your name has a
+  lime initial and opens your profile, and the version is a small tag.
+- **Phones:** the draft screen is more compact, so the first player card starts higher; the
+  re-spin buttons shorten to "↻ Team 1"; GM mode shows the cap you have left in the sticky team
+  bar; on the smallest phones the Leaderboard puts each record under the name so long usernames
+  fit; and the admin panel starts collapsed.
+- The Leaderboard's "20–0s" column is now "Perfect".
+- The Stats screen no longer explains how runs are counted.
+
 ## [1.8.0] — 2026-09-14
 
 A full pass over every screen on phones: small and large phones, tablets and landscape. Five

@@ -64,6 +64,7 @@ node tools/ui-harness/audit.mjs --as player --width 375 --tab Leaderboard --out 
 node tests/test-theme-contrast.mjs  # every text color in every theme scope is readable (WCAG AA) - see Design system
 node tests/test-result-moments.mjs  # record-first result: per-season rank, upset/streak moments, black Leaderboard, Share
 node tests/test-sou-leave.mjs       # Over/Under can't be replayed or left running: leaving/reloading mid-round is a miss
+node tests/test-sim-engine-independence.mjs  # the season sim rolls identically in every JS engine; pins a 2,000-season checksum
 
 # Rebuild the game data from source (only when adding a season or changing grading)
 cd scripts && python3 build.py && python3 correct.py && python3 rate2.py \
@@ -192,6 +193,16 @@ so consumers do a field lookup instead of recomputing. Things worth knowing befo
 for the daily, a random `code` for Unlimited/challenge links) plus the exact roster drafted. Same
 seed + same lineup always produces the same result — this is what makes challenge codes and daily
 results reproducible/shareable, so don't add unseeded randomness to any of that path.
+
+**The number of random draws must not depend on the JavaScript engine either.** The client and the
+server run different engines (the player's browser vs. Deno's V8), and they must consume the seeded
+stream call for call. Never order anything in this path with `sort(() => Math.random() - 0.5)` or any
+other inconsistent comparator: how many times an engine calls it is up to the engine. That exact
+shuffle in `buildTimeline` broke in production. Chrome 152's V8 calls it fewer times than the server's,
+so Chrome players saw different playoff results from the ones saved (v1.8.1). `smallTimSort`
+reproduces the server's calls exactly. `tests/test-sim-engine-independence.mjs` pins a checksum of
+2,000 seasons. If a change moves it, every challenge code plays out differently, and the client and
+the Edge Function must ship together.
 
 **Reroll pool exclusion.** A reroll must never repeat a team+era already anywhere in the draft's
 planned sequence (`seq`, not just the shown prefix — a rerolled pick that duplicates a
@@ -336,7 +347,10 @@ change means running each format, since they have separate benchmarks.
 its own saved progress slot (`ps-daily-wip:<date>`, suffixed `:std` for Championship), and it
 resumes rather than restarts. Any new navigation path
 must not give a player a second crack at it. Unlimited drafts may be reset, but a reset counts as a
-**DNF** against their stats.
+**DNF** against their stats. **A draft counts from the moment its first board is dealt, picks or
+not:** leaving and coming back (or reloading) resumes it with its re-spins as they were, and Reset,
+switching Unlimited/Genius/GM or scoring format, or entering a code abandons it as a DNF. Before
+1.8.1 a no-pick draft didn't count, which made looking at the first board and leaving a free redo.
 
 **Stat columns follow one shape at every position:** main-role yards, TDs, per-attempt average,
 volume, secondary role, fumbles.
