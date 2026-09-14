@@ -17,13 +17,20 @@ import {
   passerRating, normFormat, BEST_FIELDS, FORMATS,
   botPar, draftPoints, modeKey, LADDERS, dailySeed,
 } from "./game-logic.mjs";
+import {
+  SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr, fmtDate,
+  outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips,
+} from "./ui-common.jsx";
+import { PROFILE_CSS } from "./profile.jsx";
+import { AVATAR_CSS } from "./avatars.jsx";
+import { PICKER_CSS } from "./avatar-picker.jsx";
+import { MODERATION_CSS } from "./moderation.jsx";
 initGameData(gameData.players, gameData.opponents);
 
 // Baked in by build.mjs's esbuild `define` (same mechanism as SUPABASE_URL - see storage.js).
 const IS_STAGING = APP_ENV === "staging";
 
 const POS_NAME = { QB: "Quarterbacks", RB: "Running backs", WR: "Wide receivers", TE: "Tight ends" };
-const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
 // Stats O/U: the one headline counting stat each position gets quizzed on.
 const SOU_STAT = {
   QB: ["py", "passing yards"],
@@ -99,24 +106,12 @@ const BAP_ATTRS = {
 };
 const BAP_CATS = ["Physical", "Mental", "Skill"];
 
-const teamVars = (code) => ({ "--tc1": TEAMS[code][2], "--tc2": TEAMS[code][3] });
-const gradeTier = (r) => (r >= 95 ? "ga" : r >= 80 ? "gb" : r >= 56 ? "gc" : "gd");
 const TEAM_CODES = Object.keys(TEAMS);
 
-function cityFor(code, year) {
-  if (code === "LA") return year <= 2015 ? "St. Louis" : "Los Angeles";
-  if (code === "LAC") return year <= 2016 ? "San Diego" : "Los Angeles";
-  if (code === "LV") return year <= 2019 ? "Oakland" : "Las Vegas";
-  return TEAMS[code][1];
-}
 function cityRange(code, w) {
   const [a, b] = WINDOWS[w];
   const c1 = cityFor(code, a), c2 = cityFor(code, b);
   return c1 === c2 ? c1 : `${c1} & ${c2}`;
-}
-function teamLabel(code, year) {
-  const c = cityFor(code, year);
-  return c ? `${c} ${TEAMS[code][0]}` : TEAMS[code][0];
 }
 
 // Every player id that actually appears on a board, for Stats O/U's random pick - the id->name
@@ -209,11 +204,6 @@ function statCells(p) {
   ];
 }
 
-function grade(r) {
-  const t = [[120, "A+"], [105, "A"], [95, "A−"], [88, "B+"], [80, "B"], [72, "B−"], [64, "C+"], [56, "C"], [48, "C−"], [40, "D"]];
-  for (const [v, g] of t) if (r >= v) return g;
-  return "F";
-}
 const bapOverallScore = (filled) => {
   const scores = Object.values(filled).map((f) => f.score);
   return scores.reduce((a, b) => a + b, 0) / scores.length;
@@ -547,7 +537,7 @@ const CSS = `
 /* Stop the browser pinning the view to the bottom while a season's tiles tick in under it. */
 html:has(.result-hero){overflow-anchor:none}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
-.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.challenge{${cssVars("dark")};color:var(--ink)}
+.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.challenge,.pf-card{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
 /* Leaderboard scope: true black. After the dark list so its champion block takes night tokens. */
 .ps.night,.night .champion{${cssVars("night")};color:var(--ink)}
@@ -1178,6 +1168,10 @@ button.pill{font-family:inherit;transition:border-color .12s}
   .btn:hover:not(:disabled),.btn:active:not(:disabled),.mode:hover:not(.static),.mode:active:not(.static),.fmtbtn:hover,.card:hover:not(.off){transform:none}
 }
 `;
+// The whole stylesheet the app renders, for previewing one screen on its own (the UI harness).
+// The screens in their own files bring their own rules, each scoped to its class prefix (pf-, av-, ap-,
+// md-), after the base stylesheet so they can reuse its tokens and classes.
+export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS;
 
 const reducedMotion = () => typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's
@@ -1194,7 +1188,6 @@ function blankStats(username) {
   return { username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0,
     bestScore: null, bestRun: null, bestRecord: null, recent: [], created: Date.now() };
 }
-const draftsOf = (s) => (s.runs || 0) + (s.dnf || 0);
 
 const topPct = (rank, total) => {
   const p = (100 * rank) / total;
@@ -1208,10 +1201,6 @@ const EMPTY_SITE_STATS = {
   byFormat: Object.fromEntries(FORMATS.map((f) => [f, { bestLineups: [], bestGm: [], biggestUpsets: [] }])),
   mostDrafted: [], mostWins: [], mostChamps: [], mostPlayoffs: [], longestStreaks: [], bestWinPct: [], avgWinPct: 0,
 };
-const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-// An outcome as the end of a sentence. Stored outcomes can't change, and the perfect one already ends
-// in a period and repeats the record the sentence has just given.
-const outcomeSentence = (o) => (!o ? "" : o === "Perfect season. 20–0." ? "Perfect season." : `${o}.`);
 const USER_RE = /^[a-zA-Z0-9_]{3,16}$/;
 
 const OUTCOME_BUTTONS = [
@@ -1332,35 +1321,6 @@ function PlayerIndex() {
   );
 }
 
-function RosterRows({ roster }) {
-  return (
-    <div className="reveal">
-      {roster.map((p) => (
-        <div className={`rv pos-${p.slot.startsWith("FLEX") ? "FLEX" : p.slot}`} key={p.slot}>
-          <div className="s">{SLOT_LABEL[p.slot]}</div>
-          <div><div className="p">{p.name}</div><div className="t">{p.season} {teamLabel(p.team, p.season)}</div></div>
-          <div className="pts">{p.ppr.toFixed(1)}<small>PPR pts</small></div>
-          <div className={`gr ${gradeTier(p.rating)}`}>{grade(p.rating)}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// A drafted-roster summary as small position-colored chips (reusing the same chip/pos-${slot}
-// coloring the in-draft sticky bar uses) instead of one long comma-joined line of names - used
-// anywhere a saved roster gets shown back compactly (the sitewide/hall-of-fame best-lineup cards).
-function RosterChips({ roster }) {
-  return (
-    <div className="chips" style={{ flexWrap: "wrap", marginTop: 6 }}>
-      {roster.map((p, i) => (
-        <span key={i} className={`chip on pos-${(p.slot || "").startsWith("FLEX") ? "FLEX" : p.slot || ""}`}>
-          {p.name} · {shortYr(p.season)}
-        </span>
-      ))}
-    </div>
-  );
-}
 
 // A plain "#rank — username — value" leaderboard, shared by every zero-frills Stats leaderboard
 // (wins, championships, playoffs, streak, win %, GM score) - the same .rc grid every other
@@ -1454,11 +1414,6 @@ const FORMAT_KEY = "ps-format";
 // Which saved-progress slot a mode occupies. Free-mode variants (genius/gm/format) all share one
 // slot the way they always have; the two dailies genuinely coexist, so they don't.
 const slotId = (m) => (m.kind === "daily" ? `daily:${normFormat(m.format)}` : "free");
-// Scores from the two formats live in different profile fields and never rank against each other.
-const scoreOf = (p, format) => (p ? p[BEST_FIELDS[normFormat(format)].score] ?? null : null);
-const runOf = (p, format) => (p ? p[BEST_FIELDS[normFormat(format)].run] ?? null : null);
-const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };
-const LADDER_LABEL = { daily: "Daily", unlimited: "Unlimited", genius: "Genius", gm: "GM" };
 // Whether a finished daily ended in a title, for choosing its button's tone. Saved results carry
 // `champ` from the sim; ones saved before that field existed fall back to the outcome text.
 const wonItAll = (rec) => rec?.champ ?? /^(Won the championship|Perfect season)/.test(rec?.outcome || "");
@@ -1565,7 +1520,6 @@ const HOWTO_KEY = "ps-howto-seen";
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
 const findPlayer = (key, id, season) => (BOARDS[key] || []).find((p) => p.id === id && p.season === season);
-const shortYr = (y) => `'${String(y).slice(2)}`;
 
 function bestAvailable(key, draftedIds, openSlots, format) {
   const rate = (p) => (normFormat(format) === "standard" ? p.stdRating : p.rating);
@@ -2798,7 +2752,7 @@ export default function PerfectSeason() {
 
   return (
     <div className={`ps${view === "play" ? " dark" : view === "board" ? " night" : ""}`}>
-      <style>{CSS}</style>
+      <style>{APP_CSS}</style>
       <div className="wrap">
         <nav className="nav" aria-label="Sections">
           {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"], ["stats", "Stats"]].map(([k, l]) => (

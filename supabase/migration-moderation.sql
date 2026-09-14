@@ -1,0 +1,21 @@
+-- Migration: reports and moderation (v1.11.0). Run AFTER migration-profiles.sql (it uses
+-- profile_details, text_is_clean and the avatars bucket). Staging first, then production. Safe to
+-- re-run.
+--
+-- Contract: PROFILES.md. Only adds objects.
+--
+-- PHASE 0 STUB - agent F writes this file. What it must define:
+--
+--   moderators (user_id -> profiles.id, added_at) - RLS on, no policies. Adding one:
+--       insert into moderators (user_id) select id from profiles where username = '...';
+--   reports (id, reporter_id, target_id, reason, note, status open|dismissed|actioned, created_at,
+--            resolved_by, resolved_at, action) - RLS on, no policies; one open report per reporter,
+--            target and reason.
+--   is_moderator() -> boolean (stable; called as GET)
+--   report_player(p_username text, p_reason text, p_note text) -> jsonb { ok: true }
+--       raises not_signed_in | no_such_player | self | bad_reason | note_too_long | limit | duplicate
+--   mod_queue() -> jsonb array (stable; called as GET), raises not_moderator
+--   mod_act(p_user_id uuid, p_action text, p_new_name text) -> jsonb { ok: true, removed_path }
+--       actions remove_picture | clear_bio | rename | dismiss
+--       raises not_moderator | no_such_player | bad_action | invalid | taken | blocked
+--   a storage.objects delete policy letting moderators delete any "avatars" object

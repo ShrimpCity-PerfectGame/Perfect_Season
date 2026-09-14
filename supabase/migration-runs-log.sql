@@ -15,6 +15,8 @@
 -- an edit here plus re-running the whole file (the backfill is a no-op the second time):
 --   1.6.0  site_stats returns biggest_upsets instead of pos_records. A client older than 1.6.0 shows
 --          its position-records section empty until the 1.6.0 client ships a few minutes later.
+--   1.11.0 adds player_stats(user_id) for the profile screen, and indexes for reading one player's
+--          daily_runs, sou_runs and builds. Only adds objects.
 
 create table if not exists public.runs (
   id          uuid primary key default gen_random_uuid(),
@@ -205,5 +207,25 @@ returns jsonb language sql stable security invoker set search_path = public as $
     'avg_win_pct', (
       select coalesce(round(100 * sum(wins)::numeric / nullif(sum(wins + losses), 0)), 0) from played
     )
+  );
+$$;
+
+-- ---------- One player (1.11.0) ----------
+-- Everything per-player the profile screen shows beyond the profiles row itself. Contract and exact
+-- JSON shape: PROFILES.md ("player_stats"). tests/mock-profile-stats.mjs mirrors it and
+-- tests/test-player-stats-sql.mjs checks the two agree.
+--
+-- PHASE 0 STUB (agent A writes the real query): returns the empty shape for everyone.
+create or replace function public.player_stats(p_user_id uuid)
+returns jsonb language sql stable security invoker set search_path = public as $$
+  select jsonb_build_object(
+    'since', null, 'by_ladder', '[]'::jsonb, 'wins', '[]'::jsonb, 'best_points', null,
+    'go_to_players', '[]'::jsonb, 'team_counts', '[]'::jsonb,
+    'by_format', jsonb_build_object(
+      'fantasy', jsonb_build_object('champs', 0, 'biggest_upset', null, 'best_gm', null),
+      'standard', jsonb_build_object('champs', 0, 'biggest_upset', null, 'best_gm', null)),
+    'dailies', jsonb_build_object('played', 0, 'best_score', null, 'best_w', null, 'best_l', null, 'best_rank', null),
+    'over_under', jsonb_build_object('played', 0, 'best', null),
+    'builds', jsonb_build_object('count', 0, 'best', null)
   );
 $$;

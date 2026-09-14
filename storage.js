@@ -25,18 +25,9 @@ export async function clearDraft(key) {
 }
 
 // ---------- Supabase client seam ----------
-// SUPABASE_URL/SUPABASE_ANON_KEY are bare identifiers, textually replaced at build time by
-// build.mjs's esbuild `define` (same mechanism as the existing NODE_ENV define) - never read
-// from process.env directly here, since this module is bundled for the browser. The real
-// client is only ever constructed lazily (not at module load) so tests - which always install
-// window.__ps_supabase__ before mounting - never hit this branch or need the identifiers defined.
-import { createClient } from "@supabase/supabase-js";
-let _client = null;
-function getClient() {
-  if (typeof window !== "undefined" && window.__ps_supabase__) return window.__ps_supabase__;
-  if (!_client) _client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  return _client;
-}
+// The client, the read-retry option and the profile row mapping live in storage-core.js, shared
+// with the feature modules re-exported at the bottom of this file.
+import { getClient, READ, rowToProfile } from "./storage-core.js";
 
 // ---------- Auth ----------
 export async function authSignUp(email, password, username) {
@@ -63,36 +54,7 @@ export function mapAuthError(error) {
 }
 
 // ---------- Profiles (stats) and daily runs ----------
-// DB columns are snake_case; the rest of the app works with the same camelCase shape
-// blankStats() always produced, so every profile row is translated at this boundary.
-function rowToProfile(row) {
-  if (!row) return null;
-  return {
-    username: row.username, runs: row.runs || 0, dnf: row.dnf || 0, wins: row.wins || 0, losses: row.losses || 0,
-    champs: row.champs || 0, perfect: row.perfect || 0, playoffs: row.playoffs || 0,
-    bestScore: row.best_score ?? null, bestRun: row.best_run ?? null, bestRecord: row.best_record ?? null,
-    bestScoreStd: row.best_score_std ?? null, bestRunStd: row.best_run_std ?? null,
-    points: {
-      daily: row.points_daily || 0, unlimited: row.points_unlimited || 0,
-      genius: row.points_genius || 0, gm: row.points_gm || 0,
-    },
-    pointsBank: row.points_bank || 0, pointsDay: row.points_day ?? null,
-    recent: row.recent || [], dailyStreak: row.daily_streak || 0, dailyLast: row.daily_last ?? null,
-    dailyBestStreak: row.daily_best_streak || 0, id: row.id,
-  };
-}
-function profileToRow(s) {
-  return {
-    username: s.username, runs: s.runs, dnf: s.dnf, wins: s.wins, losses: s.losses,
-    champs: s.champs, perfect: s.perfect, playoffs: s.playoffs,
-    best_score: s.bestScore, best_run: s.bestRun, best_record: s.bestRecord, recent: s.recent || [],
-    best_score_std: s.bestScoreStd, best_run_std: s.bestRunStd,
-    points_daily: s.points?.daily || 0, points_unlimited: s.points?.unlimited || 0,
-    points_genius: s.points?.genius || 0, points_gm: s.points?.gm || 0,
-    points_bank: s.pointsBank || 0, points_day: s.pointsDay ?? null,
-    daily_streak: s.dailyStreak, daily_last: s.dailyLast, daily_best_streak: s.dailyBestStreak,
-  };
-}
+// Rows are translated to the app's camelCase shape by storage-core.js's rowToProfile.
 // Which profiles column ranks each scoring format. Mirrors game-logic.mjs's BEST_FIELDS on the
 // DB-column side of the boundary.
 const BEST_COL = { fantasy: "best_score", standard: "best_score_std" };
@@ -164,11 +126,8 @@ export async function fetchLadderTop(mode = "unlimited", limit = 10) {
   if (error || !data) return [];
   return data.map(rowToProfile);
 }
-// supabase-js retries a dropped GET/HEAD by itself (up to 3 times, 1s/2s/4s apart) but never a POST,
-// and .rpc() POSTs by default. Both Stats functions only read, so they're called as GET (`get: true`,
-// allowed because they're declared STABLE) to get that same retry. Keep it that way for any new
-// read-only RPC; writes stay POST and go out exactly once.
-const READ = { get: true };
+// Both Stats functions only read, so they go out as GET (storage-core.js's READ) and get supabase-js's
+// automatic retry. Keep it that way for any new read-only RPC; writes stay POST and go out exactly once.
 
 // Summed in the database (site_totals(), supabase/migration-runs-log.sql) - one small row back
 // instead of a column from every account. Returns null when it can't be loaded, never zeros: a
@@ -257,3 +216,9 @@ export function subscribeSiteActivity({ onOnlineCount, onDraftFinished }) {
     broadcastDraftFinished: () => channel.send({ type: "broadcast", event: "draft_finished", payload: {} }),
   };
 }
+
+// ---------- Profiles, pictures and moderation (v1.11.0) ----------
+// Their own modules, so they can be built and tested separately; re-exported here so the app keeps
+// importing everything from "./storage.js". See PROFILES.md for the contract.
+export * from "./storage-profile.js";
+export * from "./storage-moderation.js";

@@ -143,6 +143,44 @@ export async function loadAppModule() {
   return import(pathToFileURL(cachedComponentPath).href + `?t=${Date.now()}`);
 }
 
+// Any other module, bundled the same way as the app - for testing a screen that lives in its own file
+// (profile.jsx, avatars.jsx, avatar-picker.jsx, moderation.jsx) on its own. `entry` is relative to the
+// repo root. Call setupDom() first.
+const bundledModules = new Map();
+export async function loadModule(entry) {
+  if (!bundledModules.has(entry)) {
+    const outfile = path.join(root, "build", `test-${entry.replace(/[^a-z0-9]+/gi, "-")}.mjs`);
+    await esbuild.build({
+      entryPoints: [path.join(root, entry)],
+      bundle: true,
+      format: "esm",
+      jsx: "automatic",
+      platform: "browser",
+      external: ["react", "react-dom", "react-dom/client"],
+      define: {
+        APP_VERSION: JSON.stringify("test"),
+        APP_ENV: JSON.stringify("production"),
+        APP_SITE_URL: JSON.stringify("https://gridspin.test"),
+      },
+      outfile,
+    });
+    bundledModules.set(entry, outfile);
+  }
+  return import(pathToFileURL(bundledModules.get(entry)).href + `?t=${Date.now()}`);
+}
+
+// Renders one component (from loadModule) into #root. rerender(props) updates it in place.
+export async function renderComponent(Component, props = {}) {
+  const act = await getAct();
+  const React = (await import("react")).default;
+  const { createRoot } = await import("react-dom/client");
+  const container = document.getElementById("root");
+  const reactRoot = createRoot(container);
+  await act(async () => { reactRoot.render(React.createElement(Component, props)); });
+  const rerender = (next) => act(async () => { reactRoot.render(React.createElement(Component, next)); });
+  return { container, reactRoot, rerender };
+}
+
 // Mounts a fresh PerfectSeason instance. Call setupDom() first.
 export async function mount() {
   const act = await getAct();

@@ -2,6 +2,9 @@
 // it too (the UI audit harness in tools/ui-harness). Nothing here may import Node-only modules;
 // tests/helpers.mjs re-exports makeMockAuth for the test suites.
 import * as GL from "../game-logic.mjs";
+import { playerStats } from "./mock-profile-stats.mjs";
+import { makeProfileData } from "./mock-profile-data.mjs";
+import { makeModeration } from "./mock-moderation.mjs";
 
 // In-memory mock of the Supabase client surface storage.js actually calls: auth (signUp,
 // signInWithPassword, signOut, getSession, onAuthStateChange) and .from("profiles"/"daily_runs")
@@ -20,8 +23,28 @@ export function makeMockAuth() {
   const listeners = [];
   const notify = (event) => listeners.forEach((cb) => cb(event, session));
 
+  // The v1.11.0 profile modules (PROFILES.md) each own their tables and database functions, in their
+  // own files, sharing these tables and the signed-in user.
+  const state = { profiles, runs, dailyRuns, souRuns, builds, currentUserId: () => session?.user?.id ?? null, isModerator: () => false };
+  const profileData = makeProfileData(state, { playerStats });
+  const moderation = makeModeration(state, profileData);
+  state.isModerator = moderation.isModerator;
+  const extraTables = { ...profileData.tables, ...moderation.tables };
+  // These have no client write policy at all - the app changes them only through database functions -
+  // so a direct write gets the error RLS would give.
+  const rlsDenied = () => Promise.resolve({ error: { code: "42501", message: "new row violates row-level security policy" } });
+
   function from(table) {
-    const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : table === "builds" ? builds : table === "runs" ? runs : dailyRuns;
+    const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : table === "builds" ? builds : table === "runs" ? runs : extraTables[table] || dailyRuns;
+    if (extraTables[table]) {
+      const base = fromStore(store);
+      return { ...base, insert: rlsDenied, upsert: rlsDenied, update: () => ({ eq: rlsDenied }), delete: () => ({ eq: rlsDenied }) };
+    }
+    return fromStore(store);
+  }
+
+  function fromStore(store) {
+    const table = store === profiles ? "profiles" : store === souRuns ? "sou_runs" : store === builds ? "builds" : store === runs ? "runs" : store === dailyRuns ? "daily_runs" : "other";
     return {
       select(_cols, opts) {
         const state = { filters: [], order: null, limit: null };
@@ -308,14 +331,36 @@ export function makeMockAuth() {
       avg_win_pct: games > 0 ? Math.round((100 * wins) / games) : 0,
     };
   }
-  const rpcs = { site_totals: siteTotals, site_stats: siteStats };
+  const rpcs = {
+    site_totals: siteTotals, site_stats: siteStats,
+    player_stats: ({ p_user_id } = {}) => playerStats(state, p_user_id),
+    ...profileData.rpcs, ...moderation.rpcs,
+  };
 
   return {
     from,
     channel,
     functions: { invoke: (name, opts) => (name === "submit-run" ? invokeSubmitRun(opts?.body) : Promise.resolve({ error: { message: "unknown function" } })) },
     removeChannel() {},
-    rpc: (name, args) => Promise.resolve(rpcs[name] ? { data: rpcs[name](args), error: null } : { data: null, error: { message: `unknown function ${name}` } }),
+    rpc: (name, args) => {
+      if (!rpcs[name]) return Promise.resolve({ data: null, error: { message: `unknown function ${name}` } });
+      try {
+        return Promise.resolve({ data: rpcs[name](args), error: null });
+      } catch (e) {
+        // A database function refusing something raises its own code (PROFILES.md) - returned the way
+        // PostgREST returns it. Anything else is a bug in the mock, so it isn't swallowed.
+        if (/^[a-z_]+$/.test(e?.message || "")) return Promise.resolve({ data: null, error: { message: e.message, code: "P0001" } });
+        return Promise.reject(e);
+      }
+    },
+    storage: profileData.storage,
+    _profileDetails: profileData.tables.profile_details, // test-only escape hatches for the profile modules
+    _avatarPresets: profileData.tables.avatar_presets,
+    _blockedWords: profileData.tables.blocked_words,
+    _siteFlags: profileData.tables.site_flags,
+    _storageObjects: profileData.objects,
+    _reports: moderation.tables.reports,
+    _moderators: moderation.tables.moderators,
     _profiles: profiles, // test-only escape hatch for setup/assertions
     _runs: runs, // test-only escape hatch for setup/assertions
     _builds: builds, // test-only escape hatch for setup/assertions
@@ -329,9 +374,12 @@ export function makeMockAuth() {
         if ([...profiles.values()].some((r) => r.username === username)) {
           return { data: null, error: { code: "23505", message: 'duplicate key value violates unique constraint "profiles_username_key"' } };
         }
+        // The signup trigger refuses a blocked username (migration-profiles.sql's handle_new_user), which
+        // reaches the client as Supabase Auth's generic database error.
+        if (!profileData.isClean(username)) return { data: null, error: { status: 500, message: "Database error saving new user" } };
         const id = `user-${authUsers.size + 1}`;
         authUsers.set(email, { id, email, password });
-        profiles.set(id, { id, username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0 });
+        profiles.set(id, { id, username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
         session = { user: { id, email } };
         notify("SIGNED_IN");
         return { data: { user: { id, email } }, error: null };

@@ -1,0 +1,28 @@
+-- Migration: profiles (v1.11.0) - bios, pictures, favorite teams, the word filter, and one-read
+-- profile lookups. Run AFTER migration-runs-log.sql (player_profile calls its player_stats), before
+-- shipping the client that reads it. Staging first, then production. Safe to re-run.
+--
+-- Contract: PROFILES.md. Only adds objects (plus a stricter handle_new_user), so the site that's live
+-- when this runs keeps working.
+--
+-- PHASE 0 STUB - agent B writes this file. What it must define:
+--
+--   profile_details (user_id -> profiles.id, bio, avatar_path, avatar_preset -> avatar_presets.key,
+--                    favorite_team, updated_at)
+--       RLS on, anyone may select, NO insert/update/delete policy - written only by the functions below.
+--   avatar_presets (key primary key, pack, free) seeded with profile-rules.mjs's FREE_AVATAR_PRESETS.
+--   blocked_words (word primary key, match 'word' | 'anywhere') - RLS on, no policies (nobody reads the
+--       list but the functions). text_is_clean(text) -> boolean, security definer, execute revoked
+--       from public, anon and authenticated.
+--   site_flags (key primary key, enabled boolean) with 'uploads_paused' (false) - the upload kill switch:
+--       update site_flags set enabled = true where key = 'uploads_paused';
+--   storage bucket "avatars": public, file_size_limit 262144, allowed_mime_types webp/jpeg/png; policies
+--       on storage.objects so an authenticated player can insert/select/update/delete only under their
+--       own "<auth.uid()>/" folder, and insert only while uploads aren't paused.
+--   save_profile(p_bio text, p_favorite_team text) -> jsonb (the details row)
+--       raises bio_too_long | bio_invalid | bio_blocked | bad_team | not_signed_in
+--   set_avatar(p_path text, p_preset text) -> jsonb (the details row); both null clears the picture
+--       raises bad_request | bad_path | bad_preset | not_signed_in
+--   check_username(p_username text) -> text: ok | taken | blocked | invalid (stable; called as GET)
+--   handle_new_user(): the signup trigger, now also refusing a blocked username (raises username_blocked)
+--   player_profile(p_username text) -> jsonb { profile, details, stats } or null (stable; called as GET)
