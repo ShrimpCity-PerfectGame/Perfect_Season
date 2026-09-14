@@ -20,6 +20,7 @@
     "@electric-sql/pglite": "^0.5.8",
     "esbuild": "^0.24.0",
     "jsdom": "^25.0.1",
+    "puppeteer-core": "^25.10.0",
     "supabase": "^2.117.0"
   }
 }
