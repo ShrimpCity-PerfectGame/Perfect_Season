@@ -538,11 +538,49 @@ function scoringPlays(n) {
   }
   return out;
 }
+// V8's TimSort for arrays of under 64 items, written out so the season sim can't depend on the
+// JavaScript engine running it. buildTimeline shuffles the plays with a random comparator, which
+// isn't a real ordering: how many times an engine calls it is up to the engine, and every call draws
+// from the seeded stream. Newer V8 (Chrome 152's) skips a comparison that the older V8 in the
+// server's Deno runtime makes, so a Chrome player's stream drifted after the first playoff game and
+// the season on screen could differ from the one saved (19–1 shown, 20–0 stored). This makes the
+// server's exact calls in every browser - one natural run, then binary insertion - so every season
+// already saved still replays the same. V8 splits 64 or more items into several runs; a game never
+// gets near that (at most 41 scoring plays, each worth 2 points or more).
+export function smallTimSort(a, compare) {
+  const n = a.length;
+  if (n < 2) return a;
+  // The leading run: strictly descending (reversed in place) or never descending.
+  let run = 2;
+  const descending = compare(a[1], a[0]) < 0;
+  for (let i = 2; i < n; i++) {
+    const order = compare(a[i], a[i - 1]);
+    if (descending ? order >= 0 : order < 0) break;
+    run++;
+  }
+  if (descending) {
+    for (let lo = 0, hi = run - 1; lo < hi; lo++, hi--) [a[lo], a[hi]] = [a[hi], a[lo]];
+  }
+  // Binary insertion for the rest; an equal item goes after its equals, so the sort is stable.
+  for (let start = run; start < n; start++) {
+    const pivot = a[start];
+    let left = 0, right = start;
+    while (left < right) {
+      const mid = left + ((right - left) >> 1);
+      if (compare(pivot, a[mid]) < 0) right = mid;
+      else left = mid + 1;
+    }
+    for (let p = start; p > left; p--) a[p] = a[p - 1];
+    a[left] = pivot;
+  }
+  return a;
+}
+
 export function buildTimeline(us, them, win) {
-  const plays = [
+  const plays = smallTimSort([
     ...scoringPlays(us).map((v) => ({ team: "us", v })),
     ...scoringPlays(them).map((v) => ({ team: "them", v })),
-  ].sort(() => Math.random() - 0.5);
+  ], () => Math.random() - 0.5);
   const close = Math.abs(us - them) <= 8;
   if (close && plays.length) {
     // close game: the winner gets the last score (a real drive, not a safety), late in the fourth
