@@ -36,5 +36,17 @@ assert(await fetchOwnRank(110) === 0, "a tie isn't strictly above");
 assert(await fetchOwnRank(80, "standard") === 1, "standard ranks on its own column");
 assert(selects.every((s) => s.opts?.head && s.opts?.count), "fetchOwnRank must count server-side, not download rows");
 
+// A failed request is "unknown", not zero - the home pill would otherwise read "0 drafts".
+const realRpc = mock.rpc;
+let calls = 0;
+mock.rpc = (name, args) => { calls++; return Promise.resolve({ data: null, error: { message: "TypeError: Failed to fetch" } }); };
+assert(await fetchSiteTotals() === null, "a failed site_totals request should come back null, not zeros");
+assert(calls === 2, "a failed site_totals request should be retried once, got " + calls + " calls");
+calls = 0;
+mock.rpc = (name, args) => (++calls === 1 ? Promise.resolve({ data: null, error: { message: "stalled" } }) : realRpc(name, args));
+const retried = await fetchSiteTotals();
+assert(retried && retried.players === 3, "a request that fails once should succeed on the retry, got " + JSON.stringify(retried));
+mock.rpc = realRpc;
+
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }
 console.log("test-profile-queries.mjs done");

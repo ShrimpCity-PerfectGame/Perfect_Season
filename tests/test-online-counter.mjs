@@ -5,7 +5,7 @@
 // can only be verified live, in two real browser sessions). Same idea for broadcast: a test
 // triggers the mock channel's own send() directly (via auth._channels) to simulate another tab
 // finishing a draft, without needing a second mounted app.
-import { setupDom, makeStorage, mount, flush, findButtonByText, assert, runTest, makeMockAuth, broadcast } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth, broadcast } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -33,6 +33,38 @@ await runTest("the home screen shows a live drafts count that ticks up on a broa
   const after = draftsPill();
   const afterCount = parseInt(after.textContent.replace(/[^\d]/g, ""), 10);
   assert(afterCount === startCount + 1, `expected the drafts count to tick up by 1 (${startCount} -> ${startCount + 1}), got ${afterCount}`);
+});
+
+const draftsCount = () => {
+  const pill = [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("drafts"));
+  return pill ? parseInt(pill.textContent.replace(/[^\d]/g, ""), 10) : null;
+};
+async function reloadLeaderboard() {
+  await click(findButtonByText(container, "Leaderboard"));
+  await flush(6);
+  await click(findButtonByText(container, "Modes"));
+  await flush(4);
+}
+
+await runTest("a leaderboard refresh with older totals never lowers the live drafts count", async () => {
+  // The tab that finishes a draft refreshes the leaderboard while its submit-run is still saving, so
+  // it can read a total from before that draft. The mock's totals don't include the broadcast above.
+  const shown = draftsCount();
+  await reloadLeaderboard();
+  assert(draftsCount() === shown, `expected the drafts count to stay at ${shown} after a stale refresh, got ${draftsCount()}`);
+});
+
+await runTest("a failed totals request leaves the drafts count alone instead of showing 0", async () => {
+  const shown = draftsCount();
+  const realRpc = auth.rpc;
+  auth.rpc = () => Promise.resolve({ data: null, error: { message: "TypeError: Failed to fetch" } });
+  await click(findButtonByText(container, "Leaderboard"));
+  await new Promise((r) => setTimeout(r, 1300)); // fetchSiteTotals retries once after 1s
+  await flush(6);
+  await click(findButtonByText(container, "Modes"));
+  await flush(4);
+  auth.rpc = realRpc;
+  assert(draftsCount() === shown, `expected the drafts count to stay at ${shown} when totals fail to load, got ${draftsCount()}`);
 });
 
 console.log("test-online-counter.mjs done");

@@ -148,12 +148,16 @@ export async function fetchLadderTop(mode = "unlimited", limit = 10) {
   return data.map(rowToProfile);
 }
 // Summed in the database (site_totals(), supabase/migration-runs-log.sql) - one small row back
-// instead of a column from every account.
-const NO_TOTALS = { runs: 0, perfect: 0, players: 0 };
+// instead of a column from every account. Returns null when it can't be loaded, never zeros: a
+// failed request must not show up as "0 drafts". Requests to Supabase occasionally stall for ~5s
+// and fail outright (cause still unknown - see CHANGELOG 1.4.1), so one retry before giving up.
 export async function fetchSiteTotals() {
-  const { data, error } = await getClient().rpc("site_totals");
-  if (error || !data) return NO_TOTALS;
-  return { runs: Number(data.runs) || 0, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0 };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 1000));
+    const { data, error } = await getClient().rpc("site_totals");
+    if (!error && data) return { runs: Number(data.runs) || 0, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0 };
+  }
+  return null;
 }
 export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
   const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).eq("format", format).order("score", { ascending: false }).limit(limit);
