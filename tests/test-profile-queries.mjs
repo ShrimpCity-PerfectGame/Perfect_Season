@@ -2,7 +2,7 @@
 // column of every profile (an unfiltered select("*")). This pins that totals are summed in the
 // database (site_totals()) and rank is a server-side count, and that the numbers are unchanged.
 import { makeMockAuth } from "./helpers.mjs";
-import { fetchSiteTotals, fetchOwnRank } from "../storage.js";
+import { fetchSiteTotals, fetchOwnRank, fetchSiteStats } from "../storage.js";
 
 let failed = 0;
 const assert = (cond, msg) => { if (!cond) { failed++; console.error("FAIL:", msg); } };
@@ -36,16 +36,22 @@ assert(await fetchOwnRank(110) === 0, "a tie isn't strictly above");
 assert(await fetchOwnRank(80, "standard") === 1, "standard ranks on its own column");
 assert(selects.every((s) => s.opts?.head && s.opts?.count), "fetchOwnRank must count server-side, not download rows");
 
-// A failed request is "unknown", not zero - the home pill would otherwise read "0 drafts".
+// Read-only RPCs must go out as GET: supabase-js only retries a dropped request when it's a GET/HEAD,
+// and these two failing unretried (as POSTs) is what showed "0 drafts" on a flaky load.
 const realRpc = mock.rpc;
-let calls = 0;
-mock.rpc = (name, args) => { calls++; return Promise.resolve({ data: null, error: { message: "TypeError: Failed to fetch" } }); };
+const rpcCalls = [];
+mock.rpc = (name, args, opts) => { rpcCalls.push({ name, opts }); return realRpc(name, args, opts); };
+await fetchSiteTotals();
+await fetchSiteStats();
+mock.rpc = realRpc;
+for (const name of ["site_totals", "site_stats"]) {
+  const call = rpcCalls.find((c) => c.name === name);
+  assert(call?.opts?.get === true, `${name} must be called with { get: true } so a dropped request is retried, got ${JSON.stringify(call?.opts)}`);
+}
+
+// A failed request is "unknown", not zero - the home pill would otherwise read "0 drafts".
+mock.rpc = () => Promise.resolve({ data: null, error: { message: "TypeError: Failed to fetch" } });
 assert(await fetchSiteTotals() === null, "a failed site_totals request should come back null, not zeros");
-assert(calls === 2, "a failed site_totals request should be retried once, got " + calls + " calls");
-calls = 0;
-mock.rpc = (name, args) => (++calls === 1 ? Promise.resolve({ data: null, error: { message: "stalled" } }) : realRpc(name, args));
-const retried = await fetchSiteTotals();
-assert(retried && retried.players === 3, "a request that fails once should succeed on the retry, got " + JSON.stringify(retried));
 mock.rpc = realRpc;
 
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }

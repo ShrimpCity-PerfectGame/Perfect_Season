@@ -131,6 +131,15 @@ and fails if the mock and the SQL return different JSON — **change both togeth
 The log starts partway through the site's life: the migration backfilled each account's `recent`
 plus best runs, and nothing older exists.
 
+**Reads retry themselves; writes don't.** supabase-js (postgrest-js's `fetchWithRetry`) retries a
+GET/HEAD that drops on the network up to 3 times (1s/2s/4s), but never a POST — and `.rpc()` POSTs by
+default. Call read-only RPCs with `{ get: true }` (they must be `stable`/`immutable` in SQL);
+`tests/test-profile-queries.mjs` checks this for `site_totals`/`site_stats`. **The in-app Browser
+pane is not a reliable network signal:** it intermittently stalls a request ~5s on page load and fails
+it with a CORS error. That never reproduced in real Chrome (30 fresh loads) or Node, so confirm a
+network failure outside the pane (e.g. puppeteer-core against the installed Chrome) before treating it
+as a site bug.
+
 **The scoring/simulation/roster-legality logic is one shared module, not two.** `game-logic.mjs`
 (imported by both `perfect-season.jsx` and `supabase/functions/submit-run`) holds every pure,
 framework-free function this depends on — `effectiveRating`/`flexRating`, `seededSequence`/`fits`/

@@ -13,6 +13,23 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.5.1] — 2026-09-14
+
+### Fixed
+
+- **Site totals and the Stats screen could fail to load on a dropped connection.** The Supabase
+  library automatically retries a read that drops, but only for GET requests, and these two were
+  being sent as POST, so a single dropped request left them empty (the home screen showed
+  "0 drafts"). Both now go out as GET and get the same automatic retry as every other read.
+
+### About the "intermittent failed requests"
+
+- The failures investigated since 1.4.1 (a request stalling for about 5 seconds, then failing with
+  a CORS error) turned out to come from the in-app browser used for testing, not from the site or
+  Supabase. They reproduced on about one page load in five there, but not once in 30 fresh page
+  loads in real Chrome (120 requests) or in 240 requests sent from Node over fresh connections. The
+  1.4.1 and 1.5.0 changes aimed at them are still improvements, just not fixes for that symptom.
+
 ## [1.5.0] — 2026-09-13
 
 ### Added

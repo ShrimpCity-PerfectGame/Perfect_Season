@@ -59,7 +59,6 @@ await runTest("a failed totals request leaves the drafts count alone instead of 
   const realRpc = auth.rpc;
   auth.rpc = () => Promise.resolve({ data: null, error: { message: "TypeError: Failed to fetch" } });
   await click(findButtonByText(container, "Leaderboard"));
-  await new Promise((r) => setTimeout(r, 1300)); // fetchSiteTotals retries once after 1s
   await flush(6);
   await click(findButtonByText(container, "Modes"));
   await flush(4);

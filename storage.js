@@ -147,17 +147,19 @@ export async function fetchLadderTop(mode = "unlimited", limit = 10) {
   if (error || !data) return [];
   return data.map(rowToProfile);
 }
+// supabase-js retries a dropped GET/HEAD by itself (up to 3 times, 1s/2s/4s apart) but never a POST,
+// and .rpc() POSTs by default. Both Stats functions only read, so they're called as GET (`get: true`,
+// allowed because they're declared STABLE) to get that same retry. Keep it that way for any new
+// read-only RPC; writes stay POST and go out exactly once.
+const READ = { get: true };
+
 // Summed in the database (site_totals(), supabase/migration-runs-log.sql) - one small row back
 // instead of a column from every account. Returns null when it can't be loaded, never zeros: a
-// failed request must not show up as "0 drafts". Requests to Supabase occasionally stall for ~5s
-// and fail outright (cause still unknown - see CHANGELOG 1.4.1), so one retry before giving up.
+// failed request must not show up as "0 drafts".
 export async function fetchSiteTotals() {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt) await new Promise((r) => setTimeout(r, 1000));
-    const { data, error } = await getClient().rpc("site_totals");
-    if (!error && data) return { runs: Number(data.runs) || 0, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0 };
-  }
-  return null;
+  const { data, error } = await getClient().rpc("site_totals", {}, READ);
+  if (error || !data) return null;
+  return { runs: Number(data.runs) || 0, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0 };
 }
 export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
   const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).eq("format", format).order("score", { ascending: false }).limit(limit);
@@ -197,7 +199,7 @@ export async function fetchBuildCount() {
 // runs log. Returns the shape the Stats screen renders, or null if the request failed.
 const EMPTY_FORMAT = { bestLineups: [], bestGm: [], posRecords: {} };
 export async function fetchSiteStats(limit = 10) {
-  const { data, error } = await getClient().rpc("site_stats", { p_limit: limit });
+  const { data, error } = await getClient().rpc("site_stats", { p_limit: limit }, READ);
   if (error || !data) return null;
   const profilesOf = (rows) => (rows || []).map(rowToProfile);
   const byFormat = {};
