@@ -47,8 +47,9 @@ await runTest("the stat strip shows score with par, signed points, and this seas
   const base = { score: 78.4, par: 80.1, points: 64, games: [] };
   let out = html(React.createElement(app.SeasonStrip, { result: { ...base, rank: { rank: 212, total: 1874 } }, ladderName: "Daily" }));
   assert(out.includes("78.4") && out.includes("par 80.1"), "expected team score and par, got: " + out);
-  assert(out.includes("📈 +64") && out.includes("Daily ladder"), "expected positive points with 📈 and the ladder, got: " + out);
-  assert(out.includes("#212") && out.includes("of 1,874 · Top 11%"), "expected the rank with a percentile, got: " + out);
+  // The 📈 is its own small span so the number can't wrap under it on a phone.
+  assert(/<span class="em"[^>]*>📈<\/span>\+64/.test(out) && out.includes("Daily ladder"), "expected positive points with a small 📈 and the ladder, got: " + out);
+  assert(out.includes("#212") && out.includes(">of 1,874<") && out.includes(">Top 11%<"), "expected the rank with a percentile on its own line, got: " + out);
 
   out = html(React.createElement(app.SeasonStrip, { result: { ...base, points: -156, rank: { rank: 3, total: 9 } }, ladderName: "Unlimited" }));
   assert(out.includes("-156") && !out.includes("📈"), "negative points get no 📈, got: " + out);

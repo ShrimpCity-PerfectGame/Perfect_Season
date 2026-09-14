@@ -80,7 +80,9 @@ await runTest("resetting a draft records exactly one DNF, not two", async () => 
   assert(row.points_unlimited < 0, "the DNF should have cost points on the unlimited ladder, got " + row.points_unlimited);
 });
 
-await runTest("abandoning an Unlimited draft for another mode still costs a DNF", async () => {
+await runTest("the mode bar's Unlimited pill resumes the draft in progress instead of wiping it", async () => {
+  // It used to throw the saved draft away and charge a DNF for one tap, while the Home tile for the
+  // same draft resumed it. Both now resume.
   const { container, auth, userId } = await signedInApp("dnfswitch");
   await click(findButtonByText(container, "Modes"));
   await flush();
@@ -88,6 +90,7 @@ await runTest("abandoning an Unlimited draft for another mode still costs a DNF"
   await flush();
   await draftOne(container);
   assert(text(container).includes("Pick 2 of 6"), "expected one pick made in the Unlimited draft");
+  const code = container.querySelector(".seedline code")?.textContent;
 
   // Go play the Daily, so the live mode is no longer the Unlimited draft...
   await click(findButtonByText(container, "Modes"));
@@ -95,15 +98,16 @@ await runTest("abandoning an Unlimited draft for another mode still costs a DNF"
   await click(findButtonByText(container, "Fantasy daily"));
   await flush(3);
 
-  // ...then tap Unlimited in the mode bar, which wipes the saved Unlimited draft.
+  // ...then tap Unlimited in the mode bar.
   const unlimitedTab = [...container.querySelectorAll("button.mb")].find((b) => b.textContent === "Unlimited");
   assert(unlimitedTab, "expected an Unlimited button in the in-draft mode bar");
   await click(unlimitedTab);
   await flush(6);
 
+  assert(container.querySelector(".seedline code")?.textContent === code, "expected the same Unlimited draft back, got code " + container.querySelector(".seedline code")?.textContent);
+  assert(text(container).includes("Pick 2 of 6"), "expected the pick already made to still be there");
   const row = auth._profiles.get(userId);
-  assert(row.dnf === 1, `expected the abandoned Unlimited draft to be charged, got ${row.dnf} DNFs`);
-  assert(row.points_unlimited < 0, "the abandoned draft should have cost unlimited-ladder points");
+  assert(row.dnf === 0, `resuming a draft must not charge a DNF, got ${row.dnf}`);
 });
 
 await runTest("finishing a draft is not a DNF", async () => {

@@ -53,10 +53,14 @@ node tests/test-tamper-resistance.mjs    # end-to-end: a fabricated submission n
 node tests/test-profile-queries.mjs      # site totals/own rank never pull every profile column
 node tests/test-runs-sql.mjs             # runs log + Stats SQL in real Postgres (PGlite): backfill, RLS, and SQL == helpers.mjs mock
 
-# Visual checks: there is no screenshot script (an older tests/shots.py never existed in this
-# checkout). Build with build.mjs, serve the repo root (.claude/launch.json's "static" config),
-# open /public/page.html in the preview browser, and click through the changed screens at
-# desktop and mobile widths.
+# Visual checks: tools/ui-harness runs the real app on the tests' in-memory Supabase mock
+# (tests/mock-supabase.mjs) with seeded stress data - no staging writes, no sign-in - and
+# tools/ui-harness/audit.mjs drives it in the installed Chrome (puppeteer-core) at phone sizes,
+# screenshots it, and measures overflow, clipped text, small tap targets, tiny text, iOS input
+# zoom and overlapping controls. Harness query params: as=player|admin|guest|newbie, howto=1.
+node tools/ui-harness/build.mjs   # bundle the harness into build/ui-harness.js (never shipped)
+node tools/ui-harness/audit.mjs --as player --width 375 --tab Leaderboard --out build/ui-audit
+# For a change's final check, still click through the real staging site at desktop and mobile widths.
 node tests/test-theme-contrast.mjs  # every text color in every theme scope is readable (WCAG AA) - see Design system
 node tests/test-result-moments.mjs  # record-first result: per-season rank, upset/streak moments, black Leaderboard
 
