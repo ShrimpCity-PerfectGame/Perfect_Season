@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchStatsProfiles, subscribeSiteActivity, fetchLadderTop,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, submitRun, submitDnf,
@@ -943,70 +943,13 @@ const topPct = (rank, total) => {
   return p < 1 ? `Top ${p.toFixed(1)}%` : `Top ${Math.max(1, Math.round(p))}%`;
 };
 
-// Every leaderboard on the Stats screen is a different sort/aggregation over one fetched batch of
-// profiles (see storage.js's fetchStatsProfiles) - kept as one pure function so the component
-// itself just useMemo's the result instead of a wall of inline .sort()/.filter() calls.
-// Score-ranked boards are computed for BOTH formats in this one pass (it's a single walk over an
-// already-fetched array, so there's no cost to it) and the screen picks which to show. Career
-// counters below stay merged - they measure seasons played, not points scored.
-function computeSiteStats(profiles) {
-  const byFormat = {};
-  for (const f of FORMATS) {
-    const scored = profiles.filter((q) => scoreOf(q, f) != null);
-    byFormat[f] = {
-      bestLineups: [...scored].sort((a, b) => scoreOf(b, f) - scoreOf(a, f)).slice(0, 15),
-      // Best-ever player at each slot. Each format's best_run column is format-pure by
-      // construction, so no tagging is needed and no run lands in the wrong bucket - which also
-      // avoids comparing a full-PPR rating against a standard one.
-      posRecords: (() => {
-        const rec = {};
-        for (const q of profiles) {
-          const best = runOf(q, f);
-          if (!best) continue;
-          for (const p of best.roster) {
-            const bucket = p.slot.startsWith("FLEX") ? "FLEX" : p.slot;
-            if (!rec[bucket] || p.rating > rec[bucket].rating) rec[bucket] = { ...p, username: q.username };
-          }
-        }
-        return rec;
-      })(),
-      // GM-mode runs are tagged via run.gm (see finish()); runs from before either tag existed
-      // are simply excluded rather than assumed, since recent only holds a bounded window.
-      bestGm: profiles.flatMap((q) => (q.recent || [])
-        .filter((run) => run.gm && normFormat(run.format) === f)
-        .map((run) => ({ ...run, username: q.username })))
-        .sort((a, b) => b.score - a.score).slice(0, 10),
-    };
-  }
-
-  const draftCounts = new Map();
-  for (const q of profiles) for (const run of q.recent || []) {
-    if (run.dnf || !run.roster) continue;
-    for (const p of run.roster) {
-      const key = `${p.name}|${p.season}|${p.team}`;
-      draftCounts.set(key, (draftCounts.get(key) || 0) + 1);
-    }
-  }
-  const mostDrafted = [...draftCounts.entries()]
-    .map(([key, count]) => { const [name, season, team] = key.split("|"); return { name, season, team, count }; })
-    .sort((a, b) => b.count - a.count).slice(0, 15);
-
-  const withDrafts = profiles.filter((q) => draftsOf(q) > 0);
-  const mostWins = [...withDrafts].sort((a, b) => b.wins - a.wins).slice(0, 10);
-  const mostChamps = withDrafts.filter((q) => q.champs > 0).sort((a, b) => b.champs - a.champs).slice(0, 10);
-  const mostPlayoffs = withDrafts.filter((q) => q.playoffs > 0).sort((a, b) => b.playoffs - a.playoffs).slice(0, 10);
-  const longestStreaks = profiles.filter((q) => q.dailyBestStreak > 0).sort((a, b) => b.dailyBestStreak - a.dailyBestStreak).slice(0, 10);
-  // A minimum sample so a 1-0 account can't top a percentage-based leaderboard.
-  const bestWinPct = withDrafts.filter((q) => q.wins + q.losses >= 3)
-    .map((q) => ({ ...q, pct: q.wins / (q.wins + q.losses) }))
-    .sort((a, b) => b.pct - a.pct).slice(0, 10);
-
-  const totalWins = withDrafts.reduce((t, q) => t + q.wins, 0);
-  const totalLosses = withDrafts.reduce((t, q) => t + q.losses, 0);
-  const avgWinPct = totalWins + totalLosses > 0 ? Math.round((100 * totalWins) / (totalWins + totalLosses)) : 0;
-
-  return { byFormat, mostDrafted, mostWins, mostChamps, mostPlayoffs, longestStreaks, bestWinPct, avgWinPct };
-}
+// What the Stats screen renders before site_stats() answers, or if it fails - the same shape
+// storage.js's fetchSiteStats returns, every board empty.
+const EMPTY_SITE_STATS = {
+  totals: { runs: 0, perfect: 0, players: 0 },
+  byFormat: Object.fromEntries(FORMATS.map((f) => [f, { bestLineups: [], bestGm: [], posRecords: {} }])),
+  mostDrafted: [], mostWins: [], mostChamps: [], mostPlayoffs: [], longestStreaks: [], bestWinPct: [], avgWinPct: 0,
+};
 const POS_RECORD_SLOTS = [["QB", "QB"], ["RB", "RB"], ["WR", "WR"], ["TE", "TE"], ["FLEX", "Flex"]];
 const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const USER_RE = /^[a-zA-Z0-9_]{3,16}$/;
@@ -1409,7 +1352,7 @@ export default function PerfectSeason() {
   // so the rows and the column that reads them can never describe different ladders.
   const [ladder, setLadder] = useState({ loading: false, rows: [], mode: "unlimited" });
   const [ladderMode, setLadderMode] = useState("unlimited");
-  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, profiles: [], buildCount: 0, topBuilds: [] });
+  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: 0, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
   const siteActivity = useRef(null); // { unsubscribe, broadcastDraftFinished } from subscribeSiteActivity - finish() reaches it to announce a completed draft
@@ -1522,17 +1465,16 @@ export default function PerfectSeason() {
     }
   }
 
-  // Lazy - only fetched once the Stats tab is actually opened. Every profile-based leaderboard on
-  // that screen (see the Stats view below) is a different client-side sort/aggregation over
-  // fetchStatsProfiles's one fetch; builds live in their own table (Build-a-player results never
-  // touch a profile row), so the created-players count/leaderboard are their own small fetch.
+  // Lazy - only fetched once the Stats tab is actually opened. Every account and run board on that
+  // screen comes back computed from fetchSiteStats's one call; builds live in their own table
+  // (Build-a-player results never touch a profile row), so they're their own small fetch.
   async function loadSiteStats() {
     setSiteStats((s) => ({ ...s, loading: true }));
     try {
-      const [profiles, buildCount, topBuilds] = await Promise.all([fetchStatsProfiles(300), fetchBuildCount(), fetchTopBuilds(10)]);
-      setSiteStats({ loading: false, loaded: true, profiles, buildCount, topBuilds });
+      const [data, buildCount, topBuilds] = await Promise.all([fetchSiteStats(10), fetchBuildCount(), fetchTopBuilds(10)]);
+      setSiteStats({ loading: false, loaded: true, data, error: !data, buildCount, topBuilds });
     } catch (e) {
-      setSiteStats({ loading: false, loaded: true, profiles: [], buildCount: 0, topBuilds: [] });
+      setSiteStats({ loading: false, loaded: true, data: null, error: true, buildCount: 0, topBuilds: [] });
     }
   }
 
@@ -2207,7 +2149,7 @@ export default function PerfectSeason() {
   const siteBest = lb.top[0];
   const totals = lb.totals;
   const perfectPct = totals.runs > 0 ? Math.round((100 * totals.perfect) / totals.runs) : 0;
-  const site = useMemo(() => computeSiteStats(siteStats.profiles), [siteStats.profiles]);
+  const site = siteStats.data || EMPTY_SITE_STATS;
   // The score-ranked half of the Stats screen, for whichever format is selected there.
   const fmtStats = site.byFormat[normFormat(boardFormat)];
   const myKey = user ? user.toLowerCase() : null;
@@ -2982,13 +2924,15 @@ export default function PerfectSeason() {
               <>
                 <h2 className="h">Sitewide</h2>
                 <div className="tiles">
-                  <div className="tile"><div className="n">{totals.players}</div><div className="l">Accounts</div></div>
-                  <div className="tile"><div className="n">{(liveDrafts ?? totals.runs).toLocaleString()}</div><div className="l">Drafts</div></div>
-                  <div className="tile"><div className="n">{totals.perfect}</div><div className="l">Perfect seasons</div></div>
+                  <div className="tile"><div className="n">{site.totals.players}</div><div className="l">Accounts</div></div>
+                  <div className="tile"><div className="n">{(liveDrafts ?? site.totals.runs).toLocaleString()}</div><div className="l">Drafts</div></div>
+                  <div className="tile"><div className="n">{site.totals.perfect}</div><div className="l">Perfect seasons</div></div>
                   <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
                   <div className="tile"><div className="n">{siteStats.buildCount}</div><div className="l">Created players</div></div>
                 </div>
-                <p className="note">Leaderboards below draw from the 300 most recently active accounts, not everyone who's ever played.</p>
+                {siteStats.error
+                  ? <p className="note">Stats couldn't be loaded. Try Refresh.</p>
+                  : <p className="note">Career boards count every account. Most-drafted players, GM scores and position records count every run since the run log started in September 2026, plus each account's last 10 runs from before then.</p>}
                 <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>
 
                 {/* Only the score-ranked boards split by format; the career records further down

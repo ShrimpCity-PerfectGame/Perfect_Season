@@ -32,6 +32,7 @@ export function makeMockAuth() {
   const dailyRuns = new Map(); // "date:userId" -> row
   const souRuns = new Map(); // "date:userId" -> row
   const builds = new Map(); // id -> row - no natural key (unlike daily/sou), so a generated uuid like the real table
+  const runs = new Map(); // "user_id|created_at|dnf" -> row, mirroring runs' unique key (see migration-runs-log.sql)
   let session = null;
   const listeners = [];
   const notify = (event) => listeners.forEach((cb) => cb(event, session));
@@ -181,7 +182,9 @@ export function makeMockAuth() {
     if (body?.dnf) {
       const row = profiles.get(userId);
       if (!row) return { error: { message: "no profile for this account" } };
-      Object.assign(row, mockProfileToRow(GL.applyDnf(mockRowToProfile(row), Number(body.picks) || 0, body.mode)));
+      const updatedDnf = GL.applyDnf(mockRowToProfile(row), Number(body.picks) || 0, body.mode);
+      Object.assign(row, mockProfileToRow(updatedDnf));
+      logRun(GL.runLogRow(userId, row.username, updatedDnf.recent[0]));
       return { data: { ok: true } };
     }
 
@@ -249,16 +252,92 @@ export function makeMockAuth() {
       updated = { ...updated, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
     }
     Object.assign(existingRow, mockProfileToRow(updated));
+    logRun(GL.runLogRow(userId, existingRow.username, run, mode.kind === "daily" ? mode.date : null));
 
     return { data: { ok: true, run } };
   }
+
+  // Mirrors index.ts's logRun: after the profile write, and a duplicate of the unique key is a no-op.
+  function logRun(row) {
+    const key = `${row.user_id}|${row.created_at}|${row.dnf}`;
+    if (!runs.has(key)) runs.set(key, { backfilled: false, ...row });
+  }
+
+  // Mirrors migration-runs-log.sql's site_totals()/site_stats() over this mock's profiles and runs.
+  // tests/test-runs-sql.mjs runs the real SQL in PGlite against the same fixture and requires the
+  // two to return identical JSON, so this can't quietly drift from what the database does.
+  const byName = (a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0);
+  const card = (p) => Object.fromEntries(
+    ["id", "username", "runs", "dnf", "wins", "losses", "champs", "perfect", "playoffs", "daily_best_streak"].map((k) => [k, p[k] ?? null]));
+  function siteTotals() {
+    const rows = [...profiles.values()];
+    return {
+      players: rows.length,
+      runs: rows.reduce((t, r) => t + (r.runs || 0) + (r.dnf || 0), 0),
+      perfect: rows.reduce((t, r) => t + (r.perfect || 0), 0),
+    };
+  }
+  function siteStats({ p_limit: limit = 10 } = {}) {
+    const all = [...profiles.values()];
+    const played = all.filter((p) => (p.runs || 0) + (p.dnf || 0) > 0);
+    const logged = [...runs.values()].filter((r) => !r.dnf);
+    const entries = logged.flatMap((r) => (Array.isArray(r.roster) ? r.roster : []).map((entry) => ({ username: r.username, format: r.format, entry })));
+    const top = (rows, val, keep = () => true) => rows.filter(keep).sort((a, b) => val(b) - val(a) || byName(a, b)).slice(0, limit);
+
+    const by_format = {};
+    for (const f of ["fantasy", "standard"]) {
+      const col = f === "standard" ? "best_score_std" : "best_score";
+      const pos = {};
+      for (const e of entries.filter((x) => x.format === f)) {
+        const bucket = String(e.entry.slot).startsWith("FLEX") ? "FLEX" : e.entry.slot;
+        const cur = pos[bucket];
+        const r = e.entry.rating ?? -Infinity, cr = cur?.rating ?? -Infinity;
+        if (!cur || r > cr || (r === cr && e.username < cur.username)) pos[bucket] = { ...e.entry, username: e.username };
+      }
+      by_format[f] = {
+        best_lineups: all.filter((p) => p[col] != null).sort((a, b) => b[col] - a[col] || byName(a, b)).slice(0, 15)
+          .map((p) => ({ ...card(p), best_score: p.best_score ?? null, best_run: p.best_run ?? null, best_score_std: p.best_score_std ?? null, best_run_std: p.best_run_std ?? null })),
+        best_gm: logged.filter((r) => r.gm && r.format === f && r.score != null)
+          .sort((a, b) => b.score - a.score || (a.created_at < b.created_at ? -1 : 1)).slice(0, limit)
+          .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l })),
+        pos_records: pos,
+      };
+    }
+
+    const counts = new Map();
+    for (const { entry } of entries) {
+      const key = JSON.stringify([entry.name, Number(entry.season), entry.team]);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const most_drafted = [...counts.entries()]
+      .map(([key, count]) => { const [name, season, team] = JSON.parse(key); return { name, season, team, count }; })
+      .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || a.season - b.season
+        || (a.team < b.team ? -1 : a.team > b.team ? 1 : 0)).slice(0, 15);
+
+    const wins = played.reduce((t, p) => t + p.wins, 0), games = played.reduce((t, p) => t + p.wins + p.losses, 0);
+    return {
+      totals: siteTotals(),
+      by_format,
+      most_drafted,
+      most_wins: top(played, (p) => p.wins).map(card),
+      most_champs: top(played, (p) => p.champs, (p) => p.champs > 0).map(card),
+      most_playoffs: top(played, (p) => p.playoffs, (p) => p.playoffs > 0).map(card),
+      longest_streaks: top(all, (p) => p.daily_best_streak || 0, (p) => (p.daily_best_streak || 0) > 0).map(card),
+      best_win_pct: played.filter((p) => p.wins + p.losses >= 3).map((p) => ({ p, pct: p.wins / (p.wins + p.losses) }))
+        .sort((a, b) => b.pct - a.pct || byName(a.p, b.p)).slice(0, limit).map(({ p, pct }) => ({ ...card(p), pct })),
+      avg_win_pct: games > 0 ? Math.round((100 * wins) / games) : 0,
+    };
+  }
+  const rpcs = { site_totals: siteTotals, site_stats: siteStats };
 
   return {
     from,
     channel,
     functions: { invoke: (name, opts) => (name === "submit-run" ? invokeSubmitRun(opts?.body) : Promise.resolve({ error: { message: "unknown function" } })) },
     removeChannel() {},
+    rpc: (name, args) => Promise.resolve(rpcs[name] ? { data: rpcs[name](args), error: null } : { data: null, error: { message: `unknown function ${name}` } }),
     _profiles: profiles, // test-only escape hatch for setup/assertions
+    _runs: runs, // test-only escape hatch for setup/assertions
     _builds: builds, // test-only escape hatch for setup/assertions
     _dailyRuns: dailyRuns, // test-only escape hatch for setup/assertions
     _channels: channels, // test-only escape hatch, e.g. auth._channels.get("site-activity").send({event:"draft_finished", payload:{}})

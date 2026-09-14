@@ -51,6 +51,7 @@ node tests/test-difficulty.mjs [N] [fantasy|standard] [gm]  # plays N drafts wit
 node tests/test-replay-verification.mjs  # game-logic.mjs's replayDraft: legit traces (incl. rerolls) accepted, tampered ones rejected
 node tests/test-tamper-resistance.mjs    # end-to-end: a fabricated submission never reaches profiles; a legit one still works
 node tests/test-profile-queries.mjs      # site totals/own rank never pull every profile column
+node tests/test-runs-sql.mjs             # runs log + Stats SQL in real Postgres (PGlite): backfill, RLS, and SQL == helpers.mjs mock
 
 # Visual checks: there is no screenshot script (an older tests/shots.py never existed in this
 # checkout). Build with build.mjs, serve the repo root (.claude/launch.json's "static" config),
@@ -116,6 +117,19 @@ grinding many codes offline for a lucky *legitimate* outcome remains possible �
 server-issued/committed seeds, a bigger lift (network round-trip at draft start, rate-limiting),
 not attempted here. `sou_runs` (Stats O/U) and `builds` (Build-a-player) remain fully
 client-writable — lower-stakes minigames, not roster-scoring, a candidate for a later pass.
+
+**The runs log is the complete history; `profiles.recent` is not.** `recent` keeps only an
+account's last 10 runs. Every finished draft and DNF is also appended to the `runs` table
+(`supabase/migration-runs-log.sql`) by `submit-run`, after the profile write and through
+`game-logic.mjs`'s `runLogRow` — a failed log insert is logged, never fails the season. Anything
+per-run on the Stats screen (most-drafted, GM scores, position records, and future boards like
+biggest upset) must read `runs`, not `recent`. Stats aggregates run in the database: `site_stats()`
+and `site_totals()`, called via `storage.js`'s `fetchSiteStats`/`fetchSiteTotals`. The jsdom mock
+in `tests/helpers.mjs` reimplements both, and `tests/test-runs-sql.mjs` runs the real SQL in PGlite
+and fails if the mock and the SQL return different JSON — **change both together**, and keep every
+`order by` fully tiebroken (the test is how the missing team tiebreak in most-drafted was found).
+The log starts partway through the site's life: the migration backfilled each account's `recent`
+plus best runs, and nothing older exists.
 
 **The scoring/simulation/roster-legality logic is one shared module, not two.** `game-logic.mjs`
 (imported by both `perfect-season.jsx` and `supabase/functions/submit-run`) holds every pure,
@@ -324,6 +338,6 @@ every open tab ticks up the instant anyone finishes a season), and a **Stats** s
 tab — sitewide totals plus leaderboards for best lineups ever, most-drafted players, position
 records, career wins/championships/playoff appearances, longest daily streak, best win percentage,
 best GM-mode score, and Build-a-player's sitewide "created players" tally/highest-OVR build — one
-consolidated `fetchStatsProfiles` fetch plus the separate `builds` table, see `computeSiteStats`
-and `logBuild`). See `AdminPanel`, `SOU_STAT`, `BAP_ATTRS`, and `GM_CAP`/`playerSalary()` in the
+`fetchSiteStats` call, computed in the database by `site_stats()` — see the runs-log note under
+Architecture — plus the separate `builds` table and `logBuild`). See `AdminPanel`, `SOU_STAT`, `BAP_ATTRS`, and `GM_CAP`/`playerSalary()` in the
 source.

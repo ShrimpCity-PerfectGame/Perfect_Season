@@ -13,6 +13,27 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.5.0] — 2026-09-13
+
+### Added
+
+- **Every run is now kept.** A new runs log records every finished draft and every abandoned one,
+  permanently. Before this, each account only kept its last 10 runs.
+
+### Changed
+
+- **Stats cover everyone.** Every Stats board is now worked out from every account and every
+  logged run, instead of the 300 most recently active accounts. Most-drafted players, GM-mode
+  scores and position records include everything since the log started, plus each account's last
+  10 runs from before then.
+- Sitewide totals are added up by the database instead of in the browser.
+
+### Deploy notes
+
+Order matters: run `supabase/migration-runs-log.sql` in the SQL editor, then deploy the
+`submit-run` Edge Function, then ship the client. A client without the migration shows zeroed
+totals and an empty Stats screen.
+
 ## [1.4.3] — 2026-09-13
 
 ### Changed

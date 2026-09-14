@@ -685,3 +685,28 @@ export function applyRun(prev, run, day) {
   if (betterRecord(run, prev.bestRecord)) s.bestRecord = { w: run.w, l: run.l };
   return s;
 }
+
+// ---------- Runs log ----------
+// The `runs` table row for one entry of profiles.recent - a finished run or a DNF, in exactly the
+// shape applyRun/applyDnf put there. submit-run and the test mock both write through this, and
+// supabase/migration-runs-log.sql's backfill maps old recent entries the same way, so a run logged
+// live and the same run recovered by the backfill are the same row (and collide on the unique
+// (user_id, created_at, dnf) key instead of duplicating).
+export function runLogRow(userId, username, entry, dailyDate = null) {
+  const dnf = !!entry.dnf;
+  const base = {
+    user_id: userId, username,
+    created_at: new Date(entry.date || Date.now()).toISOString(),
+    gm: !!entry.gm, genius: !!entry.genius, dnf,
+  };
+  if (dnf) {
+    return { ...base, ladder: LADDERS.includes(entry.mode) ? entry.mode : "unlimited", format: null, picks: Number(entry.picks) || 0 };
+  }
+  return {
+    ...base,
+    ladder: modeKey(entry), daily_date: entry.mode === "daily" ? dailyDate : null, format: normFormat(entry.format),
+    w: entry.w, l: entry.l, score: entry.score, champ: !!entry.champ, perfect: !!entry.perfect, playoffs: !!entry.playoffs,
+    outcome: entry.outcome ?? null, par: entry.par ?? null, points: entry.points ?? null, cap_used: entry.capUsed ?? null,
+    code: entry.code ?? null, roster: entry.roster ?? null,
+  };
+}

@@ -1,5 +1,7 @@
 -- Perfect Season: Supabase schema + RLS
--- Run this once in the Supabase dashboard's SQL editor (a new project's SQL Editor tab).
+-- Run this once in the Supabase dashboard's SQL editor (a new project's SQL Editor tab), then run
+-- migration-runs-log.sql, which owns the runs table and the Stats functions (site_stats,
+-- site_totals) - kept in that one file so there is a single definition to maintain.
 -- Safe to re-run individual statements if something fails partway (uses IF NOT EXISTS /
 -- CREATE OR REPLACE where practical), but a clean project is the easiest path.
 

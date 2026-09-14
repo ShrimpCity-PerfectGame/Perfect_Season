@@ -30,6 +30,7 @@ assert(userId, "expected a profile to exist after signup");
 
 await runTest("a fabricated score/roster is rejected and never reaches profiles", async () => {
   const before = { ...auth._profiles.get(userId) };
+  const runsBefore = auth._runs.size;
   const res = await submitRun({
     mode: { kind: "free", code: "FAKECODE" },
     history: [
@@ -46,6 +47,7 @@ await runTest("a fabricated score/roster is rejected and never reaches profiles"
   assert(!res.ok, "expected the fabricated submission to be rejected, got: " + JSON.stringify(res));
   const after = auth._profiles.get(userId);
   assert(after.runs === before.runs && after.best_score === before.best_score, "a rejected submission must not change the stored profile at all");
+  assert(auth._runs.size === runsBefore, "a rejected submission must not reach the runs log either");
 });
 
 await runTest("a legitimate submission for the same account still succeeds afterward", async () => {
@@ -75,6 +77,9 @@ await runTest("a legitimate submission for the same account still succeeds after
   assert(res.ok, "expected a legitimately replayable draft to be accepted, got: " + JSON.stringify(res));
   const after = auth._profiles.get(userId);
   assert(after.runs === 1, "expected the legitimate run to actually be recorded, got runs=" + after.runs);
+  const logged = [...auth._runs.values()].filter((r) => r.user_id === userId);
+  assert(logged.length === 1 && !logged[0].dnf && logged[0].score === res.run.score && logged[0].roster?.length === 6,
+    "expected exactly one runs-log row matching the accepted run, got: " + JSON.stringify(logged));
 });
 
 // Builds a real, legal draft trace the same way the client would - shared by the tests below.

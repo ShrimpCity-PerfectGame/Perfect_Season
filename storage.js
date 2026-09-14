@@ -147,13 +147,13 @@ export async function fetchLadderTop(mode = "unlimited", limit = 10) {
   if (error || !data) return [];
   return data.map(rowToProfile);
 }
+// Summed in the database (site_totals(), supabase/migration-runs-log.sql) - one small row back
+// instead of a column from every account.
+const NO_TOTALS = { runs: 0, perfect: 0, players: 0 };
 export async function fetchSiteTotals() {
-  // Only the three columns summed below - select("*") also dragged every profile's `recent` run
-  // history along.
-  const { data, error } = await getClient().from("profiles").select("runs, dnf, perfect");
-  const rows = error || !data ? [] : data;
-  const totals = rows.reduce((t, r) => ({ runs: t.runs + (r.runs || 0) + (r.dnf || 0), perfect: t.perfect + (r.perfect || 0) }), { runs: 0, perfect: 0 });
-  return { ...totals, players: rows.length };
+  const { data, error } = await getClient().rpc("site_totals");
+  if (error || !data) return NO_TOTALS;
+  return { runs: Number(data.runs) || 0, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0 };
 }
 export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
   const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).eq("format", format).order("score", { ascending: false }).limit(limit);
@@ -187,23 +187,30 @@ export async function fetchBuildCount() {
   return error || count == null ? 0 : count;
 }
 
-// The Stats screen's one data source: every leaderboard there (best lineups, most-drafted
-// players, most wins/championships/playoffs, longest streak, win %, position records, best
-// GM-mode score) is a different client-side sort/aggregation over this same fetched array,
-// since wins/losses/champs/perfect/playoffs/daily_best_streak/best_run/recent are all columns on
-// the same profiles row - one query instead of one per stat. Deliberately bounded to the
-// most-recently-active profiles (order + limit) rather than an unbounded full-table scan, so a
-// stat like "best lineups ever" is really "best among recently active players," not everyone
-// who's ever played - the same honesty tier as this app's other partial-sample stats (Stats
-// O/U's "career" caveat, Build-a-player's last-season-only pool).
-export async function fetchStatsProfiles(limit = 300) {
-  const { data, error } = await getClient().from("profiles")
-    // NOTE: an explicit column list, not select("*") - a column missing here doesn't error, it
-    // just makes every leaderboard built from it render empty. Both formats' bests must be listed.
-    .select("id, username, runs, dnf, best_score, best_run, best_score_std, best_run_std, points_daily, points_unlimited, points_genius, points_gm, points_bank, wins, losses, champs, perfect, playoffs, daily_streak, daily_last, daily_best_streak, recent")
-    .order("updated_at", { ascending: false }).limit(limit);
-  if (error || !data) return [];
-  return data.map(rowToProfile);
+// Every Stats-screen board, computed in the database by site_stats() (supabase/migration-runs-log.sql)
+// over every account and every logged run - not a browser-side pass over a recent sample. Career
+// boards come from profiles; per-run boards (most-drafted, GM scores, position records) from the
+// runs log. Returns the shape the Stats screen renders, or null if the request failed.
+const EMPTY_FORMAT = { bestLineups: [], bestGm: [], posRecords: {} };
+export async function fetchSiteStats(limit = 10) {
+  const { data, error } = await getClient().rpc("site_stats", { p_limit: limit });
+  if (error || !data) return null;
+  const profilesOf = (rows) => (rows || []).map(rowToProfile);
+  const byFormat = {};
+  for (const [f, v] of Object.entries(data.by_format || {})) {
+    byFormat[f] = { bestLineups: profilesOf(v.best_lineups), bestGm: v.best_gm || [], posRecords: v.pos_records || {} };
+  }
+  return {
+    totals: { runs: Number(data.totals?.runs) || 0, perfect: Number(data.totals?.perfect) || 0, players: Number(data.totals?.players) || 0 },
+    byFormat: { fantasy: byFormat.fantasy || EMPTY_FORMAT, standard: byFormat.standard || EMPTY_FORMAT },
+    mostDrafted: data.most_drafted || [],
+    mostWins: profilesOf(data.most_wins),
+    mostChamps: profilesOf(data.most_champs),
+    mostPlayoffs: profilesOf(data.most_playoffs),
+    longestStreaks: profilesOf(data.longest_streaks),
+    bestWinPct: (data.best_win_pct || []).map((r) => ({ ...rowToProfile(r), pct: Number(r.pct) })),
+    avgWinPct: Number(data.avg_win_pct) || 0,
+  };
 }
 
 // One channel, two live concerns: a concurrent-players count via Supabase Realtime Presence

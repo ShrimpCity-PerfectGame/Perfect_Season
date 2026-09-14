@@ -1,6 +1,6 @@
 // fetchSiteTotals and fetchOwnRank run on every home/leaderboard load. Both used to download every
-// column of every profile (an unfiltered select("*")). This pins that they now ask for only what
-// they need, and still compute the same numbers.
+// column of every profile (an unfiltered select("*")). This pins that totals are summed in the
+// database (site_totals()) and rank is a server-side count, and that the numbers are unchanged.
 import { makeMockAuth } from "./helpers.mjs";
 import { fetchSiteTotals, fetchOwnRank } from "../storage.js";
 
@@ -27,7 +27,7 @@ for (const r of rows) await realFrom("profiles").insert(r);
 selects.length = 0;
 const totals = await fetchSiteTotals();
 assert(totals.runs === 11 && totals.perfect === 1 && totals.players === 3, `site totals wrong: ${JSON.stringify(totals)}`);
-assert(selects[0]?.cols !== "*", "fetchSiteTotals must not select every column");
+assert(selects.length === 0, "fetchSiteTotals must not select from profiles at all - it calls site_totals(), got: " + JSON.stringify(selects));
 
 selects.length = 0;
 assert(await fetchOwnRank(100) === 1, "one fantasy score above 100");

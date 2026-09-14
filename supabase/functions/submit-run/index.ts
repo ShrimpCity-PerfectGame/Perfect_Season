@@ -86,6 +86,15 @@ function isPlausibleDailyDate(date: string) {
   return [-1, 0, 1].some((offset) => utcDateKey(new Date(now + offset * DAY)) === date);
 }
 
+// Appends to the runs log (supabase/migration-runs-log.sql) AFTER the profile is saved. The two
+// writes aren't one transaction, and that's deliberate: the profile is the player's own record, so a
+// failure here is logged and swallowed rather than failing a season that already counted. The
+// unique (user_id, created_at, dnf) key makes a duplicate a no-op, not an error.
+async function logRun(service: any, row: any) {
+  const { error } = await service.from("runs").upsert(row, { onConflict: "user_id,created_at,dnf", ignoreDuplicates: true });
+  if (error) console.error("runs log insert failed:", error.message);
+}
+
 Deno.serve(async (req) => {
   const cors = corsHeaders(req);
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors } });
@@ -116,6 +125,7 @@ Deno.serve(async (req) => {
     const updated = GL.applyDnf(rowToProfile(row), Number(bodyRaw.picks) || 0, bodyRaw.mode);
     const { error: writeError } = await service.from("profiles").update(profileToRow(updated)).eq("id", user.id);
     if (writeError) return json({ error: "failed to save" }, 500);
+    await logRun(service, GL.runLogRow(user.id, row.username, updated.recent[0]));
     return json({ ok: true });
   }
 
@@ -216,6 +226,7 @@ Deno.serve(async (req) => {
 
   const { error: writeError } = await service.from("profiles").update(profileToRow(updated)).eq("id", user.id);
   if (writeError) return json({ error: "failed to save" }, 500);
+  await logRun(service, GL.runLogRow(user.id, existingRow.username, run, mode.kind === "daily" ? mode.date : null));
 
   return json({ ok: true, run });
 });

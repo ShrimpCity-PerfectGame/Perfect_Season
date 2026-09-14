@@ -1,7 +1,7 @@
 {
   "name": "perfect-season",
   "private": true,
-  "version": "1.4.3",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
     "check": "esbuild perfect-season.jsx --bundle --format=esm --platform=node --jsx=automatic --outfile=build/app.js --external:react --external:react-dom",
@@ -17,6 +17,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "esbuild": "^0.24.0",
     "jsdom": "^25.0.1",
     "supabase": "^2.117.0"

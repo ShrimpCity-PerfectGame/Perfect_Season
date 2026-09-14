@@ -1,10 +1,9 @@
-// The Stats screen: one fetch (fetchStatsProfiles, mirrored here by seeding auth._profiles
-// directly) feeds every leaderboard via computeSiteStats - best lineups and most-drafted players
-// (moved here from the old Leaderboard-view Hall of Fame), plus wins/championships/playoffs/
-// streak/win%/position records (zero new tracking) and best GM-mode score (tagged via run.gm,
-// see finish()). Seeds two profiles whose numbers are picked so every leaderboard has a clear,
-// checkable #1.
+// The Stats screen: one call (fetchSiteStats -> site_stats(), mirrored by the mock in helpers.mjs)
+// feeds every board - career boards from profiles, most-drafted / GM scores / position records from
+// the runs log. Seeds two profiles plus their runs, with numbers picked so every board has a clear,
+// checkable #1. tests/test-runs-sql.mjs checks the mock against the real SQL.
 import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { runLogRow } from "../game-logic.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -50,6 +49,16 @@ auth._profiles.set("bob-id", {
     { dnf: true, picks: 2 }, // a DNF entry has no roster at all - must not break aggregation
   ],
 });
+
+// The runs log holds what the per-run boards read. Seeded the way submit-run writes it (runLogRow),
+// one row per recent entry, each with its own timestamp.
+let clock = Date.UTC(2026, 8, 1);
+for (const [id, p] of auth._profiles) {
+  for (const entry of p.recent) {
+    const row = runLogRow(id, p.username, { ...entry, date: clock += 1000 });
+    auth._runs.set(`${row.user_id}|${row.created_at}|${row.dnf}`, row);
+  }
+}
 
 // Build-a-player results live in their own table, unrelated to profiles - seed a couple directly
 // the same way logBuild would insert them, to test the Stats screen's read side independent of
