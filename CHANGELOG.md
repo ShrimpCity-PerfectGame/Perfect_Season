@@ -13,6 +13,15 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.4.1] — 2026-09-13
+
+### Fixed
+
+- **Site totals and your leaderboard rank failed to load.** Both downloaded every column of every
+  account just to add up a few numbers, and that request was failing on the live site. Site totals
+  now fetch only the three columns they sum, and your rank is counted by the database instead of in
+  the browser.
+
 ## [1.4.0] — 2026-09-13
 
 A new look, part one. No gameplay changes.

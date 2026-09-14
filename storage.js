@@ -134,9 +134,10 @@ export async function fetchLeaderboardTop(limit = 10, format = "fantasy") {
 // 1-based rank. Ranking across formats would be meaningless: the two score different things.
 export async function fetchOwnRank(score, format = "fantasy") {
   const col = bestCol(format);
-  const { data, error } = await getClient().from("profiles").select("*");
-  if (error || !data) return 0;
-  return data.filter((r) => r[col] != null && r[col] > score).length;
+  // Counted server-side (head: no rows come back) rather than downloading every profile to count
+  // them here - that unfiltered select("*") was failing on production.
+  const { count, error } = await getClient().from("profiles").select("id", { count: "exact", head: true }).gt(col, score);
+  return error || count == null ? 0 : count;
 }
 // One points ladder. Only players who have actually earned on it are listed - a table full of
 // zeroes from accounts that never played the mode isn't a leaderboard.
@@ -147,7 +148,9 @@ export async function fetchLadderTop(mode = "unlimited", limit = 10) {
   return data.map(rowToProfile);
 }
 export async function fetchSiteTotals() {
-  const { data, error } = await getClient().from("profiles").select("*");
+  // Only the three columns summed below - select("*") also dragged every profile's `recent` run
+  // history along, and that request was failing on production.
+  const { data, error } = await getClient().from("profiles").select("runs, dnf, perfect");
   const rows = error || !data ? [] : data;
   const totals = rows.reduce((t, r) => ({ runs: t.runs + (r.runs || 0) + (r.dnf || 0), perfect: t.perfect + (r.perfect || 0) }), { runs: 0, perfect: 0 });
   return { ...totals, players: rows.length };

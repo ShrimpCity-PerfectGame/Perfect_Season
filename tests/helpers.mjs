@@ -47,9 +47,6 @@ export function makeMockAuth() {
           if (state.limit != null) out = out.slice(0, state.limit);
           return out;
         };
-        // fetchBuildCount's `.select("*", { count: "exact", head: true })` - awaited directly,
-        // no further chaining, so a plain resolved promise matches the real call shape.
-        if (opts?.count) return Promise.resolve({ count: run().length, error: null });
         const builder = {
           eq(col, val) { state.filters.push((r) => r[col] === val); return builder; },
           // Real Postgres has no "undefined" - an unset column reads as NULL, so `is null`/
@@ -64,7 +61,12 @@ export function makeMockAuth() {
             const rows = run();
             return Promise.resolve(rows[0] ? { data: rows[0], error: null } : { data: null, error: { message: "no rows" } });
           },
-          then(resolve, reject) { return Promise.resolve({ data: run(), error: null }).then(resolve, reject); },
+          // `{ count: "exact", head: true }` (fetchBuildCount, fetchOwnRank) returns just the count
+          // of rows matching the filters, which may be chained on before it's awaited.
+          then(resolve, reject) {
+            const result = opts?.count ? { count: run().length, error: null } : { data: run(), error: null };
+            return Promise.resolve(result).then(resolve, reject);
+          },
         };
         return builder;
       },

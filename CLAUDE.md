@@ -50,6 +50,7 @@ node tests/test-scoring-format.mjs # fantasy vs standard grading: the fantasy pa
 node tests/test-difficulty.mjs [N] [fantasy|standard] [gm]  # plays N drafts with a bot, reports avg wins / 20-0 rate
 node tests/test-replay-verification.mjs  # game-logic.mjs's replayDraft: legit traces (incl. rerolls) accepted, tampered ones rejected
 node tests/test-tamper-resistance.mjs    # end-to-end: a fabricated submission never reaches profiles; a legit one still works
+node tests/test-profile-queries.mjs      # site totals/own rank never pull every profile column (that request failed on production)
 
 # Visual checks: there is no screenshot script (an older tests/shots.py never existed in this
 # checkout). Build with build.mjs, serve the repo root (.claude/launch.json's "static" config),
