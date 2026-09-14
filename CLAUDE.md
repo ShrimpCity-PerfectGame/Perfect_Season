@@ -338,23 +338,14 @@ suite and still broke the live Leaderboard for every existing account.
   broke. Click through the actual changed screens on staging before promoting — this replaces
   clicking through production, it isn't extra work on top of it. After promoting, confirm the
   version in the header matches the release.
-- **Going live on gridspin.app (one time; v1.9.0 waits on staging for it).** The rename and the domain
-  ship together, in this order:
-  1. The user bought gridspin.app through Vercel on 2026-09-14 (.gg was $130/yr). .app is HTTPS-only (HSTS preloaded), which Vercel handles.
-  2. Production Vercel project → Domains: add `gridspin.app` and `www.gridspin.app` (www redirects
-     to the apex), add the DNS records Vercel shows at the registrar, and wait for the certificate.
-  3. Production Supabase → Authentication → URL Configuration: Site URL `https://gridspin.app`, and
-     add it to the redirect URLs. Keep the vercel.app entry until the redirect in step 5 is live.
-  4. Merge v1.9.0 to `master`. build.mjs names `https://gridspin.app` for production itself, so no
-     Vercel setting is needed; the build log's "Built ... (v1.9.0, production, <url>)" line shows it.
-  5. Verify on gridspin.app: header version, `og:image` in the page source is an absolute gridspin.app
-     URL, the share text ends with the address, sign-in works. Then set both old addresses of the
-     production project, `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`
-     (same project, identical deployment), to redirect to gridspin.app. The staging project is
-     `perfect-season-staging.vercel.app`; the domain never goes on it.
-
-  Sign-ins and unfinished drafts live in each browser's storage for the old address, so everyone
-  signs in once more after the move. Accounts and stats are server-side and unaffected.
+- **The live site is gridspin.app** (since v1.9.0, 2026-09-14). The domain was bought through Vercel
+  (.gg was $130/yr), which runs its DNS and HTTPS (.app is HTTPS-only). In the production Vercel
+  project, `gridspin.app` currently forwards to `www.gridspin.app`, which serves the site; that is
+  cosmetic and the owner left it. The project's original addresses, `perfect-season-t9sk.vercel.app`
+  and `perfect-season-beta.vercel.app`, still serve the same deployment and are deliberately not
+  redirected (nobody used them) - don't add redirects unless asked. `build.mjs` bakes
+  `https://gridspin.app` into production's link previews and share link, so none of that affects
+  them. Staging stays `perfect-season-staging.vercel.app`; the domain never goes on it.
 
 ## Development Guidelines
 
