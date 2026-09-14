@@ -349,8 +349,10 @@ suite and still broke the live Leaderboard for every existing account.
      `https://gridspin.gg`; if it still says vercel.app, set `SITE_URL` in the Vercel project's
      Production environment and redeploy.
   5. Verify on gridspin.gg: header version, `og:image` in the page source is an absolute gridspin.gg
-     URL, the share text ends with the address, sign-in works. Then set the old
-     `perfect-season-t9sk.vercel.app` domain to redirect to gridspin.gg.
+     URL, the share text ends with the address, sign-in works. Then set both old addresses of the
+     production project, `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`
+     (same project, identical deployment), to redirect to gridspin.gg. The staging project is
+     `perfect-season-staging.vercel.app`; the domain never goes on it.
 
   Sign-ins and unfinished drafts live in each browser's storage for the old address, so everyone
   signs in once more after the move. Accounts and stats are server-side and unaffected.
