@@ -3,7 +3,8 @@
   "outputDirectory": "public",
   "rewrites": [
     { "source": "/", "destination": "/page.html" },
-    { "source": "/c/:code", "destination": "/page.html" }
+    { "source": "/c/:code", "destination": "/page.html" },
+    { "source": "/c/:code/", "destination": "/page.html" }
   ],
   "headers": [
     {

@@ -4,7 +4,8 @@ import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByTex
 
 setupDom();
 window.storage = makeStorage();
-  window.__ps_supabase__ = makeMockAuth();
+const auth = makeMockAuth();
+window.__ps_supabase__ = auth;
 const { container } = await mount();
 await flush();
 
@@ -67,8 +68,14 @@ await runTest("forcing an outcome auto-fills the roster and skips to the scripte
 });
 
 await runTest("forcing a board and a specific player lands them in the chosen slot", async () => {
+  const forcedCode = container.querySelector(".seedline code")?.textContent;
   await click(findButtonByText(container, "Run it back"));
-  await flush();
+  await flush(6);
+  // The ending was forced from the first board: that dealt draft is over, not abandoned. It used to stay
+  // saved, so Run it back charged the admin account a real DNF for it.
+  const admin = [...auth._profiles.values()].find((p) => p.username === "admin");
+  assert(admin.dnf === 0, `a forced ending must not lead to a DNF, got dnf=${admin.dnf}`);
+  assert(container.querySelector(".seedline code")?.textContent !== forcedCode, "expected fresh boards after the forced season");
 
   const input = panel().querySelector('input[placeholder="Force a player by name"]');
   await type(input, "Tom Brady");

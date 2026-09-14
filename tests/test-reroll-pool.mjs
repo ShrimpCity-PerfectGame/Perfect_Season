@@ -38,7 +38,7 @@ await runTest("no board repeats within a draft, across rerolls and normal advanc
     await flush();
     seen.push(boardOf(container));
 
-    await click(findButtonByText(container, "Re-spin years"));
+    await click(findButtonByText(container, "Re-spin era"));
     await flush();
     seen.push(boardOf(container));
 

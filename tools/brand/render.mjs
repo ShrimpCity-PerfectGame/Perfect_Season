@@ -61,7 +61,7 @@ try {
   <div class="tag">Spin an era. Draft the greats. Go 20–0.</div>
 </div></body></html>`, { waitUntil: "networkidle0" });
   await page.evaluate(() => document.fonts.ready);
-  const anton = await page.evaluate(() => document.fonts.check("80px Anton"));
+  const anton = await page.evaluate(async () => (await document.fonts.load("80px Anton")).length > 0);
   if (!anton) throw new Error("Anton didn't load - og.png needs Google Fonts; check the network and rerun");
   writeFileSync(out("og.png"), await page.screenshot({ clip: { x: 0, y: 0, width: 1200, height: 630 } }));
   console.log("wrote static/og.png");

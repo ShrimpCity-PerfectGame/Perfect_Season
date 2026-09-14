@@ -120,4 +120,47 @@ await runTest("a challenge code deals the same board to whoever enters it", asyn
   assert(boardOf(guest.container) === hostBoard, `expected the same board for the same code, got "${boardOf(guest.container)}" vs "${hostBoard}"`);
 });
 
+await runTest("switching to the daily while an Unlimited reel is still spinning keeps the daily's own board", async () => {
+  // restoreDraft used to leave the other draft's reel interval running: it finished by setting that
+  // draft's next board as the daily's, which was then saved - and the daily failed server replay.
+  setupDom();
+  // Real reel animation this time (the test DOM normally reports reduced motion, which skips it).
+  window.matchMedia = (query) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent() { return true; } });
+  const storage = makeStorage();
+  window.storage = storage;
+  window.__ps_supabase__ = makeMockAuth();
+  const { container } = await mount();
+  await flush();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // A new draft shows no reel or cards until its first spin frame, so wait for cards as well as the spin.
+  const settle = async () => { for (let i = 0; i < 40 && (container.querySelector(".reel.spin") || !container.querySelector(".card")); i++) { await sleep(100); await flush(1); } await flush(2); };
+  const pickFirst = async () => {
+    const card = [...container.querySelectorAll(".card")].find((c) => !c.classList.contains("off"));
+    await click(card.querySelector("button.hit"));
+    await flush();
+    await click(card.querySelector(".drafts button.btn.solid"));
+    await flush();
+  };
+  const pill = (label) => [...container.querySelectorAll("button.mb")].find((b) => b.textContent.startsWith(label));
+
+  await click(findButtonByText(container, "Fantasy daily"));
+  await flush();
+  await settle();
+  await pickFirst();
+  await settle();
+  await click(pill("Unlimited"));
+  await flush();
+  await settle();
+  await pickFirst();
+  assert(container.querySelector(".reel.spin"), "test setup: the reel should still be spinning after the Unlimited pick");
+  await click(pill("Daily"));
+  await flush();
+  await sleep(1300);
+  await flush(3);
+
+  const key = Object.keys(storage.data).find((k) => k.includes("ps-daily-wip"));
+  const snap = JSON.parse(storage.data[key]);
+  assert(snap.seq[snap.seqIdx] === `${snap.spin.team}|${snap.spin.w}`, `the daily's saved board must be its own, got ${snap.spin.team}|${snap.spin.w} for ${snap.seq[snap.seqIdx]}`);
+});
+
 console.log("test-daily.mjs done");

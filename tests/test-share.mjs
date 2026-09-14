@@ -156,4 +156,60 @@ await runTest("a signed-in player with an Unlimited draft going is warned, and t
   assert(auth._profiles.get(userId).dnf === 1, `expected one DNF for the abandoned draft, got ${auth._profiles.get(userId).dnf}`);
 });
 
+async function openLink(url, auth = makeMockAuth()) {
+  setupDom(url);
+  window.storage = makeStorage();
+  window.__ps_supabase__ = auth;
+  const { container } = await mount();
+  await flush(3);
+  const howto = findButtonByText(container, "Got it, let's draft");
+  if (howto) { await click(howto); await flush(); }
+  return container;
+}
+
+await runTest("a challenge draft in another scoring format resumes from the Unlimited tile", async () => {
+  // The tile used to run openFree with the device's own format, which saw a different variant and replaced it.
+  const container = await openLink("http://localhost/c/K3F9QZ?beat=7-10&scoring=championship");
+  await click(findButtonByText(container.querySelector(".challenge"), "Draft these boards"));
+  await flush(4);
+  const card = [...container.querySelectorAll(".card")].find((c) => !c.classList.contains("off"));
+  await click(card.querySelector("button.hit"));
+  await flush();
+  await click(card.querySelector(".drafts button.btn.solid"));
+  await flush(3);
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await clickMode(container, "Unlimited");
+  await flush(4);
+  assert(container.querySelector(".seedline code")?.textContent === "K3F9QZ" && text(container).includes("Pick 2 of 6"), "expected the challenge draft back, got: " + container.querySelector(".seedline")?.textContent);
+});
+
+await runTest("Draft these boards waits until the session has loaded", async () => {
+  // Taking it while still signed out would abandon a draft without charging its DNF.
+  const auth = makeMockAuth();
+  const getSession = auth.auth.getSession.bind(auth.auth);
+  auth.auth.getSession = async (...args) => { await new Promise((r) => setTimeout(r, 400)); return getSession(...args); };
+  setupDom("http://localhost/c/ABCD12?beat=17-3");
+  window.storage = makeStorage();
+  window.__ps_supabase__ = auth;
+  const { container } = await mount();
+  await flush(2);
+  const button = () => findButtonByText(container.querySelector(".challenge"), "Draft these boards");
+  assert(button()?.disabled, "expected the button to wait for the session");
+  await new Promise((r) => setTimeout(r, 700));
+  await flush(4);
+  assert(!button().disabled, "expected the button to be ready once the session has loaded");
+});
+
+await runTest("the card's warning follows a draft started after the link opened, and warns guests too", async () => {
+  const container = await openLink("http://localhost/c/ABCD12?beat=17-3");
+  assert(!container.querySelector(".challenge .warn"), "nothing in progress yet, so no warning");
+  await click(findButtonByText(container, "Start my season"));
+  await flush(3);
+  await click(findButtonByText(container, "Modes"));
+  await flush(3);
+  const warn = container.querySelector(".challenge .warn");
+  assert(warn?.textContent.includes("replaces it"), "a guest should be told the dealt draft will be replaced, got: " + warn?.textContent);
+});
+
 console.log("test-share.mjs done");

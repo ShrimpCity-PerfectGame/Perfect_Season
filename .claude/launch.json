@@ -4,7 +4,7 @@
     {
       "name": "static",
       "runtimeExecutable": "C:\\Users\\Willi\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
-      "runtimeArgs": ["-m", "http.server", "8080"],
+      "runtimeArgs": ["-m", "http.server", "8080", "--directory", "public"],
       "port": 8080
     }
   ]

@@ -23,8 +23,14 @@ function build(env) {
 }
 const attr = (html, re) => (html.match(re) || [])[1];
 
+console.log("page.html as authored");
+const raw = readFileSync(path.join(root, "page.html"), "utf8");
+// It's opened as-is for local checks: a bare text placeholder in <head> would end up on the page.
+check("the robots placeholder is an HTML comment, used once", !raw.includes("%ROBOTS%") && raw.split("<!--ROBOTS-->").length === 2);
+
 console.log("production build");
 const prod = build({});
+check("the robots placeholder is gone from the built page", !prod.html.includes("<!--ROBOTS-->"));
 check("canonical is the address Vercel serves", attr(prod.html, /<link rel="canonical" href="([^"]+)"/) === "https://www.gridspin.app/", prod.html);
 check("link previews use the same address", attr(prod.html, /property="og:image" content="([^"]+)"/) === "https://www.gridspin.app/og.png");
 check("no noindex", !/name="robots"/.test(prod.html));
@@ -54,6 +60,7 @@ const hostRe = rule && new RegExp(`^${rule.has.find((c) => c.type === "host").va
 check("every *.vercel.app address sends noindex", !!hostRe && ["perfect-season-t9sk.vercel.app", "perfect-season-beta.vercel.app", "perfect-season-staging.vercel.app"].every((h) => hostRe.test(h)));
 check("gridspin.app itself is never noindexed", !!hostRe && !hostRe.test("gridspin.app") && !hostRe.test("www.gridspin.app"));
 check("challenge links (/c/CODE) serve the app", (vercel.rewrites || []).some((r) => r.source === "/c/:code" && r.destination === "/page.html"));
+check("challenge links with a trailing slash serve the app too", (vercel.rewrites || []).some((r) => r.source === "/c/:code/" && r.destination === "/page.html"));
 check("challenge links are kept out of search results", (vercel.headers || []).some((h) => h.source === "/c/(.*)" && h.headers.some((x) => x.key === "X-Robots-Tag" && x.value === "noindex")));
 
 if (failures) { console.log(`${failures} failure(s)`); process.exit(1); }

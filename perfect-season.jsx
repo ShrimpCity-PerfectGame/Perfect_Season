@@ -1779,8 +1779,6 @@ export default function PerfectSeason() {
   const [codeInput, setCodeInput] = useState("");
   // A friend's boards from a challenge link (gridspin.app/c/CODE?beat=7-10), waiting on the Modes screen.
   const [challenge, setChallenge] = useState(() => (typeof window === "undefined" ? null : parseChallengeLink(window.location.pathname, window.location.search)));
-  // Whether taking the challenge would abandon a saved Unlimited draft (a DNF), so the card can say so.
-  const [challengeAbandons, setChallengeAbandons] = useState(false);
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [], format: "fantasy" });
   // The points ladder currently being viewed, and its rows. Paired the same way lb/lbFormat are,
   // so the rows and the column that reads them can never describe different ladders.
@@ -1846,7 +1844,8 @@ export default function PerfectSeason() {
       const saved = await sget(DRAFT_KEY, false);
       const ok = saved && saved.spin && BOARDS[`${saved.spin.team}|${saved.spin.w}`] && Array.isArray(saved.history)
         && saved.history.every((h) => findPlayer(h.key, h.id, h.season));
-      if (ok && saved.history.length > 0 && validDraft(saved)) restoreDraft(saved);
+      // An Unlimited draft counts from its first dealt board, so it comes back even with no picks yet.
+      if (ok && validDraft(saved) && (saved.history.length > 0 || saved.mode.kind === "free")) restoreDraft(saved);
       refreshWip();
       setDraftReady(true);
       if (!(await sget(HOWTO_KEY, false))) setHowTo(true);
@@ -1864,7 +1863,6 @@ export default function PerfectSeason() {
   useEffect(() => {
     if (!challenge) return;
     try { window.history.replaceState(null, "", "/"); } catch (e) { /* no history API */ }
-    sget(FREE_PROGRESS, false).then((saved) => setChallengeAbandons(!!(validDraft(saved) && saved.mode.kind === "free")));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2036,13 +2034,18 @@ export default function PerfectSeason() {
     setWip((w) => {
       const next = { ...w };
       for (const [slot, saved] of Object.entries(found)) {
-        if (!pendingClears.current[slot]) next[slot] = validDraft(saved) ? saved.history.length : 0;
+        // null means no draft; 0 means a dealt draft with no picks yet, which still counts.
+        if (!pendingClears.current[slot]) next[slot] = validDraft(saved) ? saved.history.length : null;
       }
       return next;
     });
   }
 
   function restoreDraft(saved) {
+    // Stop a reel still spinning for the draft being left: its interval would end by setting that draft's
+    // next board as this one's spin, and the snapshot effect would then save it under this draft.
+    clearInterval(timer.current);
+    setSpinning(false);
     const r = {};
     saved.history.forEach((h) => { r[h.slot] = findPlayer(h.key, h.id, h.season); });
     setRoster(r); setHistory(saved.history); setUsed(saved.used || []);
@@ -2061,6 +2064,9 @@ export default function PerfectSeason() {
   const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history)
     && BOARDS[`${s.spin.team}|${s.spin.w}`] && s.history.every((h) => findPlayer(h.key, h.id, h.season))
     && (s.mode.kind !== "daily" || s.mode.seed === dailySeed(s.mode.date, s.mode.format));
+  // Whether abandoning a saved draft costs this account a DNF: one with picks, or one this account dealt.
+  // A board a guest only looked at on this device isn't charged to whoever signs in afterwards.
+  const chargeableDraft = (s) => s.history.length > 0 || s.mode.owner === (userId || null);
 
   // presetRoster (Build-a-player) pre-fills one slot before the sequence is walked, so boardAt
   // correctly treats that position as already spoken for from the very first board.
@@ -2072,7 +2078,8 @@ export default function PerfectSeason() {
     const seed = m.kind === "daily" ? dailySeed(m.date, fmt) : m.code;
     const list = seededSequence(seed);
     const initialRoster = presetRoster || {};
-    setMode({ ...m, format: fmt, seed }); setSeq(list);
+    // owner: the account (or guest, null) that dealt this draft - see chargeableDraft.
+    setMode({ ...m, format: fmt, seed, owner: userId || null }); setSeq(list);
     setRoster(initialRoster); setHistory([]); setUsed([]); setSelected(null); setResult(null);
     setShown(0); setPo({ idx: 0, stage: "pre" }); setRerolls({ team: REROLL_BUDGET, years: REROLL_BUDGET });
     setPending(null); setNotice(""); setResumed(false); setConfirmReset(false);
@@ -2202,7 +2209,13 @@ export default function PerfectSeason() {
       loadLeaderboard(fmt);
       clearDraft(DRAFT_KEY);
       clearDraftTracked(slotId(mode), mode.kind === "daily" ? DAILY_PROGRESS(mode.date, fmt) : FREE_PROGRESS);
-      setWip((w) => ({ ...w, [slotId(mode)]: 0 }));
+      setWip((w) => ({ ...w, [slotId(mode)]: null }));
+    } else if (mode.kind === "free") {
+      // A forced ending records nothing, but the Unlimited draft it ends is over: clear its saved copy, or
+      // it would come back on the next Unlimited tap and be charged as a DNF when replaced.
+      clearDraft(DRAFT_KEY);
+      clearDraftTracked("free", FREE_PROGRESS);
+      setWip((w) => ({ ...w, free: null }));
     }
     setShare({ state: "idle", text: "" });
     setResult(sim);
@@ -2303,9 +2316,9 @@ export default function PerfectSeason() {
   // charge one itself and then call restart(), which charged a second one for the same draft.
   async function abandonCurrent() {
     const saved = await sget(FREE_PROGRESS, false);
-    if (validDraft(saved) && saved.mode.kind === "free") recordDnf(saved.history.length, saved.mode);
+    if (validDraft(saved) && saved.mode.kind === "free" && chargeableDraft(saved)) recordDnf(saved.history.length, saved.mode);
     clearDraftTracked("free", FREE_PROGRESS);
-    setWip((w) => ({ ...w, free: 0 }));
+    setWip((w) => ({ ...w, free: null }));
   }
 
   // The draft screen's Unlimited pill: back to the free draft already in progress, whatever its
@@ -2324,11 +2337,24 @@ export default function PerfectSeason() {
     startDraft({ kind: "free", code: newCode(), format, ...extra });
   }
 
-  // After an Unlimited season its saved draft is already cleared, so this deals fresh boards. After a
-  // daily, an Unlimited draft left in progress is still saved, and gets resumed rather than abandoned.
+  // After an Unlimited season its saved draft is already cleared, so this deals fresh boards under the same
+  // variant and scoring just played. After a daily, the draft left in the Unlimited slot is resumed, whatever
+  // its variant or scoring, rather than abandoned.
   function runItBack() {
-    if (mode?.kind === "free") restart();
-    else openFree();
+    if (mode?.kind === "free") restart({ format: mode.format, gm: !!mode.gm, genius: !!mode.genius });
+    else resumeFree();
+  }
+
+  // Unlimited from Modes: back to the draft in the Unlimited slot - a GM, Genius or challenge draft
+  // included - when it's in the selected scoring format. (openFree alone treats another variant as
+  // abandoned and charges a DNF.) Switching the scoring format first still asks for a new draft under
+  // that format's rules.
+  async function playUnlimited() {
+    const fmt = normFormat(format);
+    if (mode?.kind === "free" && !result && normFormat(mode.format) === fmt) { setView("play"); return; }
+    const saved = await sget(FREE_PROGRESS, false);
+    if (validDraft(saved) && saved.mode.kind === "free" && normFormat(saved.mode.format) === fmt) { setView("play"); restoreDraft(saved); return; }
+    openFree();
   }
 
   // Stats O/U: "career" here means the sum of a player's appearances across every board he
@@ -2595,11 +2621,11 @@ export default function PerfectSeason() {
     const saved = await sget(FREE_PROGRESS, false);
     if (validDraft(saved) && saved.mode.kind === "free") {
       if (sameVariant(saved.mode)) { restoreDraft(saved); return; }
-      // Use the saved history length (not live state) so the DNF is recorded correctly even if
-      // this draft was started in an earlier session and never loaded back into memory.
-      recordDnf(saved.history.length);
+      // Use the saved draft (not live state) so the DNF is recorded correctly - its picks and its own
+      // ladder - even if it was started in an earlier session and never loaded back into memory.
+      if (chargeableDraft(saved)) recordDnf(saved.history.length, saved.mode);
       clearDraftTracked("free", FREE_PROGRESS);
-      setWip((w) => ({ ...w, free: 0 }));
+      setWip((w) => ({ ...w, free: null }));
     }
     clearDraft(DRAFT_KEY);
     startDraft({ kind: "free", code: newCode(), ...want });
@@ -2622,10 +2648,15 @@ export default function PerfectSeason() {
   // code, it abandons any Unlimited draft in progress (a DNF; the card warns first).
   async function acceptChallenge() {
     const c = challenge;
-    if (!c) return;
+    // Not before the session loads: abandoning a draft while signed out would skip its DNF.
+    if (!c || !authReady) return;
     setChallenge(null);
     await abandonCurrent();
     clearDraft(DRAFT_KEY);
+    // The link's scoring becomes the selected format, as opening a daily does, so Modes shows what you're
+    // playing and the Unlimited tile takes you back to it.
+    setFormat(c.format);
+    sset(FORMAT_KEY, c.format, false);
     setView("play");
     startDraft({ kind: "free", code: c.code, format: c.format, gm: c.gm, genius: c.genius });
   }
@@ -2753,6 +2784,8 @@ export default function PerfectSeason() {
   const regW = regGames.filter((g) => g.win).length;
   const inProgress = !!mode && !result && history.length > 0 && history.length < 6;
   const freePicks = (mode && mode.kind === "free" && !result ? history.length : wip.free) || 0;
+  // A draft sits in the Unlimited slot, picks or not (wip.free is null when there's none).
+  const freeInProgress = (mode?.kind === "free" && !result) || wip.free != null;
   // Per format, since both dailies can be part-finished at the same time.
   const dailyPicksFor = (f) => (dailyDone[f] ? 0
     : ((mode && mode.kind === "daily" && mode.date === todayKey() && normFormat(mode.format) === f && !result
@@ -2772,7 +2805,7 @@ export default function PerfectSeason() {
             <button key={k} className={`tab ${view === k ? "on" : ""}`} aria-current={view === k ? "page" : undefined}
               onClick={() => {
                 setView(k); if (k === "home") refreshWip(); if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); } if (k === "stats" && !siteStats.loaded) loadSiteStats(); }}>
-              {l}{k === "play" && view !== "play" && mode && open.length < 6 && !result && <span className="dot" aria-label="Draft in progress" />}
+              {l}{k === "play" && view !== "play" && mode && !result && !modeDailyDone && <span className="dot" aria-label="Draft in progress" />}
             </button>
           ))}
           <div className="hdr-links">
@@ -2814,11 +2847,13 @@ export default function PerfectSeason() {
                 </h2>
                 <p>
                   {[challenge.gm && "GM mode", challenge.genius && "Genius mode", `${FORMAT_LABEL[challenge.format]} scoring`].filter(Boolean).join(" · ")}.{" "}
-                  The same six team-and-era boards they drafted from, in the same order. Your season is your own.
+                  The same code, so the boards come up in the order they did for them - re-spins aside. Your season is your own.
                 </p>
-                {user && challengeAbandons && <p className="warn">You have an Unlimited draft in progress. Drafting these boards counts it as a DNF.</p>}
+                {freeInProgress && (
+                  <p className="warn">You have an Unlimited draft in progress. Drafting these boards {user ? "counts it as a DNF" : "replaces it"}.</p>
+                )}
                 <div className="frow">
-                  <button className="btn solid" onClick={acceptChallenge}>Draft these boards</button>
+                  <button className="btn solid" disabled={!authReady} onClick={acceptChallenge}>Draft these boards</button>
                   <button className="btn" onClick={() => setChallenge(null)}>Not now</button>
                 </div>
               </section>
@@ -2839,7 +2874,7 @@ export default function PerfectSeason() {
               <p className="herosub">Spin an era. Draft the greats. Go 20–0.</p>
               <p className="heroexplain">Each round spins a random team and era. The stats are real, the fantasy points are hidden, and your six play a full season against real NFL teams. Win all 20 and you've gone perfect.</p>
               <div className="herocta">
-                <button className="btn solid xl" onClick={() => openFree()}>Start my season 🏈</button>
+                <button className="btn solid xl" onClick={playUnlimited}>Start my season 🏈</button>
               </div>
               <div className="herostats">
                 {liveDrafts != null && (
@@ -2891,13 +2926,13 @@ export default function PerfectSeason() {
                 </div>
               </div>
 
-              <button className="mode m-unlimited" onClick={() => openFree()}>
+              <button className="mode m-unlimited" onClick={playUnlimited}>
                 <div className="mt">
                   <span className="icon" aria-hidden="true">♾️</span>
                   <span className="mn">Unlimited</span>{freePicks > 0 && <span className="pill">{freePicks} of 6 picked</span>}
                 </div>
                 <p>Draft as many teams as you like. Random boards every time, resets allowed.</p>
-                <span className="go">{freePicks > 0 ? "Back to your draft" : "Let's go"}</span>
+                <span className="go">{freeInProgress ? "Back to your draft" : "Let's go"}</span>
               </button>
 
               <button className="mode m-genius" onClick={() => openFree({ genius: true })}>
@@ -2975,7 +3010,7 @@ export default function PerfectSeason() {
             <p className="note" style={{ marginTop: 0 }}>Pick a mode to start one.</p>
             <div className="frow" style={{ marginTop: 10 }}>
               <button className="btn solid" onClick={startDaily}>Play today's daily</button>
-              <button className="btn" onClick={() => openFree()}>Unlimited draft</button>
+              <button className="btn" onClick={playUnlimited}>Unlimited draft</button>
             </div>
           </div>
         )}
@@ -3015,8 +3050,8 @@ export default function PerfectSeason() {
                   {!dailyDone[otherFormat] && (
                     <button className="btn solid" onClick={() => startDaily(otherFormat)}>Play the {FORMAT_LABEL[otherFormat]} daily</button>
                   )}
-                  {/* openFree, not restart: an Unlimited draft already in progress is resumed, not charged as a DNF. */}
-                  <button className="btn" onClick={() => openFree()}>Play an unlimited draft</button>
+                  {/* resumeFree, not restart: the draft in the Unlimited slot, whatever its variant, is resumed rather than charged as a DNF. */}
+                  <button className="btn" onClick={() => resumeFree()}>Play an unlimited draft</button>
                   <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>Today's leaderboard</button>
                 </div>
               </div>
@@ -3063,7 +3098,7 @@ export default function PerfectSeason() {
                     </div>
                     <div className="sp">
                       <button className="btn sm" tabIndex={stuck ? 0 : -1} disabled={spinning || rerolls.team < 1} onClick={() => reroll("team")}>Re-spin team ({rerolls.team})</button>
-                      <button className="btn sm" tabIndex={stuck ? 0 : -1} disabled={spinning || rerolls.years < 1} onClick={() => reroll("years")}>Re-spin years ({rerolls.years})</button>
+                      <button className="btn sm" tabIndex={stuck ? 0 : -1} disabled={spinning || rerolls.years < 1} onClick={() => reroll("years")}>Re-spin era ({rerolls.years})</button>
                     </div>
                   </div>
                 </div>
@@ -3080,9 +3115,9 @@ export default function PerfectSeason() {
                     <span className="rs-long">Re-spin team <span className="left">({rerolls.team} left)</span></span>
                     <span className="rs-short" aria-hidden="true">↻ Team <b>{rerolls.team}</b></span>
                   </button>
-                  <button className="btn" aria-label={`Re-spin years (${rerolls.years} left)`} disabled={spinning || rerolls.years < 1} onClick={() => reroll("years")}>
-                    <span className="rs-long">Re-spin years <span className="left">({rerolls.years} left)</span></span>
-                    <span className="rs-short" aria-hidden="true">↻ Years <b>{rerolls.years}</b></span>
+                  <button className="btn" aria-label={`Re-spin era (${rerolls.years} left)`} disabled={spinning || rerolls.years < 1} onClick={() => reroll("years")}>
+                    <span className="rs-long">Re-spin era <span className="left">({rerolls.years} left)</span></span>
+                    <span className="rs-short" aria-hidden="true">↻ Era <b>{rerolls.years}</b></span>
                   </button>
                   {mode.kind === "daily" ? (
                     <span className="note" style={{ marginLeft: "auto", alignSelf: "center" }}>One shot. No resets on the daily.</span>
@@ -3294,7 +3329,7 @@ export default function PerfectSeason() {
                       <button className="btn" onClick={runItBack}>Run it back 🔁</button>
                     </div>
                     {mode.kind === "free" && (
-                      <p className="note">Share result sends a link to these exact six boards (code <b>{mode.code}</b>), with your record to beat.</p>
+                      <p className="note">Share result sends a link to this draft's code (<b>{mode.code}</b>), so friends get the same boards - re-spins aside - with your record to beat.</p>
                     )}
                   </>
                 )}

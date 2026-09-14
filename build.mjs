@@ -68,7 +68,7 @@ const html = readFileSync("page.html", "utf8")
   .replace(/"static\//g, '"/')
   .replace(/\/static\//g, "/")
   .replaceAll("%CANONICAL_URL%", canonicalUrl)
-  .replace("%ROBOTS%", appEnv === "staging" ? '<meta name="robots" content="noindex, nofollow" />\n' : "");
+  .replace("<!--ROBOTS-->", appEnv === "staging" ? '<meta name="robots" content="noindex, nofollow" />' : "");
 writeFileSync("public/page.html", html);
 
 // Crawl files. Staging still allows crawling on purpose: a crawler has to fetch a page to see its

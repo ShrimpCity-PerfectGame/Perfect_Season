@@ -16,6 +16,12 @@ async function signedInApp(username) {
   window.__ps_supabase__ = auth;
   const { container } = await mount();
   await flush();
+  await signUp(container, username);
+  const userId = [...auth._profiles.keys()][0];
+  return { container, auth, userId };
+}
+
+async function signUp(container, username) {
   await click(findButtonByText(container, "Account"));
   await flush();
   await click(findButtonByText(container.querySelector(".panel"), "Create account"));
@@ -27,8 +33,6 @@ async function signedInApp(username) {
   await type(p2, "Password1");
   await click([...container.querySelector(".panel").querySelectorAll("button")].find((b) => !b.hasAttribute("role") && b.textContent.includes("Create account")));
   await waitForCrypto();
-  const userId = [...auth._profiles.keys()][0];
-  return { container, auth, userId };
 }
 
 async function draftOne(container) {
@@ -232,6 +236,117 @@ await runTest("Play an unlimited draft after the daily resumes the Unlimited dra
   assert(codeOf(container) === code, `expected the Unlimited draft in progress back, got code ${codeOf(container)} instead of ${code}`);
   assert(text(container).includes("Pick 2 of 6"), "expected its pick to still be there");
   assert(auth._profiles.get(userId).dnf === 0, `expected no DNF, got ${auth._profiles.get(userId).dnf}`);
+});
+
+await runTest("a DNF lands on the abandoned draft's own ladder, even with another mode loaded", async () => {
+  // openFree used to charge it to whatever mode was on screen - here the daily.
+  const { container, auth, userId } = await signedInApp("dnfladder");
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "GM mode"));
+  await flush(3);
+  await draftOne(container);
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(findButtonByText(container, "Fantasy daily"));
+  await flush(3);
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "Genius mode"));
+  await flush(6);
+  const row = auth._profiles.get(userId);
+  assert(row.dnf === 1, `expected one DNF, got ${row.dnf}`);
+  assert(row.points_gm < 0 && !row.points_daily, `the penalty belongs on the GM ladder, got gm=${row.points_gm} daily=${row.points_daily}`);
+});
+
+await runTest("after the daily, Run it back and Play an unlimited draft resume a GM draft in progress", async () => {
+  // Both used to go through openFree, which treats a GM draft as a different variant: a DNF and new boards.
+  const { container, auth, userId } = await signedInApp("dnfgmresume");
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "GM mode"));
+  await flush(3);
+  await draftOne(container);
+  const code = codeOf(container);
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(findButtonByText(container, "Fantasy daily"));
+  await flush(3);
+  for (let i = 0; i < 6; i++) await draftOne(container);
+  await flush(6);
+  await finishSeason(container);
+  await click(findButtonByText(container, "Run it back"));
+  await flush(6);
+  assert(codeOf(container) === code && text(container).includes("Pick 2 of 6") && text(container).includes("GM mode"), `expected the GM draft back, got code ${codeOf(container)}`);
+
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(findButtonByText(container, "Fantasy daily"));
+  await flush(3);
+  await click(findButtonByText(container, "Play an unlimited draft"));
+  await flush(6);
+  assert(codeOf(container) === code, `expected Play an unlimited draft to resume the GM draft, got code ${codeOf(container)}`);
+  assert(auth._profiles.get(userId).dnf === 0, `resuming must not charge a DNF, got ${auth._profiles.get(userId).dnf}`);
+});
+
+await runTest("a dealt draft with no picks comes back after a reload, and Modes shows it", async () => {
+  const { container, auth, userId } = await signedInApp("dnfzeroreload");
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "GM mode"));
+  await flush(3);
+  const code = codeOf(container);
+
+  const storage = window.storage;
+  setupDom();
+  window.storage = storage;
+  window.__ps_supabase__ = auth;
+  const reloaded = (await mount()).container;
+  await flush(6);
+  const tile = modeButton(reloaded, "Unlimited");
+  assert(tile.textContent.includes("Back to your draft"), "the Unlimited tile should offer the dealt draft, got: " + tile.textContent);
+  assert(reloaded.querySelector(".tab .dot"), "the Draft tab should mark a draft in progress");
+  // The Unlimited tile resumes whatever is in the slot, GM mode included, instead of replacing it.
+  await click(tile);
+  await flush(6);
+  assert(codeOf(reloaded) === code && text(reloaded).includes("GM mode"), `expected the GM draft back from the Unlimited tile, got ${codeOf(reloaded)}`);
+  assert(auth._profiles.get(userId).dnf === 0, "resuming must not charge a DNF");
+});
+
+await runTest("a board a guest only dealt isn't charged to the account they create next", async () => {
+  setupDom();
+  window.storage = makeStorage();
+  const auth = makeMockAuth();
+  window.__ps_supabase__ = auth;
+  const { container } = await mount();
+  await flush();
+  await click(findButtonByText(container, "Start my season"));
+  await flush(3);
+  assert(codeOf(container), "expected a dealt Unlimited draft");
+  await signUp(container, "dnfguestboard");
+  const userId = [...auth._profiles.keys()][0];
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "GM mode"));
+  await flush(6);
+  assert(auth._profiles.get(userId).dnf === 0, `a board dealt before the account existed must not cost it a DNF, got ${auth._profiles.get(userId).dnf}`);
+});
+
+await runTest("Run it back after a Genius season deals Genius mode again", async () => {
+  // It used to deal plain Unlimited, and switching back to Genius then cost a DNF.
+  const { container, auth, userId } = await signedInApp("dnfgeniusagain");
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "Genius mode"));
+  await flush(3);
+  for (let i = 0; i < 6; i++) await draftOne(container);
+  await flush(6);
+  await finishSeason(container);
+  const code = codeOf(container);
+  await click(findButtonByText(container, "Run it back"));
+  await flush(6);
+  assert(codeOf(container) !== code && container.querySelector(".seedline .modechip.genius"), "expected fresh boards in Genius mode, got: " + container.querySelector(".seedline")?.textContent);
+  assert(auth._profiles.get(userId).dnf === 0, "a new season after a finished one is not a DNF");
 });
 
 console.log("test-dnf.mjs done");
