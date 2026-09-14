@@ -537,7 +537,9 @@ const GRAIN = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'
 const CSS = `
 .ps{${cssVars("light")};--display:'Anton',Impact,'Arial Narrow',sans-serif;
   font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-synthesis:none;-webkit-font-smoothing:antialiased;
-  color:var(--ink);background-color:var(--bg);background-image:${GRAIN};min-height:100vh;font-variant-numeric:tabular-nums}
+  color:var(--ink);background-color:var(--bg);background-image:${GRAIN};min-height:100vh;font-variant-numeric:tabular-nums;
+  /* decorative hero glow bleeds past the viewport edge; clip (not hidden) so no scroll container is created */
+  overflow-x:clip}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
 .ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
