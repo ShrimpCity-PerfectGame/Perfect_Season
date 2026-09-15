@@ -36,7 +36,6 @@ export const PROFILE_CSS = `
 .pf-hd{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin:0 0 10px}
 .pf-hd .h{margin:0}
 .pf-meta{font-size:13px;font-weight:700;color:var(--muted)}
-.pf-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .panel p.pf-msg{margin:0}
 .pf-msgact{margin-top:12px}
 /* Badge tiers: --tier reads as text (the deep metal on cream), --medal is the bright fill. */
@@ -116,7 +115,7 @@ export const PROFILE_CSS = `
 /* Seasons by wins: one scale for every bar, 0 to 20 wins, a perfect season in lime. Phones get a bar
    per row, so every count fits beside its bar; wider screens get columns. */
 .pf-chart{display:grid;gap:3px;margin:0;padding:0;list-style:none}
-.pf-chart li{position:relative;display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:8px}
+.pf-chart li{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:8px}
 .pf-x{font-size:12px;font-weight:700;line-height:14px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
 .pf-bin{display:flex;align-items:center;gap:6px;min-width:0;height:14px;border-left:1px solid var(--line2)}
 .pf-bar{flex:none;width:calc(var(--v)*(100% - 46px));min-width:3px;height:10px;border-radius:0 4px 4px 0;background:var(--ink);
@@ -328,7 +327,7 @@ function PlayerCard({ profile, details, progress, isOwner, signedIn, moderator, 
         <div className="pf-id">
           <h1 className="pf-name">{profile.username}</h1>
           {team && (
-            <p className="pf-team"><span className="pf-swatch" style={teamVars(team)} aria-hidden="true" /><span className="pf-sr">Favorite team: </span>{teamName(team)}</p>
+            <p className="pf-team"><span className="pf-swatch" style={teamVars(team)} role="img" aria-label="Favorite team" />{teamName(team)}</p>
           )}
         </div>
       </div>
@@ -483,11 +482,12 @@ function BadgeGrid({ progress }) {
             <Fragment key={p.id}>
               <li className={`pf-badge pf-t-${b.tier}${p.earned ? " pf-on" : ""}`} data-badge={p.id} data-earned={p.earned ? "true" : "false"}
                 style={{ "--p": p.earned ? 1 : Math.min(1, p.have / p.need) }}>
-                <button type="button" className="pf-stk" aria-expanded={isOpen} aria-controls={isOpen ? `${id}-${p.id}` : undefined} onClick={() => setOpen(isOpen ? null : p.id)}>
+                {/* The name a screen reader hears carries what the colors and the ring show. */}
+                <button type="button" className="pf-stk" aria-label={`${b.name}, ${TIER_LABEL[b.tier]}, ${status.toLowerCase()}`}
+                  aria-expanded={isOpen} aria-controls={isOpen ? `${id}-${p.id}` : undefined} onClick={() => setOpen(isOpen ? null : p.id)}>
                   <span className="pf-disc" aria-hidden="true"><span className="pf-emo">{b.emoji}</span></span>
                   <span className="pf-bn">{b.name}</span>
-                  {!p.earned && counted && <span className="pf-bp" aria-hidden="true">{num(p.have)}/{num(p.need)}</span>}
-                  <span className="pf-sr">{`, ${TIER_LABEL[b.tier]}, ${status.toLowerCase()}`}</span>
+                  {!p.earned && counted && <span className="pf-bp">{num(p.have)}/{num(p.need)}</span>}
                 </button>
               </li>
               {isOpen && (
@@ -514,21 +514,24 @@ function WinsChart({ wins }) {
   const max = Math.max(...counts);
   if (max <= 0) return null;
   const total = counts.reduce((a, b) => a + b, 0);
+  // Read out as one picture with every count in full, rather than 21 bars of numbers without context.
+  const summary = counts.map((n, w) => (n ? `${w} ${w === 1 ? "win" : "wins"}, ${plural(n, "season")}` : null)).filter(Boolean).join("; ");
   return (
     <div className="pf-sec">
       <div className="pf-hd"><h2 className="h">Seasons by wins</h2><span className="pf-meta">{plural(total, "season")}</span></div>
-      <ol className="pf-chart">
-        {counts.map((n, w) => (
-          <li key={w} className={w === 20 ? "pf-perfect" : undefined} style={{ "--v": n / max }} aria-hidden={n === 0 ? "true" : undefined}>
-            <span className="pf-sr">{`${w} ${w === 1 ? "win" : "wins"}: ${plural(n, "season")}`}</span>
-            <span className="pf-x" aria-hidden="true">{w}</span>
-            <span className="pf-bin" aria-hidden="true">
-              {n > 0 && <span className="pf-bar" />}
-              {n > 0 && <span className="pf-n">{compact(n)}</span>}
-            </span>
-          </li>
-        ))}
-      </ol>
+      <div role="img" aria-label={`Seasons by wins: ${summary}`}>
+        <ol className="pf-chart">
+          {counts.map((n, w) => (
+            <li key={w} className={w === 20 ? "pf-perfect" : undefined} style={{ "--v": n / max }}>
+              <span className="pf-x">{w}</span>
+              <span className="pf-bin">
+                {n > 0 && <span className="pf-bar" />}
+                {n > 0 && <span className="pf-n">{compact(n)}</span>}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
     </div>
   );
 }

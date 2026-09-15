@@ -155,6 +155,12 @@ await runTest("a veteran shows every section, in the contract's order", async ()
   const chartBars = c.querySelectorAll(".pf-chart li");
   assert(chartBars.length === 21, "the wins chart has a bar slot for 0 to 20 wins, got " + chartBars.length);
   assert(c.querySelector(".pf-chart li.pf-perfect .pf-bar"), "the 20-win bar is drawn (the fixture has a perfect season)");
+  const chartName = c.querySelector('[role="img"] .pf-chart')?.closest('[role="img"]').getAttribute("aria-label") || "";
+  const counts = Object.fromEntries(p.extra.wins.map((r) => [r.w, r.n]));
+  assert(chartName.startsWith("Seasons by wins: ") && chartName.includes(`12 wins, ${counts[12]} seasons`) && chartName.includes(`20 wins, ${counts[20]} season`),
+    "the chart reads out every count, got: " + chartName);
+  assert(!/(: |; )[0-4] wins?,/.test(chartName), "empty bars (the fixture has nothing under 5 wins) aren't read out, got: " + chartName);
+  assert(c.querySelector(".pf-card .pf-team [role='img']")?.getAttribute("aria-label") === "Favorite team", "the team swatch says what the team is");
 });
 
 await runTest("sections with nothing to show are left out", async () => {
@@ -188,6 +194,11 @@ await runTest("the badge grid shows every badge, earned ones marked and locked o
     const shownProgress = el.querySelector(".pf-bp")?.textContent;
     if (!pr.earned && pr.need > 1) assert(shownProgress === `${pr.have}/${pr.need}`, `${pr.id} should show ${pr.have}/${pr.need}, got ${shownProgress}`);
     else assert(!shownProgress, `${pr.id} shouldn't show a count (earned, or a yes/no badge)`);
+    // Screen readers get the same facts as the colors: the name, the tier and how far along it is.
+    const b = BADGES.find((x) => x.id === pr.id);
+    const said = pr.earned ? "earned" : pr.need > 1 ? `${pr.have} of ${pr.need}` : "not earned yet";
+    const label = el.querySelector("button").getAttribute("aria-label") || "";
+    assert(label.startsWith(b.name) && label.toLowerCase().includes(b.tier) && label.endsWith(said), `${pr.id}'s accessible name should say "${said}", got "${label}"`);
   }
   const earned = progress.filter((x) => x.earned).length;
   assert(earned > 0 && earned < BADGES.length, "the fixture should have a mix of earned and locked badges");
