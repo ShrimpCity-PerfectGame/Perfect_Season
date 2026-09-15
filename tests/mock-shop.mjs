@@ -96,7 +96,11 @@ export function makeShop(state, { wallet, profileData }) {
   return {
     tables: { shop_items: items, inventory },
     rpcs,
-    // set_avatar's check for a paid pack's avatar (state.ownsAvatarPack).
-    ownsAvatarPack: (uid, pack) => inventory.has(`${uid}|${packItem(pack)}`),
+    // set_avatar's check for a paid pack's avatar (state.ownsAvatarPack): the pack's shop item, owned the way
+    // shop_state says it is, as migration-profiles.sql checks it.
+    ownsAvatarPack: (uid, pack) => {
+      const item = items.get(packItem(pack));
+      return !!item && owns(uid, item);
+    },
   };
 }

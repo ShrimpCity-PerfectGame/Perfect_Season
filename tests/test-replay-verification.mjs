@@ -157,7 +157,40 @@ t = (() => {
 check("the skipping trace's first board did have a legal pick", gl.boardHasOption(t.seq[0], new Set(), gl.SLOTS));
 r = gl.replayDraft(t.seed, t.history, t.seq);
 check("rejects a trace that passes over a board it could have picked from", !r.ok && /passed over/.test(r.reason || ""), r);
-// And the same trace with its last board re-spun before the final pick still replays: a re-spin is the legal way on.
+// A re-spin replaces the board on screen, so it can't be tied to a board the draft already picked from: that would add
+// the re-spun board instead of replacing one, giving the draft an extra board to pick from.
+t = (() => {
+  const seed = "verify-seed-respin-after-pick";
+  const base = gl.seededSequence(seed);
+  const roster = {};
+  const drafted = new Set();
+  const history = [];
+  const seq = [];
+  const pickFrom = (key) => {
+    const open = gl.SLOTS.filter((s) => !roster[s]);
+    const player = gl.BOARDS[key].find((p) => !drafted.has(p.id) && open.some((s) => gl.fits(p.pos, s)));
+    if (!player) return;
+    const slot = open.find((s) => gl.fits(player.pos, s));
+    history.push({ key, id: player.id, season: player.season, slot });
+    roster[slot] = player;
+    drafted.add(player.id);
+  };
+  seq.push(base[0]);
+  pickFrom(base[0]);
+  const [team, w] = base[0].split("|");
+  const respin = gl.rerollCandidate({ seed, kind: "team", seqIdx: 0, spinTeam: team, spinW: Number(w), shown: new Set(base), drafted, open: gl.SLOTS.filter((s) => !roster[s]) });
+  seq.push(respin);
+  pickFrom(respin);
+  for (let i = 1; i < base.length && history.length < gl.SLOTS.length; i++) {
+    seq.push(base[i]);
+    pickFrom(base[i]);
+  }
+  return { seed, history, seq };
+})();
+check("the re-spin-after-a-pick trace is a full roster", t.history.length === gl.SLOTS.length, t.history.length);
+r = gl.replayDraft(t.seed, t.history, t.seq);
+check("rejects a re-spin tied to a board the draft already picked from", !r.ok && /re-?spin|reroll/i.test(r.reason || ""), r);
+// And a draft with its last board re-spun before the final pick still replays: a re-spin is the legal way on.
 const lastSpin = simulateDraft("verify-seed-5", [{ kind: "team", beforePick: 5 }]);
 r = gl.replayDraft(lastSpin.seed, lastSpin.history, lastSpin.seq);
 check("a re-spin before the final pick still replays as legal", r.ok, r);

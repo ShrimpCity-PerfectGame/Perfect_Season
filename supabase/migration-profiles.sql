@@ -251,7 +251,8 @@ $$;
 -- Your picture: an uploaded photo (p_path), a default avatar (p_preset), or neither (both null, back to
 -- your initial). Setting one clears the other. It doesn't touch storage: the browser uploads the photo
 -- first and deletes the old one after this succeeds. A default avatar from one of v1.12.0's paid packs
--- (migration-shop.sql, SHOP.md 3.2) needs the pack: an inventory row for its item, 'pack-<pack>'.
+-- (migration-shop.sql, SHOP.md 3.2) needs its pack's shop item, 'pack-<pack>', owned the way shop_state
+-- says it is - free, bought, or a badge item whose badge is paid - so the picker and this always agree.
 create or replace function public.set_avatar(p_path text, p_preset text)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
@@ -283,7 +284,15 @@ begin
       if to_regclass('public.inventory') is null then
         raise exception 'bad_preset' using errcode = 'P0001';
       end if;
-      if not exists (select 1 from public.inventory where user_id = v_uid and item_id = 'pack-' || v_preset.pack) then
+      -- The same ownership rule as shop_state's (migration-shop.sql): the picker unlocks a pack from that answer,
+      -- so anything narrower here would offer avatars this then refuses.
+      if not exists (
+        select 1 from public.shop_items s
+         where s.id = 'pack-' || v_preset.pack
+           and (s.rarity = 'free'
+                or exists (select 1 from public.inventory i where i.user_id = v_uid and i.item_id = s.id)
+                or (s.badge is not null
+                    and exists (select 1 from public.badge_awards b where b.user_id = v_uid and b.badge = s.badge)))) then
         raise exception 'bad_preset' using errcode = 'P0001';
       end if;
     end if;

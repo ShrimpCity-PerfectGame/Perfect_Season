@@ -70,12 +70,15 @@ create table if not exists public.inventory (
   primary key (user_id, item_id)
 );
 
--- The avatar packs' avatars (shop-catalog.mjs's AVATAR_PACKS; avatars.jsx draws them). Picking one needs its pack.
+-- The avatar packs' avatars (shop-catalog.mjs's AVATAR_PACKS; avatars.jsx draws them). Picking one needs its pack's
+-- shop item (set_avatar in migration-profiles.sql), so giving a pack to everyone is a shop change -
+-- `update shop_items set rarity = 'free', price = null where id = 'pack-sideline';` - never a change here. Like the
+-- items above, a re-run only adds missing rows.
 insert into public.avatar_presets (key, pack, free) values
   ('headset', 'sideline', false), ('cooler', 'sideline', false), ('pylon', 'sideline', false), ('penalty-flag', 'sideline', false),
   ('title-ring', 'trophy-room', false), ('medal', 'trophy-room', false), ('banner', 'trophy-room', false), ('game-ball', 'trophy-room', false),
   ('floodlights', 'night-game', false), ('scoreboard', 'night-game', false), ('fireworks', 'night-game', false), ('blimp', 'night-game', false)
-on conflict (key) do update set pack = excluded.pack, free = excluded.free;
+on conflict (key) do nothing;
 
 -- What a player wears. Null is the default: the Ink frame, the Navy card, no title.
 alter table public.profile_details add column if not exists frame text references public.shop_items(id);

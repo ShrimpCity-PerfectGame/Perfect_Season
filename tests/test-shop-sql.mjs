@@ -527,6 +527,29 @@ await runTest("set_avatar refuses a pack's avatars until that pack is bought, th
   assert((await call(P, "set_avatar", { p_path: null, p_preset: "gold-helmet" })).error === "bad_preset", "a paid avatar in a pack that isn't sold");
 });
 
+await runTest("a pack given away in the shop (its item made free) unlocks its avatars for everyone - the database, the shop and the mock agree - and a re-run keeps it", async () => {
+  const R = await newPlayer("freepack");
+  const pack = AVATAR_PACKS[AVATAR_PACKS.length - 1];
+  const [first, second] = pack.presets;
+  assert((await call(R, "set_avatar", { p_path: null, p_preset: first.key })).error === "bad_preset", `${first.key} is locked before`);
+  const [was] = await owner("select rarity, price from shop_items where id = $1", [pack.item]);
+  await owner("update shop_items set rarity = 'free', price = null where id = $1", [pack.item]);
+  try {
+    assert((await call(R, "set_avatar", { p_path: null, p_preset: first.key })).data?.avatar_preset === first.key, "unlocked for a player who never bought the pack");
+    assert(itemOf((await call(R, "shop_state")).data, pack.item)?.owned === true, "and shop_state (so the picker) calls the pack theirs");
+    // The runbook's change is to shop_items, which a re-run leaves alone; the avatars' rows aren't touched at all.
+    await db.exec(sql("migration-shop.sql"));
+    await db.exec(sql("migration-profiles.sql"));
+    assert((await call(R, "set_avatar", { p_path: null, p_preset: second.key })).data?.avatar_preset === second.key, "a re-run of both migrations keeps the pack given away");
+    const world = mockWorld();
+    world.state.profiles.set(R, { id: R, username: "freepack" });
+    Object.assign(world.tables.shop_items.get(pack.item), { rarity: "free", price: null });
+    assert(world.call(R, "set_avatar", { p_path: null, p_preset: first.key }).data?.avatar_preset === first.key, "the mock's set_avatar unlocks it the same way");
+  } finally {
+    await owner("update shop_items set rarity = $2, price = $3 where id = $1", [pack.item, was.rarity, was.price]);
+  }
+});
+
 await runTest("with only v1.11.0's migrations, set_avatar refuses a paid avatar as bad_preset rather than failing - and learns the packs when the shop arrives", async () => {
   const old = await freshDb({ migrations: PROFILE_MIGRATIONS });
   try {

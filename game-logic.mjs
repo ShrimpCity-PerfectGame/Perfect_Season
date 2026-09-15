@@ -281,6 +281,9 @@ export function replayDraft(seed, history, seq) {
   const rerollsUsed = { team: 0, years: 0 };
   let histPtr = 0;
   let prevKey = null;
+  // Whether the previous entry was a board on screen - one with a legal pick - that wasn't picked from: the only kind
+  // of board a re-spin replaces.
+  let prevOnScreen = false;
 
   for (let si = 0; si < seq.length; si++) {
     if (SLOTS.every((s) => roster[s])) break; // roster already complete - nothing left to validate
@@ -291,6 +294,9 @@ export function replayDraft(seed, history, seq) {
       basePtr++;
     } else {
       if (prevKey == null) return fail("a reroll can't happen before any board was shown");
+      // Tied to a board the draft already picked from (or one it skipped for having no pick), a re-spin would add a
+      // board to pick from rather than replace the one on screen.
+      if (!prevOnScreen) return fail("a reroll must replace a board that was on screen and not picked from");
       const [prevTeam, prevW] = prevKey.split("|");
       const [team, w] = key.split("|");
       let kind;
@@ -304,7 +310,7 @@ export function replayDraft(seed, history, seq) {
       shown.add(key);
     }
 
-    if (!boardHasOption(key, drafted, open)) { prevKey = key; continue; } // client would have skipped this board too
+    if (!boardHasOption(key, drafted, open)) { prevKey = key; prevOnScreen = false; continue; } // client would have skipped this board too
 
     if (histPtr < history.length && history[histPtr].key === key) {
       const h = history[histPtr];
@@ -316,11 +322,14 @@ export function replayDraft(seed, history, seq) {
       roster[h.slot] = player;
       drafted.add(player.id);
       histPtr++;
+      prevOnScreen = false;
     } else if (si + 1 >= seq.length || seq[si + 1] === base[basePtr]) {
       // The app leaves a board it could pick from only by picking or by re-spinning it, which puts the new board
       // straight after this one. Walking past it to the next base board instead would let a trace draft the best six
       // of the sequence's eighteen boards (on a Daily, better than any draft the app allows).
       return fail("a board with a legal pick was passed over");
+    } else {
+      prevOnScreen = true;
     }
     prevKey = key;
   }
