@@ -33,12 +33,26 @@ export function makeMockAuth() {
   // These have no client write policy at all - the app changes them only through database functions -
   // so a direct write gets the error RLS would give.
   const rlsDenied = () => Promise.resolve({ error: { code: "42501", message: "new row violates row-level security policy" } });
+  // Reads, the same way: reports and moderators have RLS on and no select policy, so a client sees no rows;
+  // blocked_words has its table grants revoked too, so a client's read is refused outright.
+  const HIDDEN_ROWS = new Set(["reports", "moderators"]);
+  const REFUSED_READS = new Set(["blocked_words"]);
+  function refusedRead(table) {
+    const result = { data: null, error: { code: "42501", message: `permission denied for table ${table}` } };
+    const query = {
+      eq: () => query, not: () => query, gt: () => query, lte: () => query, order: () => query, limit: () => query,
+      single: () => Promise.resolve(result),
+      then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
+    };
+    return query;
+  }
 
   function from(table) {
     const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : table === "builds" ? builds : table === "runs" ? runs : extraTables[table] || dailyRuns;
     if (extraTables[table]) {
-      const base = fromStore(store);
-      return { ...base, insert: rlsDenied, upsert: rlsDenied, update: () => ({ eq: rlsDenied }), delete: () => ({ eq: rlsDenied }) };
+      const base = fromStore(HIDDEN_ROWS.has(table) ? new Map() : store);
+      const select = REFUSED_READS.has(table) ? () => refusedRead(table) : base.select;
+      return { ...base, select, insert: rlsDenied, upsert: rlsDenied, update: () => ({ eq: rlsDenied }), delete: () => ({ eq: rlsDenied }) };
     }
     return fromStore(store);
   }

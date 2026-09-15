@@ -21,7 +21,8 @@
 create table if not exists public.runs (
   id          uuid primary key default gen_random_uuid(),
   user_id     uuid not null references auth.users(id) on delete cascade,
-  -- A snapshot, so a leaderboard never needs a join. Usernames can't be changed in the app.
+  -- A snapshot, so a leaderboard never needs a join. Players can't change their username; a moderator's
+  -- rename (migration-moderation.sql's mod_act) rewrites it here too.
   username    text not null,
   -- The run's own timestamp (run.date), not the insert time - that is what makes the backfill and
   -- a live insert of the same run collide on the unique key below instead of duplicating.

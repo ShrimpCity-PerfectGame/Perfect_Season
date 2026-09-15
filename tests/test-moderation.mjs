@@ -8,35 +8,7 @@
 import { freshDb, addAccount, asUser, asAnon, uuid, sql } from "./pg-fixture.mjs";
 import { assert, runTest, setupDom, makeMockAuth, loadModule, renderComponent, click, type, flush } from "./helpers.mjs";
 
-// ============ STAND-INS - the lead deletes this block (and the line in moderationDb) when merging agent B ============
-// migration-moderation.sql runs after migration-profiles.sql and uses three things from it that agent B is
-// writing in parallel, so they don't exist on this branch: the profile_details table, the text_is_clean word
-// filter and the avatars bucket. These are the smallest versions (PROFILES.md 3.1) that let it install and run.
-// Each is only created if it's missing, so they do nothing once B's migration is in.
-const STAND_INS = `
-  create table if not exists public.profile_details (
-    user_id uuid primary key references public.profiles(id) on delete cascade,
-    bio text not null default '',
-    avatar_path text,
-    avatar_preset text,
-    favorite_team text,
-    updated_at timestamptz not null default now()
-  );
-  alter table public.profile_details enable row level security;
-  do $$ begin
-    if to_regprocedure('public.text_is_clean(text)') is null then
-      -- Refuses only the made-up word BLOCKED below, as a whole word (plural too).
-      create function public.text_is_clean(t text) returns boolean language sql stable security definer set search_path = public
-        as $f$ select lower(coalesce(t, '')) !~ '(^|[^a-z])snarfblat(s|es)?([^a-z]|$)' $f$;
-      revoke execute on function public.text_is_clean(text) from public, anon, authenticated;
-    end if;
-  end $$;
-  insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true) on conflict (id) do nothing;
-`;
-// ============ end of STAND-INS ============
-
-// A made-up word for the word filter to refuse. It's added to the real blocked_words list wherever that exists
-// (and to the mock's); the stand-in text_is_clean refuses it until then.
+// A made-up word for the word filter to refuse, added to the real blocked_words list (and the mock's).
 const BLOCKED = "snarfblat";
 const USERNAME_RULE = "Usernames are 3 to 16 characters: letters, numbers, and underscores.";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -44,14 +16,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sortKeys = (v) => (Array.isArray(v) ? v.map(sortKeys) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v);
 
 async function moderationDb() {
-  const db = await freshDb({ migrations: ["migration-runs-log.sql", "migration-profiles.sql"] });
-  await db.exec(STAND_INS); // STAND-INS: delete this line with the block above
-  await db.exec(sql("migration-moderation.sql"));
-  await db.exec(`do $$ begin
-    if to_regclass('public.blocked_words') is not null then
-      insert into public.blocked_words (word, match) values ('${BLOCKED}', 'word') on conflict do nothing;
-    end if;
-  end $$;`);
+  const db = await freshDb();
+  await db.exec(`insert into public.blocked_words (word, match) values ('${BLOCKED}', 'word') on conflict do nothing;`);
   return db;
 }
 
