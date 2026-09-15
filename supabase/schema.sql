@@ -145,6 +145,7 @@ create policy "users insert their own build" on public.builds
 -- username passed as signUp() metadata (options.data.username) - so a signup either fully
 -- succeeds (auth user + profile both exist) or fully fails, with no orphaned auth-only accounts
 -- if a separate client-side insert step had instead been used.
+-- migration-profiles.sql (v1.11.0) now defines handle_new_user, adding the blocked-username check; its version replaces this one.
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
