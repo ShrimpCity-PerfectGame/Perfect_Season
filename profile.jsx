@@ -1,5 +1,6 @@
-// The profile screen - your own and everyone else's. Contract: PROFILES.md (6.3). Classes are prefixed
-// pf-; the player card (.pf-card) is in the dark scope (perfect-season.jsx's stylesheet lists it).
+// The profile screen - your own and everyone else's. Contract: PROFILES.md (6.3), and SHOP.md (7.3) for what
+// the player card wears. Classes are prefixed pf-. The card's paint and text scope come from its card theme
+// (cosmetics.jsx's CardTheme); .pf-card itself is only its layout.
 //
 // Props:
 //   status          "loading" | "ok" | "missing" | "error"
@@ -19,10 +20,10 @@
 //   onOpenShop()    owner: open the shop
 // Test hooks: the root is <section class="profile" data-username=... data-owner="true|false">; the
 // owner view has a "Log out" button; an owner with no drafts sees "Play your first season to start
-// your record." and a "Go to the draft" button.
+// your record." and a "Go to the draft" button; an owner given onOpenShop has a "Shop" button.
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar } from "./avatars.jsx";
-import { FramedAvatar, CardTheme, TitleLine, Coins } from "./cosmetics.jsx";
+import { FramedAvatar, CardTheme, TitleLine, Coin, Coins } from "./cosmetics.jsx";
 import { AvatarPicker } from "./avatar-picker.jsx";
 import { ReportSheet } from "./moderation.jsx";
 import { BADGE_BY_ID, badgeProgress, topBadges } from "./badges.mjs";
@@ -30,9 +31,9 @@ import {
   FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, fmtDate, outcomeSentence, draftsOf, scoreOf, runOf, RosterRows,
 } from "./ui-common.jsx";
 import { BIO_MAX, TEAM_CODES, bioLength, cleanBio, mapPlayerStats } from "./profile-rules.mjs";
-import { saveProfile, saveAvatarPhoto, setAvatarPreset, removeAvatar } from "./storage.js";
+import { saveProfile, saveAvatarPhoto, setAvatarPreset, removeAvatar, fetchShop } from "./storage.js";
 import { TEAMS, FORMATS, LADDERS, nextStreak } from "./game-logic.mjs";
-import { PALETTE } from "./theme.mjs";
+import { SHOWCASE_MAX, PACK_BY_ITEM } from "./shop-catalog.mjs";
 
 export const PROFILE_CSS = `
 /* ===== profile ===== */
@@ -48,14 +49,12 @@ export const PROFILE_CSS = `
 .pf-t-gold{--tier:var(--tier-gold);--medal:var(--tier-gold-fill)}
 .pf-t-special{--tier:var(--tier-special);--medal:var(--tier-special-fill)}
 
-/* The player card: the page's navy scoreboard moment (dark tokens), with the app's sticker edge. */
-.pf-card{position:relative;display:grid;gap:14px;margin:0 0 20px;padding:20px 20px 18px;border-radius:18px;
-  background:var(--bg);border:2px solid ${PALETTE.ink};box-shadow:4px 4px 0 ${PALETTE.ink}}
-.pf-card::before{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
-  background:radial-gradient(ellipse 60% 90% at 0% 0%,var(--glow),transparent 62%),radial-gradient(color-mix(in srgb,var(--ink) 5%,transparent) 1px,transparent 1.4px) 0 0/6px 6px}
+/* The player card's layout. Its paint - background, edge, shadow, texture - and its text colors come from the
+   card theme it wears (cosmetics.jsx's CardTheme, Navy unless another is equipped), and the ring around the
+   picture from its frame. Children stay above a theme's texture layer. */
+.pf-card{position:relative;display:grid;gap:14px;margin:0 0 20px;padding:20px 20px 18px;border-radius:18px}
 .pf-card>*{position:relative}
 .pf-head{display:flex;align-items:center;gap:16px;min-width:0}
-.pf-ring{flex:none;display:grid;place-items:center;padding:4px;border-radius:50%;background:var(--ink)}
 .pf-id{display:grid;gap:8px;min-width:0}
 .pf-name{margin:0;font-family:var(--display);font-weight:400;font-size:clamp(34px,6.2vw,54px);line-height:.95;color:var(--ink);overflow-wrap:anywhere}
 .pf-team{margin:0;display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--ink)}
@@ -225,7 +224,9 @@ const PICTURE_ERROR = {
   signed_out: "You're logged out. Log in again to change your picture.",
   network: "That didn't save. Check your connection and try again.",
 };
-const EMPTY_DETAILS = { bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, updatedAt: null };
+const EMPTY_DETAILS = {
+  bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null, title: null, showcase: [], updatedAt: null,
+};
 const EMPTY_EXTRA = mapPlayerStats(null);
 
 const num = (n) => Number(n || 0).toLocaleString();
@@ -252,6 +253,22 @@ function liveStreak(s) {
 function draftingSince(profile) {
   const times = [profile.extra?.since, profile.joined].map((t) => (t ? Date.parse(t) : NaN)).filter(Number.isFinite);
   return times.length ? Math.min(...times) : null;
+}
+
+// The badges a player card shows: the showcase's earned badges in the order they were chosen, or the three
+// best earned ones when none of the showcase is earned. The database doesn't check a showcase against the
+// badges (they're worked out here, in the browser), so an id that isn't earned, or isn't a badge, is skipped.
+// The shop's card preview uses this too, so both show the same badges.
+export function cardBadges(showcase, progress) {
+  const earned = new Set((progress || []).filter((p) => p?.earned).map((p) => p.id));
+  const picked = [...new Set(Array.isArray(showcase) ? showcase : [])].filter((id) => earned.has(id) && BADGE_BY_ID[id]).slice(0, SHOWCASE_MAX);
+  return picked.length ? picked.map((id) => BADGE_BY_ID[id]) : topBadges(progress, 3);
+}
+
+// The avatar packs a player can choose from: the starter set, plus every avatar pack fetchShop() says they own.
+export function ownedPackNames(items) {
+  const bought = (items || []).filter((i) => i?.kind === "avatar_pack" && i.owned).map((i) => PACK_BY_ITEM[i.id]?.pack).filter(Boolean);
+  return [...new Set(["starter", ...bought])];
 }
 
 export function ProfileScreen(props) {
@@ -329,45 +346,48 @@ function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDet
 
 function PlayerCard({ profile, details, progress, isOwner, signedIn, moderator, drafted, editing, reporting, sharing, shared, onEdit, onReport, onShare, onOpenReports, wallet, onOpenShop }) {
   const s = profile.stats || {};
-  const top = topBadges(progress, 3);
+  const badges = cardBadges(details.showcase, progress);
+  const showcased = badges.length > 0 && (details.showcase || []).includes(badges[0].id);
   const team = TEAMS[details.favoriteTeam] ? details.favoriteTeam : null;
   const since = drafted ? draftingSince(profile) : profile.joined ? Date.parse(profile.joined) : null;
   const streak = liveStreak(s);
+  // The balance is the owner's own, so it's a fact on their card only.
+  const coins = isOwner && wallet ? wallet.balance : null;
   return (
     <CardTheme theme={details.cardTheme} team={team} className="pf-card">
       {/* A long name goes under the picture on a narrow phone rather than breaking beside it (Anton is
           about 0.45em a letter, so a dozen letters is where it stops fitting next to the picture). */}
       <div className={`pf-head${profile.username.length > 11 ? " pf-long" : ""}`}>
-        <FramedAvatar className="pf-ring" frame={details.frame} team={team} username={profile.username} photoUrl={details.avatarUrl}
+        <FramedAvatar frame={details.frame} team={team} username={profile.username} photoUrl={details.avatarUrl}
           preset={details.avatarPreset} size={84} decorative />
         <div className="pf-id">
           <h1 className="pf-name">{profile.username}</h1>
-          <TitleLine title={details.title} />
+          <TitleLine title={details.title} className="pf-title" />
           {team && (
             <p className="pf-team"><span className="pf-swatch" style={teamVars(team)} role="img" aria-label="Favorite team" />{teamName(team)}</p>
           )}
         </div>
       </div>
-      {top.length > 0 && (
-        <ul className="pf-tops" aria-label="Best badges">
-          {top.map((b) => <li key={b.id} className={`pf-t-${b.tier}`}><span className="pf-e" aria-hidden="true">{b.emoji}</span>{b.name}</li>)}
+      {badges.length > 0 && (
+        <ul className="pf-tops" aria-label={showcased ? "Showcase" : "Best badges"}>
+          {badges.map((b) => <li key={b.id} className={`pf-t-${b.tier}`} data-badge={b.id}><span className="pf-e" aria-hidden="true">{b.emoji}</span>{b.name}</li>)}
         </ul>
       )}
       {details.bio && <p className="pf-bio">{details.bio}</p>}
-      {(Number.isFinite(since) || streak > 0) && (
+      {(Number.isFinite(since) || streak > 0 || coins != null) && (
         <dl className="pf-facts">
           {Number.isFinite(since) && <div><dt>{drafted ? "Drafting since" : "Joined"}</dt><dd>{monthYear(since)}</dd></div>}
           {streak > 0 && <div><dt>Daily streak</dt><dd><span aria-hidden="true">🔥 </span>{streak}</dd></div>}
+          {coins != null && <div className="pf-coins"><dt>Balance</dt><dd><Coins amount={coins} size={20} /></dd></div>}
         </dl>
       )}
       <div className="pf-actions">
         {isOwner && <button className="btn" aria-expanded={editing} onClick={onEdit}>Edit profile</button>}
+        {isOwner && onOpenShop && <button className="btn pf-shop" onClick={() => onOpenShop()}><Coin size={18} />Shop</button>}
         {/* Lime for the one main action: sharing, unless an empty record's Go to the draft is on screen. */}
         <button className={`btn${drafted || !isOwner ? " solid" : ""}`} onClick={onShare} disabled={sharing}>Share profile</button>
         {!isOwner && signedIn && <button className="btn" aria-expanded={reporting} onClick={onReport}>Report</button>}
         {isOwner && moderator && <button className="btn" onClick={onOpenReports}>Reports ({num(moderator.openReports)})</button>}
-        {isOwner && onOpenShop && <button className="btn" onClick={() => onOpenShop()}>Shop</button>}
-        {isOwner && wallet && <Coins amount={wallet.balance} />}
         <span className={`pf-status${shared === "failed" ? " pf-bad" : ""}`} role="status">{shared ? SHARE_STATUS[shared] : ""}</span>
       </div>
     </CardTheme>
@@ -382,6 +402,7 @@ function ProfileEditor({ username, details, userId, onSaved, onClose }) {
   const [picking, setPicking] = useState(false);
   const [picBusy, setPicBusy] = useState(false);
   const [picError, setPicError] = useState("");
+  const [ownedPacks, setOwnedPacks] = useState(() => ownedPackNames([]));
   const id = useId();
   const panelRef = useRef(null);
   const pictureButton = useRef(null);
@@ -389,6 +410,13 @@ function ProfileEditor({ username, details, userId, onSaved, onClose }) {
   // The editor opens under the card, which on a phone (or one on its side) is below the screen - Edit profile
   // looked like it did nothing. Brought just into view, without animating.
   useEffect(() => { panelRef.current?.scrollIntoView?.({ block: "nearest" }); }, []);
+  // Which avatar packs the picker can use, read when the editor opens so a pack bought in the shop a moment ago
+  // is there. Until it answers (or if it can't), the starter set.
+  useEffect(() => {
+    let live = true;
+    fetchShop().then((shop) => { if (live && shop) setOwnedPacks(ownedPackNames(shop.items)); });
+    return () => { live = false; };
+  }, []);
   // When the picker closes (a save or Cancel), focus goes back to the button that opened it, not the page.
   useEffect(() => {
     if (wasPicking.current && !picking) pictureButton.current?.focus?.();
@@ -436,7 +464,7 @@ function ProfileEditor({ username, details, userId, onSaved, onClose }) {
       <div className="pf-field" role="group" aria-labelledby={`${id}-pic`}>
         <span className="pf-label" id={`${id}-pic`}>Picture</span>
         {picking ? (
-          <AvatarPicker username={username} current={{ photoUrl: details.avatarUrl, preset: details.avatarPreset }} busy={picBusy} error={picError}
+          <AvatarPicker username={username} current={{ photoUrl: details.avatarUrl, preset: details.avatarPreset }} busy={picBusy} error={picError} ownedPacks={ownedPacks}
             onPhoto={pictureSave((blob) => saveAvatarPhoto(userId, blob, details.avatarPath))}
             onPreset={pictureSave((key) => setAvatarPreset(key, details.avatarPath))}
             onRemove={pictureSave(() => removeAvatar(details.avatarPath))}
@@ -667,7 +695,7 @@ function Records({ s, x }) {
     const g = x.byFormat?.[f]?.bestGm;
     if (g) add(`gm-${f}`, `Best ${FORMAT_LABEL[f]} GM score`, g.score.toFixed(1), `${g.w}–${g.l}`);
   }
-  // Ladder totals only: the points bank belongs to the shop, which isn't open yet.
+  // Ladder totals only: the old points bank buys nothing (the shop spends coins, SHOP.md), so it isn't shown.
   const ladders = LADDERS.filter((l) => Math.round(s.points?.[l] || 0) !== 0);
   if (!rows.length && !ladders.length) return null;
   return (
