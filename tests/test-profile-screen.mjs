@@ -12,6 +12,8 @@ import { BADGES, badgeProgress, topBadges } from "../badges.mjs";
 import { bioLength, mapPlayerStats, emptyPlayerStats } from "../profile-rules.mjs";
 
 setupDom();
+// Nothing here should reach a real network client: every screen gets the mock, signed in or not.
+window.__ps_supabase__ = makeMockAuth();
 const { act } = await import("react");
 const { ProfileScreen, PROFILE_CSS } = await loadModule("profile.jsx");
 
@@ -96,7 +98,8 @@ await runTest("a signed-in visitor gets Share profile and Report, which opens th
   assert(c.querySelector("section.profile").dataset.owner === "false", "a visitor's view is data-owner=false");
   assert(hasButton(c, "Share profile") && hasButton(c, "Report"), "expected Share profile and Report, got: " + buttons(c));
   for (const label of ["Edit profile", "Log out"]) assert(!hasButton(c, label), `a visitor shouldn't see ${label}`);
-  const sheet = () => c.querySelector('[class*="md-"], [role="dialog"]');
+  // moderation.jsx owns the sheet's markup; anything of its md- classes, or a dialog, anywhere on the page.
+  const sheet = () => document.querySelector('[class*="md-"], [role="dialog"]');
   assert(!sheet(), "the report sheet starts closed");
   await click(button(c, "Report"));
   assert(sheet(), "Report should open moderation.jsx's ReportSheet");

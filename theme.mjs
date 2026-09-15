@@ -54,9 +54,9 @@ export const THEME = {
     gb: "#0A6E60",
     gc: "#735800",
     gd: "#B32F25",
-    // Badge tiers on the profile screen. `tierX` is the tier as text (a tier's name, a progress arc),
-    // so on cream it's the deep version of the metal; `tierXFill` is the bright medal color, only ever
-    // a fill with an ink outline or ink text on it, so it's the same in every scope.
+    // Badge tiers on the profile screen. `tierX` is read against the page (a tier's name, a badge's
+    // progress ring), so on cream it's the deep version of the metal; `tierXFill` is the bright medal
+    // color, only ever a fill behind an emoji or inside an ink edge, so it's the same in every scope.
     tierBronze: "#93511F",
     tierSilver: "#56606B",
     tierGold: "#7A5B00",

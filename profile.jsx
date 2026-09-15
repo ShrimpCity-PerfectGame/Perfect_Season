@@ -625,7 +625,7 @@ function Records({ s, x }) {
   if (d.bestScore != null) add("daily", "Best daily score", Number(d.bestScore).toFixed(1), d.bestW != null ? `${d.bestW}–${d.bestL}` : null);
   for (const f of FORMATS) {
     const u = x.byFormat?.[f]?.biggestUpset;
-    if (u) add(`upset-${f}`, `Biggest ${FORMAT_LABEL[f]} upset`, u.score.toFixed(1), `Won the title at ${u.w}–${u.l}${u.ladder && u.ladder !== "unlimited" ? `, ${LADDER_LABEL[u.ladder] || u.ladder}` : ""}`, "🚨");
+    if (u) add(`upset-${f}`, `Biggest ${FORMAT_LABEL[f]} upset`, u.score.toFixed(1), `${u.w}–${u.l}${u.ladder && u.ladder !== "unlimited" ? `, ${LADDER_LABEL[u.ladder] || u.ladder}` : ""}`, "🚨");
   }
   for (const f of FORMATS) {
     const g = x.byFormat?.[f]?.bestGm;
