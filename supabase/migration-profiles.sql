@@ -297,6 +297,51 @@ begin
 end;
 $$;
 
+-- ---------- The minigame boards ----------
+-- The browser still writes sou_runs (Over/Under) and builds (Build-a-player) itself: schema.sql's policies
+-- only check that the row's user_id is the caller's. Scores there are taken on trust (CLAUDE.md), but what
+-- the boards and profiles show as text must not be.
+
+-- A row's username is the account's own, whatever the browser sent. Every name on those boards opens that
+-- player's profile, so otherwise a modified client could post under another player's name, or as any text
+-- at all (past the signup word filter), and a moderator's rename would last only until its next insert.
+-- mod_act's rename updates these rows after profiles, so this reads the new name.
+create or replace function public.use_account_username()
+returns trigger language plpgsql security invoker set search_path = public, pg_temp as $$
+begin
+  new.username := coalesce((select p.username from public.profiles p where p.id = new.user_id), new.username);
+  return new;
+end;
+$$;
+
+-- A build's position shows as text on the Stats board and the player's profile, and the Stats board calls
+-- toFixed on its overall. PostgREST sends a NaN or Infinity numeric as a string, so one such row (NaN also
+-- sorts above every number, straight to the top of the board) crashed the Stats screen for everyone. Only
+-- new rows are checked: nothing updates a build but a rename, which must still work on an old bad row.
+create or replace function public.check_new_build()
+returns trigger language plpgsql security invoker set search_path = public, pg_temp as $$
+begin
+  -- abs() of NaN or Infinity is never under a bound, so this also asks for a finite number.
+  if new.pos is null or new.pos not in ('QB', 'RB', 'WR', 'TE') or not coalesce(abs(new.overall) < 1e12, false) then
+    raise exception 'bad_build' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+-- Trigger functions only: nothing calls them directly (a trigger runs without its caller holding execute).
+revoke execute on function public.use_account_username(), public.check_new_build() from public, anon, authenticated;
+
+drop trigger if exists sou_runs_account_username on public.sou_runs;
+create trigger sou_runs_account_username before insert or update on public.sou_runs
+  for each row execute function public.use_account_username();
+drop trigger if exists builds_account_username on public.builds;
+create trigger builds_account_username before insert or update on public.builds
+  for each row execute function public.use_account_username();
+drop trigger if exists builds_check_new on public.builds;
+create trigger builds_check_new before insert on public.builds
+  for each row execute function public.check_new_build();
+
 -- ---------- Reading a profile ----------
 
 -- For player_profile's case-insensitive lookup (gridspin.app/u/Name typed in any case).
