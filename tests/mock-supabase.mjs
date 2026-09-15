@@ -222,6 +222,21 @@ export function makeMockAuth() {
     data: null,
     error: { name: "FunctionsHttpError", message: "Edge Function returned a non-2xx status code", context: { status, json: async () => body } },
   });
+  // Test-only: the tables whose writes inside submit-run fail the way a database error would (not a unique
+  // violation), to reach index.ts's failure branches - e.g. auth._failWrites.add("profiles").
+  const failWrites = new Set();
+  const writeError = (table) => (failWrites.has(table) ? { code: "08006", message: `could not write ${table}` } : null);
+  const UNIQUE_VIOLATION = "23505";
+  const uniqueViolation = (constraint) => ({ code: UNIQUE_VIOLATION, message: `duplicate key value violates unique constraint "${constraint}"` });
+  // A database function called the way supabase-js calls one: { data, error }, never a throw. The mock's
+  // functions throw their refusal codes, as the other mock modules do.
+  const callFunction = (fn, args) => {
+    try {
+      return { data: fn(args), error: null };
+    } catch (e) {
+      return { data: null, error: { code: "P0001", message: String(e?.message || e) } };
+    }
+  };
   async function invokeSubmitRun(body) {
     if (!session?.user) return { error: { message: "unauthorized" } };
     const userId = session.user.id;
@@ -249,6 +264,7 @@ export function makeMockAuth() {
       }
       seed = GL.dailySeed(mode.date, format);
     } else if (mode.kind === "free") {
+      // Over 32 characters is refused like a missing code, as index.ts does: finished_codes can't hold it.
       if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return { data: { error: "missing challenge code" } };
       seed = mode.code;
     } else {
@@ -284,17 +300,21 @@ export function makeMockAuth() {
     const existingRow = profiles.get(userId);
     if (!existingRow) return { data: { error: "no profile for this account" } };
 
-    // Keyed by format too, mirroring the real (date, format, user_id) primary key - this mock has
-    // no real constraint, so without it the standard daily would silently overwrite the fantasy one.
+    // The duplicate guard, before anything is written (SHOP.md 4.2). A Daily is keyed by format too, mirroring the
+    // real (date, format, user_id) primary key - this mock has no real constraint, so without it the standard daily
+    // would silently overwrite the fantasy one. A challenge code goes through finished_codes' (user_id, code) key.
+    // Only a unique violation is "already recorded"; any other failure is a failed save.
+    const codeKey = `${userId}|${mode.code}`;
     if (mode.kind === "daily") {
       const dailyKey = `${mode.date}:${format}:${userId}`;
-      if (dailyRuns.has(dailyKey)) return refused(409, { error: "today's daily is already recorded", reason: "duplicate" });
+      const dailyInsertError = writeError("daily_runs") || (dailyRuns.has(dailyKey) ? uniqueViolation("daily_runs_pkey") : null);
+      if (dailyInsertError?.code === UNIQUE_VIOLATION) return refused(409, { error: "today's daily is already recorded", reason: "duplicate" });
+      if (dailyInsertError) return refused(500, { error: "failed to save" });
       dailyRuns.set(dailyKey, { date: mode.date, format, user_id: userId, username: existingRow.username, w: run.w, l: run.l, score, outcome: run.outcome, created_at: new Date().toISOString() });
     } else {
-      // One finished season per account per challenge code (SHOP.md 4.2): finished_codes' primary key, taken
-      // before anything else is written.
-      const codeKey = `${userId}|${mode.code}`;
-      if (wallet.tables.finished_codes.has(codeKey)) return refused(409, { error: "this draft is already recorded", reason: "duplicate" });
+      const codeInsertError = writeError("finished_codes") || (wallet.tables.finished_codes.has(codeKey) ? uniqueViolation("finished_codes_pkey") : null);
+      if (codeInsertError?.code === UNIQUE_VIOLATION) return refused(409, { error: "this draft is already recorded", reason: "duplicate" });
+      if (codeInsertError) return refused(500, { error: "failed to save" });
       wallet.tables.finished_codes.set(codeKey, { user_id: userId, code: mode.code, created_at: new Date().toISOString() });
     }
 
@@ -304,24 +324,35 @@ export function makeMockAuth() {
       const streak = GL.nextStreak(existing, mode.date);
       updated = { ...updated, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
     }
+
+    if (writeError("profiles")) {
+      // The season didn't count, so the code is given back and a retry can count it.
+      if (mode.kind === "free") wallet.tables.finished_codes.delete(codeKey);
+      return refused(500, { error: "failed to save" });
+    }
     Object.assign(existingRow, mockProfileToRow(updated));
     logRun(GL.runLogRow(userId, existingRow.username, run, mode.kind === "daily" ? mode.date : null));
 
-    // The season's coins, then any badge it earned (SHOP.md 4.2). A failure here never fails the season,
-    // which already counted.
+    // The season's coins, then the coins for any badge the player now has. The season already counted, so any
+    // failure answers coins: null. Each call's error is thrown to reach the catch, as index.ts does with
+    // supabase-js's { data, error }.
     let coins = null;
     let newBadges = [];
     try {
       const reward = seasonReward(run, { date: mode.date, streak: updated.dailyStreak });
-      const season = {
-        ...wallet.server.credit_coins({ p_user: userId, p_amount: reward.amount, p_kind: reward.kind, p_ref: reward.ref, p_daily_cap: reward.dailyCap }),
-        lines: reward.lines,
-      };
+      const credit = callFunction(wallet.server.credit_coins, { p_user: userId, p_amount: reward.amount, p_kind: reward.kind, p_ref: reward.ref, p_daily_cap: reward.dailyCap });
+      if (credit.error) throw new Error(`credit_coins: ${credit.error.message}`);
+
+      // player_stats reads the runs log, which logRun above has just added this season to.
+      const stats = callFunction(rpcs.player_stats, { p_user_id: userId });
+      if (stats.error) throw new Error(`player_stats: ${stats.error.message}`);
       const favoriteTeam = profileData.tables.profile_details.get(userId)?.favorite_team ?? null;
-      const progress = badgeProgress({ stats: updated, extra: mapPlayerStats(playerStats(state, userId)), details: { favoriteTeam }, joined: existingRow.created_at ?? null });
-      const awards = wallet.server.award_badges({ p_user: userId, p_badges: badgeRewards(progress) });
-      coins = coinsSummary(season, awards);
-      newBadges = awards.awarded;
+      const progress = badgeProgress({ stats: updated, extra: mapPlayerStats(stats.data), details: { favoriteTeam }, joined: existingRow.created_at });
+      const awards = callFunction(wallet.server.award_badges, { p_user: userId, p_badges: badgeRewards(progress) });
+      if (awards.error) throw new Error(`award_badges: ${awards.error.message}`);
+
+      coins = coinsSummary({ ...credit.data, lines: reward.lines }, awards.data);
+      newBadges = Array.isArray(awards.data?.awarded) ? awards.data.awarded : [];
     } catch (e) {
       coins = null;
       newBadges = [];
@@ -432,6 +463,7 @@ export function makeMockAuth() {
     _shopItems: shop.tables.shop_items,
     _inventory: shop.tables.inventory,
     _wallet: wallet, // its server functions (credit_coins, award_badges) and helpers, for setting up a test
+    _failWrites: failWrites, // test-only: tables whose writes inside submit-run fail (see invokeSubmitRun)
     _profiles: profiles, // test-only escape hatch for setup/assertions
     _runs: runs, // test-only escape hatch for setup/assertions
     _builds: builds, // test-only escape hatch for setup/assertions
