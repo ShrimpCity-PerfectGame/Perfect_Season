@@ -54,6 +54,17 @@ export const THEME = {
     gb: "#0A6E60",
     gc: "#735800",
     gd: "#B32F25",
+    // Badge tiers on the profile screen. `tierX` is read against the page (a tier's name, a badge's
+    // progress ring), so on cream it's the deep version of the metal; `tierXFill` is the bright medal
+    // color, only ever a fill behind an emoji or inside an ink edge, so it's the same in every scope.
+    tierBronze: "#93511F",
+    tierSilver: "#56606B",
+    tierGold: "#7A5B00",
+    tierSpecial: "#6D3FD6",
+    tierBronzeFill: "#E39A62",
+    tierSilverFill: "#C5CDD8",
+    tierGoldFill: "#F5C542",
+    tierSpecialFill: "#B18CFF",
     glow: "rgba(16,17,20,.06)",
     shadow: "0 1px 0 rgba(16,17,20,.06), 0 6px 18px rgba(16,17,20,.08)",
     bevel: "inset 0 1px 0 rgba(255,255,255,.9)",
@@ -88,6 +99,14 @@ export const THEME = {
     gb: "#2FD3B5",
     gc: "#F7B32B",
     gd: "#F07B6B",
+    tierBronze: "#E39A62",
+    tierSilver: "#C5CDD8",
+    tierGold: "#F5C542",
+    tierSpecial: "#B18CFF",
+    tierBronzeFill: "#E39A62",
+    tierSilverFill: "#C5CDD8",
+    tierGoldFill: "#F5C542",
+    tierSpecialFill: "#B18CFF",
     glow: "rgba(184,245,0,.18)",
     shadow: "0 1px 0 rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.45)",
     bevel: "inset 0 1px 0 rgba(255,255,255,.08), inset 0 -1px 0 rgba(0,0,0,.45)",
@@ -121,6 +140,14 @@ export const THEME = {
     gb: "#2FD3B5",
     gc: "#F7B32B",
     gd: "#F07B6B",
+    tierBronze: "#E39A62",
+    tierSilver: "#C5CDD8",
+    tierGold: "#F5C542",
+    tierSpecial: "#B18CFF",
+    tierBronzeFill: "#E39A62",
+    tierSilverFill: "#C5CDD8",
+    tierGoldFill: "#F5C542",
+    tierSpecialFill: "#B18CFF",
     glow: "rgba(184,245,0,.16)",
     shadow: "0 1px 0 rgba(0,0,0,.5), 0 8px 22px rgba(0,0,0,.55)",
     bevel: "inset 0 1px 0 rgba(255,255,255,.07), inset 0 -1px 0 rgba(0,0,0,.5)",
@@ -130,7 +157,8 @@ export const THEME = {
 };
 
 // Tokens used as text colors, and the backgrounds text sits on - what the contrast test checks.
-export const TEXT_TOKENS = ["ink", "muted", "accentInk", "win", "loss", "qb", "rb", "wr", "te", "flex", "genius", "gm", "ga", "gb", "gc", "gd"];
+export const TEXT_TOKENS = ["ink", "muted", "accentInk", "win", "loss", "qb", "rb", "wr", "te", "flex", "genius", "gm", "ga", "gb", "gc", "gd",
+  "tierBronze", "tierSilver", "tierGold", "tierSpecial"];
 export const SURFACE_TOKENS = ["bg", "surface", "surface2"];
 
 const kebab = (k) => k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());

@@ -8,9 +8,21 @@
 // Query parameters:
 //   as=player (default) | admin | guest | newbie   who is signed in ("admin" unlocks AdminPanel)
 //   howto=1                                        show the How to play overlay on load
+//
+// The profile screen on its own, with tests/fixtures/profile-fixture.mjs data:
+//   screen=profile&fixture=veteran (default) | rookie | photo
+//   owner=1                                        your own profile (Edit profile, Log out); saves go to the mock
+//   as=guest                                       a visitor who isn't signed in (default: a signed-in visitor)
+//   status=loading | missing | error               the other states
+//   moderator=N                                    an owner who is a moderator, with N open reports
+//   name=Mississippi_Kid1                          a different username, e.g. to check a long one fits
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import PerfectSeason from "../../perfect-season.jsx";
+import PerfectSeason, { APP_CSS } from "../../perfect-season.jsx";
+import { ProfileScreen } from "../../profile.jsx";
 import { makeMockAuth } from "../../tests/mock-supabase.mjs";
+import { veteranProfile, rookieProfile, photoProfile, VETERAN_ROW } from "../../tests/fixtures/profile-fixture.mjs";
+import { FREE_AVATAR_PRESETS, TEAM_CODES } from "../../profile-rules.mjs";
 import { BOARDS, SLOTS, fits, runLogRow } from "../../game-logic.mjs";
 
 const params = new URLSearchParams(location.search);
@@ -96,13 +108,93 @@ NAMES.forEach((username, i) => {
   mock._builds.set(`build-${i}`, { id: `build-${i}`, username, pos: pick(["QB", "RB", "WR", "TE"]), overall: 140 - i * 3.3, filled: {} });
 });
 
+// Profile details for most of the seeded players: bios (one right at the 160-character limit, one long
+// unbroken word), default avatars, favorite teams, and uploaded photos. A photo is a data URL standing in
+// for the stored file - the mock's getPublicUrl returns an object's publicUrl when it has one.
+const PHOTO = `data:image/svg+xml;utf8,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'><defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#6FA8DC'/><stop offset='.62' stop-color='#CFE3F2'/><stop offset='.62' stop-color='#3E7D3A'/><stop offset='1' stop-color='#2C5E2A'/></linearGradient></defs><rect width='256' height='256' fill='url(#g)'/><circle cx='128' cy='104' r='42' fill='#8A5A3C'/><path d='M52 256c6-62 38-96 76-96s70 34 76 96z' fill='#B32F25'/><text x='128' y='236' font-family='Arial' font-weight='700' font-size='40' text-anchor='middle' fill='#fff'>12</text></svg>",
+)}`;
+const BIOS = [
+  "Takes a running back in round one and regrets nothing.",
+  "Daily grinder. 🏈🔥",
+  "",
+  "Tight ends win titles. That's the whole strategy, and it has worked exactly twice, which is twice more than the running back guys. Sticking with them forever. 🏈",
+  "Supercalifragilisticexpialidociousfootballdrafterextraordinaireandthensome",
+  "Chasing 20–0 since day one.",
+];
+NAMES.forEach((username, i) => {
+  if (i % 4 === 3) return; // a few players have never saved anything
+  const id = `seed-${i}`;
+  const photo = i % 5 === 1;
+  const path = photo ? `${id}/1757800000${String(i).padStart(3, "0")}.webp` : null;
+  mock._profileDetails.set(id, {
+    user_id: id, bio: BIOS[i % BIOS.length], avatar_path: path, avatar_preset: photo ? null : FREE_AVATAR_PRESETS[i % FREE_AVATAR_PRESETS.length].key,
+    favorite_team: i % 6 === 2 ? null : TEAM_CODES[(i * 7) % TEAM_CODES.length], updated_at: new Date(clock).toISOString(),
+  });
+  if (photo) mock._storageObjects.set(`avatars/${path}`, { bucket: "avatars", path, contentType: "image/webp", size: 2048, owner: id, publicUrl: PHOTO });
+});
+
 async function signIn(username) {
   const { data } = await mock.auth.signUp({ email: `${username}@harness.test`, password: "harness-only", options: { data: { username } } });
   if (username === "admin") return; // a fresh account, so forced outcomes start from a clean profile
   Object.assign(mock._profiles.get(data.user.id), profileFor(data.user.id, username, 0), { daily_streak: 6, daily_best_streak: 6 });
+  mock._profileDetails.set(data.user.id, { user_id: data.user.id, bio: BIOS[0], avatar_path: null, avatar_preset: "helmet", favorite_team: "KC", updated_at: new Date().toISOString() });
+}
+
+// ---------- screen=profile: the profile screen on its own ----------
+// Uploads get a real address to show: the mock stores the object, and the harness hands the image back
+// as a blob URL instead of the mock's placeholder address.
+const baseStorageFrom = mock.storage.from.bind(mock.storage);
+mock.storage.from = (bucket) => {
+  const api = baseStorageFrom(bucket);
+  return {
+    ...api,
+    async upload(path, body, opts) {
+      const res = await api.upload(path, body, opts);
+      const o = mock._storageObjects.get(`${bucket}/${path}`);
+      if (!res.error && o && body instanceof Blob) o.publicUrl = URL.createObjectURL(body);
+      return res;
+    },
+  };
+};
+
+function ProfilePreview({ userId, owner }) {
+  const fixtures = { veteran: veteranProfile, rookie: rookieProfile, photo: photoProfile };
+  const [profile, setProfile] = useState(() => {
+    const p = (fixtures[params.get("fixture")] || veteranProfile)();
+    // The fixture's streak is dated; move it to today so the card shows it whenever this is opened.
+    return { ...p, username: params.get("name") || p.username, stats: { ...p.stats, dailyLast: today } };
+  });
+  const moderator = owner && params.get("moderator") != null ? { openReports: Number(params.get("moderator")) || 0 } : null;
+  const hasScores = profile.stats.bestScore != null;
+  return (
+    <div className="ps">
+      <style>{APP_CSS}</style>
+      <div className="wrap">
+        <ProfileScreen status={params.get("status") || "ok"} profile={profile} isOwner={owner} userId={userId}
+          rank={hasScores ? { fantasy: 3, standard: 1 } : { fantasy: null, standard: null }} moderator={moderator}
+          onRetry={() => console.log("retry")} onShare={async () => "copied"}
+          onDetailsSaved={(details) => setProfile((p) => ({ ...p, details }))}
+          onLogOut={() => console.log("log out")} onPlay={() => console.log("play")} onOpenReports={() => console.log("reports")} />
+      </div>
+    </div>
+  );
 }
 
 (async () => {
+  if (params.get("screen") === "profile") {
+    const owner = params.get("owner") === "1";
+    let userId = null;
+    if (owner || who !== "guest") {
+      // The fixture player is in the mock too, so a visitor's report has someone to report.
+      mock._profiles.set(VETERAN_ROW.id, { ...VETERAN_ROW });
+      const name = owner ? "harness_owner" : "harness_visitor";
+      const { data } = await mock.auth.signUp({ email: `${name}@harness.test`, password: "harness-only", options: { data: { username: name } } });
+      userId = data.user.id;
+    }
+    createRoot(document.getElementById("root")).render(<ProfilePreview userId={userId} owner={owner} />);
+    return;
+  }
   if (who === "player") await signIn("shrimpcity");
   else if (who === "admin") await signIn("admin");
   else if (who === "newbie") await mock.auth.signUp({ email: "newbie@harness.test", password: "harness-only", options: { data: { username: "newbie" } } });
