@@ -424,7 +424,8 @@ name.
 
 **Test hooks (must keep):** root `<section class="shop" data-balance="<n>">` (`data-balance` absent until loaded);
 tabs are buttons named by `KIND_LABEL` plus "Showcase"; each item is `<article class="sh-item" data-item="<id>"
-data-state="…">` holding a button that selects it; buttons named "Buy", "Confirm purchase", "Equip", "Take off";
+data-state="…">` whose first button selects it, and the selected item's article holds its actions, buttons named
+"Buy", "Confirm purchase", "Equip", "Take off";
 showcase checkboxes `input[name="showcase"][value="<badge id>"]` and a "Save showcase" button.
 
 ### 7.3 `profile.jsx` (agent L)
@@ -443,12 +444,13 @@ New props: `wallet` (`{ balance }` or null — the owner's) and `onOpenShop()`.
 
 ## 8. App integration — `perfect-season.jsx` (agent M)
 
-- **The Shop view.** `view === "shop"` shows ShopScreen, for a signed-in player only (signing out leaves it). It opens
-  from the profile card's Shop button and the result screen's coins line. It isn't an address (the page stays at
-  `/`), but it takes part in history like the other views, so Back returns where you were: `HISTORY_VIEWS` gains
-  `shop`.
-- **Result screen**, signed in, once the save answers: the coins it earned (`coins.earned`, its lines kept compact)
-  and a Shop button; any new badges by emoji and name; when `capped`, "Unlimited, Genius and GM pay coins for 20
+- **The Shop view.** `view === "shop"` shows ShopScreen, for a signed-in player only (signing out leaves it, and a
+  history entry for it reached while signed out opens Modes). It opens from the profile card's Shop button and the
+  result screen's coins line. It isn't an address (the page stays at `/`), but like a profile it pushes a history
+  entry of its own (`HISTORY_VIEWS` gains `shop`), so Back — the browser's or the shop's own, which calls
+  `history.back()` — returns to the screen it was opened from.
+- **Result screen**, signed in, once the save answers: the coins it earned (`coins.earned` as "+186 coins", with the
+  season's lines on one compact row and the new badges' coins folded into one "Badges" line) and a Shop button; any new badges by emoji and name; when `capped`, "Unlimited, Genius and GM pay coins for 20
   seasons a day. The Daily always pays."; on `reason: "duplicate"`, "This draft was already recorded, so it didn't
   count again." in place of the save-error panel. `coins: null` shows nothing about coins.
 - **Wallet.** `fetchWallet()` when your own profile opens and after a season saves or a claim pays → ProfileScreen's
