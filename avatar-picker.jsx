@@ -1,17 +1,27 @@
 // Choosing a picture: upload a photo (drag and zoom it into the circle, then a 256x256 image is made in
-// the browser) or pick one of the default avatars. Contract: PROFILES.md. Classes are prefixed ap-.
+// the browser) or pick one of the default avatars. Contract: PROFILES.md, and SHOP.md (7.1) for the packs.
+// Classes are prefixed ap-.
 //
 //   username    - for the preview's initial
 //   current     - { photoUrl, preset } as the player has them now
 //   busy        - a save is in flight; disable the controls
 //   error       - a message to show from the last failed save, or ""
+//   ownedPacks  - the avatar packs the player owns, by pack name ("sideline", ...); the starter set is always
+//                 theirs. The others show dimmed, with "In the shop", and can't be chosen.
 //   onPhoto     - (blob) => Promise: the cropped image, ready for storage-profile.js's saveAvatarPhoto
 //   onPreset    - (key) => Promise: a default avatar was chosen
 //   onRemove    - () => Promise: back to the initial
 //   onCancel    - () => void: close without changes
 import { useEffect, useId, useRef, useState } from "react";
 import { Avatar, AVATAR_PRESETS } from "./avatars.jsx";
+import { AVATAR_PACKS } from "./shop-catalog.mjs";
 import { loadImage, prepareAvatar, releaseImage, BACKDROP } from "./avatar-image.mjs";
+
+// The groups on Choose an avatar, Starter first, then the shop's packs in catalog order.
+const PACK_GROUPS = [
+  { pack: "starter", name: "Starter" },
+  ...AVATAR_PACKS.map((p) => ({ pack: p.pack, name: p.name })),
+].map((g) => ({ ...g, presets: AVATAR_PRESETS.filter((p) => p.pack === g.pack) }));
 
 // The image work, behind one object so the jsdom tests (which have no canvas) can swap in fakes. The
 // app never changes it.
@@ -70,11 +80,21 @@ export const PICKER_CSS = `
 .ap-zoom input:disabled{cursor:default;opacity:.45}
 /* Arrow keys mean nothing on a phone, so touch screens get the shorter hint. */
 .ap-hint-touch{display:none}
+/* Choose an avatar: one group per pack, each a label and a grid. Flex columns, not grids: inside a grid track the
+   avatar grid's width:100% has nothing definite to resolve against, so auto-fill sized it to its 640px max-width
+   and it ran off a phone's screen. */
+.ap-packs{display:flex;flex-direction:column;gap:18px;width:100%;min-width:0}
+.ap-pack{display:flex;flex-direction:column;gap:8px;min-width:0}
+.ap-panel .ap-packname{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:0;font-size:12px;font-weight:800;line-height:1.3;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ap-shop{padding:2px 8px;border-radius:999px;background:var(--surface2);box-shadow:inset 0 0 0 1.5px var(--line2);color:var(--ink);font-size:12px;font-weight:700;letter-spacing:0;text-transform:none}
 /* 88px tiles: three columns from about 360px, two below - narrower, "Stopwatch" and "Megaphone" broke mid-word. */
-.ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;width:100%;max-width:640px}
-.ap-preset{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;padding:12px 4px 8px;
+.ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;width:100%;max-width:640px;margin:0;padding:0;list-style:none}
+.ap-preset,.ap-lock{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;padding:12px 4px 8px;
   border:2px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font-weight:700;font-size:13px;line-height:1.2;
   transition:transform .12s ease,border-color .12s,box-shadow .12s}
+/* A pack in the shop: its avatars dimmed on a dashed tile, their names still readable. */
+.ap-lock{border-style:dashed;border-color:var(--line2);background:transparent;color:var(--muted);transition:none}
+.ap-dim{display:grid;opacity:.4;filter:grayscale(.6)}
 .ap-preset[aria-pressed=true]{border-color:var(--ink);box-shadow:3px 3px 0 var(--hard)}
 /* The current one gets a lime check badge in its corner. */
 .ap-preset[aria-pressed=true]::before{content:"";position:absolute;top:5px;right:5px;width:20px;height:20px;border-radius:50%;background:var(--accent);box-shadow:inset 0 0 0 2px var(--on-accent)}
@@ -122,10 +142,14 @@ function drawStage(canvas, image, crop, cssSize) {
   ctx.drawImage(image.source, x, y, w, h);
 }
 
-export function AvatarPicker({ username, current, busy, error, onPhoto, onPreset, onRemove, onCancel }) {
+export function AvatarPicker({ username, current, busy, error, ownedPacks, onPhoto, onPreset, onRemove, onCancel }) {
   const id = useId();
   const photoUrl = current?.photoUrl || null;
   const preset = current?.preset || null;
+  // The pack of the avatar the player already wears counts as theirs too: the database only let them choose it
+  // because they own it, and the shop's list may still be loading.
+  const currentPack = AVATAR_PRESETS.find((p) => p.key === preset)?.pack;
+  const owns = (pack) => pack === "starter" || pack === currentPack || (Array.isArray(ownedPacks) && ownedPacks.includes(pack));
   const [tab, setTab] = useState(preset && !photoUrl ? "presets" : "upload");
   const [image, setImage] = useState(null); // { source, width, height } from loadImage
   const [crop, setCrop] = useState(null); // { x, y, size } in source pixels
@@ -356,15 +380,38 @@ export function AvatarPicker({ username, current, busy, error, onPhoto, onPreset
         </div>
       ) : (
         <div className="ap-panel" role="tabpanel" id={`${id}-panel-presets`} aria-labelledby={`${id}-tab-presets`}>
-          <div className="ap-grid" role="group" aria-label="Default avatars">
-            {AVATAR_PRESETS.map((p) => {
-              const isCurrent = !photoUrl && preset === p.key;
+          <div className="ap-packs">
+            {PACK_GROUPS.map((g) => {
+              const labelId = `${id}-pack-${g.pack}`;
+              const owned = owns(g.pack);
               return (
-                <button key={p.key} type="button" className="ap-preset" aria-pressed={isCurrent} disabled={locked}
-                  onClick={() => { if (!isCurrent) run(() => onPreset?.(p.key)); }}>
-                  <Avatar username={username || ""} preset={p.key} size={56} decorative />
-                  <span className="ap-name">{p.name}</span>
-                </button>
+                <div key={g.pack} className="ap-pack" data-pack={g.pack} data-owned={owned ? "true" : "false"}>
+                  <p className="ap-packname" id={labelId}>{g.name}{!owned && <span className="ap-shop">In the shop</span>}</p>
+                  {owned ? (
+                    <div className="ap-grid" role="group" aria-labelledby={labelId}>
+                      {g.presets.map((p) => {
+                        const isCurrent = !photoUrl && preset === p.key;
+                        return (
+                          <button key={p.key} type="button" className="ap-preset" aria-pressed={isCurrent} disabled={locked}
+                            onClick={() => { if (!isCurrent) run(() => onPreset?.(p.key)); }}>
+                            <Avatar username={username || ""} preset={p.key} size={56} decorative />
+                            <span className="ap-name">{p.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    // Not options at all until the pack is bought: a list to look at, with nothing to focus or press.
+                    <ul className="ap-grid" aria-labelledby={labelId}>
+                      {g.presets.map((p) => (
+                        <li key={p.key} className="ap-lock" data-preset={p.key}>
+                          <span className="ap-dim"><Avatar username={username || ""} preset={p.key} size={56} decorative /></span>
+                          <span className="ap-name">{p.name}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               );
             })}
           </div>

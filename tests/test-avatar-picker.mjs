@@ -1,9 +1,10 @@
-// The avatar picker (avatar-picker.jsx) in jsdom: the tabs, choosing a default avatar, removing a
-// picture, busy and error states, and framing an uploaded photo. jsdom can't decode or draw images, so
-// the picker's imageTools are swapped for fakes; the real image work is tested in Chrome by
-// test-avatar-image.mjs.
+// The avatar picker (avatar-picker.jsx) in jsdom: the tabs, choosing a default avatar, the avatar packs
+// (grouped by pack, the ones in the shop dimmed and not choosable), removing a picture, busy and error
+// states, and framing an uploaded photo. jsdom can't decode or draw images, so the picker's imageTools
+// are swapped for fakes; the real image work is tested in Chrome by test-avatar-image.mjs.
 import { setupDom, loadModule, renderComponent, click, flush, type, assert, runTest, findButtonByText } from "./helpers.mjs";
 import { FREE_AVATAR_PRESETS } from "../profile-rules.mjs";
+import { AVATAR_PACKS } from "../shop-catalog.mjs";
 
 setupDom();
 // No canvas in jsdom: without this every preview draw logs "not implemented".
@@ -115,6 +116,58 @@ await runTest("choosing a default avatar calls onPreset with its key, and the cu
   const { container: c2 } = await show(spies({ current: { photoUrl: "https://storage.mock/avatars/u/1.webp", preset: null } }).props);
   await click(tab(c2, "Choose an avatar"));
   assert(presetButtons(c2).every((b) => b.getAttribute("aria-pressed") === "false"), "with a photo, no default avatar is marked");
+});
+
+await runTest("Choose an avatar groups by pack, Starter first; a pack in the shop is dimmed, says so, and can't be chosen", async () => {
+  const packs = (c) => [...c.querySelectorAll(".ap-pack")];
+  const packEl = (c, pack) => c.querySelector(`.ap-pack[data-pack="${pack}"]`);
+  const nameOf = (el) => el.querySelector(".ap-packname").firstChild.textContent;
+  const focusable = "button, a[href], input, select, textarea, [tabindex]";
+
+  const { calls, props } = spies({ current: { photoUrl: null, preset: "trophy" }, ownedPacks: ["sideline"] });
+  const { container: c, rerender } = await show(props);
+  assert(packs(c).map((p) => p.dataset.pack).join() === ["starter", ...AVATAR_PACKS.map((p) => p.pack)].join(), `packs in order, Starter first, got ${packs(c).map((p) => p.dataset.pack).join()}`);
+  assert(packs(c).map(nameOf).join() === ["Starter", ...AVATAR_PACKS.map((p) => p.name)].join(), `pack names, got ${packs(c).map(nameOf).join()}`);
+
+  for (const [pack, keys] of [["starter", FREE_AVATAR_PRESETS], ["sideline", AVATAR_PACKS[0].presets]]) {
+    const el = packEl(c, pack);
+    const group = el.querySelector("[role=group]");
+    const label = el.querySelector(".ap-packname");
+    assert(el.dataset.owned === "true" && !el.querySelector(".ap-shop"), `${pack} is owned, with no "In the shop"`);
+    assert(group && group.getAttribute("aria-labelledby") === label.id && label.id, `${pack}'s avatars are a group named by the pack`);
+    assert([...group.querySelectorAll("button.ap-preset")].map((b) => b.textContent).join() === keys.map((p) => p.name).join(), `${pack}'s avatars are buttons, in order`);
+  }
+  for (const pack of AVATAR_PACKS.slice(1)) {
+    const el = packEl(c, pack.pack);
+    const list = el.querySelector("ul.ap-grid");
+    assert(el.dataset.owned === "false" && el.querySelector(".ap-shop")?.textContent === "In the shop", `${pack.pack} says "In the shop" by its name`);
+    assert(list && list.getAttribute("aria-labelledby") === el.querySelector(".ap-packname").id, `${pack.pack}'s avatars are a list named by the pack (and "In the shop")`);
+    assert([...list.querySelectorAll("li.ap-lock")].map((li) => li.textContent).join() === pack.presets.map((p) => p.name).join(), `${pack.pack} still shows its avatars and names`);
+    assert(!el.querySelector(focusable) && !el.querySelector(".ap-preset"), `${pack.pack}'s avatars aren't options: nothing to focus or press`);
+    assert([...list.querySelectorAll(".ap-dim > .av")].length === 4, `${pack.pack}'s pictures are dimmed`);
+    await click(list.querySelector("li"));
+    await flush();
+  }
+  assert(calls.preset.length === 0, "clicking an avatar in the shop saves nothing");
+  assert(presetButtons(c).length === FREE_AVATAR_PRESETS.length + 4, "only owned avatars are buttons");
+
+  await click(presetButton(c, "Penalty flag"));
+  await flush();
+  assert(calls.preset.join() === "penalty-flag", `an owned pack's avatar is chosen like any other, got ${calls.preset.join()}`);
+
+  await rerender({ ...props, busy: true });
+  assert(presetButtons(c).every((b) => b.disabled), "busy disables the pack avatars too");
+
+  // Without ownedPacks (the shop hasn't loaded yet) only the starter set can be chosen - except the pack the
+  // current picture is from, which the player must own.
+  const { container: c2 } = await show(spies({ current: { photoUrl: null, preset: "medal" } }).props);
+  assert(packs(c2).filter((p) => p.dataset.owned === "true").map((p) => p.dataset.pack).join() === "starter,trophy-room", `owned packs: starter and the current picture's, got ${packs(c2).filter((p) => p.dataset.owned === "true").map((p) => p.dataset.pack).join()}`);
+  assert(presetButton(c2, "Medal")?.getAttribute("aria-pressed") === "true", "the current pack avatar is marked");
+  assert(selected(c2) === "Choose an avatar", "a pack avatar opens on Choose an avatar too");
+
+  const { container: c3 } = await show(spies({ ownedPacks: AVATAR_PACKS.map((p) => p.pack) }).props);
+  await click(tab(c3, "Choose an avatar"));
+  assert(packs(c3).every((p) => p.dataset.owned === "true") && !c3.querySelector(".ap-shop") && presetButtons(c3).length === 24, "owning every pack makes all 24 choosable");
 });
 
 await runTest("Remove picture shows only when there is a picture and calls onRemove; Cancel calls onCancel", async () => {
