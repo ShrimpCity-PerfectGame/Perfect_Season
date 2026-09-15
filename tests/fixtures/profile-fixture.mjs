@@ -41,7 +41,7 @@ export const VETERAN_STATS_JSON = {
     { ladder: "gm", seasons: 7, dnf: 2, wins: 93, losses: 36, champs: 1, perfect: 0, playoffs: 5, best_score: 101.7, best_score_std: 90.3 },
   ],
   wins: [[5, 1], [6, 1], [7, 2], [8, 3], [9, 4], [10, 6], [11, 7], [12, 9], [13, 8], [14, 7], [15, 5], [16, 4], [17, 3], [18, 2], [19, 1], [20, 1]].map(([w, n]) => ({ w, n })),
-  best_points: 212,
+  best_points: 236,
   go_to_players: [
     { name: "Randy Moss", season: 2007, team: "NE", count: 6 },
     { name: "Priest Holmes", season: 2002, team: "KC", count: 5 },

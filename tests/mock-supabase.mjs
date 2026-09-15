@@ -102,7 +102,8 @@ export function makeMockAuth() {
           const key = table === "daily_runs"
             ? `${row.date}:${row.format || "fantasy"}:${row.user_id}`
             : `${row.date}:${row.user_id}`;
-          store.set(key, row);
+          // Both tables default created_at to now(), which player_stats' tiebreaks read.
+          store.set(key, { created_at: new Date().toISOString(), ...row });
         }
         return Promise.resolve({ error: null });
       },
@@ -250,7 +251,7 @@ export function makeMockAuth() {
     if (mode.kind === "daily") {
       const dailyKey = `${mode.date}:${format}:${userId}`;
       if (dailyRuns.has(dailyKey)) return { data: { error: "today's daily is already recorded" } };
-      dailyRuns.set(dailyKey, { date: mode.date, format, user_id: userId, username: existingRow.username, w: run.w, l: run.l, score, outcome: run.outcome });
+      dailyRuns.set(dailyKey, { date: mode.date, format, user_id: userId, username: existingRow.username, w: run.w, l: run.l, score, outcome: run.outcome, created_at: new Date().toISOString() });
     }
 
     const existing = mockRowToProfile(existingRow);

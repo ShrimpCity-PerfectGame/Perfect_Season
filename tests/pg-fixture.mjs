@@ -21,6 +21,9 @@ export const MIGRATIONS = ["migration-runs-log.sql", "migration-profiles.sql", "
 export async function freshDb({ migrations = MIGRATIONS } = {}) {
   const db = new PGlite();
   await db.exec(`
+    -- PGlite takes the machine's time zone, which changes how to_jsonb writes timestamps and what
+    -- current_date means. Supabase runs in UTC.
+    set timezone = 'UTC';
     create role anon nologin;
     create role authenticated nologin;
     create role service_role nologin bypassrls;
