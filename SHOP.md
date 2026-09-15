@@ -101,9 +101,10 @@ Ledger `kind`s and their `ref`s:
 All four: RLS on, no policies, every privilege revoked from `anon` and `authenticated`.
 
 - `wallet_lock(p_user uuid) → bigint` — creates an empty wallet if there's none, locks the row until the transaction
-  ends, returns the balance. **Every function that reads a balance or moves coins takes this lock first**, so two
-  purchases (or a purchase and a credit) at the same moment wait for each other, and every path locks the wallet
-  before touching the ledger (no deadlocks).
+  ends, returns the balance. **Every function that moves coins or decides something on a balance takes this lock
+  first**, so two purchases (or a purchase and a credit) at the same moment wait for each other, and every path locks
+  the wallet before touching the ledger (no deadlocks). The read-only `wallet_state` and `shop_state` don't lock (a
+  stable function can't, and nothing is decided on the balance they show).
 - `wallet_apply(p_user uuid, p_amount bigint, p_kind text, p_ref text) → bigint` — locks the wallet, records
   `(user, kind, ref)` in the ledger and moves the wallet by `p_amount`. Returns `p_amount`, or 0 when that
   `(user, kind, ref)` is already recorded or the amount is 0. A debit the balance can't cover breaks `wallets`' check
@@ -147,7 +148,9 @@ The database's own numbers (250, 15, 10,000, the starting formula, the 24-hour w
 Seeded with the launch catalog ([6.2](#62-shop-catalogmjs-phase-0-lead)), `on conflict (id) do nothing`: a re-run
 adds new items and leaves existing rows alone, so a price changed with SQL stays changed. RLS on, public select.
 Runbook: `update shop_items set price = 1500 where id = 'frame-lime';` and
-`update shop_items set active = false where id = 'frame-lime';` (edit the seed too, for new databases).
+`update shop_items set active = false where id = 'frame-lime';` (edit the seed too, for new databases). To give a
+pack's avatars to everyone, free the avatars rather than the shop item (`set_avatar` checks inventory for paid
+avatars): `update avatar_presets set free = true where pack = 'sideline';`.
 
 **`inventory`** `(user_id → profiles cascade, item_id → shop_items(id), acquired_at timestamptz default now(),
 primary key (user_id, item_id))`. RLS on, no policies, privileges revoked from anon and authenticated. Only bought
@@ -164,9 +167,9 @@ frame, the Navy card, no title) and `showcase text[] not null default '{}'` (nam
 | function | returns | notes / raises |
 |---|---|---|
 | `shop_state()` | jsonb `{ "balance", "items": [{ "id", "kind", "rarity", "price", "badge", "active", "sort", "owned" }], "equipped": { "frame", "card", "title", "showcase" } }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. Items: every active item plus any inactive one the player owns, ordered by kind (frame, card, title, avatar_pack), then `sort`, then `id`. `owned`: free, or an inventory row, or a badge item whose badge is in `badge_awards`. `equipped`: the caller's profile_details columns (nulls and `[]` without a row). |
-| `shop_buy(p_item text)` | jsonb `{ "ok": true, "balance", "item" }` | security definer; `authenticated` only. Raises, checked in this order: `not_signed_in`; `unavailable` (no such item, or not active); `badge_only`; `owned` (free, or already owned); `not_enough`. Takes the wallet lock **before** reading ownership or the balance, then inserts the inventory row and `wallet_apply(uid, -price, 'purchase', id)`, all in one transaction. |
-| `equip_item(p_slot text, p_item text)` | jsonb: the details row (`to_jsonb`, like `save_profile`) | security definer; `authenticated` only. Raises `not_signed_in`; `bad_slot` (not `frame`, `card` or `title`); `bad_item` (no such item, or its kind isn't the slot's — each slot takes its own kind); `not_owned`. Null `p_item` clears the slot. Upserts the caller's row and changes only that column (`card` → `card_theme`). |
-| `set_showcase(p_badges text[])` | jsonb: the details row | security definer; `authenticated` only. Raises `not_signed_in`; `bad_showcase` (more than 3, a null, a duplicate, or an id not matching `^[a-z0-9-]{1,40}$`). Null saves `{}`. It doesn't check the badges are earned: the card shows only the earned ones, because badges are worked out in the browser and one earned since the player's last season isn't in `badge_awards` yet. |
+| `shop_buy(p_item text)` | jsonb `{ "ok": true, "balance", "item" }` | security definer; `authenticated` only. Raises, checked in this order: `not_signed_in`; `unavailable` (no such item, or not active); `badge_only`; `owned` (free, or already owned); `not_enough`. Takes the wallet lock **before** reading the item, ownership or the balance, then inserts the inventory row and `wallet_apply(uid, -price, 'purchase', id)`, all in one transaction. If `wallet_apply` doesn't charge the full price (the ledger already records that purchase but the inventory row is gone — only possible after rows were edited by hand) it raises `purchase_conflict` and rolls back, rather than hand the item over free. |
+| `equip_item(p_slot text, p_item text)` | jsonb: the details row (`to_jsonb`, like `save_profile`) | security definer; `authenticated` only. Raises `not_signed_in`; `bad_slot` (not `frame`, `card` or `title`); `bad_item` (no such item, or its kind isn't the slot's — each slot takes its own kind); `not_owned`. Null `p_item` clears the slot. Upserts the caller's row and changes only that column (`card` → `card_theme`) plus `updated_at`. |
+| `set_showcase(p_badges text[])` | jsonb: the details row | security definer; `authenticated` only. Raises `not_signed_in`; `bad_showcase` (more than 3, a null, a duplicate, a multi-dimensional array, or an id not matching `^[a-z0-9-]{1,40}$`). Null saves `{}`; the ids are saved in order, numbered from 1. It doesn't check the badges are earned: the card shows only the earned ones, because badges are worked out in the browser and one earned since the player's last season isn't in `badge_awards` yet. |
 
 **`set_avatar` in `migration-profiles.sql` (agent J):** a preset that isn't free is allowed when the caller owns
 its pack's item (an `inventory` row for `'pack-' || pack`); otherwise `bad_preset`, as now. It must still work in a
@@ -261,6 +264,7 @@ fetchShop()              → { balance, items: [{ id, kind, rarity, price, badge
                              equipped: { frame, card, title, showcase } } | null
 buyItem(id)              → { ok: true, balance } | { ok: false, reason }
     // reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "signed_out" | "network"
+    // (purchase_conflict arrives as "network": nothing the player can do clears it)
 equipItem(slot, id)      → { ok: true, details } | { ok: false, reason }        // id null clears the slot
     // reason: "not_owned" | "invalid" | "signed_out" | "network"
 setShowcase(badgeIds)    → { ok: true, details } | { ok: false, reason: "invalid" | "signed_out" | "network" }
