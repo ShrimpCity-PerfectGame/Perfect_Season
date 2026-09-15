@@ -42,7 +42,9 @@ const centeredCrop = (image) => {
 };
 
 export const PICKER_CSS = `
-.ap-picker{display:flex;flex-direction:column;gap:14px;min-width:0}
+/* Full width of wherever it sits: sized to its content, the avatar grid worked out six columns and ran past
+   a phone's screen, hiding half the avatars. */
+.ap-picker{display:flex;flex-direction:column;gap:14px;min-width:0;width:100%}
 .ap-tabs{display:flex;align-self:flex-start;max-width:100%;border:2px solid var(--btn-line);border-radius:10px;overflow:hidden;background:var(--surface)}
 .ap-tab{flex:1 1 auto;background:none;border:none;padding:8px 14px;font-weight:700;font-size:14px;line-height:1.2;color:var(--muted);transition:background-color .12s,color .12s}
 .ap-tab+.ap-tab{border-left:2px solid var(--btn-line)}
@@ -68,6 +70,7 @@ export const PICKER_CSS = `
 .ap-zoom input:disabled{cursor:default;opacity:.45}
 /* Arrow keys mean nothing on a phone, so touch screens get the shorter hint. */
 .ap-hint-touch{display:none}
+/* 88px tiles: three columns from about 360px, two below - narrower, "Stopwatch" and "Megaphone" broke mid-word. */
 .ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;width:100%;max-width:640px}
 .ap-preset{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;padding:12px 4px 8px;
   border:2px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font-weight:700;font-size:13px;line-height:1.2;
@@ -89,6 +92,10 @@ export const PICKER_CSS = `
   .ap-tab,.ap-preset,.ap-stage,.ap-zoom input{position:relative;z-index:1}
   .ap-hint-fine{display:none}
   .ap-hint-touch{display:inline}
+}
+/* A phone on its side: a smaller stage, so Use this photo is on screen with the circle. */
+@media (max-height:500px) and (orientation:landscape){
+  .ap-stage,.ap-zoom{width:min(100%,200px)}
 }
 @media (prefers-reduced-motion:reduce){
   .ap-tab,.ap-preset{transition:none}
@@ -150,6 +157,9 @@ export function AvatarPicker({ username, current, busy, error, onPhoto, onPreset
     if (old && old !== next) imageTools.releaseImage?.(old.source);
   };
   useEffect(() => () => { if (imageRef.current) imageTools.releaseImage?.(imageRef.current.source); }, []);
+  // The picker replaces the button that opened it, so keyboard and screen-reader focus would otherwise drop to
+  // the page: it starts on the selected tab instead.
+  useEffect(() => { tabRefs.current[tab]?.focus?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (submittedFrom.current !== undefined && photoUrl !== submittedFrom.current) {

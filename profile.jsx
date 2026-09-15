@@ -18,7 +18,7 @@
 // Test hooks: the root is <section class="profile" data-username=... data-owner="true|false">; the
 // owner view has a "Log out" button; an owner with no drafts sees "Play your first season to start
 // your record." and a "Go to the draft" button.
-import { Fragment, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar } from "./avatars.jsx";
 import { AvatarPicker } from "./avatar-picker.jsx";
 import { ReportSheet } from "./moderation.jsx";
@@ -171,8 +171,17 @@ export const PROFILE_CSS = `
   .pf-table th,.pf-table td{padding:9px 8px}
   .pf-book dd{font-size:23px}
 }
-@media (max-width:400px){
+/* A long name goes under the picture below 440px: beside it, 16 characters broke mid-word at 402-420px
+   (412px is the commonest Android width). */
+@media (max-width:440px){
   .pf-head.pf-long{flex-direction:column;align-items:flex-start}
+}
+/* A phone on its side: a shorter card, so its buttons are on the first screen. */
+@media (max-height:500px) and (orientation:landscape){
+  .pf-card{gap:8px;padding:12px 16px}
+  .pf-name{font-size:30px}
+  .pf-facts{padding-top:8px}
+  .pf-facts dd{font-size:19px}
 }
 @media (min-width:641px){
   .pf-chart{grid-template-columns:repeat(21,minmax(0,1fr));align-items:stretch;gap:0 2px;height:210px}
@@ -218,7 +227,9 @@ const EMPTY_EXTRA = mapPlayerStats(null);
 
 const num = (n) => Number(n || 0).toLocaleString();
 const plural = (n, one, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
-const teamName = (code) => (TEAMS[code] ? `${TEAMS[code][1]} ${TEAMS[code][0]}` : code);
+// City and nickname, skipping an empty part: Washington's city is blank, which read " Washington" and sorted
+// it above Arizona.
+const teamName = (code) => (TEAMS[code] ? [TEAMS[code][1], TEAMS[code][0]].filter(Boolean).join(" ") : code);
 const teamStyle = (code) => (TEAMS[code] ? teamVars(code) : undefined);
 const TEAM_OPTIONS = [...TEAM_CODES].sort((a, b) => teamName(a).localeCompare(teamName(b)));
 // A chart label has a column's width to fit in, so big counts shorten (the list's hidden text has them in full).
@@ -366,6 +377,17 @@ function ProfileEditor({ username, details, userId, onSaved, onClose }) {
   const [picBusy, setPicBusy] = useState(false);
   const [picError, setPicError] = useState("");
   const id = useId();
+  const panelRef = useRef(null);
+  const pictureButton = useRef(null);
+  const wasPicking = useRef(false);
+  // The editor opens under the card, which on a phone (or one on its side) is below the screen - Edit profile
+  // looked like it did nothing. Brought just into view, without animating.
+  useEffect(() => { panelRef.current?.scrollIntoView?.({ block: "nearest" }); }, []);
+  // When the picker closes (a save or Cancel), focus goes back to the button that opened it, not the page.
+  useEffect(() => {
+    if (wasPicking.current && !picking) pictureButton.current?.focus?.();
+    wasPicking.current = picking;
+  }, [picking]);
   // Counted the way it will be saved (cleanBio: one line, trimmed), in code points like the database.
   const length = bioLength(cleanBio(bio));
   const over = length > BIO_MAX;
@@ -404,7 +426,7 @@ function ProfileEditor({ username, details, userId, onSaved, onClose }) {
   };
 
   return (
-    <div className="panel pf-editor">
+    <div className="panel pf-editor" ref={panelRef}>
       <div className="pf-field" role="group" aria-labelledby={`${id}-pic`}>
         <span className="pf-label" id={`${id}-pic`}>Picture</span>
         {picking ? (
@@ -416,7 +438,7 @@ function ProfileEditor({ username, details, userId, onSaved, onClose }) {
         ) : (
           <div className="pf-pic">
             <Avatar username={username} photoUrl={details.avatarUrl} preset={details.avatarPreset} size={64} />
-            <button type="button" className="btn" onClick={() => setPicking(true)}>{details.avatarUrl || details.avatarPreset ? "Change picture" : "Add a picture"}</button>
+            <button type="button" className="btn" ref={pictureButton} onClick={() => setPicking(true)}>{details.avatarUrl || details.avatarPreset ? "Change picture" : "Add a picture"}</button>
           </div>
         )}
       </div>
@@ -469,6 +491,9 @@ function HeadlineTiles({ s, rank }) {
 function BadgeGrid({ progress }) {
   const [open, setOpen] = useState(null);
   const id = useId();
+  // A badge in the bottom row opens its details below the screen on a phone; bring them just into view.
+  const detailRef = useRef(null);
+  useEffect(() => { if (open) detailRef.current?.scrollIntoView?.({ block: "nearest" }); }, [open]);
   const earned = progress.filter((p) => p.earned).length;
   return (
     <div className="pf-sec">
@@ -493,7 +518,7 @@ function BadgeGrid({ progress }) {
                 </button>
               </li>
               {isOpen && (
-                <li className={`pf-bdetail pf-t-${b.tier}${p.earned ? "" : " pf-locked"}`} id={`${id}-${p.id}`}>
+                <li ref={detailRef} className={`pf-bdetail pf-t-${b.tier}${p.earned ? "" : " pf-locked"}`} id={`${id}-${p.id}`}>
                   <span className="pf-bemo" aria-hidden="true"><span>{b.emoji}</span></span>
                   <div className="pf-btext">
                     <p className="pf-bname">{b.name}</p>

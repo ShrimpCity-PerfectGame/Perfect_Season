@@ -1152,7 +1152,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
   .mb::after{content:'';position:absolute;left:-3px;right:-3px;top:-6px;bottom:-6px}
   .whoami::after{content:'';position:absolute;left:-4px;right:-4px;top:-10px;bottom:-4px}
   /* Names sit in rows about 40px apart, so their hit areas stop short of the next row's. */
-  .namelink::after{content:'';position:absolute;left:-6px;right:-6px;top:-10px;bottom:-10px}
+  .namelink::after{content:'';position:absolute;left:-6px;right:-6px;top:-10px;bottom:-10px;min-width:44px}
   /* The header chips sit just above the tab grid on phones: keep their hit areas off the tabs. */
   .nav button.pill::after{bottom:-4px}
   .nav .tab{min-height:40px}

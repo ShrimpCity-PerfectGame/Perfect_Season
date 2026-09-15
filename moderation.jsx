@@ -28,6 +28,8 @@ export const MODERATION_CSS = `
   border:2px solid var(--line2);background:var(--surface);color:var(--ink);font-size:24px;line-height:1}
 .md-sheet .md-title{padding-right:52px;margin-bottom:12px}
 .md-case{text-transform:none}
+/* A 16-character name of wide letters ran under the close button and pushed the sheet sideways at 320px. */
+.md-title .md-case{overflow-wrap:anywhere}
 .md-fieldset{border:0;margin:0;padding:0;min-width:0}
 .md-legend{padding:0;margin:0 0 8px;font-size:13px;font-weight:700;color:var(--muted)}
 .md-reasons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -85,6 +87,8 @@ export const MODERATION_CSS = `
 }
 @media (max-width:359px){
   .md-reasons{grid-template-columns:1fr}
+  /* Beside the picture, a 16-character name broke mid-word: the name goes under it instead. */
+  .md-head{flex-direction:column;align-items:flex-start}
 }
 /* Wider screens: a dialog in the middle instead of a sheet. */
 @media (min-width:600px){
