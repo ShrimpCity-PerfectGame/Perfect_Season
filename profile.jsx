@@ -54,10 +54,14 @@ export const PROFILE_CSS = `
    picture from its frame. Children stay above a theme's texture layer. */
 .pf-card{position:relative;display:grid;gap:14px;margin:0 0 20px;padding:20px 20px 18px;border-radius:18px}
 .pf-card>*{position:relative}
-.pf-head{display:flex;align-items:center;gap:16px;min-width:0}
-.pf-id{display:grid;gap:8px;min-width:0}
+/* A name that doesn't fit beside the picture wraps under it rather than breaking mid-word: eleven capitals
+   ("MAHOMES_MVP") broke on a 320-340px phone, more so beside a shop frame, which is wider than Ink. Only the name and
+   title decide that: the team line is contained (its width doesn't count), so a short name with a long team still
+   sits beside the picture, and .pf-id grows to give the team line whatever room is left. */
+.pf-head{display:flex;flex-wrap:wrap;align-items:center;gap:16px;min-width:0}
+.pf-id{flex:1 1 auto;display:grid;gap:8px;min-width:0}
 .pf-name{margin:0;font-family:var(--display);font-weight:400;font-size:clamp(34px,6.2vw,54px);line-height:.95;color:var(--ink);overflow-wrap:anywhere}
-.pf-team{margin:0;display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--ink)}
+.pf-team{contain:inline-size;margin:0;display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--ink)}
 .pf-swatch{flex:none;width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,var(--tc1) 0 50%,var(--tc2) 50%);box-shadow:0 0 0 2px var(--ink)}
 .pf-tops{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
 .pf-tops li{display:inline-flex;align-items:center;gap:7px;padding:4px 12px 4px 4px;border-radius:999px;background:var(--surface2);box-shadow:inset 0 0 0 1.5px var(--tier);
@@ -177,6 +181,8 @@ export const PROFILE_CSS = `
    (412px is the commonest Android width). */
 @media (max-width:440px){
   .pf-head.pf-long{flex-direction:column;align-items:flex-start}
+  /* The column's width, not the name's: the contained team line would otherwise wrap under a short name. */
+  .pf-head.pf-long .pf-id{align-self:stretch}
 }
 /* A phone on its side: a shorter card, so its buttons are on the first screen. */
 @media (max-height:500px) and (orientation:landscape){

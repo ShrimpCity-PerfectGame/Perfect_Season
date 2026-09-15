@@ -242,6 +242,12 @@ export const COSMETICS_CSS = `
 .cs-pack{gap:0}
 .cs-pack>*+*{margin-left:-6px}
 
+/* Under 360px the shop's two columns leave a thumbnail about 121px wide. A one-word title can't wrap, so
+   "Undefeated" and "Cinderella" were cut off at both ends: a tighter tag there. */
+@media (max-width:359px){
+  .cs-chip{padding:7px 8px 7px 7px}
+  .cs-chip .cs-title{gap:6px;letter-spacing:.03em}
+}
 @media (prefers-reduced-motion:reduce){
   .cs-frame-flame::before,.cs-frame-flame::after{animation:none}
 }

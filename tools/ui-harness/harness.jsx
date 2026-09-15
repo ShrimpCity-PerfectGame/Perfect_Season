@@ -16,6 +16,7 @@
 //   status=loading | missing | error               the other states
 //   moderator=N                                    an owner who is a moderator, with N open reports
 //   name=Mississippi_Kid1                          a different username, e.g. to check a long one fits
+//   team=SF | none                                 a different favorite team, or none
 //
 // Coins and the shop (SHOP.md):
 //   screen=cosmetics[&team=KC]                     every frame (24, 40 and 84px, on cream, navy and black), card
@@ -180,6 +181,8 @@ function ProfilePreview({ userId, owner }) {
     // What the card wears (SHOP.md 7.3): frame=, card= and title= take shop item ids, e.g. card=card-ticket.
     const worn = Object.fromEntries([["frame", "frame"], ["cardTheme", "card"], ["title", "title"]]
       .map(([key, param]) => [key, params.get(param)]).filter(([, id]) => id));
+    // team=SF (or team=none) swaps the fixture's favorite team, e.g. to see a long team name beside a long username.
+    if (params.has("team")) worn.favoriteTeam = TEAMS[params.get("team")] ? params.get("team") : null;
     // The fixture's streak is dated; move it to today so the card shows it whenever this is opened.
     return { ...p, username: params.get("name") || p.username, stats: { ...p.stats, dailyLast: today }, details: { ...(p.details || {}), ...worn } };
   });
