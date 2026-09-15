@@ -154,9 +154,14 @@ export function makeProfileData(state, { playerStats }) {
   const isReservedUsername = (name) => typeof name === "string" && RESERVED_USERNAMES.includes(name.toLowerCase())
     && [...state.profiles.values()].some((r) => String(r.username).toLowerCase() === name.toLowerCase());
 
-  const detailsJson = (d) => (d ? { user_id: d.user_id, bio: d.bio, avatar_path: d.avatar_path, avatar_preset: d.avatar_preset, favorite_team: d.favorite_team, updated_at: d.updated_at } : null);
+  // Every column of the row, as to_jsonb gives it - v1.12.0's cosmetics (migration-shop.sql) included.
+  const detailsJson = (d) => (d ? {
+    user_id: d.user_id, bio: d.bio, avatar_path: d.avatar_path, avatar_preset: d.avatar_preset, favorite_team: d.favorite_team,
+    frame: d.frame ?? null, card_theme: d.card_theme ?? null, title: d.title ?? null, showcase: [...(d.showcase || [])], updated_at: d.updated_at,
+  } : null);
+  // Also used by tests/mock-shop.mjs's equip_item and set_showcase, which write the same row.
   function upsertDetails(uid, patch) {
-    const row = details.get(uid) || { user_id: uid, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null };
+    const row = details.get(uid) || { user_id: uid, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: null, title: null, showcase: [] };
     Object.assign(row, patch, { updated_at: new Date().toISOString() });
     details.set(uid, row);
     return detailsJson(row);
@@ -184,7 +189,12 @@ export function makeProfileData(state, { playerStats }) {
       const uid = player();
       if (p_path != null && p_preset != null) fail("bad_request");
       if (p_path != null && !isOwnAvatarPath(uid, p_path)) fail("bad_path");
-      if (p_preset != null && !presets.get(p_preset)?.free) fail("bad_preset");
+      // A paid pack's avatar needs the pack (SHOP.md 3.2); state.ownsAvatarPack is tests/mock-shop.mjs's, and
+      // without the shop nothing paid is owned.
+      if (p_preset != null) {
+        const preset = presets.get(p_preset);
+        if (!preset || !(preset.free || state.ownsAvatarPack?.(uid, preset.pack))) fail("bad_preset");
+      }
       return upsertDetails(uid, { avatar_path: p_path ?? null, avatar_preset: p_preset ?? null });
     },
     check_username({ p_username = null } = {}) {
@@ -283,5 +293,6 @@ export function makeProfileData(state, { playerStats }) {
     isClean,
     isReservedUsername,
     objects,
+    upsertDetails,
   };
 }

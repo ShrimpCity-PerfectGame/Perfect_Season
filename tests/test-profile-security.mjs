@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 import { StorageClient } from "@supabase/storage-js";
 import { assert, runTest, setupDom, makeMockAuth, loadModule, renderComponent, flush } from "./helpers.mjs";
-import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql } from "./pg-fixture.mjs";
+import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql, PROFILE_MIGRATIONS } from "./pg-fixture.mjs";
 import { BLOCKED_WORDS_SEED } from "./mock-profile-data.mjs";
 import { veteranProfile } from "./fixtures/profile-fixture.mjs";
 import { AVATAR_TYPES, AVATAR_MAX_BYTES, emptyPlayerStats } from "../profile-rules.mjs";
@@ -86,7 +86,9 @@ const INVALID_USERNAMES = [
 ];
 
 // ---------- The database ----------
-const db = await freshDb();
+// v1.11.0's migrations only: this file's every-function and every-table checks are about profiles and moderation.
+// tests/test-economy-security.mjs does the same for v1.12.0's wallet and shop.
+const db = await freshDb({ migrations: PROFILE_MIGRATIONS });
 await db.exec("insert into storage.buckets (id, name) values ('other', 'other') on conflict (id) do nothing");
 // Ids with letters in them, so a folder name in the wrong case is a different folder.
 const ALICE = "a11ce000-0000-4000-8000-00000000a11c"; // the victim
@@ -970,7 +972,7 @@ await runTest("9d. the profile screen, the Reports queue and the Report sheet re
 // Printed, not asserted: each needs PROFILES.md 3.4's algorithm (and tests/mock-profile-data.mjs) changed. A gap
 // that has since closed isn't printed. Gaps closed so far are asserted in 2f.
 {
-  const gapDb = await freshDb();
+  const gapDb = await freshDb({ migrations: PROFILE_MIGRATIONS });
   const gaps = [
     ["bios", "a whole-word entry spaced out", [...WORD].join(" ")],
     ["usernames", "a whole-word entry run into another word (camel case)", `${WORD[0].toUpperCase()}${WORD.slice(1)}Please`],

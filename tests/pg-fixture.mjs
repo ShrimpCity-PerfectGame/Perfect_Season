@@ -16,7 +16,9 @@ import { readFileSync } from "node:fs";
 
 export const sql = (file) => readFileSync(new URL(`../supabase/${file}`, import.meta.url), "utf8");
 export const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-export const MIGRATIONS = ["migration-runs-log.sql", "migration-profiles.sql", "migration-moderation.sql"];
+export const MIGRATIONS = ["migration-runs-log.sql", "migration-profiles.sql", "migration-moderation.sql", "migration-wallet.sql", "migration-shop.sql"];
+// Just v1.11.0's (PROFILES.md), for the tests whose every-function and every-table checks are about those.
+export const PROFILE_MIGRATIONS = MIGRATIONS.slice(0, 3);
 
 export async function freshDb({ migrations = MIGRATIONS } = {}) {
   const db = new PGlite();

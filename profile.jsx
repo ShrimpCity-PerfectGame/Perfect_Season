@@ -15,11 +15,14 @@
 //   onLogOut()      owner only
 //   onPlay()        owner with no drafts yet: go to the draft
 //   onOpenReports() moderator: open the Reports queue
+//   wallet          { balance } for the owner, else null (v1.12.0, SHOP.md 7.3)
+//   onOpenShop()    owner: open the shop
 // Test hooks: the root is <section class="profile" data-username=... data-owner="true|false">; the
 // owner view has a "Log out" button; an owner with no drafts sees "Play your first season to start
 // your record." and a "Go to the draft" button.
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar } from "./avatars.jsx";
+import { FramedAvatar, CardTheme, TitleLine, Coins } from "./cosmetics.jsx";
 import { AvatarPicker } from "./avatar-picker.jsx";
 import { ReportSheet } from "./moderation.jsx";
 import { BADGE_BY_ID, badgeProgress, topBadges } from "./badges.mjs";
@@ -267,7 +270,7 @@ export function ProfileScreen(props) {
   return <ProfileView key={profile.id ?? profile.username} {...props} />;
 }
 
-function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDetailsSaved, onLogOut, onPlay, onOpenReports }) {
+function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDetailsSaved, onLogOut, onPlay, onOpenReports, wallet, onOpenShop }) {
   // A save shows on the screen straight away. The parent hears about it through onDetailsSaved and may
   // pass the new details back in; once it does, its copy is the one shown.
   const [saved, setSaved] = useState(null);
@@ -298,7 +301,8 @@ function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDet
     <section className="profile" data-username={profile.username} data-owner={isOwner ? "true" : "false"}>
       <PlayerCard profile={profile} details={details} progress={progress} isOwner={isOwner} signedIn={!!userId} moderator={moderator}
         drafted={drafted} editing={editing} reporting={reporting} sharing={sharing} shared={shared}
-        onEdit={() => setEditing((v) => !v)} onReport={() => setReporting((v) => !v)} onShare={share} onOpenReports={() => onOpenReports?.()} />
+        onEdit={() => setEditing((v) => !v)} onReport={() => setReporting((v) => !v)} onShare={share} onOpenReports={() => onOpenReports?.()}
+        wallet={isOwner ? wallet : null} onOpenShop={isOwner ? onOpenShop : null} />
       {isOwner && editing && (
         <ProfileEditor username={profile.username} details={details} userId={userId} onSaved={detailsSaved} onClose={() => setEditing(false)} />
       )}
@@ -323,22 +327,22 @@ function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDet
   );
 }
 
-function PlayerCard({ profile, details, progress, isOwner, signedIn, moderator, drafted, editing, reporting, sharing, shared, onEdit, onReport, onShare, onOpenReports }) {
+function PlayerCard({ profile, details, progress, isOwner, signedIn, moderator, drafted, editing, reporting, sharing, shared, onEdit, onReport, onShare, onOpenReports, wallet, onOpenShop }) {
   const s = profile.stats || {};
   const top = topBadges(progress, 3);
   const team = TEAMS[details.favoriteTeam] ? details.favoriteTeam : null;
   const since = drafted ? draftingSince(profile) : profile.joined ? Date.parse(profile.joined) : null;
   const streak = liveStreak(s);
   return (
-    <div className="pf-card">
+    <CardTheme theme={details.cardTheme} team={team} className="pf-card">
       {/* A long name goes under the picture on a narrow phone rather than breaking beside it (Anton is
           about 0.45em a letter, so a dozen letters is where it stops fitting next to the picture). */}
       <div className={`pf-head${profile.username.length > 11 ? " pf-long" : ""}`}>
-        <span className="pf-ring">
-          <Avatar username={profile.username} photoUrl={details.avatarUrl} preset={details.avatarPreset} size={84} decorative />
-        </span>
+        <FramedAvatar className="pf-ring" frame={details.frame} team={team} username={profile.username} photoUrl={details.avatarUrl}
+          preset={details.avatarPreset} size={84} decorative />
         <div className="pf-id">
           <h1 className="pf-name">{profile.username}</h1>
+          <TitleLine title={details.title} />
           {team && (
             <p className="pf-team"><span className="pf-swatch" style={teamVars(team)} role="img" aria-label="Favorite team" />{teamName(team)}</p>
           )}
@@ -362,9 +366,11 @@ function PlayerCard({ profile, details, progress, isOwner, signedIn, moderator, 
         <button className={`btn${drafted || !isOwner ? " solid" : ""}`} onClick={onShare} disabled={sharing}>Share profile</button>
         {!isOwner && signedIn && <button className="btn" aria-expanded={reporting} onClick={onReport}>Report</button>}
         {isOwner && moderator && <button className="btn" onClick={onOpenReports}>Reports ({num(moderator.openReports)})</button>}
+        {isOwner && onOpenShop && <button className="btn" onClick={() => onOpenShop()}>Shop</button>}
+        {isOwner && wallet && <Coins amount={wallet.balance} />}
         <span className={`pf-status${shared === "failed" ? " pf-bad" : ""}`} role="status">{shared ? SHARE_STATUS[shared] : ""}</span>
       </div>
-    </div>
+    </CardTheme>
   );
 }
 

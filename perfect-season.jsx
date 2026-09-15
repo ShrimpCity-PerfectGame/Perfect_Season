@@ -26,6 +26,8 @@ import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS, Avatar } from "./avatars.jsx";
 import { PICKER_CSS } from "./avatar-picker.jsx";
 import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
+import { COSMETICS_CSS } from "./cosmetics.jsx";
+import { SHOP_CSS } from "./shop.jsx";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
 initGameData(gameData.players, gameData.opponents);
 
@@ -539,11 +541,13 @@ const CSS = `
 /* Stop the browser pinning the view to the bottom while a season's tiles tick in under it. */
 html:has(.result-hero){overflow-anchor:none}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
-.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.challenge,.pf-card{${cssVars("dark")};color:var(--ink)}
+.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
 /* Leaderboard scope: true black. After the dark list so its champion block takes night tokens. */
-.ps.night,.night .champion{${cssVars("night")};color:var(--ink)}
+.ps.night,.night .champion,.cs-night{${cssVars("night")};color:var(--ink)}
 .ps.night{background-color:var(--bg);background-image:none}
+/* A card theme on a cream ground (cosmetics.jsx's CardTheme). Last, so it wins over .pf-card's dark tokens. */
+.cs-light{${cssVars("light")};color:var(--ink)}
 .ps *{box-sizing:border-box}
 /* :where() keeps this at element specificity, so .fmtbtn's Anton, .linkbtn's accent color and .tab's
    muted color actually apply - as .ps button it outranked every one of them. */
@@ -1175,7 +1179,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 // The whole stylesheet the app renders, for previewing one screen on its own (the UI harness).
 // The screens in their own files bring their own rules, each scoped to its class prefix (pf-, av-, ap-,
 // md-), after the base stylesheet so they can reuse its tokens and classes.
-export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS;
+export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS;
 
 const reducedMotion = () => typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's

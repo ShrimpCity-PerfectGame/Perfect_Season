@@ -16,6 +16,7 @@ import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql } from "./pg-fi
 import { makeProfileData, BLOCKED_WORDS_SEED, AVATAR_FOLDER_LIMIT } from "./mock-profile-data.mjs";
 import { playerStats } from "./mock-profile-stats.mjs";
 import { FREE_AVATAR_PRESETS, TEAM_CODES, AVATAR_BUCKET, AVATAR_MAX_BYTES, AVATAR_TYPES, emptyPlayerStats, mapPlayerStats } from "../profile-rules.mjs";
+import { AVATAR_PACKS } from "../shop-catalog.mjs";
 
 const ch = (...codes) => String.fromCodePoint(...codes);
 // A blocked word of each kind, taken from the list rather than written out here.
@@ -29,6 +30,11 @@ const photo = (uid, n = "1757800000000", ext = "webp") => `${uid}/${n}.${ext}`;
 // Sorted keys, so JSON from Postgres and from the mock compare equal regardless of key order.
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
 const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+// Every default avatar: the free starter set, plus v1.12.0's paid packs (migration-shop.sql).
+const ALL_PRESETS = FREE_AVATAR_PRESETS.length + AVATAR_PACKS.reduce((n, p) => n + p.presets.length, 0);
+// A profile_details row's columns, v1.12.0's cosmetics included.
+const DETAILS_COLUMNS = ["avatar_path", "avatar_preset", "bio", "card_theme", "favorite_team", "frame", "showcase", "title", "updated_at", "user_id"];
+const EMPTY_DETAILS = { bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null, title: null, showcase: [], updatedAt: null };
 
 const db = await freshDb();
 const ALICE = uuid(1), BOB = uuid(2);
@@ -65,16 +71,18 @@ await runTest("anyone can read profile_details, avatar_presets and site_flags; n
     const details = await attempt(who, "select * from profile_details");
     assert(details.rows?.some((r) => r.user_id === ALICE && r.bio === "Hello"), `${label} should read profile_details: ${JSON.stringify(details)}`);
     const presets = await attempt(who, "select key, pack, free from avatar_presets order by key");
-    assert(presets.rows?.length === FREE_AVATAR_PRESETS.length, `${label} should read all ${FREE_AVATAR_PRESETS.length} presets`);
+    assert(presets.rows?.length === ALL_PRESETS, `${label} should read all ${ALL_PRESETS} presets`);
     const flags = await attempt(who, "select key, enabled from site_flags");
     assert(flags.rows?.some((r) => r.key === "uploads_paused" && r.enabled === false), `${label} should read the uploads_paused flag`);
     const words = await attempt(who, "select * from blocked_words");
     assert(/permission denied/.test(words.error || ""), `${label} must not read blocked_words, got ${JSON.stringify(words).slice(0, 120)}`);
   }
-  // The seeds: exactly profile-rules.mjs's free presets, all in the starter pack.
+  // The seeds: the starter pack is exactly profile-rules.mjs's free presets, and every other pack is paid.
   const presets = await owner("select key, pack, free from avatar_presets order by key");
   const want = FREE_AVATAR_PRESETS.map((p) => p.key).sort();
-  assert(same(presets.map((p) => p.key), want) && presets.every((p) => p.pack === "starter" && p.free === true), `presets should be the ${want.length} free starter keys, got ${JSON.stringify(presets)}`);
+  const starter = presets.filter((p) => p.pack === "starter");
+  assert(same(starter.map((p) => p.key), want) && starter.every((p) => p.free === true), `the starter pack should be the ${want.length} free keys, got ${JSON.stringify(starter)}`);
+  assert(presets.length === ALL_PRESETS && presets.filter((p) => p.pack !== "starter").every((p) => p.free === false), `every other preset is in a paid pack, got ${JSON.stringify(presets)}`);
 });
 
 await runTest("clients can't insert, update or delete the new tables directly", async () => {
@@ -102,7 +110,7 @@ await runTest("clients can't insert, update or delete the new tables directly", 
   }
   const details = await owner("select bio from profile_details where user_id = $1", [ALICE]);
   assert(details[0]?.bio === "Hello", "alice's row is untouched");
-  assert((await owner("select count(*)::int as n from avatar_presets"))[0].n === FREE_AVATAR_PRESETS.length, "presets untouched");
+  assert((await owner("select count(*)::int as n from avatar_presets"))[0].n === ALL_PRESETS, "presets untouched");
   assert((await owner("select count(*)::int as n from blocked_words"))[0].n === BLOCKED_WORDS_SEED.length, "word list untouched");
   assert(same(await owner("select key, enabled from site_flags"), [{ key: "uploads_paused", enabled: false }]), "flags untouched");
 });
@@ -123,7 +131,7 @@ await runTest("save_profile trims, enforces the length, character, word and team
   let res = await call(BOB, "set_avatar", { p_path: null, p_preset: "trophy" });
   assert(res.data?.avatar_preset === "trophy", "bob picks a default avatar first");
   res = await call(BOB, "save_profile", { p_bio: "  Takes a running back in round one  ", p_favorite_team: "NE" });
-  assert(same(Object.keys(res.data || {}).sort(), ["avatar_path", "avatar_preset", "bio", "favorite_team", "updated_at", "user_id"]), `returns the details row, got ${JSON.stringify(res)}`);
+  assert(same(Object.keys(res.data || {}).sort(), DETAILS_COLUMNS), `returns the details row, got ${JSON.stringify(res)}`);
   assert(res.data.bio === "Takes a running back in round one" && res.data.favorite_team === "NE" && res.data.user_id === BOB, "bio trimmed, team saved");
   assert(res.data.avatar_preset === "trophy", "the picture is left alone");
 
@@ -327,7 +335,7 @@ await runTest("player_profile returns the whole profiles row, the details row or
 
   r = await call(null, "player_profile", { p_username: "alice" });
   const details = (await owner("select to_jsonb(d) as d from profile_details d where user_id = $1", [ALICE]))[0].d;
-  assert(same(r.data.details, details) && same(Object.keys(details).sort(), ["avatar_path", "avatar_preset", "bio", "favorite_team", "updated_at", "user_id"]), `details is the saved row, got ${JSON.stringify(r.data.details)}`);
+  assert(same(r.data.details, details) && same(Object.keys(details).sort(), DETAILS_COLUMNS), `details is the saved row, got ${JSON.stringify(r.data.details)}`);
   assert(r.data.profile.wins === 40 && r.data.profile.username === "alice", "the profile row carries the account's stats");
 });
 
@@ -637,7 +645,7 @@ await runTest("fetchPlayerProfile: ok for an exact or unambiguous name, missing 
   let res = await P.fetchPlayerProfile("shrimpcity");
   assert(res.status === "ok" && res.profile.id === ME && res.profile.username === "shrimpcity", `exact name, got ${JSON.stringify(res).slice(0, 120)}`);
   assert(res.profile.joined === auth._profiles.get(ME).created_at && res.profile.joined, "joined is created_at");
-  assert(same(res.profile.details, { bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, updatedAt: null }), "no details row maps to empty details");
+  assert(same(res.profile.details, EMPTY_DETAILS), "no details row maps to empty details");
   assert(res.profile.stats.username === "shrimpcity" && res.profile.stats.id === ME && res.profile.stats.runs === 0, "stats is rowToProfile");
   assert(same(res.profile.extra, mapPlayerStats(emptyPlayerStats())), "extra is mapPlayerStats(player_stats)");
   res = await P.fetchPlayerProfile("ShrimpCity");
@@ -667,7 +675,7 @@ await runTest("fetchPlayerProfile: ok for an exact or unambiguous name, missing 
 await runTest("fetchProfileDetails: the saved details, empty details for none saved, null when it can't load", async () => {
   auth._profileDetails.set(ME, { user_id: ME, bio: "Hi", avatar_path: `${ME}/1757800000000.webp`, avatar_preset: null, favorite_team: "KC", updated_at: "2026-09-14T10:00:00.000Z" });
   const d = await P.fetchProfileDetails(ME);
-  assert(same(d, { bio: "Hi", avatarPath: `${ME}/1757800000000.webp`, avatarUrl: `https://storage.mock/avatars/${ME}/1757800000000.webp`, avatarPreset: null, favoriteTeam: "KC", updatedAt: "2026-09-14T10:00:00.000Z" }), `mapped details, got ${JSON.stringify(d)}`);
+  assert(same(d, { ...EMPTY_DETAILS, bio: "Hi", avatarPath: `${ME}/1757800000000.webp`, avatarUrl: `https://storage.mock/avatars/${ME}/1757800000000.webp`, favoriteTeam: "KC", updatedAt: "2026-09-14T10:00:00.000Z" }), `mapped details, got ${JSON.stringify(d)}`);
   assert(same(await P.fetchProfileDetails(OTHER), P.mapDetails(null)), "a player with no row gets empty details");
   assert((await P.fetchProfileDetails(null)) === null, "no user id is null");
   const client = Object.create(auth);

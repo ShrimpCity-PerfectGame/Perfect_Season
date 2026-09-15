@@ -60,3 +60,12 @@ export function rpcReason(error, table) {
   const key = String(error?.message || "").trim();
   return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : "network";
 }
+
+// A failed database call's reason. A session the server no longer accepts (an expired or rejected JWT,
+// which PostgREST reports as PGRST301-303 with HTTP 401) is "signed_out"; a function's own refusal is
+// looked up in `table`; anything else - a dropped connection, a server error - is "network".
+export function callReason(error, status, table) {
+  const code = String(error?.code || "");
+  if (status === 401 || /^PGRST30[123]$/.test(code) || /\bjwt\b/i.test(String(error?.message || ""))) return "signed_out";
+  return rpcReason(error, table);
+}

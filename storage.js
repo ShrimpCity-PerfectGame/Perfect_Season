@@ -72,9 +72,16 @@ export async function fetchProfile(userId) {
 // the submit-run Edge Function, which independently replays the draft trace (or, for a DNF, just
 // applies the increment) and recomputes everything server-side before writing - see
 // game-logic.mjs's replayDraft/simulateSeason and supabase/functions/submit-run.
+// On success, the function's answer: { ok: true, run, coins, newBadges } (SHOP.md 4.2 - coins is null when
+// the season counted but its coins couldn't be paid). A refusal comes back as an HTTP error whose body names
+// a reason; the only one the app treats differently is "duplicate" (this draft already counted).
 export async function submitRun(trace) {
   const { data, error } = await getClient().functions.invoke("submit-run", { body: trace });
-  if (error) return { ok: false };
+  if (error) {
+    let body = null;
+    try { body = await error.context?.json?.(); } catch (e) { /* no readable body */ }
+    return body?.reason === "duplicate" ? { ok: false, reason: "duplicate" } : { ok: false };
+  }
   return data;
 }
 // `mode` is the ladder the abandoned draft belonged to, so the points penalty lands on the right
@@ -234,3 +241,6 @@ export function subscribeSiteActivity({ onOnlineCount, onDraftFinished }) {
 // importing everything from "./storage.js". See PROFILES.md for the contract.
 export * from "./storage-profile.js";
 export * from "./storage-moderation.js";
+// ---------- Coins and the shop (v1.12.0) ----------
+// See SHOP.md.
+export * from "./storage-shop.js";

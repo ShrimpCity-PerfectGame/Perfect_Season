@@ -6,7 +6,7 @@
 // save_profile and set_avatar (supabase/migration-profiles.sql), which enforce the limits and the
 // word filter, so a modified browser can't skip them. The checks made here first are only there to
 // answer without a round trip.
-import { getClient, READ, rowToProfile, rpcReason } from "./storage-core.js";
+import { getClient, READ, rowToProfile, callReason } from "./storage-core.js";
 import {
   AVATAR_BUCKET, AVATAR_TYPES, AVATAR_MAX_BYTES, avatarObjectPath, isOwnAvatarPath, cleanBio, bioLength, BIO_MAX,
   TEAM_CODES, USERNAME_RE, mapPlayerStats,
@@ -23,7 +23,8 @@ export function avatarUrl(path) {
   }
 }
 
-// A profile_details row (or null, for a player who never saved any) in the app's shape.
+// A profile_details row (or null, for a player who never saved any) in the app's shape. frame, cardTheme and
+// title are shop item ids (null wears the default); showcase is the badge ids chosen for the card (SHOP.md).
 export function mapDetails(row) {
   return {
     bio: typeof row?.bio === "string" ? row.bio : "",
@@ -31,6 +32,10 @@ export function mapDetails(row) {
     avatarUrl: avatarUrl(row?.avatar_path),
     avatarPreset: row?.avatar_preset ?? null,
     favoriteTeam: row?.favorite_team ?? null,
+    frame: row?.frame ?? null,
+    cardTheme: row?.card_theme ?? null,
+    title: row?.title ?? null,
+    showcase: Array.isArray(row?.showcase) ? row.showcase.filter((id) => typeof id === "string") : [],
     updatedAt: row?.updated_at ?? null,
   };
 }
@@ -77,14 +82,6 @@ export async function fetchProfileDetails(userId) {
 const SAVE_REASONS = { bio_too_long: "too_long", bio_blocked: "blocked", bio_invalid: "invalid", bad_team: "invalid", not_signed_in: "signed_out" };
 const AVATAR_REASONS = { bad_path: "invalid", bad_preset: "invalid", bad_request: "invalid", not_signed_in: "signed_out" };
 
-// A failed database call's reason. A session the server no longer accepts (an expired or rejected JWT,
-// which PostgREST reports as PGRST301-303 with HTTP 401) is "signed_out"; a function's own refusal is
-// looked up in `table`; anything else - a dropped connection, a server error - is "network".
-function callReason(error, status, table) {
-  const code = String(error?.code || "");
-  if (status === 401 || /^PGRST30[123]$/.test(code) || /\bjwt\b/i.test(String(error?.message || ""))) return "signed_out";
-  return rpcReason(error, table);
-}
 const failed = (reason) => ({ ok: false, reason });
 
 // Saves your bio and favorite team together. Pass both: the current value of whichever isn't changing.

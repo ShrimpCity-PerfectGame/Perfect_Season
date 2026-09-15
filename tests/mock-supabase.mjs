@@ -5,6 +5,11 @@ import * as GL from "../game-logic.mjs";
 import { playerStats } from "./mock-profile-stats.mjs";
 import { makeProfileData } from "./mock-profile-data.mjs";
 import { makeModeration } from "./mock-moderation.mjs";
+import { makeWallet } from "./mock-wallet.mjs";
+import { makeShop } from "./mock-shop.mjs";
+import { seasonReward, badgeRewards, coinsSummary } from "../rewards.mjs";
+import { badgeProgress } from "../badges.mjs";
+import { mapPlayerStats } from "../profile-rules.mjs";
 
 // In-memory mock of the Supabase client surface storage.js actually calls: auth (signUp,
 // signInWithPassword, signOut, getSession, onAuthStateChange) and .from("profiles"/"daily_runs")
@@ -25,18 +30,22 @@ export function makeMockAuth() {
 
   // The v1.11.0 profile modules (PROFILES.md) each own their tables and database functions, in their
   // own files, sharing these tables and the signed-in user.
-  const state = { profiles, runs, dailyRuns, souRuns, builds, currentUserId: () => session?.user?.id ?? null, isModerator: () => false };
+  const state = { profiles, runs, dailyRuns, souRuns, builds, currentUserId: () => session?.user?.id ?? null, isModerator: () => false, ownsAvatarPack: () => false };
   const profileData = makeProfileData(state, { playerStats });
   const moderation = makeModeration(state, profileData);
   state.isModerator = moderation.isModerator;
-  const extraTables = { ...profileData.tables, ...moderation.tables };
+  // v1.12.0's coins and shop (SHOP.md), the same way.
+  const wallet = makeWallet(state);
+  const shop = makeShop(state, { wallet, profileData });
+  state.ownsAvatarPack = shop.ownsAvatarPack;
+  const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables };
   // These have no client write policy at all - the app changes them only through database functions -
   // so a direct write gets the error RLS would give.
   const rlsDenied = () => Promise.resolve({ error: { code: "42501", message: "new row violates row-level security policy" } });
   // Reads, the same way: reports and moderators have RLS on and no select policy, so a client sees no rows;
-  // blocked_words has its table grants revoked too, so a client's read is refused outright.
+  // blocked_words and the coin tables have their table grants revoked too, so a client's read is refused outright.
   const HIDDEN_ROWS = new Set(["reports", "moderators"]);
-  const REFUSED_READS = new Set(["blocked_words"]);
+  const REFUSED_READS = new Set(["blocked_words", "wallets", "wallet_ledger", "badge_awards", "finished_codes", "inventory"]);
   function refusedRead(table) {
     const result = { data: null, error: { code: "42501", message: `permission denied for table ${table}` } };
     const query = {
@@ -107,6 +116,7 @@ export function makeMockAuth() {
             return Promise.resolve({ error: { code: "23505", message: 'duplicate key value violates unique constraint "profiles_username_key"' } });
           }
           profiles.set(row.id, { runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, ...row });
+          wallet.welcome(row.id); // migration-wallet.sql's create_wallet trigger
         } else if (table === "builds") {
           // migration-profiles.sql's builds triggers: a real position and a finite overall, or bad_build; and
           // the account's own username, whatever the browser sent.
@@ -206,6 +216,12 @@ export function makeMockAuth() {
       daily_streak: s.dailyStreak, daily_last: s.dailyLast, daily_best_streak: s.dailyBestStreak,
     };
   }
+  // A refusal the real function answers with an HTTP error status: supabase-js hands back a FunctionsHttpError
+  // whose context is the Response, and storage.js's submitRun reads the reason from its body.
+  const refused = (status, body) => ({
+    data: null,
+    error: { name: "FunctionsHttpError", message: "Edge Function returned a non-2xx status code", context: { status, json: async () => body } },
+  });
   async function invokeSubmitRun(body) {
     if (!session?.user) return { error: { message: "unauthorized" } };
     const userId = session.user.id;
@@ -233,7 +249,7 @@ export function makeMockAuth() {
       }
       seed = GL.dailySeed(mode.date, format);
     } else if (mode.kind === "free") {
-      if (typeof mode.code !== "string" || !mode.code) return { data: { error: "missing challenge code" } };
+      if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return { data: { error: "missing challenge code" } };
       seed = mode.code;
     } else {
       return { data: { error: "unknown mode" } };
@@ -272,8 +288,14 @@ export function makeMockAuth() {
     // no real constraint, so without it the standard daily would silently overwrite the fantasy one.
     if (mode.kind === "daily") {
       const dailyKey = `${mode.date}:${format}:${userId}`;
-      if (dailyRuns.has(dailyKey)) return { data: { error: "today's daily is already recorded" } };
+      if (dailyRuns.has(dailyKey)) return refused(409, { error: "today's daily is already recorded", reason: "duplicate" });
       dailyRuns.set(dailyKey, { date: mode.date, format, user_id: userId, username: existingRow.username, w: run.w, l: run.l, score, outcome: run.outcome, created_at: new Date().toISOString() });
+    } else {
+      // One finished season per account per challenge code (SHOP.md 4.2): finished_codes' primary key, taken
+      // before anything else is written.
+      const codeKey = `${userId}|${mode.code}`;
+      if (wallet.tables.finished_codes.has(codeKey)) return refused(409, { error: "this draft is already recorded", reason: "duplicate" });
+      wallet.tables.finished_codes.set(codeKey, { user_id: userId, code: mode.code, created_at: new Date().toISOString() });
     }
 
     const existing = mockRowToProfile(existingRow);
@@ -285,7 +307,26 @@ export function makeMockAuth() {
     Object.assign(existingRow, mockProfileToRow(updated));
     logRun(GL.runLogRow(userId, existingRow.username, run, mode.kind === "daily" ? mode.date : null));
 
-    return { data: { ok: true, run } };
+    // The season's coins, then any badge it earned (SHOP.md 4.2). A failure here never fails the season,
+    // which already counted.
+    let coins = null;
+    let newBadges = [];
+    try {
+      const reward = seasonReward(run, { date: mode.date, streak: updated.dailyStreak });
+      const season = {
+        ...wallet.server.credit_coins({ p_user: userId, p_amount: reward.amount, p_kind: reward.kind, p_ref: reward.ref, p_daily_cap: reward.dailyCap }),
+        lines: reward.lines,
+      };
+      const favoriteTeam = profileData.tables.profile_details.get(userId)?.favorite_team ?? null;
+      const progress = badgeProgress({ stats: updated, extra: mapPlayerStats(playerStats(state, userId)), details: { favoriteTeam }, joined: existingRow.created_at ?? null });
+      const awards = wallet.server.award_badges({ p_user: userId, p_badges: badgeRewards(progress) });
+      coins = coinsSummary(season, awards);
+      newBadges = awards.awarded;
+    } catch (e) {
+      coins = null;
+      newBadges = [];
+    }
+    return { data: { ok: true, run, coins, newBadges } };
   }
 
   // Mirrors index.ts's logRun: after the profile write, and a duplicate of the unique key is a no-op.
@@ -357,7 +398,7 @@ export function makeMockAuth() {
   const rpcs = {
     site_totals: siteTotals, site_stats: siteStats,
     player_stats: ({ p_user_id } = {}) => playerStats(state, p_user_id),
-    ...profileData.rpcs, ...moderation.rpcs,
+    ...profileData.rpcs, ...moderation.rpcs, ...wallet.rpcs, ...shop.rpcs,
   };
 
   return {
@@ -384,6 +425,13 @@ export function makeMockAuth() {
     _storageObjects: profileData.objects,
     _reports: moderation.tables.reports,
     _moderators: moderation.tables.moderators,
+    _wallets: wallet.tables.wallets, // test-only escape hatches for coins and the shop
+    _ledger: wallet.tables.wallet_ledger,
+    _badgeAwards: wallet.tables.badge_awards,
+    _finishedCodes: wallet.tables.finished_codes,
+    _shopItems: shop.tables.shop_items,
+    _inventory: shop.tables.inventory,
+    _wallet: wallet, // its server functions (credit_coins, award_badges) and helpers, for setting up a test
     _profiles: profiles, // test-only escape hatch for setup/assertions
     _runs: runs, // test-only escape hatch for setup/assertions
     _builds: builds, // test-only escape hatch for setup/assertions
@@ -407,6 +455,7 @@ export function makeMockAuth() {
         const id = `user-${authUsers.size + 1}`;
         authUsers.set(email, { id, email, password });
         profiles.set(id, { id, username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
+        wallet.welcome(id); // migration-wallet.sql's create_wallet trigger
         session = { user: { id, email } };
         notify("SIGNED_IN");
         return { data: { user: { id, email } }, error: null };
