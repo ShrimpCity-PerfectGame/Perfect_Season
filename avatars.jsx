@@ -1,21 +1,37 @@
 // Player pictures: an uploaded photo, one of the default avatars, or the player's initial - in that
 // order, falling back to the next when the one before is missing or fails to load. Contract:
-// PROFILES.md. Classes are prefixed av-.
+// PROFILES.md, and SHOP.md (7.1) for the avatar packs. Classes are prefixed av-.
 import { useState } from "react";
 import { FREE_AVATAR_PRESETS } from "./profile-rules.mjs";
-import { PALETTE } from "./theme.mjs";
+import { AVATAR_PACKS } from "./shop-catalog.mjs";
+import { PALETTE, THEME } from "./theme.mjs";
 
-// Every default avatar: [{ key, name, pack, free }], the same keys as the database's avatar_presets.
-// The drawings themselves are in ART below, keyed the same way.
-export const AVATAR_PRESETS = FREE_AVATAR_PRESETS.map((p) => ({ ...p, pack: "starter", free: true }));
+// Every default avatar: [{ key, name, pack, free }], the same keys as the database's avatar_presets - the
+// free starter set, then each shop pack's four (free: false; owning the pack's item unlocks them). The
+// drawings themselves are in ART below, keyed the same way.
+export const AVATAR_PRESETS = [
+  ...FREE_AVATAR_PRESETS.map((p) => ({ ...p, pack: "starter", free: true })),
+  ...AVATAR_PACKS.flatMap((pack) => pack.presets.map((p) => ({ ...p, pack: pack.pack, free: false }))),
+];
 
 const { ink: INK, cream: CREAM, lime: LIME, blue: BLUE, orange: ORANGE, violet: VIOLET } = PALETTE;
+// The medal gold every scope shares (only ever a fill), and the navy scoreboard sky for the Night game pack.
+const GOLD = THEME.light.tierGoldFill;
+const NIGHT = THEME.dark.bg;
+
+// Straight rays from a center, as one path: a firework burst.
+const burst = (cx, cy, count, from, to, turn = 0) => Array.from({ length: count }, (_, i) => {
+  const a = (i / count + turn) * 2 * Math.PI;
+  const at = (r) => `${(cx + r * Math.cos(a)).toFixed(1)} ${(cy + r * Math.sin(a)).toFixed(1)}`;
+  return `M${at(from)}L${at(to)}`;
+}).join("");
 
 // The drawings, on the same 64x64 grid as the Gridspin mark (static/icon.svg): a colored disc with
 // bold ink shapes. They have to read in the 24px header, so every shape is big and simple and the
 // small details are only there for the 96px profile card. Nothing here may look like a real team's
-// logo - no stars, horseshoes or bolts on a helmet. The disc fills the whole square; Avatar clips it
-// round and draws the ring.
+// logo - no stars, horseshoes or bolts on a helmet - or any company's (no words on the blimp). The disc
+// fills the whole square; Avatar clips it round and draws the ring. The Night game pack is drawn on the
+// navy sky, so its shapes are cream and lime rather than ink.
 const ART = {
   football: {
     bg: ORANGE,
@@ -159,14 +175,185 @@ const ART = {
       </g>
     ),
   },
+
+  // ---- Sideline pack ----
+  headset: {
+    bg: LIME,
+    art: (
+      <g>
+        <path d="M15 34V30C15 18.5 22.6 10 32 10S49 18.5 49 30V34" fill="none" stroke={INK} strokeWidth="5.5" strokeLinecap="round" />
+        <rect x="8" y="26" width="14" height="22" rx="6" fill={INK} />
+        <rect x="42" y="26" width="14" height="22" rx="6" fill={INK} />
+        <circle cx="15" cy="37" r="3.2" fill={CREAM} />
+        <circle cx="49" cy="37" r="3.2" fill={CREAM} />
+        <path d="M15 47C15 53.5 19.5 56.5 27 56.5" fill="none" stroke={INK} strokeWidth="3.5" strokeLinecap="round" />
+        <rect x="26" y="52" width="12" height="9" rx="4.5" fill={CREAM} stroke={INK} strokeWidth="3" />
+      </g>
+    ),
+  },
+  // The round sideline jug: a lid, a cream band, and the tap at the bottom.
+  cooler: {
+    bg: VIOLET,
+    art: (
+      <g stroke={INK} strokeWidth="3.5" strokeLinejoin="round">
+        <path d="M14 26H10V33H14M50 26H54V33H50" fill="none" strokeLinecap="round" />
+        <path d="M14 19H50V47C50 52.5 46 56 40 56H24C18 56 14 52.5 14 47Z" fill={ORANGE} />
+        <path d="M14 29H50V37H14Z" fill={CREAM} />
+        <path d="M12 12.5C12 10.6 13.6 9 15.5 9H48.5C50.4 9 52 10.6 52 12.5V19H12Z" fill={CREAM} />
+        <path d="M28 44H36V49H33V53.5H31V49H28Z" fill={INK} strokeWidth="2.4" />
+      </g>
+    ),
+  },
+  // The end-zone pylon, standing on the goal line - not a traffic cone.
+  pylon: {
+    bg: LIME,
+    art: (
+      <g>
+        <path d="M-2 51L66 43" stroke={CREAM} strokeWidth="7" />
+        <g stroke={INK} strokeWidth="3.2" strokeLinejoin="round">
+          <path d="M20 16H36V52H20Z" fill={ORANGE} />
+          <path d="M36 16L45 11V47L36 52Z" fill={ORANGE} />
+          <path d="M36 16L45 11V47L36 52Z" fill={INK} fillOpacity=".28" stroke="none" />
+          <path d="M20 16L29 11H45L36 16Z" fill={CREAM} />
+        </g>
+      </g>
+    ),
+  },
+  // A yellow flag in flight, its weighted knot trailing.
+  "penalty-flag": {
+    bg: BLUE,
+    art: (
+      <g>
+        <path d="M8 31L15 29.5M6.5 40L14.5 38.5M9 49L16 46.5" stroke={CREAM} strokeWidth="3.2" strokeLinecap="round" />
+        <g transform="rotate(-10 34 32)" stroke={INK} strokeWidth="3.5" strokeLinejoin="round">
+          <path d="M25 17C32 12.5 40 20.5 51 15.5L54 45C44 50 36 42 28 47.5Z" fill={GOLD} />
+          <path d="M28.5 19.5L18.5 12" fill="none" strokeWidth="3" strokeLinecap="round" />
+          <circle cx="17" cy="12" r="6.2" fill={GOLD} />
+        </g>
+      </g>
+    ),
+  },
+
+  // ---- Trophy room pack ----
+  "title-ring": {
+    bg: VIOLET,
+    art: (
+      <g stroke={INK} strokeLinejoin="round">
+        <path d="M21 40C19 51 24 57 32 57S45 51 43 40" fill="none" strokeWidth="6.5" />
+        <path d="M22 10H42L52 20V33L42 43H22L12 33V20Z" fill={GOLD} strokeWidth="3.5" />
+        <path d="M32 16L41.5 26.5L32 37L22.5 26.5Z" fill={BLUE} strokeWidth="3" />
+        <path d="M17.5 21.5V31.5M46.5 21.5V31.5" stroke={CREAM} strokeWidth="2.6" strokeLinecap="round" />
+      </g>
+    ),
+  },
+  medal: {
+    bg: BLUE,
+    art: (
+      <g stroke={INK} strokeWidth="3.2" strokeLinejoin="round">
+        <path d="M15 4H28L36.5 28H23.5Z" fill={ORANGE} />
+        <path d="M49 4H36L27.5 28H40.5Z" fill={CREAM} />
+        <circle cx="32" cy="40" r="15.5" fill={GOLD} strokeWidth="3.5" />
+        <circle cx="32" cy="40" r="9.2" fill="none" strokeWidth="2.6" />
+        <path d="M29.2 36.8L32.8 34.6V45.5" fill="none" strokeWidth="3" strokeLinecap="round" />
+      </g>
+    ),
+  },
+  banner: {
+    bg: CREAM,
+    art: (
+      <g>
+        <path d="M17 13H47V54L32 45L17 54Z" fill={ORANGE} stroke={INK} strokeWidth="3.5" strokeLinejoin="round" />
+        <path d="M17 44.5L32 36L47 44.5" fill="none" stroke={CREAM} strokeWidth="3.5" />
+        <rect x="11" y="8.5" width="42" height="6.5" rx="3.25" fill={INK} />
+        <path d="M25 18.5H39V22C39 26.8 36 29.5 32 29.5S25 26.8 25 22Z" fill={INK} />
+        <rect x="30" y="29" width="4" height="3" fill={INK} />
+        <rect x="26.5" y="31.5" width="11" height="3.5" rx="1" fill={INK} />
+      </g>
+    ),
+  },
+  "game-ball": {
+    bg: LIME,
+    art: (
+      <g>
+        <path d="M21 57H43L40 50H24Z" fill={INK} />
+        <rect x="28" y="44" width="8" height="7" fill={INK} />
+        <g transform="rotate(-16 32 29)">
+          <path d="M7 29C14.5 12 49.5 12 57 29C49.5 46 14.5 46 7 29Z" fill={INK} />
+          <path d="M17.5 21.5C20 26 20 32 17.5 36.5M46.5 21.5C44 26 44 32 46.5 36.5" fill="none" stroke={CREAM} strokeWidth="3.2" />
+          <path d="M25 29H39" stroke={CREAM} strokeWidth="2.8" strokeLinecap="round" />
+          <path d="M28 25.5V32.5M32 25.5V32.5M36 25.5V32.5" stroke={CREAM} strokeWidth="2.4" strokeLinecap="round" />
+        </g>
+      </g>
+    ),
+  },
+
+  // ---- Night game pack ----
+  floodlights: {
+    bg: NIGHT,
+    art: (
+      <g>
+        <path d="M11 37H53L66 66H-2Z" fill={CREAM} fillOpacity=".14" />
+        <path d="M32 3V8M20.5 6L23.5 10M43.5 6L40.5 10M3 26H8M56 26H61" stroke={LIME} strokeWidth="3" strokeLinecap="round" />
+        <rect x="29.5" y="36" width="5" height="29" fill={CREAM} />
+        <rect x="11" y="13" width="42" height="26" rx="4" fill={CREAM} />
+        <g fill={LIME} stroke={INK} strokeWidth="2.4">
+          <circle cx="20" cy="20" r="4.6" /><circle cx="32" cy="20" r="4.6" /><circle cx="44" cy="20" r="4.6" />
+          <circle cx="20" cy="32" r="4.6" /><circle cx="32" cy="32" r="4.6" /><circle cx="44" cy="32" r="4.6" />
+        </g>
+      </g>
+    ),
+  },
+  scoreboard: {
+    bg: NIGHT,
+    art: (
+      <g>
+        <rect x="17" y="44" width="5.5" height="15" fill={CREAM} />
+        <rect x="41.5" y="44" width="5.5" height="15" fill={CREAM} />
+        <rect x="8" y="13" width="48" height="33" rx="4" fill={CREAM} />
+        <rect x="12.5" y="17.5" width="39" height="24" rx="2" fill={INK} />
+        <path d="M17 23.5H25V29.5H17V35.5H25" fill="none" stroke={ORANGE} strokeWidth="3.4" strokeLinecap="square" />
+        <rect x="39" y="23.5" width="8" height="12" fill="none" stroke={ORANGE} strokeWidth="3.4" />
+        <circle cx="32" cy="26.5" r="1.9" fill={LIME} />
+        <circle cx="32" cy="32.5" r="1.9" fill={LIME} />
+      </g>
+    ),
+  },
+  fireworks: {
+    bg: NIGHT,
+    art: (
+      <g strokeLinecap="round">
+        <path d={burst(27, 26, 8, 7.5, 19.5, 1 / 16)} stroke={LIME} strokeWidth="4" />
+        <path d={burst(45, 43, 8, 4.5, 11)} stroke={ORANGE} strokeWidth="3.4" />
+        <circle cx="27" cy="26" r="3.4" fill={CREAM} />
+        <circle cx="45" cy="43" r="2.6" fill={CREAM} />
+        <circle cx="49" cy="17" r="2.4" fill={CREAM} />
+        <circle cx="15" cy="48" r="2.2" fill={CREAM} />
+      </g>
+    ),
+  },
+  blimp: {
+    bg: NIGHT,
+    art: (
+      <g>
+        <path d="M46 21L55 11.5H59.5L57 26Z" fill={CREAM} />
+        <path d="M46 37L55 46.5H59.5L57 32Z" fill={CREAM} />
+        <rect x="23.5" y="38" width="13" height="10" rx="3" fill={CREAM} />
+        <path d="M27 44H33" stroke={NIGHT} strokeWidth="2.2" strokeLinecap="round" />
+        <ellipse cx="30" cy="29" rx="24" ry="12.5" fill={CREAM} />
+        <path d="M7.3 25H52.7A24 12.5 0 0 1 52.7 33H7.3A24 12.5 0 0 1 7.3 25Z" fill={BLUE} />
+        <path d="M13 29H21M26 29H34" stroke={LIME} strokeWidth="2.6" strokeLinecap="round" />
+      </g>
+    ),
+  },
 };
 
 export const AVATAR_CSS = `
 .av{position:relative;display:inline-grid;place-items:center;flex:none;vertical-align:middle;border-radius:50%;overflow:hidden;
   background:var(--accent);color:var(--on-accent);font-family:var(--display);font-weight:400;line-height:1;user-select:none}
 .av>*{grid-area:1/1}
-/* The ring goes on top, so it frames a photo too. It thickens with the size (see ringWidth). */
-.av::after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:inset 0 0 0 var(--av-ring,2px) var(--ink);pointer-events:none}
+/* The ring goes on top, so it frames a photo too. It thickens with the size (see ringWidth). A frame around
+   the picture (cosmetics.jsx's FramedAvatar) may set --av-edge, so the ring is its inner edge in every scope. */
+.av::after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:inset 0 0 0 var(--av-ring,2px) var(--av-edge,var(--ink));pointer-events:none}
 .av-art,.av-photo{display:block;width:100%;height:100%}
 .av-photo{object-fit:cover}
 `;
