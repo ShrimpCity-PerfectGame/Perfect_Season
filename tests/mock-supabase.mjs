@@ -326,8 +326,10 @@ export function makeMockAuth() {
     }
 
     if (writeError("profiles")) {
-      // The season didn't count, so the code is given back and a retry can count it.
-      if (mode.kind === "free") wallet.tables.finished_codes.delete(codeKey);
+      // The season didn't count, so what the duplicate guard took - the code, or this Daily's daily_runs row - is
+      // given back and a retry can count it.
+      if (mode.kind === "daily") dailyRuns.delete(`${mode.date}:${format}:${userId}`);
+      else wallet.tables.finished_codes.delete(codeKey);
       return refused(500, { error: "failed to save" });
     }
     Object.assign(existingRow, mockProfileToRow(updated));

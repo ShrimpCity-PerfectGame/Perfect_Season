@@ -251,12 +251,14 @@ Deno.serve(async (req) => {
 
   const { error: writeError } = await service.from("profiles").update(profileToRow(updated)).eq("id", user.id);
   if (writeError) {
-    // The season didn't count, so give the code back and let a retry count it. Best effort: if this
-    // fails as well, the code stays used and a retry answers "already recorded".
-    if (mode.kind === "free") {
-      const { error: releaseError } = await service.from("finished_codes").delete().eq("user_id", user.id).eq("code", mode.code);
-      if (releaseError) console.error("finished_codes release failed:", releaseError.message);
-    }
+    // The season didn't count, so give back what the duplicate guard took - the challenge code, or
+    // this Daily's daily_runs row - and let a retry count it. Best effort: if this fails as well, a
+    // retry answers "already recorded" (as a failed Daily save always did before v1.12.0).
+    const release = mode.kind === "daily"
+      ? service.from("daily_runs").delete().eq("date", mode.date).eq("format", format).eq("user_id", user.id)
+      : service.from("finished_codes").delete().eq("user_id", user.id).eq("code", mode.code);
+    const { error: releaseError } = await release;
+    if (releaseError) console.error("duplicate guard release failed:", releaseError.message);
     return json({ error: "failed to save" }, 500);
   }
   await logRun(service, GL.runLogRow(user.id, existingRow.username, run, mode.kind === "daily" ? mode.date : null));

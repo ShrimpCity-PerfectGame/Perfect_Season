@@ -177,8 +177,11 @@ function ProfilePreview({ userId, owner }) {
   const fixtures = { veteran: veteranProfile, rookie: rookieProfile, photo: photoProfile };
   const [profile, setProfile] = useState(() => {
     const p = (fixtures[params.get("fixture")] || veteranProfile)();
+    // What the card wears (SHOP.md 7.3): frame=, card= and title= take shop item ids, e.g. card=card-ticket.
+    const worn = Object.fromEntries([["frame", "frame"], ["cardTheme", "card"], ["title", "title"]]
+      .map(([key, param]) => [key, params.get(param)]).filter(([, id]) => id));
     // The fixture's streak is dated; move it to today so the card shows it whenever this is opened.
-    return { ...p, username: params.get("name") || p.username, stats: { ...p.stats, dailyLast: today } };
+    return { ...p, username: params.get("name") || p.username, stats: { ...p.stats, dailyLast: today }, details: { ...(p.details || {}), ...worn } };
   });
   const moderator = owner && params.get("moderator") != null ? { openReports: Number(params.get("moderator")) || 0 } : null;
   const hasScores = profile.stats.bestScore != null;
@@ -190,7 +193,8 @@ function ProfilePreview({ userId, owner }) {
           rank={hasScores ? { fantasy: 3, standard: 1 } : { fantasy: null, standard: null }} moderator={moderator}
           onRetry={() => console.log("retry")} onShare={async () => "copied"}
           onDetailsSaved={(details) => setProfile((p) => ({ ...p, details }))}
-          onLogOut={() => console.log("log out")} onPlay={() => console.log("play")} onOpenReports={() => console.log("reports")} />
+          onLogOut={() => console.log("log out")} onPlay={() => console.log("play")} onOpenReports={() => console.log("reports")}
+          wallet={owner ? { balance: Math.max(0, Number(params.get("coins") ?? 4210) || 0) } : null} onOpenShop={owner ? () => console.log("shop") : undefined} />
       </div>
     </div>
   );

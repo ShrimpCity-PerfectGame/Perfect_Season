@@ -226,8 +226,9 @@ season, after the existing verification:
    Free: insert `finished_codes (user_id, code)` first. A unique violation (23505) answers 409
    `{ "error": "this draft is already recorded", "reason": "duplicate" }`; any other error answers 500
    `failed to save`. Nothing else is written before this succeeds.
-3. The profile update, as now. If it fails, delete the `finished_codes` row (best effort) so a retry can count, and
-   answer 500.
+3. The profile update, as now. If it fails, give back what step 2 took — the `finished_codes` row, or the Daily's
+   `daily_runs` row (best effort) — so a retry can count, and answer 500. Any other failure of step 2's insert (not a
+   unique violation) also answers 500, never "already recorded".
 4. `logRun`, as now.
 5. **Rewards**, in one try/catch: a failure is logged and the answer carries `coins: null, newBadges: []` — never an
    error, since the season already counted.
@@ -479,8 +480,9 @@ New props: `wallet` (`{ balance }` or null — the owner's) and `onOpenShop()`.
   - A client's direct read of `wallets`, `wallet_ledger`, `badge_awards`, `finished_codes` or `inventory` is refused
     (privileges revoked); a direct write to any new table gets the RLS error. `state` gains
     `ownsAvatarPack(uid, pack)`. Escape hatches: `_wallets`, `_ledger`, `_badgeAwards`, `_finishedCodes`,
-    `_shopItems`, `_inventory`, and `_wallet` (the wallet module itself: `server`, `apply`, `balanceOf`, for setting
-    up a test).
+    `_shopItems`, `_inventory`, `_wallet` (the wallet module itself: `server`, `apply`, `balanceOf`, for setting
+    up a test), and `_failWrites` (a Set of table names — `profiles`, `finished_codes`, `daily_runs` — whose writes
+    inside the mock submit-run fail like a database error, to reach its 500 branches).
 - **Real Postgres.** `tests/pg-fixture.mjs`'s `MIGRATIONS` now ends with `migration-wallet.sql`,
   `migration-shop.sql`. `tests/test-profile-security.mjs` stays pinned to v1.11.0's three migrations (its
   every-function check is about those); N's `tests/test-economy-security.mjs` does the same checks for the new ones.

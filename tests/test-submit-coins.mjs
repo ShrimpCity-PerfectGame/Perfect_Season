@@ -10,7 +10,8 @@
 //   - 20 Unlimited, Genius and GM seasons pay each UTC day, the 21st counts but pays nothing (capped), and a Daily
 //     still pays;
 //   - a DNF pays nothing; a reward that fails still counts the season, with coins: null;
-//   - a failed save gives the challenge code back, so a retry counts, and is never mistaken for a duplicate.
+//   - a failed save gives the challenge code (or the Daily's row) back, so a retry counts, and is never mistaken
+//     for a duplicate.
 import { assert, runTest, makeMockAuth } from "./helpers.mjs";
 import * as GL from "../game-logic.mjs";
 import { COIN_RULES, seasonReward, badgeRewards } from "../rewards.mjs";
@@ -312,6 +313,20 @@ await runTest("a failed save gives the challenge code back so a retry counts, an
   assert(snapshot(flaky.id) === before, "the code was given back and nothing else written");
   const retry = await season("FLAKY-1");
   assert(retry.ok && retry.coins?.lines[0]?.key === "season", `the retry counts and pays: ${show(retry.coins)}`);
+
+  // A Daily the same way: its daily_runs row is given back, so the retry isn't answered "already recorded".
+  const beforeDaily = snapshot(flaky.id);
+  auth._failWrites.add("profiles");
+  try {
+    res = await daily("standard");
+  } finally {
+    auth._failWrites.delete("profiles");
+  }
+  assert(same(res, { ok: false }), `a failed Daily profile save: ${show(res)}`);
+  assert(snapshot(flaky.id) === beforeDaily, "the Daily's row was given back and nothing else written");
+  const dailyRetry = await daily("standard");
+  assert(dailyRetry.ok && dailyRetry.coins?.lines[0]?.key === "season" && dailyRetry.coins.lines[0].coins === COIN_RULES.dailySeason,
+    `the Daily's retry counts and pays: ${show(dailyRetry)}`);
 
   for (const [table, submit] of [["finished_codes", () => season("FLAKY-2")], ["daily_runs", () => daily("fantasy")]]) {
     const beforeFailure = snapshot(flaky.id);
