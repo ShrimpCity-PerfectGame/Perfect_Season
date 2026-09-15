@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
   fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
@@ -7,6 +7,7 @@ import {
   authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, submitRun, submitDnf,
   fetchPlayerProfile, fetchProfileDetails, checkUsername, isModerator, fetchModQueue,
+  fetchWallet, claimMinigameCoins,
 } from "./storage.js";
 import gameData from "./data/players.json";
 import { cssVars, PALETTE } from "./theme.mjs";
@@ -23,11 +24,12 @@ import {
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
-import { AVATAR_CSS, Avatar } from "./avatars.jsx";
+import { AVATAR_CSS } from "./avatars.jsx";
 import { PICKER_CSS } from "./avatar-picker.jsx";
 import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
-import { COSMETICS_CSS } from "./cosmetics.jsx";
-import { SHOP_CSS } from "./shop.jsx";
+import { COSMETICS_CSS, FramedAvatar, Coin } from "./cosmetics.jsx";
+import { SHOP_CSS, ShopScreen } from "./shop.jsx";
+import { BADGE_BY_ID } from "./badges.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
 initGameData(gameData.players, gameData.opponents);
 
@@ -692,6 +694,12 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .panel{background:var(--surface);border:2px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:16px}
 .panel p{margin:0 0 10px;font-size:14px;color:var(--muted);max-width:60ch}
 .panel h3{font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:24px;color:var(--ink);margin:0 0 6px}
+/* Coins gained (EarnedCoins): the coin, then "+15" and "coins". */
+.earned{display:inline-flex;align-items:center;gap:6px}
+/* A minigame's coins for the day on its end screen: a quiet chip. After .panel p, which it outranks. */
+p.gamecoins{width:fit-content;margin:0 0 12px;padding:4px 12px 4px 5px;border-radius:999px;background:var(--surface);
+  box-shadow:inset 0 0 0 1.5px var(--line2);font-size:15px;font-weight:800;line-height:1.2;color:var(--ink)}
+p.gamecoins .earned{display:flex}
 .notice{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);border:2px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:14px}
 .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 16px;margin-bottom:20px}
 .tile{border-top:3px solid var(--ink);padding:10px 2px 0}
@@ -872,6 +880,27 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .alarm{margin-top:12px;text-align:left;font-size:14px;border-radius:12px;padding:10px 14px;
   background:linear-gradient(90deg,color-mix(in srgb,var(--orange) 22%,transparent),transparent);box-shadow:inset 3px 0 0 var(--orange)}
 .alarm b{color:var(--orange)}
+/* What a saved season paid (SeasonCoins), under the strip and the moments: the coins beside a way to the shop (the
+   number in the strip's display type, "coins" in its label type), the season's lines in small type, then any new
+   badges as medal chips edged in their tier's color. */
+.seasoncoins{margin-top:16px}
+.sc-top{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px 16px}
+.sc-earned{gap:8px;color:var(--ink)}
+.sc-earned .ec-n{font-family:var(--display);font-weight:400;font-size:32px;line-height:1}
+.sc-earned .ec-l{margin-left:2px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.sc-lines{margin:8px auto 0;max-width:64ch;font-size:12.5px;line-height:1.55;color:var(--muted);text-wrap:balance}
+.sc-lines span{white-space:nowrap}
+.sc-lines b{font-weight:700;color:var(--ink)}
+.sc-badges{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin:10px 0 0;padding:0;list-style:none}
+.sc-badges li{display:inline-flex;align-items:center;gap:6px;padding:3px 11px 3px 3px;border-radius:999px;background:var(--surface2);
+  box-shadow:inset 0 0 0 1.5px var(--tier);font-size:13px;font-weight:700;line-height:1.2;color:var(--ink)}
+.sc-e{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--medal);font-size:13px;line-height:1}
+.sc-bronze{--tier:var(--tier-bronze);--medal:var(--tier-bronze-fill)}
+.sc-silver{--tier:var(--tier-silver);--medal:var(--tier-silver-fill)}
+.sc-gold{--tier:var(--tier-gold);--medal:var(--tier-gold-fill)}
+.sc-special{--tier:var(--tier-special);--medal:var(--tier-special-fill)}
+.sc-note{margin:10px auto 0;max-width:54ch;font-size:13px;line-height:1.45;color:var(--muted);text-wrap:balance}
+.sc-note.sc-dup{color:var(--ink);font-weight:600}
 .log{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:6px;margin:8px 0 22px}
 .g{border-radius:9px;padding:6px 8px;font-size:12px;background:var(--surface);border:1.5px solid var(--line);border-left:3px solid transparent;animation:pop .25s ease-out both}
 .g .w{font-weight:800;font-size:15px}
@@ -1345,7 +1374,7 @@ function NameLink({ name }) {
 // The screens history entries describe: a player's profile, at profilePath(name), or any other view, at "/".
 // The address alone can only name a profile or Modes, so an entry without a screen of its own (a typed
 // address, or one written before this) is read from its address.
-const HISTORY_VIEWS = ["home", "play", "profile", "players", "board", "stats", "statsou", "buildplayer", "reports"];
+const HISTORY_VIEWS = ["home", "play", "profile", "players", "board", "stats", "statsou", "buildplayer", "reports", "shop"];
 function screenOf(state, pathname) {
   if (state?.ps === "profile" && typeof state.name === "string" && state.name) return state;
   if (state?.ps === "view" && HISTORY_VIEWS.includes(state.view)) return state;
@@ -1353,6 +1382,9 @@ function screenOf(state, pathname) {
   return name ? { ps: "profile", name } : { ps: "view", view: "home" };
 }
 const sameScreen = (a, b) => a.ps === b.ps && (a.ps === "profile" ? a.name === b.name : a.view === b.view);
+// Screens with a history entry of their own, so Back from one returns to the screen it was opened from: a
+// profile, and the shop (SHOP.md 8), which opens from a profile card or a season's result but stays at "/".
+const ownsEntry = (s) => s.ps === "profile" || s.view === "shop";
 // A profile's sitewide rank in each format before it's known, or when the player has no score in it.
 const NO_RANK = Object.fromEntries(FORMATS.map((f) => [f, null]));
 // History writes are best effort. A page opened from a file (the UI harness) can't change its path, so the
@@ -1557,6 +1589,62 @@ export function SeasonMoments({ result, formatLabel }) {
   );
 }
 
+// What a saved season paid (SHOP.md 8): its coins, with the season's lines on one compact row and any new
+// badges' coins folded into one "Badges" line, since the badges themselves follow by name; the daily cap when
+// it applied; and a way to the shop. Nothing when the answer carried no coins (coins null). The result screen
+// shows it only to a signed-in player.
+export function SeasonCoins({ result, onOpenShop }) {
+  const coins = result.coins || null;
+  const badges = (Array.isArray(result.newBadges) ? result.newBadges : []).map((id) => BADGE_BY_ID[id]).filter(Boolean);
+  if (!coins && !badges.length) return null;
+  const lines = Array.isArray(coins?.lines) ? coins.lines : [];
+  const isBadge = (l) => String(l.key).startsWith("badge:");
+  const badgeCoins = lines.filter(isBadge).reduce((sum, l) => sum + (Number(l.coins) || 0), 0);
+  const rows = [...lines.filter((l) => !isBadge(l)), ...(badgeCoins > 0 ? [{ key: "badges", label: "Badges", coins: badgeCoins }] : [])];
+  return (
+    <div className="seasoncoins" data-earned={coins ? coins.earned : undefined}>
+      {coins && (
+        <div className="sc-top">
+          <EarnedCoins amount={coins.earned} size={24} className="sc-earned" />
+          <button className="btn sm" onClick={onOpenShop}>Shop</button>
+        </div>
+      )}
+      {rows.length > 0 && (
+        // Each line stays whole; a row breaks only after a separator (the space before it doesn't break).
+        <p className="sc-lines">
+          {rows.map((l, i) => (
+            <Fragment key={l.key}>{i > 0 && "\u00a0· "}<span>{l.label} <b>+{Number(l.coins).toLocaleString("en-US")}</b></span></Fragment>
+          ))}
+        </p>
+      )}
+      {badges.length > 0 && (
+        <ul className="sc-badges" aria-label={badges.length === 1 ? "New badge" : "New badges"}>
+          {badges.map((b) => (
+            <li key={b.id} className={`sc-${b.tier}`} data-badge={b.id}><span className="sc-e" aria-hidden="true">{b.emoji}</span>{b.name}</li>
+          ))}
+        </ul>
+      )}
+      {coins?.capped && <p className="sc-note">Unlimited, Genius and GM pay coins for 20 seasons a day. The Daily always pays.</p>}
+    </div>
+  );
+}
+
+// Coins gained, "+186 coins", with the coin in front of the signed number (cosmetics.jsx's Coins draws a balance,
+// coin then amount, which leaves a plus sign stranded outside the coin). The coin is decorative; the words say it.
+function EarnedCoins({ amount, size = 16, className = "" }) {
+  return (
+    <span className={`earned ${className}`.trim()}>
+      <Coin size={size} />
+      <span><span className="ec-n">+{Number(amount || 0).toLocaleString("en-US")}</span> <span className="ec-l">coins</span></span>
+    </span>
+  );
+}
+
+// "+15 coins" for a minigame's day, on its end screen.
+function GameCoins({ credited }) {
+  return <p className="gamecoins"><EarnedCoins amount={credited} /></p>;
+}
+
 // Leaderboard rows: #1 gets the crown, and your own row is called out wherever it appears.
 const rankRowClass = (i, mine) => [i === 0 ? "first" : "", mine ? "me" : ""].filter(Boolean).join(" ");
 function RankCell({ i }) {
@@ -1751,6 +1839,7 @@ export default function PerfectSeason() {
   const [stats, setStats] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [myDetails, setMyDetails] = useState(null); // your own bio/team/picture (fetchProfileDetails), for the header picture
+  const [wallet, setWallet] = useState(null); // your coins (fetchWallet), for your own profile card
   const [isMod, setIsMod] = useState(false); // a moderator, as isModerator() answered at sign-in
   const [openReports, setOpenReports] = useState(null); // how many players the Reports queue holds, once loaded
   // The profile on screen: whose it is (`name`, so an answer for someone else is never shown), fetchPlayerProfile's
@@ -1758,6 +1847,7 @@ export default function PerfectSeason() {
   const [profileData, setProfileData] = useState({ name: null, status: "loading", profile: null, rank: NO_RANK });
   const [scrollBack, setScrollBack] = useState(null); // { y } - where Back or Forward returns a screen to
   const [pending, setPending] = useState(null);
+  const pendingRun = useRef(null); // the runId of the season `pending` saves, so its answer can show on that result
   const [notice, setNotice] = useState("");
   const [saveError, setSaveError] = useState(false);
   // `format` records which scoring format `top`/`myRank` were actually fetched for. The board is
@@ -1807,6 +1897,7 @@ export default function PerfectSeason() {
   const [sou, setSou] = useState(null);
   const [souIntro, setSouIntro] = useState(null); // rules screen pending a confirm - { date, roundIndex, lives, score }, the timer doesn't start until this is accepted
   const [souDone, setSouDone] = useState(null); // today's finished record, if any: { score }
+  const [souCoins, setSouCoins] = useState(null); // { date, credited } - the coins a finished day's claim paid
   const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
   // stage "build": { stage, pos, filled: {attr: {score, fromName, fromTeam, fromSeason}}, remaining: [attr], seen: [playerId], team, player }
@@ -1890,8 +1981,8 @@ export default function PerfectSeason() {
   const historyScreen = useRef(null);
   const leftAt = useRef(0);
 
-  // Opening a profile pushes an entry for it, after recording the screen being left in the current entry, so
-  // Back returns there and Forward works. Leaving a profile for any other screen pushes "/". Moving between
+  // Opening a profile or the shop pushes an entry for it, after recording the screen being left in the current
+  // entry, so Back returns there and Forward works. Leaving one for any other screen pushes "/". Moving between
   // other screens just keeps the current entry up to date. Done here rather than in each click handler, so
   // every route in or out counts: the tabs, the header, the names, and the profile's own buttons.
   useEffect(() => {
@@ -1908,10 +1999,10 @@ export default function PerfectSeason() {
     } else if (next.ps === "profile" && prev.ps === "view" && prev.view === "profile") {
       // Signing in on the Account tab turns that screen into your profile: the same entry, at your address.
       writeHistory("replaceState", next, profilePath(next.name));
-    } else if (next.ps === "profile") {
+    } else if (ownsEntry(next)) {
       if (prev.ps === "view") writeHistory("replaceState", { ...prev, scroll: leftAt.current });
-      writeHistory("pushState", next, profilePath(next.name));
-    } else if (prev.ps === "profile") {
+      writeHistory("pushState", next, next.ps === "profile" ? profilePath(next.name) : "/");
+    } else if (ownsEntry(prev)) {
       writeHistory("pushState", next, "/");
     } else {
       writeHistory("replaceState", next);
@@ -1923,12 +2014,19 @@ export default function PerfectSeason() {
   // Over/Under and Build-a-player through their own openers, since leaving them dropped the round or build.
   const onHistoryMove = useRef(null);
   onHistoryMove.current = (state) => {
-    const s = screenOf(state, window.location.pathname);
+    let s = screenOf(state, window.location.pathname);
+    // A screen that isn't open to this player now - the Reports queue for someone who isn't a moderator, the
+    // shop signed out - is Modes instead, and its entry says so. Decided before it's recorded as the current
+    // screen, so opening Modes in its place doesn't count as leaving the shop and push an entry mid-traversal.
+    if (s.ps === "view" && ((s.view === "reports" && !isMod) || (s.view === "shop" && !userId))) {
+      s = { ps: "view", view: "home" };
+      writeHistory("replaceState", s);
+    }
     historyScreen.current = s;
     if (s.ps === "profile") { setProfileOf(s.name); setView("profile"); }
     else if (s.view === "statsou") openSou();
     else if (s.view === "buildplayer") openBuildPicker();
-    else openTab(s.view === "reports" && !isMod ? "home" : s.view);
+    else openTab(s.view);
     if (s.scroll > 0) setScrollBack({ y: s.scroll });
   };
   useEffect(() => {
@@ -1951,6 +2049,17 @@ export default function PerfectSeason() {
     leftAt.current = window.scrollY || 0;
     setProfileOf(name);
     setView("profile");
+  }
+  // The shop (SHOP.md 8), from your profile card or a season's coins. Signed in only.
+  function openShop() {
+    if (!userId) return;
+    openTab("shop");
+  }
+  // The shop's Back: the entry it was opened from, the way the browser's Back gets there. An entry the app
+  // didn't push (no history API) has nothing to go back to in the app, so Modes instead.
+  function leaveShop() {
+    if (window.history.state?.ps === "view" && window.history.state.view === "shop") window.history.back();
+    else openTab("home");
   }
 
   // Fresh every time the profile view opens or shows someone else. `req` drops an answer that arrives after
@@ -1975,6 +2084,8 @@ export default function PerfectSeason() {
     }
     setProfileData({ name, status: res.status, profile: res.profile || null, rank: NO_RANK });
     if (res.status !== "ok") return;
+    // Your own card shows your balance, fresh each time it opens.
+    if (userId && res.profile.id === userId) loadWallet();
     const ranks = await Promise.all(FORMATS.map(async (f) => {
       const score = scoreOf(res.profile.stats, f);
       if (score == null) return null;
@@ -2105,10 +2216,12 @@ export default function PerfectSeason() {
       const res = await submitRun(trace);
       let fresh = null;
       if (res.ok) {
+        loadWallet(); // the season's coins
         fresh = await fetchProfile(uid);
         if (fresh) setStats(fresh);
       }
-      setSaveError(!res.ok);
+      // A draft that had already counted isn't a failed save: the result screen says so instead (SHOP.md 8).
+      setSaveError(!res.ok && res.reason !== "duplicate");
       // `fresh` is the server's profile after this run, so the result screen can show the streak
       // it actually extended rather than a locally guessed one.
       return { ...res, fresh };
@@ -2149,8 +2262,20 @@ export default function PerfectSeason() {
       setPending(null);
       const res = await submitAndSync(uid, trace);
       if (res.ok) notes.push("Your last season was saved.");
+      // Still on screen, that season now shows what it paid.
+      showSaveAnswer(pendingRun.current, res);
     }
     setNotice(notes.join(" "));
+  }
+
+  // A save's answer on the season it belongs to (matched by runId, like addSeasonContext): the coins and badges
+  // it paid, or that this draft had already counted (SHOP.md 8). coins stays null when the season counted but
+  // its coins couldn't be paid.
+  function showSaveAnswer(runId, res) {
+    if (!runId || !res) return;
+    const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [] }
+      : res.reason === "duplicate" ? { duplicate: true } : null;
+    if (extras) setResult((r) => (r && r.runId === runId ? { ...r, ...extras } : r));
   }
 
   async function logOut() {
@@ -2173,8 +2298,37 @@ export default function PerfectSeason() {
   }
   function clearAccountExtras() {
     accountReq.current++;
-    setMyDetails(null); setIsMod(false); setOpenReports(null);
-    setView((v) => (v === "reports" ? "home" : v));
+    // souCoins too: Over/Under's finished day belongs to the device, but the coins it paid were that account's.
+    setMyDetails(null); setIsMod(false); setOpenReports(null); setWallet(null); setSouCoins(null);
+    setView((v) => (v === "reports" || v === "shop" ? "home" : v));
+  }
+
+  // Your wallet, for your own card: when your profile opens, after a season saves and after a minigame pays. A read
+  // is dropped if the account changed meanwhile, or if the shop has reported a newer balance since it started.
+  const walletReq = useRef(0);
+  function loadWallet() {
+    const account = accountReq.current;
+    const req = ++walletReq.current;
+    fetchWallet().then((w) => { if (w && account === accountReq.current && req === walletReq.current) setWallet(w); });
+  }
+  // ShopScreen's onBalance: the balance it just loaded or spent down to.
+  function onShopBalance(balance) {
+    walletReq.current++;
+    setWallet((w) => ({ ...w, balance }));
+  }
+
+  // Today's coins for a minigame (SHOP.md 8), claimed once its score is saved. Nothing waits on it: a slow claim
+  // shows its coins when it lands, and a failed or repeated one (credited 0) shows nothing.
+  async function claimMinigame(game, onCredited) {
+    const account = accountReq.current;
+    try {
+      const res = await claimMinigameCoins(game);
+      if (account !== accountReq.current || !res?.ok || !(res.credited > 0)) return;
+      onCredited(res.credited);
+      loadWallet();
+    } catch (e) {
+      // No coins shown; the game's own screen is unaffected.
+    }
   }
 
   // pin holds one axis fixed at target's value during the animation - used by reroll() so
@@ -2376,7 +2530,7 @@ export default function PerfectSeason() {
         history: finishedHistory, seq, gm: !!mode.gm, genius: !!mode.genius, format: fmt,
       };
       const saving = user ? submitAndSync(userId, trace) : Promise.resolve(null);
-      if (!user) setPending(trace);
+      if (!user) { setPending(trace); pendingRun.current = sim.runId; }
       addSeasonContext(sim, fmt, saving, mode.kind === "daily" && user ? (stats?.dailyBestStreak || 0) : null);
       // Point the leaderboard at the format just played before refreshing it, so the rank shown
       // beside this result ranks it against its own format rather than the other one's numbers.
@@ -2407,6 +2561,8 @@ export default function PerfectSeason() {
     const ctx = { rank: null };
     try {
       const res = await saving;
+      // What the save paid shows as soon as it answers, without waiting on the ranks below.
+      showSaveAnswer(sim.runId, res);
       const saved = !!res?.ok;
       const [place, atOrBelow] = await Promise.all([
         fetchSeasonRank(sim.score, fmt),
@@ -2622,8 +2778,12 @@ export default function PerfectSeason() {
     setSouDone({ score });
     await sdel(SOU_PROGRESS(date), false);
     // Wait for the leaderboard write to land before re-fetching it, or the read can race ahead of
-    // the write and show a board missing the score that was just saved.
-    if (user && userId) await upsertSouRun(date, userId, { username: user, score });
+    // the write and show a board missing the score that was just saved. Today's coins are claimed after
+    // it too, since the claim pays only for a saved run.
+    if (user && userId) {
+      await upsertSouRun(date, userId, { username: user, score });
+      claimMinigame("over_under", (credited) => setSouCoins({ date, credited }));
+    }
     loadSouBoard(date);
   }
 
@@ -2730,8 +2890,15 @@ export default function PerfectSeason() {
       // Sitewide-only tally for the Stats screen's "created players" count and highest-OVR
       // leaderboard - doesn't touch this account's own stats/leaderboard position (see
       // playBapSim's comment below for Build-a-player's stat-free promise), and only for
-      // logged-in users, matching the existing daily/sou_runs convention.
-      if (user && userId) logBuild(userId, { username: user, pos: bap.pos, overall: bapOverallScore(filled), filled });
+      // logged-in users, matching the existing daily/sou_runs convention. Today's coins are
+      // claimed once it's logged, since the claim pays only for a logged build; the screen waits
+      // on neither, and the coins land on this build (its `filled`) only if it's still on screen.
+      if (user && userId) {
+        (async () => {
+          await logBuild(userId, { username: user, pos: bap.pos, overall: bapOverallScore(filled), filled });
+          await claimMinigame("build", (credited) => setBap((b) => (b && b.filled === filled ? { ...b, coins: credited } : b)));
+        })().catch(() => {});
+      }
       return;
     }
     rollBapRound(bap.pos, filled, remaining, bap.seen);
@@ -2758,7 +2925,7 @@ export default function PerfectSeason() {
     // numeric range isn't remotely the same scale winProb()/SPREAD expect).
     const adjustedScore = opp.reg + (customScore - BASELINE) * share;
     const sim = simulateSeason(adjustedScore);
-    setBap({ stage: "result", pos: bap.pos, filled: bap.filled, opp, sim, shown: reducedMotion() ? sim.games.length : 0 });
+    setBap({ stage: "result", pos: bap.pos, filled: bap.filled, opp, sim, shown: reducedMotion() ? sim.games.length : 0, coins: bap.coins });
   }
 
   // Today's daily always picks up where it left off: you get one run at it, not one per visit.
@@ -2977,9 +3144,9 @@ export default function PerfectSeason() {
   const otherFormat = mode && normFormat(mode.format) === "standard" ? "fantasy" : "standard";
   function skipPlayoffs() { setShown(result.games.length); setPo({ idx: 0, stage: "done" }); }
 
-  // The Profile tab is lit on your own profile and its Reports queue (or a guest's login), not on someone else's.
+  // The Profile tab is lit on your own profile, its Reports queue and the shop (or a guest's login), not on someone else's.
   const tabOn = (k) => (k === "profile"
-    ? view === "reports" || (view === "profile" && (!profileOf || profileOf === user || ownProfileShown))
+    ? view === "reports" || view === "shop" || (view === "profile" && (!profileOf || profileOf === user || ownProfileShown))
     : view === k);
 
   return (
@@ -2998,8 +3165,9 @@ export default function PerfectSeason() {
             {!user && authReady && <button className="pill hdrchip login" onClick={() => openTab("profile")}>Log in</button>}
             {user && (
               <button className="whoami" aria-label={`Your profile, ${user}`} onClick={() => openTab("profile")}>
-                {/* The button is labeled, so the picture beside the name is decorative. */}
-                <Avatar username={user} photoUrl={myDetails?.avatarUrl ?? null} preset={myDetails?.avatarPreset ?? null} size={24} decorative />
+                {/* The button is labeled, so the picture beside the name is decorative. It wears your frame. */}
+                <FramedAvatar frame={myDetails?.frame ?? null} team={TEAMS[myDetails?.favoriteTeam] ? myDetails.favoriteTeam : null}
+                  username={user} photoUrl={myDetails?.avatarUrl ?? null} preset={myDetails?.avatarPreset ?? null} size={24} decorative />
                 <span className="whoname">{user}</span>
               </button>
             )}
@@ -3406,6 +3574,9 @@ export default function PerfectSeason() {
                     <>
                       <SeasonStrip result={result} ladderName={LADDER_LABEL[modeKey({ mode: mode.kind, gm: mode.gm, genius: mode.genius })]} />
                       <SeasonMoments result={result} formatLabel={FORMAT_LABEL[normFormat(result.format)]} />
+                      {user && <SeasonCoins result={result} onOpenShop={openShop} />}
+                      {/* In place of the save-error panel: nothing from this season counted. */}
+                      {user && result.duplicate && <p className="sc-note sc-dup">This draft was already recorded, so it didn't count again.</p>}
                     </>
                   ) : (
                     <div className="rating">Team score {result.score.toFixed(1)}</div>
@@ -3543,13 +3714,19 @@ export default function PerfectSeason() {
                 rank={shownData?.rank || NO_RANK}
                 moderator={ownProfileShown && isMod && openReports != null ? { openReports } : null}
                 onRetry={() => loadProfile(shownProfile)} onShare={() => shareProfile(profile?.username || shownProfile)}
-                onDetailsSaved={onDetailsSaved} onLogOut={logOut} onPlay={() => openTab("play")} onOpenReports={() => openTab("reports")} />
+                onDetailsSaved={onDetailsSaved} onLogOut={logOut} onPlay={() => openTab("play")} onOpenReports={() => openTab("reports")}
+                wallet={ownProfileShown ? wallet : null} onOpenShop={openShop} />
             </div>
           );
         })()}
 
         {/* ---------------- REPORTS (moderators) ---------------- */}
         {view === "reports" && isMod && <ModerationQueue onOpenProfile={openProfile} />}
+
+        {/* ---------------- SHOP (SHOP.md 8) ---------------- */}
+        {view === "shop" && user && userId && (
+          <ShopScreen key={userId} userId={userId} username={user} onBack={leaveShop} onDetailsSaved={onDetailsSaved} onBalance={onShopBalance} />
+        )}
 
         {/* ---------------- LEADERBOARD ---------------- */}
         {view === "board" && (
@@ -3885,6 +4062,7 @@ export default function PerfectSeason() {
             <p className="note" style={{ marginTop: 0 }}>
               Assembled from {new Set(Object.values(bap.filled).map((f) => f.fromName)).size} different real players' last-season attributes. Overall: <b>{grade(bapOverallScore(bap.filled))}</b>
             </p>
+            {user && bap.coins > 0 && <GameCoins credited={bap.coins} />}
             {/* The next step comes first; the attribute-by-attribute breakdown is below it. */}
             <button className="btn solid" style={{ marginBottom: 14 }} onClick={playBapSim}>Give him his shot at a ring</button>
             <div className="panel">
@@ -3914,6 +4092,7 @@ export default function PerfectSeason() {
               <p className="note" style={{ marginTop: 0 }}>
                 Your {POS_NAME[bap.pos].replace(/s$/, "").toLowerCase()} took over for the {bap.opp.season} {TEAMS[bap.opp.team][0]}.
               </p>
+              {user && bap.coins > 0 && <GameCoins credited={bap.coins} />}
               <div className="result-hero" aria-live="polite">
                 <div className="rec led-wrap"><span className="led">
                   {bap.sim.games.slice(0, bap.shown).filter((g) => g.win).length}–{bap.sim.games.slice(0, bap.shown).filter((g) => !g.win).length}
@@ -4022,6 +4201,7 @@ export default function PerfectSeason() {
             <p className="note" style={{ marginTop: 0 }}>Today's Over/Under, {prettyDate(todayKey())}, is done. Come back tomorrow for a new set.</p>
             <div className="panel">
               <h3 style={{ marginTop: 0 }}>Your score: {souDone.score}</h3>
+              {user && souCoins?.credited > 0 && souCoins.date === todayKey() && <GameCoins credited={souCoins.credited} />}
               {!user && <p className="note">Log in to put your score on tomorrow's leaderboard.</p>}
             </div>
             <h2 className="h">Today's leaderboard</h2>
