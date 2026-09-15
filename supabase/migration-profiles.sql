@@ -250,11 +250,13 @@ $$;
 
 -- Your picture: an uploaded photo (p_path), a default avatar (p_preset), or neither (both null, back to
 -- your initial). Setting one clears the other. It doesn't touch storage: the browser uploads the photo
--- first and deletes the old one after this succeeds.
+-- first and deletes the old one after this succeeds. A default avatar from one of v1.12.0's paid packs
+-- (migration-shop.sql, SHOP.md 3.2) needs the pack: an inventory row for its item, 'pack-<pack>'.
 create or replace function public.set_avatar(p_path text, p_preset text)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_uid uuid := auth.uid();
+  v_preset public.avatar_presets;
   v_row public.profile_details;
 begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
@@ -268,8 +270,23 @@ begin
      and not (p_path ~ '^[^/]*/[0-9]{10,16}\.(webp|jpg|png)$' and split_part(p_path, '/', 1) = v_uid::text) then
     raise exception 'bad_path' using errcode = 'P0001';
   end if;
-  if p_preset is not null and not exists (select 1 from public.avatar_presets where key = p_preset and free) then
-    raise exception 'bad_preset' using errcode = 'P0001';
+  if p_preset is not null then
+    select * into v_preset from public.avatar_presets where key = p_preset;
+    if not found then
+      raise exception 'bad_preset' using errcode = 'P0001';
+    end if;
+    if not v_preset.free then
+      -- This file also runs without migration-shop.sql, and then nothing paid is owned. plpgsql plans each
+      -- statement the first time it runs it, so the inventory query stands alone and is only reached once the
+      -- table exists: in one condition with the to_regclass check, it would be planned - and fail on the
+      -- missing table - either way.
+      if to_regclass('public.inventory') is null then
+        raise exception 'bad_preset' using errcode = 'P0001';
+      end if;
+      if not exists (select 1 from public.inventory where user_id = v_uid and item_id = 'pack-' || v_preset.pack) then
+        raise exception 'bad_preset' using errcode = 'P0001';
+      end if;
+    end if;
   end if;
   insert into public.profile_details as d (user_id, avatar_path, avatar_preset)
   values (v_uid, p_path, p_preset)

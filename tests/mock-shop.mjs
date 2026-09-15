@@ -1,9 +1,11 @@
 // The test mock's side of supabase/migration-shop.sql (SHOP.md 3.2): shop_items seeded with the launch catalog,
 // inventory, the paid packs' avatars in avatar_presets, and the functions shop_state, shop_buy, equip_item and
 // set_showcase. tests/test-shop-sql.mjs runs the same calls through the real SQL and through this mock and
-// requires the same results.
+// requires the same results and the same rows afterwards.
 //
-// A database function refusing something throws new Error("<code>"), like the other mock modules.
+// A database function refusing something throws new Error("<code>"), like the other mock modules. A signed-out
+// caller gets not_signed_in here, where the real functions refuse the anon role outright (execute is revoked);
+// storage-shop.js reads both as signed_out.
 import { SHOP_ITEMS, SHOP_KINDS, AVATAR_PACKS, EQUIP_SLOTS, SHOWCASE_MAX, LAUNCH_PRICES, packItem } from "../shop-catalog.mjs";
 
 const fail = (code) => {
@@ -53,14 +55,23 @@ export function makeShop(state, { wallet, profileData }) {
     },
     shop_buy({ p_item = null } = {}) {
       const uid = player();
-      wallet.lock(uid);
+      // The SQL takes wallet_lock here, before reading anything else. The lock only matters between two sessions,
+      // which this mock never has, and the empty wallet it may create is rolled back with any refusal - so the
+      // mock reads the balance without making one, and a refusal leaves no wallet behind either way.
       const item = items.get(p_item);
       if (!item || !item.active) fail("unavailable");
       if (item.badge != null) fail("badge_only");
       if (owns(uid, item)) fail("owned");
       if (wallet.balanceOf(uid) < item.price) fail("not_enough");
-      inventory.set(`${uid}|${item.id}`, { user_id: uid, item_id: item.id, acquired_at: new Date().toISOString() });
-      wallet.apply(uid, -item.price, "purchase", item.id);
+      const key = `${uid}|${item.id}`;
+      inventory.set(key, { user_id: uid, item_id: item.id, acquired_at: new Date().toISOString() });
+      // A purchase the ledger already records, with no inventory row (rows edited by hand): the SQL refuses rather
+      // than hand the item over free, and its rollback takes the inventory row back out.
+      const charged = wallet.apply(uid, -(item.price ?? 0), "purchase", item.id);
+      if (item.price == null || charged !== -item.price) {
+        inventory.delete(key);
+        fail("purchase_conflict");
+      }
       return { ok: true, balance: wallet.balanceOf(uid), item: item.id };
     },
     equip_item({ p_slot = null, p_item = null } = {}) {

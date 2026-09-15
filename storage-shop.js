@@ -53,7 +53,12 @@ export async function fetchShop() {
   }
 }
 
-const BUY_REASONS = { not_enough: "not_enough", owned: "owned", unavailable: "unavailable", badge_only: "badge_only", not_signed_in: "signed_out" };
+// purchase_conflict means the ledger already records this purchase with no item to show for it - rows edited by
+// hand, nothing the player did or can fix - so it's the same "didn't go through" as a failed request.
+const BUY_REASONS = {
+  not_enough: "not_enough", owned: "owned", unavailable: "unavailable", badge_only: "badge_only", not_signed_in: "signed_out",
+  purchase_conflict: "network",
+};
 // Buys one item with coins.
 //   { ok: true, balance } | { ok: false, reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "signed_out" | "network" }
 export async function buyItem(id) {
