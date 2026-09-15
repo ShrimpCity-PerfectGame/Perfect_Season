@@ -41,7 +41,10 @@ export const SHOP_CSS = `
 /* Card previews: layout only, laid out like the profile card - picture and name, then the badges. */
 .sh-card{display:grid;gap:12px;min-width:0;padding:16px 16px 16px 14px;border-radius:16px}
 .sh-card>*,.sh-mini>*{position:relative}
-.sh-head{display:flex;align-items:center;gap:14px;min-width:0}
+/* A name too long to sit beside the picture wraps under it instead of breaking mid-word ("longestname_1 / 234" on a
+   320px phone, 16 capitals in the 330px case beside the stock on a tablet). Only a name wider than the whole card
+   still breaks. */
+.sh-head{display:flex;flex-wrap:wrap;align-items:center;gap:14px;min-width:0}
 .sh-who{display:grid;gap:4px;min-width:0}
 .sh-name{margin:0;font-family:var(--display);font-weight:400;font-size:32px;line-height:.95;color:var(--ink);overflow-wrap:anywhere}
 .sh-long .sh-name{font-size:24px}
@@ -54,7 +57,9 @@ export const SHOP_CSS = `
 .sh-t-gold{--tier:var(--tier-gold);--medal:var(--tier-gold-fill)}
 .sh-t-special{--tier:var(--tier-special);--medal:var(--tier-special-fill)}
 .sh-pack{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
-.sh-mini{display:grid;min-width:0;padding:9px 16px 9px 9px;border-radius:12px}
+/* At least the 12px CardTheme asks for: a theme's trim (Team colors' stripes, the ticket's tear line, the gold bands)
+   is in its outer 10px, and at 9px it ran under the picture's frame. */
+.sh-mini{display:grid;min-width:0;padding:12px 16px 12px 12px;border-radius:12px}
 .sh-mini .sh-head{gap:10px}
 .sh-mini .sh-name{font-size:22px}
 .sh-mini.sh-long .sh-name{font-size:18px}
@@ -149,6 +154,9 @@ export const SHOP_CSS = `
 .sh-sum>div{min-width:0;padding:9px 2px 0;border-top:3px solid var(--ink)}
 .sh-sum dt{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .sh-sum dd{margin:6px 0 0;font-family:var(--display);font-weight:400;font-size:28px;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+/* The balance's coin goes above its number when the column is too narrow for both: a six-figure balance ran into
+   Earned beside it on a phone, and a seven-figure one on a tablet. */
+.sh-sumcoins{flex-wrap:wrap;row-gap:4px}
 .sh-ledgers{margin:0;padding:0;list-style:none;border-top:1px solid var(--line)}
 .sh-ledger{display:grid;grid-template-columns:minmax(72px,auto) minmax(0,1fr) auto;align-items:baseline;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14.5px}
 .sh-amt{font-family:var(--display);font-weight:400;font-size:20px;line-height:1;color:var(--win);font-variant-numeric:tabular-nums}
@@ -243,7 +251,7 @@ export function WalletPanel({ wallet }) {
     <section className="sh-wallet" aria-labelledby={`${id}-h`}>
       <h2 className="h" id={`${id}-h`}>Coins</h2>
       <dl className="sh-sum">
-        <div><dt>Balance</dt><dd><Coins amount={wallet.balance} size={20} /></dd></div>
+        <div><dt>Balance</dt><dd><Coins amount={wallet.balance} size={20} className="sh-sumcoins" /></dd></div>
         <div><dt>Earned</dt><dd>{num(wallet.earned)}</dd></div>
         <div><dt>Spent</dt><dd>{num(wallet.spent)}</dd></div>
       </dl>

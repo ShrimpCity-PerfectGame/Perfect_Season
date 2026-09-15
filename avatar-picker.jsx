@@ -89,6 +89,10 @@ export const PICKER_CSS = `
 .ap-shop{padding:2px 8px;border-radius:999px;background:var(--surface2);box-shadow:inset 0 0 0 1.5px var(--line2);color:var(--ink);font-size:12px;font-weight:700;letter-spacing:0;text-transform:none}
 /* 88px tiles: three columns from about 360px, two below - narrower, "Stopwatch" and "Megaphone" broke mid-word. */
 .ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;width:100%;max-width:640px;margin:0;padding:0;list-style:none}
+/* A pack's four: in one row where four fit, two by two where they don't. Three columns, on most phones, left the
+   fourth avatar alone on a row. A column is at least 88px from 382px wide (four columns and their gaps) and half
+   the row below that: (382px - 100%) * 999 is far above either under 382px and zero or less from there. */
+.ap-grid.ap-four{grid-template-columns:repeat(auto-fill,minmax(clamp(88px,(382px - 100%) * 999,50% - 5px),1fr))}
 .ap-preset,.ap-lock{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;padding:12px 4px 8px;
   border:2px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font-weight:700;font-size:13px;line-height:1.2;
   transition:transform .12s ease,border-color .12s,box-shadow .12s}
@@ -384,11 +388,12 @@ export function AvatarPicker({ username, current, busy, error, ownedPacks, onPho
             {PACK_GROUPS.map((g) => {
               const labelId = `${id}-pack-${g.pack}`;
               const owned = owns(g.pack);
+              const gridClass = `ap-grid${g.presets.length === 4 ? " ap-four" : ""}`;
               return (
                 <div key={g.pack} className="ap-pack" data-pack={g.pack} data-owned={owned ? "true" : "false"}>
                   <p className="ap-packname" id={labelId}>{g.name}{!owned && <span className="ap-shop">In the shop</span>}</p>
                   {owned ? (
-                    <div className="ap-grid" role="group" aria-labelledby={labelId}>
+                    <div className={gridClass} role="group" aria-labelledby={labelId}>
                       {g.presets.map((p) => {
                         const isCurrent = !photoUrl && preset === p.key;
                         return (
@@ -402,7 +407,7 @@ export function AvatarPicker({ username, current, busy, error, ownedPacks, onPho
                     </div>
                   ) : (
                     // Not options at all until the pack is bought: a list to look at, with nothing to focus or press.
-                    <ul className="ap-grid" aria-labelledby={labelId}>
+                    <ul className={gridClass} aria-labelledby={labelId}>
                       {g.presets.map((p) => (
                         <li key={p.key} className="ap-lock" data-preset={p.key}>
                           <span className="ap-dim"><Avatar username={username || ""} preset={p.key} size={56} decorative /></span>
