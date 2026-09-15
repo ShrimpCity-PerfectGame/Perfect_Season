@@ -30,6 +30,7 @@ import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
 import { COSMETICS_CSS, FramedAvatar, Coin } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { BADGE_BY_ID } from "./badges.mjs";
+import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
 initGameData(gameData.players, gameData.opponents);
 
@@ -1624,7 +1625,7 @@ export function SeasonCoins({ result, onOpenShop }) {
           ))}
         </ul>
       )}
-      {coins?.capped && <p className="sc-note">Unlimited, Genius and GM pay coins for 20 seasons a day. The Daily always pays.</p>}
+      {coins?.capped && <p className="sc-note">Unlimited, Genius and GM pay coins for {COIN_RULES.paidSeasonsPerDay} seasons a day. The Daily always pays.</p>}
     </div>
   );
 }
@@ -2084,8 +2085,6 @@ export default function PerfectSeason() {
     }
     setProfileData({ name, status: res.status, profile: res.profile || null, rank: NO_RANK });
     if (res.status !== "ok") return;
-    // Your own card shows your balance, fresh each time it opens.
-    if (userId && res.profile.id === userId) loadWallet();
     const ranks = await Promise.all(FORMATS.map(async (f) => {
       const score = scoreOf(res.profile.stats, f);
       if (score == null) return null;
@@ -2109,6 +2108,12 @@ export default function PerfectSeason() {
     fetchModQueue().then((queue) => { if (live && queue) setOpenReports(queue.length); });
     return () => { live = false; };
   }, [isMod, ownProfileShown, shownData?.profile]);
+  // Your own card shows your balance, read each time it opens. Keyed on ownProfileShown rather than done in
+  // loadProfile, because opening your own /u/ address loads the profile before the session is back.
+  useEffect(() => {
+    if (ownProfileShown) loadWallet();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownProfileShown, shownData?.profile]);
 
   // The share sheet where the device has one, otherwise the address copied.
   async function shareProfile(name) {
@@ -2216,15 +2221,19 @@ export default function PerfectSeason() {
       const res = await submitRun(trace);
       let fresh = null;
       if (res.ok) {
-        loadWallet(); // the season's coins
         fresh = await fetchProfile(uid);
-        if (fresh) setStats(fresh);
+        if (fresh) {
+          setStats(fresh);
+          // The name as it is now: a moderator may have renamed this account since it signed in, and the shop and
+          // the minigame boards look the player up by it.
+          if (fresh.username) setUser(fresh.username);
+        }
       }
       // A draft that had already counted isn't a failed save: the result screen says so instead (SHOP.md 8).
       setSaveError(!res.ok && res.reason !== "duplicate");
       // `fresh` is the server's profile after this run, so the result screen can show the streak
-      // it actually extended rather than a locally guessed one.
-      return { ...res, fresh };
+      // it actually extended rather than a locally guessed one. `uid` is who the answer belongs to.
+      return { ...res, fresh, uid };
     } catch (e) {
       setSaveError(true);
       return { ok: false };
@@ -2270,11 +2279,12 @@ export default function PerfectSeason() {
 
   // A save's answer on the season it belongs to (matched by runId, like addSeasonContext): the coins and badges
   // it paid, or that this draft had already counted (SHOP.md 8). coins stays null when the season counted but
-  // its coins couldn't be paid.
+  // its coins couldn't be paid. `payer` is the account that saved it: the result screen stays up after signing
+  // out, and the next account to sign in mustn't see this one's coins.
   function showSaveAnswer(runId, res) {
     if (!runId || !res) return;
-    const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [] }
-      : res.reason === "duplicate" ? { duplicate: true } : null;
+    const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [], payer: res.uid }
+      : res.reason === "duplicate" ? { duplicate: true, payer: res.uid } : null;
     if (extras) setResult((r) => (r && r.runId === runId ? { ...r, ...extras } : r));
   }
 
@@ -2303,8 +2313,8 @@ export default function PerfectSeason() {
     setView((v) => (v === "reports" || v === "shop" ? "home" : v));
   }
 
-  // Your wallet, for your own card: when your profile opens, after a season saves and after a minigame pays. A read
-  // is dropped if the account changed meanwhile, or if the shop has reported a newer balance since it started.
+  // Your wallet, for your own card, read when your profile opens. A read is dropped if the account changed
+  // meanwhile, or if the shop has reported a newer balance since it started.
   const walletReq = useRef(0);
   function loadWallet() {
     const account = accountReq.current;
@@ -2317,15 +2327,15 @@ export default function PerfectSeason() {
     setWallet((w) => ({ ...w, balance }));
   }
 
-  // Today's coins for a minigame (SHOP.md 8), claimed once its score is saved. Nothing waits on it: a slow claim
-  // shows its coins when it lands, and a failed or repeated one (credited 0) shows nothing.
-  async function claimMinigame(game, onCredited) {
+  // A game day's coins for a minigame (SHOP.md 8), claimed once its score is saved. `date` is the game's own day -
+  // Over/Under's date, or today for a build - in the player's calendar, the way the games count days. Nothing waits
+  // on it: a slow claim shows its coins when it lands, and a failed or repeated one (credited 0) shows nothing.
+  async function claimMinigame(game, date, onCredited) {
     const account = accountReq.current;
     try {
-      const res = await claimMinigameCoins(game);
+      const res = await claimMinigameCoins(game, date);
       if (account !== accountReq.current || !res?.ok || !(res.credited > 0)) return;
       onCredited(res.credited);
-      loadWallet();
     } catch (e) {
       // No coins shown; the game's own screen is unaffected.
     }
@@ -2563,7 +2573,8 @@ export default function PerfectSeason() {
       const res = await saving;
       // What the save paid shows as soon as it answers, without waiting on the ranks below.
       showSaveAnswer(sim.runId, res);
-      const saved = !!res?.ok;
+      // A draft already recorded is in the runs log as well, so it's ranked like a saved one, not added again.
+      const saved = !!res?.ok || res?.reason === "duplicate";
       const [place, atOrBelow] = await Promise.all([
         fetchSeasonRank(sim.score, fmt),
         sim.champ ? fetchUpsetRank(sim.score, fmt) : Promise.resolve(null),
@@ -2782,7 +2793,7 @@ export default function PerfectSeason() {
     // it too, since the claim pays only for a saved run.
     if (user && userId) {
       await upsertSouRun(date, userId, { username: user, score });
-      claimMinigame("over_under", (credited) => setSouCoins({ date, credited }));
+      claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
     }
     loadSouBoard(date);
   }
@@ -2896,7 +2907,7 @@ export default function PerfectSeason() {
       if (user && userId) {
         (async () => {
           await logBuild(userId, { username: user, pos: bap.pos, overall: bapOverallScore(filled), filled });
-          await claimMinigame("build", (credited) => setBap((b) => (b && b.filled === filled ? { ...b, coins: credited } : b)));
+          await claimMinigame("build", todayKey(), (credited) => setBap((b) => (b && b.filled === filled ? { ...b, coins: credited } : b)));
         })().catch(() => {});
       }
       return;
@@ -3574,9 +3585,9 @@ export default function PerfectSeason() {
                     <>
                       <SeasonStrip result={result} ladderName={LADDER_LABEL[modeKey({ mode: mode.kind, gm: mode.gm, genius: mode.genius })]} />
                       <SeasonMoments result={result} formatLabel={FORMAT_LABEL[normFormat(result.format)]} />
-                      {user && <SeasonCoins result={result} onOpenShop={openShop} />}
+                      {userId && result.payer === userId && <SeasonCoins result={result} onOpenShop={openShop} />}
                       {/* In place of the save-error panel: nothing from this season counted. */}
-                      {user && result.duplicate && <p className="sc-note sc-dup">This draft was already recorded, so it didn't count again.</p>}
+                      {userId && result.payer === userId && result.duplicate && <p className="sc-note sc-dup">This draft was already recorded, so it didn't count again.</p>}
                     </>
                   ) : (
                     <div className="rating">Team score {result.score.toFixed(1)}</div>

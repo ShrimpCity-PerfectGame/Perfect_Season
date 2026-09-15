@@ -8,6 +8,7 @@ import {
   setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto,
   makeMockAuth, clickMode,
 } from "./helpers.mjs";
+import { COIN_RULES } from "../rewards.mjs";
 
 let app = null;
 async function close() {
@@ -64,6 +65,11 @@ const coinsOf = (container) => container.querySelector(".result-hero .seasoncoin
 const shown = (container) => container.querySelector(".wrap")?.textContent || "";
 const num = (n) => Number(n).toLocaleString("en-US");
 const utcToday = () => new Date().toISOString().slice(0, 10);
+// Today in the player's own calendar - how the minigames count their days (a claim's key is <game>:<that day>).
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 // What a screen reader says for an element: its aria-label, or its text leaving out anything aria-hidden. Coins
 // (cosmetics.jsx) promises "1,240 coins" as its accessible text, however it draws the coin.
 function spoken(el) {
@@ -329,6 +335,11 @@ await runTest("finishing the same code again says it was already recorded, not a
   assert(!coinsOf(container), "nothing about coins for a season that didn't count");
   assert(auth._profiles.get(uid).runs === runs, "the season didn't count again");
   assert(addedRows(auth, before, uid).length === 0, "and paid nothing");
+  // Already in the runs log, so it's ranked among the logged seasons, not as one more.
+  const logged = [...auth._runs.values()].filter((r) => !r.dnf && r.format === "fantasy").length;
+  await until(() => /of \d/.test(container.querySelector(".result-hero .strip")?.textContent || ""), "this season's rank");
+  const strip = container.querySelector(".result-hero .strip").textContent;
+  assert(strip.includes(`of ${num(logged)}`), `ranked among the ${logged} logged seasons, not ${logged + 1}: ${strip}`);
 });
 
 await runTest("past the day's paid seasons, the result says why the season paid nothing", async () => {
@@ -337,7 +348,7 @@ await runTest("past the day's paid seasons, the result says why the season paid 
   const before = ledgerKeys(auth);
   const code = await playUnlimited(container);
   await until(() => coinsOf(container)?.querySelector(".sc-note"), () => `the cap note, got: ${container.querySelector(".result-hero")?.textContent}`);
-  assert(coinsOf(container).querySelector(".sc-note").textContent === "Unlimited, Genius and GM pay coins for 20 seasons a day. The Daily always pays.", "the cap note's words");
+  assert(coinsOf(container).querySelector(".sc-note").textContent === `Unlimited, Genius and GM pay coins for ${COIN_RULES.paidSeasonsPerDay} seasons a day. The Daily always pays.`, "the cap note's words");
   const added = addedRows(auth, before, uid);
   assert(!added.some((r) => r.kind === "season"), `a capped season pays nothing (code ${code}), got ${JSON.stringify(added)}`);
   assert(Number(coinsOf(container).dataset.earned) === added.reduce((sum, r) => sum + r.amount, 0), "earned is only what its badges paid");
@@ -347,7 +358,7 @@ await runTest("past the day's paid seasons, the result says why the season paid 
 
 await runTest("Over/Under pays +15 coins once a day, on its end screen", async () => {
   await playOverUnder(container);
-  const rows = () => [...auth._ledger.values()].filter((r) => r.user_id === uid && r.kind === "minigame" && r.ref === `over_under:${utcToday()}`);
+  const rows = () => [...auth._ledger.values()].filter((r) => r.user_id === uid && r.kind === "minigame" && r.ref === `over_under:${localToday()}`);
   await until(() => container.querySelector(".gamecoins"), () => `+15 coins on the Over/Under result, got: ${text(container).slice(0, 300)}`);
   assert(spoken(container.querySelector(".gamecoins")) === "+15 coins", `expected "+15 coins", got "${spoken(container.querySelector(".gamecoins"))}"`);
   assert(rows().length === 1 && rows()[0].amount === 15, "one 15-coin claim in the ledger");
@@ -372,7 +383,7 @@ await runTest("Build-a-player pays +15 coins once a day, on the build and its ve
   await click(findButtonByText(container, "Give him his shot"));
   await until(() => findButtonByText(container, "Build another"), "the verdict");
   assert(spoken(container.querySelector(".gamecoins")) === "+15 coins", "the verdict keeps showing the build's coins");
-  const rows = () => [...auth._ledger.values()].filter((r) => r.user_id === uid && r.kind === "minigame" && r.ref === `build:${utcToday()}`);
+  const rows = () => [...auth._ledger.values()].filter((r) => r.user_id === uid && r.kind === "minigame" && r.ref === `build:${localToday()}`);
   assert(rows().length === 1, "one build claim in the ledger");
 
   await click(findButtonByText(container, "Build another"));
@@ -395,6 +406,34 @@ await runTest("signing out while in the shop leaves it, and its entry opens Mode
   assert(!container.querySelector(".whoami"), "signed out");
   await back();
   assert(!shopOf(container) && text(container).includes("Daily challenge"), `Back to the shop's entry opens Modes when signed out, got: ${text(container).slice(0, 200)}`);
+});
+
+await runTest("opening your own profile's address straight away shows your balance once the session is back", async () => {
+  await close();
+  await auth.auth.signInWithPassword({ email: "shopper@example.com", password: "Password1" });
+  container = await open("http://localhost/u/shopper", auth);
+  await until(() => profileOf(container)?.dataset.owner === "true", () => `your own profile at its address, got: ${text(container).slice(0, 200)}`);
+  const balance = auth._wallet.balanceOf(uid);
+  await until(() => spoken(profileOf(container)).includes(`${num(balance)} coins`), () => `your ${balance} coins on the card, got: ${spoken(profileOf(container)).slice(0, 300)}`);
+});
+
+await runTest("the next account to sign in on the device doesn't see the last account's season coins", async () => {
+  await click(tab(container, "Modes"));
+  await flush();
+  await playUnlimited(container);
+  await until(() => coinsOf(container)?.dataset.earned != null, "this season's coins");
+  await click(container.querySelector(".whoami"));
+  await until(() => profileOf(container)?.dataset.username === "shopper", "your profile");
+  await click(named(profileOf(container), "Log out"));
+  await flush(4);
+  await click(tab(container, "Account"));
+  await flush();
+  await signUp(container.querySelector(".panel"), "nextup@example.com", "nextup");
+  await until(() => container.querySelector(".whoami"), "the next account signed in");
+  await click(tab(container, "Draft"));
+  await flush(3);
+  assert(container.querySelector(".result-hero .strip"), `the last season's result is still on the Draft tab, got: ${text(container).slice(0, 200)}`);
+  assert(!coinsOf(container) && !container.querySelector(".result-hero .sc-dup"), `but not what it paid shopper, got: ${container.querySelector(".result-hero")?.textContent}`);
 });
 
 await close();

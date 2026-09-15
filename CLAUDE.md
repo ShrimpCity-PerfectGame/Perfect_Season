@@ -230,7 +230,8 @@ overwrite each other.
 **Profiles (v1.11.0) - the rules that matter most; `PROFILES.md` has everything else.**
 - **Writes only through security-definer functions.** `profile_details` (bio, picture, default avatar,
   favorite team), `reports`, `moderators`, `blocked_words`, `site_flags` and `avatar_presets` have RLS on
-  and no client write policy. Players change their own row only through `save_profile`/`set_avatar`;
+  and no client write policy. Players change their own row only through `save_profile`/`set_avatar` (and since
+  v1.12.0 `equip_item`/`set_showcase` for what the card wears, SHOP.md);
   reports and moderator actions only through `report_player`/`mod_act`. Those functions are the
   security boundary - a modified browser can call them directly - so every limit and the word filter
   live in SQL, and the browser's checks exist only for friendlier messages. `blocked_words` isn't
@@ -283,9 +284,13 @@ overwrite each other.
   finished season per account per challenge code, in any variant or format. If the profile update then fails it
   gives that row back (or a Daily's `daily_runs` row), so a retry counts. Grinding fresh codes for a lucky outcome
   is still the known gap above; only 20 Unlimited, Genius and GM seasons pay coins per UTC day.
+- **Minigame coins count the player's own days.** The app sends `claim_minigame` the game's day in the player's
+  calendar (Over/Under's date, or today for a build), which must be UTC yesterday, today or tomorrow; the ledger key
+  is `<game>:<day>`. Keyed by the UTC date instead, two evenings' games either side of UTC midnight (8pm on the US
+  east coast) shared a key and the second paid nothing.
 - **Accepted gaps, priced by `tests/test-economy-security.mjs`** (which prints them): the minigames are
-  browser-written, so `claim_minigame` pays 15 once a UTC day per game to anyone with a `sou_runs`/`builds` row
-  from the last 24 hours - 30 coins a day without playing, no more than an honest player - and their badges (Stat
+  browser-written, so `claim_minigame` pays 15 a game day per game to anyone with the row (an Over/Under row for the
+  day, or a build from the last 24 hours) - about 30 coins a day without playing, no more than an honest player - and their badges (Stat
   Nerd, Mad Scientist) pay nothing; the Genius flag is the client's word (Big Brain, the Genius ladder); and codes
   are the client's choice, so searching codes offline for 20-0 seasons tops out around 7,000 coins a day. Closed in
   v1.12.0: submit-run refuses a GM season over the cap, ignores GM/Genius flags on a Daily, and `replayDraft`
@@ -298,9 +303,13 @@ overwrite each other.
   perfect-season.jsx maps to theme.mjs's scopes; each theme's painted colors are data in `cosmetics.jsx`, so
   `tests/test-cosmetics.mjs` can hold its text to WCAG AA, for all 32 teams on Team colors.
 - **Runbook** (SQL editor): change a price - `update shop_items set price = 1500 where id = 'frame-lime';`; take an
-  item off sale (owners keep it) - `update shop_items set active = false where id = 'frame-lime';`; give a pack's
-  avatars to everyone - `update avatar_presets set free = true where pack = 'sideline';`. The seeds in
-  `migration-shop.sql` only add missing items, so these survive a re-run - edit the seed too for new databases.
+  item off sale (owners keep it) - `update shop_items set active = false where id = 'frame-lime';`; give an item
+  (a pack included) to everyone - `update shop_items set rarity = 'free', price = null where id = 'pack-sideline';` -
+  since a pack's avatars follow its shop item everywhere (`shop_state`, `set_avatar`, the picker). The seeds in
+  `migration-shop.sql` only add missing rows, so these survive a re-run - edit the seed too for new databases.
+- **Cosmetic artwork uses fixed colors**, like the avatar drawings: frame and card-theme paints are data in
+  `cosmetics.jsx` (`COLORS`), not theme tokens, because an item looks the same wherever it's worn. Text on a card
+  still takes its scope's tokens, and `tests/test-cosmetics.mjs` checks those against every paint behind text.
 
 **The runs log is the complete history; `profiles.recent` is not.** `recent` keeps only an
 account's last 10 runs. Every finished draft and DNF is also appended to the `runs` table
@@ -492,7 +501,9 @@ suite and still broke the live Leaderboard for every existing account.
   a "Test site" banner. Nothing done on staging can touch real accounts, scores, or leaderboards.
 - **Most releases are just a merge.** The client redeploys itself from the branch. Only two things
   need a per-environment step, and only when they actually changed:
-  - `supabase/functions/submit-run` or `game-logic.mjs` → `npm run deploy:fn:staging`, then
+  - `supabase/functions/submit-run`, or any module it bundles - `game-logic.mjs`, `data/players.json`, and since
+    v1.12.0 `rewards.mjs`, `badges.mjs` and `profile-rules.mjs` (a badge or coin-rule change the browser shows but
+    the function doesn't pay is the failure) → `npm run deploy:fn:staging`, then
     `npm run deploy:fn:prod` after promoting (needs `STAGING_PROJECT_REF` / `PROD_PROJECT_REF`).
   - A schema change → run its migration in that environment's SQL editor first.
 

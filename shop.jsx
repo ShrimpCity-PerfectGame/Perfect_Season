@@ -192,6 +192,8 @@ export const SHOP_CSS = `
 @media (hover:hover){
   .sh-tile:hover{transform:translate(-1px,-2px);box-shadow:5px 6px 0 var(--hard)}
   .sh-tile.sh-open:hover{box-shadow:0 0 0 3px var(--accent-ink),6px 7px 0 3px var(--hard)}
+  /* A mouse presses while it hovers, so the press has to come after the lift to show (as .btn's does). */
+  .sh-tile:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--hard)}
   .sh-tab:hover:not(.sh-on){color:var(--ink);border-color:var(--ink)}
   .sh-chip:hover:not(.sh-on){border-color:var(--ink)}
 }
@@ -326,7 +328,10 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
     const needProfile = !(mine && mine.for === username && mine.status === "ok");
     const [s, w, p] = await Promise.all([fetchShop(), fetchWallet(), needProfile ? fetchPlayerProfile(username) : null]);
     if (ask !== request.current) return;
-    if (needProfile) setMine({ for: username, status: p?.status === "ok" ? "ok" : "error", profile: p?.status === "ok" ? p.profile : null });
+    // Only your own account's profile counts: a name the app still has from before a moderator's rename can now
+    // belong to someone else, whose picture and badges this must not show (or save to your showcase).
+    const yours = p?.status === "ok" && p.profile?.id === userId;
+    if (needProfile) setMine({ for: username, status: yours ? "ok" : "error", profile: yours ? p.profile : null });
     if (w) setWallet(w);
     if (s) {
       setShop(s);

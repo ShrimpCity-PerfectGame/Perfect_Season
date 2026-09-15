@@ -99,13 +99,13 @@ export async function setShowcase(badgeIds) {
   }
 }
 
-const CLAIM_REASONS = { not_played: "not_played", bad_game: "invalid", not_signed_in: "signed_out" };
-// Today's coins for a minigame you've played: game "over_under" | "build". credited is 0 when today's are
-// already claimed.
+const CLAIM_REASONS = { not_played: "not_played", bad_game: "invalid", bad_date: "invalid", not_signed_in: "signed_out" };
+// A game day's coins for a minigame you've played: game "over_under" | "build", date the game's day in your own
+// calendar ("2026-09-15" - Over/Under's date, or today for a build). credited is 0 when that day's are already claimed.
 //   { ok: true, credited, balance } | { ok: false, reason: "not_played" | "invalid" | "signed_out" | "network" }
-export async function claimMinigameCoins(game) {
+export async function claimMinigameCoins(game, date) {
   try {
-    const { data, error, status } = await getClient().rpc("claim_minigame", { p_game: game });
+    const { data, error, status } = await getClient().rpc("claim_minigame", { p_game: game, ...(date ? { p_date: date } : {}) });
     if (error) return failed(callReason(error, status, CLAIM_REASONS));
     return { ok: true, credited: num(data?.credited), balance: num(data?.balance) };
   } catch (e) {

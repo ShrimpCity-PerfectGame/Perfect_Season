@@ -169,7 +169,7 @@ const NEW_FUNCTIONS = {
   "credit_coins(p_user uuid, p_amount bigint, p_kind text, p_ref text, p_daily_cap integer)": [true, "v", PG_TEMP_LAST, false, false, true],
   "award_badges(p_user uuid, p_badges jsonb)": [true, "v", PG_TEMP_LAST, false, false, true],
   // A signed-in player's own; the two reads are stable, so the browser sends them as GET.
-  "claim_minigame(p_game text)": [true, "v", PG_TEMP_LAST, false, true, true],
+  "claim_minigame(p_game text, p_date text)": [true, "v", PG_TEMP_LAST, false, true, true],
   "wallet_state()": [true, "s", PG_TEMP_LAST, false, true, true],
   "shop_state()": [true, "s", PG_TEMP_LAST, false, true, true],
   "shop_buy(p_item text)": [true, "v", PG_TEMP_LAST, false, true, true],
@@ -561,7 +561,7 @@ await runTest("5c. two purchases at once: the wallet row is locked before the it
     "public.shop_buy(text)": ["public.shop_items", "public.inventory", "wallet_apply(", "public.wallets"],
     "public.credit_coins(uuid, bigint, text, text, integer)": ["public.wallet_ledger", "wallet_apply(", "public.wallets"],
     "public.award_badges(uuid, jsonb)": ["public.badge_awards", "wallet_apply(", "public.wallets"],
-    "public.claim_minigame(text)": ["wallet_apply(", "public.wallets"],
+    "public.claim_minigame(text, text)": ["wallet_apply(", "public.wallets"],
     "public.wallet_apply(uuid, bigint, text, text)": ["public.wallet_ledger", "public.wallets"],
   };
   for (const [sig, later] of Object.entries(lockFirst)) {
@@ -1111,7 +1111,7 @@ await runTest("9a. the shop's browser code has no HTML sinks or links built from
   }
   const calls = [...source("storage-shop.js").matchAll(/\.rpc\("([a-z_]+)",\s*(\{[^}]*\})/g)].map(([, fn, args]) => [fn, [...args.matchAll(/([a-z_]+):/g)].map((x) => x[1])]);
   assert(same(calls.map(([fn]) => fn).sort(), ["claim_minigame", "equip_item", "set_showcase", "shop_buy", "shop_state", "wallet_state"]), `storage-shop.js's calls: ${show(calls)}`);
-  assert(calls.every(([, keys]) => keys.every((k) => ["p_item", "p_slot", "p_badges", "p_game"].includes(k))), `no call names a player: ${show(calls)}`);
+  assert(calls.every(([, keys]) => keys.every((k) => ["p_item", "p_slot", "p_badges", "p_game", "p_date"].includes(k))), `no call names a player: ${show(calls)}`);
 });
 
 await runTest("9b. the wallet panel shows a ledger's refs and kinds as text: a hostile challenge code, item or kind never becomes markup", async () => {

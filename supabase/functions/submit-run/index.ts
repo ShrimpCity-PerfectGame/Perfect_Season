@@ -282,18 +282,24 @@ Deno.serve(async (req) => {
   let newBadges: string[] = [];
   try {
     const reward = seasonReward(run, { date: mode.date, streak: updated.dailyStreak });
-    const { data: credit, error: creditError } = await service.rpc("credit_coins", {
-      p_user: user.id, p_amount: reward.amount, p_kind: reward.kind, p_ref: reward.ref, p_daily_cap: reward.dailyCap,
-    });
+    // The season's credit and the badges' two reads don't depend on each other, so they go out together; only
+    // award_badges waits, so the balance it answers with includes the season. The badges come from the same inputs
+    // the profile screen uses. player_stats reads the runs log, which logRun above has normally just added this
+    // season to, so a badge this season earned (a Cinderella title, a Scout draft) pays now rather than a season
+    // later. It only reads, so it goes out as a GET and gets supabase-js's retry.
+    const [
+      { data: credit, error: creditError },
+      { data: stats, error: statsError },
+      { data: details, error: detailsError },
+    ] = await Promise.all([
+      service.rpc("credit_coins", {
+        p_user: user.id, p_amount: reward.amount, p_kind: reward.kind, p_ref: reward.ref, p_daily_cap: reward.dailyCap,
+      }),
+      service.rpc("player_stats", { p_user_id: user.id }, { get: true }),
+      service.from("profile_details").select("favorite_team").eq("user_id", user.id).maybeSingle(),
+    ]);
     if (creditError) throw new Error(`credit_coins: ${creditError.message}`);
-
-    // The badges from the same inputs the profile screen uses. player_stats reads the runs log,
-    // which logRun above has normally just added this season to, so a badge this season earned (a
-    // Cinderella title, a Scout draft) pays now rather than a season later. It only reads, so it
-    // goes out as a GET and gets supabase-js's retry.
-    const { data: stats, error: statsError } = await service.rpc("player_stats", { p_user_id: user.id }, { get: true });
     if (statsError) throw new Error(`player_stats: ${statsError.message}`);
-    const { data: details, error: detailsError } = await service.from("profile_details").select("favorite_team").eq("user_id", user.id).maybeSingle();
     if (detailsError) throw new Error(`profile_details: ${detailsError.message}`);
     const progress = badgeProgress({
       stats: updated, extra: mapPlayerStats(stats), details: { favoriteTeam: details?.favorite_team ?? null }, joined: existingRow.created_at,

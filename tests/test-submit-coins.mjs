@@ -31,26 +31,32 @@ const TODAY = new Date().toISOString().slice(0, 10);
 // A joined date after Day One's window, so that badge only pays where a test gives it on purpose.
 const JOINED_LATER = "2026-11-01T00:00:00.000Z";
 
-// A real, legal draft for a seed, picked the way a player could: the first player on each board who fits an open slot.
-function legalTrace(seed) {
+// A real, legal draft for a seed, picked the way a player could: the first player on each board who fits an open slot
+// - and, for a GM draft, whose salary still leaves the $1M minimum for every slot after it, since submit-run refuses a
+// GM roster over the cap.
+function legalTrace(seed, { gm = false, format } = {}) {
   const seq = GL.seededSequence(seed);
   const roster = {};
   const drafted = new Set();
   const history = [];
+  let spent = 0;
   let at = GL.boardAt(seq, 0, roster);
   while (history.length < GL.SLOTS.length) {
     const key = seq[at];
     const open = GL.SLOTS.filter((s) => !roster[s]);
-    const player = GL.BOARDS[key].find((p) => !drafted.has(p.id) && open.some((s) => GL.fits(p.pos, s)));
+    const affordable = (p) => !gm || spent + GL.playerSalary(p, format) + (open.length - 1) <= GL.GM_CAP;
+    const player = GL.BOARDS[key].find((p) => !drafted.has(p.id) && open.some((s) => GL.fits(p.pos, s)) && affordable(p));
+    if (!player) throw new Error(`legalTrace(${seed}): nobody on ${key} fits an open slot${gm ? " under the cap" : ""}`);
     const slot = open.find((s) => GL.fits(player.pos, s));
     history.push({ key, id: player.id, season: player.season, slot });
     roster[slot] = player;
     drafted.add(player.id);
+    if (gm) spent += GL.playerSalary(player, format);
     if (history.length < GL.SLOTS.length) at = GL.boardAt(seq, at + 1, roster);
   }
   return { history, seq };
 }
-const season = (code, extra = {}) => submitRun({ mode: { kind: "free", code, ...(extra.gm ? { gm: true } : {}) }, ...legalTrace(code), gm: !!extra.gm, genius: !!extra.genius, format: extra.format });
+const season = (code, extra = {}) => submitRun({ mode: { kind: "free", code, ...(extra.gm ? { gm: true } : {}) }, ...legalTrace(code, extra), gm: !!extra.gm, genius: !!extra.genius, format: extra.format });
 const daily = (format = "fantasy", date = TODAY) => submitRun({ mode: { kind: "daily", date }, ...legalTrace(GL.dailySeed(date, format)), gm: false, format });
 
 let signups = 0;

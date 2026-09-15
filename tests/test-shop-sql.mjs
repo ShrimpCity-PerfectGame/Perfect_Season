@@ -951,7 +951,7 @@ await runTest("storage-shop.js maps every code the functions raise to its reason
     assert(same(codes, Object.keys(table).sort()), `${fn} raises ${show(codes)} - each needs its reason decided here`);
   }
   // claim_minigame is migration-wallet.sql's; its codes as SHOP.md 3.1 lists them.
-  REASONS.claim_minigame = { not_signed_in: "signed_out", bad_game: "invalid", not_played: "not_played" };
+  REASONS.claim_minigame = { not_signed_in: "signed_out", bad_game: "invalid", bad_date: "invalid", not_played: "not_played" };
   const WRITES = {
     shop_buy: () => S.buyItem("frame-lime"),
     equip_item: () => S.equipItem("frame", "frame-lime"),

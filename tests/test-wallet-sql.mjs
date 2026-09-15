@@ -64,7 +64,9 @@ const STATEMENT = {
     ? ["select credit_coins($1::uuid, $2::bigint, $3::text, $4::text, $5::integer) as r", [a.p_user, a.p_amount, a.p_kind, a.p_ref, a.p_daily_cap]]
     : ["select credit_coins($1::uuid, $2::bigint, $3::text, $4::text) as r", [a.p_user, a.p_amount, a.p_kind, a.p_ref]]),
   award_badges: (a) => ["select award_badges($1::uuid, $2::jsonb) as r", [a.p_user, a.p_badges == null ? null : JSON.stringify(a.p_badges)]],
-  claim_minigame: (a) => ["select claim_minigame($1::text) as r", [a.p_game]],
+  claim_minigame: (a) => ("p_date" in a
+    ? ["select claim_minigame($1::text, $2::text) as r", [a.p_game, a.p_date]]
+    : ["select claim_minigame($1::text) as r", [a.p_game]]),
   wallet_state: () => ["select wallet_state() as r", []],
 };
 async function call(who, fn, args = {}) {
@@ -124,7 +126,7 @@ await runTest("each function is security definer or invoker, stable or volatile,
     "wallet_apply(p_user uuid, p_amount bigint, p_kind text, p_ref text)": [false, "v", PG_TEMP_LAST, false, false, true],
     "credit_coins(p_user uuid, p_amount bigint, p_kind text, p_ref text, p_daily_cap integer)": [true, "v", PG_TEMP_LAST, false, false, true],
     "award_badges(p_user uuid, p_badges jsonb)": [true, "v", PG_TEMP_LAST, false, false, true],
-    "claim_minigame(p_game text)": [true, "v", PG_TEMP_LAST, false, true, true],
+    "claim_minigame(p_game text, p_date text)": [true, "v", PG_TEMP_LAST, false, true, true],
     // Stable, so the browser reads it as GET.
     "wallet_state()": [true, "s", PG_TEMP_LAST, false, true, true],
     "create_wallet()": [true, "v", PG_TEMP_LAST, false, false, true],
@@ -445,6 +447,35 @@ await runTest("claim_minigame pays 15 once a UTC day, only for a game played in 
   assert(same(r.data, { credited: 15, balance: 280 }), `yesterday's claim doesn't block today's: ${show(r)}`);
 });
 
+await runTest("claim_minigame with the game's own day: once a game day, for an Over/Under run on that date or a build from the last 24 hours, and only for a day some time zone could call today", async () => {
+  const MAY = await account("may"), NIA = await account("nia");
+  const midnight = utcMidnight();
+  const today = utcDate(Date.now()), yesterday = utcDate(midnight - 1), tomorrow = utcDate(midnight + 24 * HOUR);
+  for (const day of [utcDate(midnight - 24 * HOUR - 1), utcDate(midnight + 48 * HOUR), "2026-9-15", "", "today", `${today} `]) {
+    const r = await call(MAY, "claim_minigame", { p_game: "over_under", p_date: day });
+    assert(r.error === "bad_date", `${show(day)} isn't a day some time zone could call today: ${show(r)}`);
+  }
+  const souRunOn = (uid, date) => owner("insert into sou_runs (date, user_id, username, score) values ($1, $2, 'x', 9)", [date, uid]);
+  assert((await call(MAY, "claim_minigame", { p_game: "over_under", p_date: today })).error === "not_played", "no run on that date");
+  await souRunOn(NIA, today);
+  assert((await call(MAY, "claim_minigame", { p_game: "over_under", p_date: today })).error === "not_played", "another player's run doesn't count");
+  // Two evenings' games either side of UTC midnight have different days in the player's calendar, so both pay.
+  await souRunOn(MAY, yesterday);
+  await souRunOn(MAY, today);
+  let r = await call(MAY, "claim_minigame", { p_game: "over_under", p_date: yesterday });
+  assert(r.data?.credited === COIN_RULES.minigame, `yesterday's game pays: ${show(r)}`);
+  r = await call(MAY, "claim_minigame", { p_game: "over_under", p_date: today });
+  assert(r.data?.credited === COIN_RULES.minigame, `and today's game too, whatever the UTC date: ${show(r)}`);
+  r = await call(MAY, "claim_minigame", { p_game: "over_under", p_date: today });
+  assert(r.data?.credited === 0, `once a game day: ${show(r)}`);
+  assert((await call(MAY, "claim_minigame", { p_game: "build", p_date: tomorrow })).error === "not_played", "no build yet");
+  await seedBuild(MAY, iso(Date.now() - MINUTE));
+  r = await call(MAY, "claim_minigame", { p_game: "build", p_date: tomorrow });
+  assert(r.data?.credited === COIN_RULES.minigame, `a build pays under the day it was made: ${show(r)}`);
+  const refs = (await ledgerOf(MAY)).filter((l) => l.kind === "minigame").map((l) => l.ref).sort();
+  assert(same(refs, [`build:${tomorrow}`, `over_under:${today}`, `over_under:${yesterday}`].sort()), `keyed by the game's day: ${show(refs)}`);
+});
+
 // ---------- wallet_state ----------
 
 await runTest("wallet_state: balance, earned, spent and the 20 newest movements, newest first, ties newest id first", async () => {
@@ -538,7 +569,7 @@ await runTest("credit_coins, award_badges and claim_minigame lock the wallet row
   const order = [
     ["public.credit_coins(uuid, bigint, text, text, integer)", ["wallet_ledger", "wallet_apply("]],
     ["public.award_badges(uuid, jsonb)", ["badge_awards", "wallet_apply("]],
-    ["public.claim_minigame(text)", ["wallet_apply("]],
+    ["public.claim_minigame(text, text)", ["wallet_apply("]],
   ];
   for (const [sig, later] of order) {
     const body = await source(sig);
@@ -634,6 +665,11 @@ await runTest("the mock gives the same answers as the SQL for one shared list of
       await seedSouRun(uid, created);
       state.souRuns.set(`m-${++mockDay}:${uid}`, { user_id: uid, score: 9, created_at: created });
     },
+    // An Over/Under run on a real date, for a claim that names the game's day.
+    souRunOn: async (uid, date) => {
+      await owner("insert into sou_runs (date, user_id, username, score) values ($1, $2, 'x', 9)", [date, uid]);
+      state.souRuns.set(`${date}:${uid}`, { date, user_id: uid, score: 9, created_at: new Date().toISOString() });
+    },
     build: async (uid, ago) => {
       const created = iso(Date.now() - ago);
       await seedBuild(uid, created);
@@ -654,6 +690,8 @@ await runTest("the mock gives the same answers as the SQL for one shared list of
   const midnight = utcMidnight();
   const today = utcDate(Date.now());
   const yesterday = utcDate(midnight - 1);
+  const tomorrow = utcDate(midnight + 24 * HOUR);
+  const dayBeforeYesterday = utcDate(midnight - 24 * HOUR - 1);
 
   const STEPS = [
     // credit_coins: every refusal, in order
@@ -744,6 +782,18 @@ await runTest("the mock gives the same answers as the SQL for one shared list of
     ["setup", () => setup.ledger(P.gil, 15, "minigame", `over_under:${yesterday}`, iso(midnight - HOUR))],
     ["gil", "claim_minigame", { p_game: "over_under" }],
     ["gil", "claim_minigame", { p_game: "build" }],
+    // claim_minigame with the game's day
+    ["fay_p", "claim_minigame", { p_game: "over_under", p_date: dayBeforeYesterday }],
+    ["fay_p", "claim_minigame", { p_game: "over_under", p_date: "2026-9-15" }],
+    ["ghost", "claim_minigame", { p_game: "over_under", p_date: today }],
+    ["fay_p", "claim_minigame", { p_game: "nope", p_date: "not a date" }],
+    ["fay_p", "claim_minigame", { p_game: "over_under", p_date: tomorrow }],
+    ["setup", () => setup.souRunOn(P.fay_p, tomorrow)],
+    ["fay_p", "claim_minigame", { p_game: "over_under", p_date: tomorrow }],
+    ["fay_p", "claim_minigame", { p_game: "over_under", p_date: tomorrow }],
+    ["fay_p", "claim_minigame", { p_game: "build", p_date: yesterday }],
+    ["fay_p", "claim_minigame", { p_game: "build", p_date: yesterday }],
+    ["gil", "claim_minigame", { p_game: "build", p_date: today }],
     // wallet_state
     ["fay_p", "wallet_state", {}],
     ["setup", async () => {

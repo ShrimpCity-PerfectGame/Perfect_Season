@@ -84,7 +84,7 @@ Ledger `kind`s and their `ref`s:
 | `season` | + an Unlimited, Genius or GM season's coins | the challenge code |
 | `daily` | + a Daily's coins | `<date>:<format>`, e.g. `2026-09-14:fantasy` |
 | `badge` | + the badge's coins | the badge id |
-| `minigame` | + 15 | `<game>:<UTC date>`, e.g. `over_under:2026-09-14` |
+| `minigame` | + 15 | `<game>:<the game's day>`, e.g. `over_under:2026-09-14` |
 | `purchase` | − the price | the item id |
 
 ### 3.1 `migration-wallet.sql`
@@ -120,7 +120,7 @@ Both are security invoker, and clients can't execute them.
 |---|---|---|
 | `credit_coins(p_user uuid, p_amount bigint, p_kind text, p_ref text, p_daily_cap integer default null)` | jsonb `{ "credited", "balance", "capped", "duplicate" }` | security definer; **service role only** (revoked from public, anon, authenticated). Raises `no_such_player`, `bad_kind` (only `season` and `daily`), `bad_amount` (null, negative or over 10,000), `bad_ref` (null, empty or over 200 characters). Takes the wallet lock; then, when `p_daily_cap` isn't null and the player already has that many rows of `p_kind` since UTC midnight, credits nothing (`capped: true`); otherwise `wallet_apply` (`duplicate: true` when it returned 0 for an amount above 0). |
 | `award_badges(p_user uuid, p_badges jsonb)` | jsonb `{ "awarded": [ids], "credited", "balance" }` | security definer; **service role only**. `p_badges` is `[{ "id": text, "coins": integer }]`, at most 50, ids `^[a-z0-9-]{1,40}$`, coins 0–10,000, else `bad_request`; `no_such_player`. Takes the wallet lock, then for each entry in order inserts `badge_awards` (on conflict do nothing); a newly inserted one goes into `awarded` and, with coins above 0, `wallet_apply(p_user, coins, 'badge', id)`. |
-| `claim_minigame(p_game text)` | jsonb `{ "credited", "balance" }` | security definer; `authenticated` only. Raises `not_signed_in`, `bad_game` (not `over_under` or `build`), `not_played` (no `sou_runs` row — for over_under — or `builds` row — for build — with the caller's `user_id` created in the last 24 hours). Takes the wallet lock, then `wallet_apply(uid, 15, 'minigame', '<game>:<UTC date>')`; `credited` 0 means today's is already claimed. |
+| `claim_minigame(p_game text, p_date text default null)` | jsonb `{ "credited", "balance" }` | security definer; `authenticated` only. `p_date` is the game's day in the player's calendar (Over/Under's date, or today for a build) — the app always sends it, because keyed by the UTC date two evenings' games either side of UTC midnight shared a key. Raises `not_signed_in`, `bad_game` (not `over_under` or `build`), `bad_date` (not UTC yesterday, today or tomorrow), `not_played` (over_under: no `sou_runs` row of the caller's for that date; build: no `builds` row of the caller's from the last 24 hours). Takes the wallet lock, then `wallet_apply(uid, 15, 'minigame', '<game>:<day>')`; `credited` 0 means that day's is already claimed. Without `p_date` the day is the UTC date and any row of that game from the last 24 hours counts. |
 | `wallet_state()` | jsonb `{ "balance", "earned", "spent", "recent": [{ "amount", "kind", "ref", "created_at" }] }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. `recent`: the 20 newest ledger rows, `created_at desc, id desc`. No wallet yet: zeros and `[]`. |
 | `create_wallet()` | trigger | After insert on `profiles` (trigger `profiles_create_wallet`): `wallet_apply(new.id, 250, 'welcome', 'welcome')`. |
 
@@ -150,9 +150,10 @@ The database's own numbers (250, 15, 10,000, the starting formula, the 24-hour w
 Seeded with the launch catalog ([6.2](#62-shop-catalogmjs-phase-0-lead)), `on conflict (id) do nothing`: a re-run
 adds new items and leaves existing rows alone, so a price changed with SQL stays changed. RLS on, public select.
 Runbook: `update shop_items set price = 1500 where id = 'frame-lime';` and
-`update shop_items set active = false where id = 'frame-lime';` (edit the seed too, for new databases). To give a
-pack's avatars to everyone, free the avatars rather than the shop item (`set_avatar` checks inventory for paid
-avatars): `update avatar_presets set free = true where pack = 'sideline';`.
+`update shop_items set active = false where id = 'frame-lime';` (edit the seed too, for new databases). To give an
+item to everyone — an avatar pack included — make it free: `update shop_items set rarity = 'free', price = null where
+id = 'pack-sideline';`. A pack's avatars follow its shop item everywhere (`shop_state`, `set_avatar`, the picker), so
+never change `avatar_presets.free` for a pack.
 
 **`inventory`** `(user_id → profiles cascade, item_id → shop_items(id), acquired_at timestamptz default now(),
 primary key (user_id, item_id))`. RLS on, no policies, privileges revoked from anon and authenticated. Only bought
@@ -174,7 +175,9 @@ frame, the Navy card, no title) and `showcase text[] not null default '{}'` (nam
 | `set_showcase(p_badges text[])` | jsonb: the details row | security definer; `authenticated` only. Raises `not_signed_in`; `bad_showcase` (more than 3, a null, a duplicate, a multi-dimensional array, or an id not matching `^[a-z0-9-]{1,40}$`). Null saves `{}`; the ids are saved in order, numbered from 1. It doesn't check the badges are earned: the card shows only the earned ones, because badges are worked out in the browser and one earned since the player's last season isn't in `badge_awards` yet. |
 
 **`set_avatar` in `migration-profiles.sql` (agent J):** a preset that isn't free is allowed when the caller owns
-its pack's item (an `inventory` row for `'pack-' || pack`); otherwise `bad_preset`, as now. It must still work in a
+its pack's item, `'pack-' || pack`, by the same rule as `shop_state` (free, an inventory row, or a badge item whose
+badge is in `badge_awards`) — the picker unlocks packs from that answer, so the two must agree; otherwise
+`bad_preset`, as now. The pack avatars' seed only adds missing rows. It must still work in a
 database without `migration-shop.sql` (several tests run migration-profiles.sql without it): check
 `to_regclass('public.inventory') is null` first and refuse, and keep the inventory query in its own statement that
 only runs when the table exists (plpgsql plans a statement the first time it runs it). `tests/mock-profile-data.mjs`'s
@@ -275,7 +278,8 @@ buyItem(id)              → { ok: true, balance } | { ok: false, reason }
 equipItem(slot, id)      → { ok: true, details } | { ok: false, reason }        // id null clears the slot
     // reason: "not_owned" | "invalid" | "signed_out" | "network"
 setShowcase(badgeIds)    → { ok: true, details } | { ok: false, reason: "invalid" | "signed_out" | "network" }
-claimMinigameCoins(game) → { ok: true, credited, balance } | { ok: false, reason }  // game: "over_under" | "build"
+claimMinigameCoins(game, date) → { ok: true, credited, balance } | { ok: false, reason }
+    // game: "over_under" | "build"; date: the game's day in the player's calendar, "2026-09-15"
     // reason: "not_played" | "invalid" | "signed_out" | "network"
 ```
 
@@ -464,8 +468,9 @@ New props: `wallet` (`{ balance }` or null — the owner's) and `onOpenShop()`.
   `wallet`; ShopScreen's `onBalance` keeps it current.
 - **Header picture**: `FramedAvatar` with `myDetails.frame` and the favorite team. `myDetails` also updates from
   ShopScreen's `onDetailsSaved`.
-- **Minigames**, signed in: once Over/Under's run is saved (await `upsertSouRun`), `claimMinigameCoins("over_under")`;
-  once a build is logged (await `logBuild`), `claimMinigameCoins("build")`. Show "+15 coins" on that end screen when
+- **Minigames**, signed in: once Over/Under's run is saved (await `upsertSouRun`), `claimMinigameCoins("over_under",
+  date)` with the game's date; once a build is logged (await `logBuild`), `claimMinigameCoins("build", todayKey())`.
+  Show "+15 coins" on that end screen when
   `credited` is above 0.
 - **Styles**: phase 0 appended `COSMETICS_CSS + SHOP_CSS` to `APP_CSS` and added `.cs-dark` to the dark scope list,
   `.cs-night` to the night list and a `.cs-light` light scope after both.

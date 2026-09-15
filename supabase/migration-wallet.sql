@@ -13,7 +13,7 @@
 --   season     + an Unlimited/Genius/GM      the challenge code
 --   daily      + a Daily                     '<date>:<format>'
 --   badge      + the badge's coins           the badge id
---   minigame   + 15                          '<game>:<UTC date>'
+--   minigame   + 15                          '<game>:<day>'
 --   purchase   - the price                   the item id
 --
 -- None of these tables is client-writable or even client-readable: a player reads their own wallet through
@@ -229,13 +229,23 @@ grant execute on function public.credit_coins(uuid, bigint, text, text, integer)
 
 -- ---------- Minigame coins and reading your wallet ----------
 
--- Today's coins for Over/Under or Build-a-player, which the app claims once the player's run is saved. Those
--- games' scores are written by the browser, so all a claim can check is that the player has a row there from the
--- last 24 hours. The ledger key '<game>:<UTC date>' is what holds it to once a UTC day, however often it's called.
-create or replace function public.claim_minigame(p_game text)
+-- A game day's coins for Over/Under or Build-a-player, which the app claims once the player's run is saved. Those
+-- games' scores are written by the browser, so all a claim can check is that the player has the row: a build from
+-- the last 24 hours, or an Over/Under row for the day being claimed. The ledger key '<game>:<day>' holds it to once
+-- a game day, however often it's called.
+--
+-- p_date is that day in the player's own calendar - Over/Under's date (its board is seeded sou-<date>), or the day
+-- a build was made - because that's how the games count days: keyed by the UTC date, two evenings' games on either
+-- side of UTC midnight (8pm on the US east coast) could share one key, and the second paid nothing. Like a Daily's
+-- date it must be one some time zone could call today: UTC yesterday, today or tomorrow. The app always sends it;
+-- without it (null) the day is the UTC date and any row of that game from the last 24 hours counts, as before.
+drop function if exists public.claim_minigame(text);
+create or replace function public.claim_minigame(p_game text, p_date text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public, pg_temp as $$
 declare
   v_uid uuid := auth.uid();
+  v_today date := (now() at time zone 'utc')::date;
+  v_day text;
   v_played boolean;
   v_credited bigint;
 begin
@@ -245,7 +255,15 @@ begin
   if p_game is null or p_game not in ('over_under', 'build') then
     raise exception 'bad_game' using errcode = 'P0001';
   end if;
-  if p_game = 'over_under' then
+  -- to_char, not ::text, which would follow the session's DateStyle.
+  if p_date is not null
+     and p_date not in (to_char(v_today - 1, 'YYYY-MM-DD'), to_char(v_today, 'YYYY-MM-DD'), to_char(v_today + 1, 'YYYY-MM-DD')) then
+    raise exception 'bad_date' using errcode = 'P0001';
+  end if;
+  v_day := coalesce(p_date, to_char(v_today, 'YYYY-MM-DD'));
+  if p_game = 'over_under' and p_date is not null then
+    v_played := exists (select 1 from public.sou_runs where user_id = v_uid and date = p_date);
+  elsif p_game = 'over_under' then
     v_played := exists (select 1 from public.sou_runs where user_id = v_uid and created_at > now() - interval '24 hours');
   else
     v_played := exists (select 1 from public.builds where user_id = v_uid and created_at > now() - interval '24 hours');
@@ -254,8 +272,7 @@ begin
     raise exception 'not_played' using errcode = 'P0001';
   end if;
   perform public.wallet_lock(v_uid);
-  -- to_char, not ::text, which would follow the session's DateStyle.
-  v_credited := public.wallet_apply(v_uid, 15, 'minigame', p_game || ':' || to_char(now() at time zone 'utc', 'YYYY-MM-DD'));
+  v_credited := public.wallet_apply(v_uid, 15, 'minigame', p_game || ':' || v_day);
   return jsonb_build_object('credited', v_credited, 'balance', (select balance from public.wallets where user_id = v_uid));
 end;
 $$;
@@ -289,8 +306,8 @@ end;
 $$;
 
 -- A signed-in player's own. Signed-out visitors can't call them at all.
-revoke execute on function public.claim_minigame(text), public.wallet_state() from public, anon;
-grant execute on function public.claim_minigame(text), public.wallet_state() to authenticated;
+revoke execute on function public.claim_minigame(text, text), public.wallet_state() from public, anon;
+grant execute on function public.claim_minigame(text, text), public.wallet_state() to authenticated;
 
 -- ---------- New accounts and starting balances ----------
 -- The trigger first, then the one-time starting balances, so an account created while this file runs gets exactly

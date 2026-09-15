@@ -94,14 +94,22 @@ export function makeWallet(state) {
   };
 
   const rpcs = {
-    claim_minigame({ p_game = null } = {}) {
+    // p_date is the game's day in the player's calendar, one of UTC yesterday, today or tomorrow; null means the UTC
+    // date, with any row of that game from the last 24 hours as the evidence (migration-wallet.sql).
+    claim_minigame({ p_game = null, p_date = null } = {}) {
       const uid = player();
       if (!["over_under", "build"].includes(p_game)) fail("bad_game");
+      const today = Date.parse(`${utcDate(new Date())}T00:00:00.000Z`);
+      const plausible = [-1, 0, 1].map((d) => utcDate(new Date(today + d * DAY_MS)));
+      if (p_date != null && !plausible.includes(p_date)) fail("bad_date");
+      const day = p_date ?? utcDate(new Date());
       const since = Date.now() - DAY_MS;
-      const rows = p_game === "over_under" ? state.souRuns.values() : state.builds.values();
-      if (![...rows].some((r) => r.user_id === uid && time(r.created_at) > since)) fail("not_played");
+      const played = p_game === "over_under" && p_date != null
+        ? [...state.souRuns.values()].some((r) => r.user_id === uid && r.date === p_date)
+        : [...(p_game === "over_under" ? state.souRuns.values() : state.builds.values())].some((r) => r.user_id === uid && time(r.created_at) > since);
+      if (!played) fail("not_played");
       lock(uid);
-      const credited = apply(uid, COIN_RULES.minigame, "minigame", `${p_game}:${utcDate(new Date())}`);
+      const credited = apply(uid, COIN_RULES.minigame, "minigame", `${p_game}:${day}`);
       return { credited, balance: balanceOf(uid) };
     },
     // Reads only: no lock, so a player without a wallet reads zeros and still has none afterwards.
