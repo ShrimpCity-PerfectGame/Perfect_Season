@@ -13,6 +13,14 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.11.1] — 2026-09-15
+
+### Fixed
+
+- **The admin name is reserved.** The testing tools on the draft screen open for "admin" in any
+  capitalization, but usernames were only unique exactly as typed, so "Admin" or "ADMIN" could still be
+  signed up. Once an account holds the name, no other capitalization can sign up with it or be renamed to it.
+
 ## [1.11.0] — 2026-09-15
 
 ### Added

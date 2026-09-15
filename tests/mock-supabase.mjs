@@ -395,9 +395,10 @@ export function makeMockAuth() {
         if (authUsers.has(email)) return { data: null, error: { message: "User already registered" } };
         const username = options?.data?.username;
         // The signup trigger (migration-profiles.sql's handle_new_user) refuses a username outside the
-        // username rule - check_username's "invalid" is the same rule - or one with a blocked word, before
-        // the profile row is written, which reaches the client as Supabase Auth's generic database error.
-        if (profileData.rpcs.check_username({ p_username: username }) === "invalid" || !profileData.isClean(username)) {
+        // username rule - check_username's "invalid" is the same rule - a reserved name another account holds
+        // in any capitalization, or one with a blocked word, before the profile row is written, which reaches
+        // the client as Supabase Auth's generic database error.
+        if (profileData.rpcs.check_username({ p_username: username }) === "invalid" || profileData.isReservedUsername(username) || !profileData.isClean(username)) {
           return { data: null, error: { status: 500, message: "Database error saving new user" } };
         }
         if ([...profiles.values()].some((r) => r.username === username)) {

@@ -253,6 +253,36 @@ await runTest("the signup trigger refuses a username outside the rule or with a 
   assert((await owner("select username from profiles where id = $1", [good]))[0]?.username === "Hancock_Titus", "a clean username signs up");
 });
 
+await runTest("admin is reserved: once an account has it, no other capitalization can sign up with it (1.11.1)", async () => {
+  // A fresh database, so the first account can still take the name - as the tests and a new project do.
+  const fresh = await freshDb();
+  const answer = async (name) => (await fresh.query("select check_username($1) as r", [name])).rows[0].r;
+  assert((await answer("admin")) === "ok" && (await answer("Admin")) === "ok", "an unclaimed admin is free, in any capitalization");
+  await addAccount(fresh, { id: uuid(1), username: "admin" });
+  let n = 10;
+  for (const name of ["Admin", "ADMIN", "aDmIn"]) {
+    assert((await answer(name)) === "taken", `${name} should be taken once admin exists, got ${await answer(name)}`);
+    const err = await failure(fresh, "insert into auth.users values ($1, $2)", [uuid(n++), { username: name }]);
+    assert(err === "username_reserved", `signing up as ${name} should raise username_reserved, got ${JSON.stringify(err)}`);
+  }
+  assert((await answer("admin2")) === "ok" && (await answer("the_admin")) === "ok", "only the name itself is reserved");
+  assert((await answer("Alice")) === "ok", "other names stay unique only as typed");
+  const direct = await asAnon(fresh, () => failure(fresh, "select username_is_reserved('Admin')"));
+  assert(/permission denied/.test(direct), `clients can't call username_is_reserved, got ${JSON.stringify(direct)}`);
+
+  // The mock agrees, before and after the name is taken.
+  const auth = makeMockAuth();
+  assert((await auth.rpc("check_username", { p_username: "Admin" })).data === "ok", "the mock's admin is free before anyone takes it");
+  const first = await auth.auth.signUp({ email: "admin@example.com", password: "Password1", options: { data: { username: "admin" } } });
+  assert(!first.error, `the mock lets the first account take admin, got ${JSON.stringify(first.error)}`);
+  await auth.auth.signOut();
+  for (const name of ["Admin", "ADMIN"]) {
+    assert((await auth.rpc("check_username", { p_username: name })).data === "taken", `the mock says ${name} is taken`);
+    const { error } = await auth.auth.signUp({ email: `${name}@example.com`, password: "Password1", options: { data: { username: name } } });
+    assert(error?.status === 500 && error.message === "Database error saving new user", `the mock refuses signing up as ${name}, got ${JSON.stringify(error)}`);
+  }
+});
+
 await runTest("the mock's signup refuses exactly the usernames the signup trigger refuses", async () => {
   const names = ["Glasss_Jaw", "has space", "ab", "a".repeat(17), `na${ch(0xEF)}ve`, "", `${WORD}_99`, stretched(DOUBLED), `${stretched(DOUBLED)}_1`,
     `xX_${ANYWHERE}_Xx`, "Mississippi", "Cockrell_Titus", "alice", mathBold("alice")];

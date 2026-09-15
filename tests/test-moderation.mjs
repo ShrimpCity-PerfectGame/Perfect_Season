@@ -281,7 +281,10 @@ await runTest("mod_act rename refuses invalid, taken and blocked names, and rena
   for (const name of ["ab", "x".repeat(17), "has space", "bad-name", "émile", "bob\n", "", null]) await refusedAs(name, "invalid");
   for (const name of ["carol", "bob"]) await refusedAs(name, "taken"); // bob's own name is taken too
   for (const name of [BLOCKED, `${BLOCKED.toUpperCase()}_99`]) await refusedAs(name, "blocked");
-  const unchanged = (await db.query("select (select username from profiles where id = $1) as name, (select count(*)::int from reports where status = 'open') as open", [ID.bob])).rows[0];
+  // A reserved name another account holds, in any capitalization, is taken too (1.11.1).
+  await addAccount(db, { id: uuid(90), username: "admin" });
+  for (const name of ["Admin", "ADMIN"]) await refusedAs(name, "taken");
+  const unchanged =(await db.query("select (select username from profiles where id = $1) as name, (select count(*)::int from reports where status = 'open') as open", [ID.bob])).rows[0];
   assert(unchanged.name === "bob" && unchanged.open === 2, `no refusal renamed anyone or resolved anything: ${JSON.stringify(unchanged)}`);
 
   const ok = await act(db, ID.alice, ID.bob, "rename", "Bobby_2");

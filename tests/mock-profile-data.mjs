@@ -13,6 +13,9 @@ import {
   AVATAR_BUCKET, AVATAR_TYPES, AVATAR_MAX_BYTES,
 } from "../profile-rules.mjs";
 
+// Usernames only one account may hold in any capitalization (migration-profiles.sql's username_is_reserved).
+export const RESERVED_USERNAMES = ["admin"];
+
 // ---------- The word filter ----------
 // The list migration-profiles.sql seeds, copied. test-word-filter.mjs fails if the two ever differ.
 // Profanity matches as a whole word, slurs anywhere - except where a slur is part of ordinary words or
@@ -146,6 +149,10 @@ export function makeProfileData(state, { playerStats }) {
 
   // Reads the table live, so a test can add or remove words through auth._blockedWords.
   const isClean = (text) => textIsClean(text, blockedWords.values());
+  // migration-profiles.sql's username_is_reserved: a reserved name that some account already holds, in any
+  // capitalization.
+  const isReservedUsername = (name) => typeof name === "string" && RESERVED_USERNAMES.includes(name.toLowerCase())
+    && [...state.profiles.values()].some((r) => String(r.username).toLowerCase() === name.toLowerCase());
 
   const detailsJson = (d) => (d ? { user_id: d.user_id, bio: d.bio, avatar_path: d.avatar_path, avatar_preset: d.avatar_preset, favorite_team: d.favorite_team, updated_at: d.updated_at } : null);
   function upsertDetails(uid, patch) {
@@ -183,6 +190,7 @@ export function makeProfileData(state, { playerStats }) {
     check_username({ p_username = null } = {}) {
       if (typeof p_username !== "string" || !USERNAME_RE.test(p_username)) return "invalid";
       if ([...state.profiles.values()].some((r) => r.username === p_username)) return "taken";
+      if (isReservedUsername(p_username)) return "taken";
       if (!isClean(p_username)) return "blocked";
       return "ok";
     },
@@ -273,6 +281,7 @@ export function makeProfileData(state, { playerStats }) {
     rpcs,
     storage,
     isClean,
+    isReservedUsername,
     objects,
   };
 }

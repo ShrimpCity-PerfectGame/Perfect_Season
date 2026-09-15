@@ -628,6 +628,8 @@ const EXPECTED_FUNCTIONS = {
   "stats_card(p jsonb)": [false, "public", true, true],
   "text_is_clean(t text)": [true, PG_TEMP_LAST, false, false],
   "use_account_username()": [false, PG_TEMP_LAST, false, false],
+  // 1.11.1: only check_username, the signup trigger and mod_act ask it, running as its owner.
+  "username_is_reserved(p_username text)": [false, PG_TEMP_LAST, false, false],
 };
 
 await runTest("6a. every public function is the expected one: definer or invoker, its search_path, and who may execute it", async () => {

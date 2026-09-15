@@ -164,7 +164,9 @@ begin
     if p_new_name is null or p_new_name !~ '^[A-Za-z0-9_]{3,16}$' then
       raise exception 'invalid' using errcode = 'P0001';
     end if;
-    if exists (select 1 from profiles where username = p_new_name) then
+    -- A reserved name another account holds in any capitalization counts as taken
+    -- (migration-profiles.sql's username_is_reserved).
+    if exists (select 1 from profiles where username = p_new_name) or username_is_reserved(p_new_name) then
       raise exception 'taken' using errcode = 'P0001';
     end if;
     if not text_is_clean(p_new_name) then

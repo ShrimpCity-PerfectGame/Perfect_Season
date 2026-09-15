@@ -281,13 +281,28 @@ $$;
 
 -- ---------- Usernames ----------
 
+-- Names only one account may hold, in any capitalization (1.11.1). Usernames are otherwise unique only as
+-- typed, but "admin" unlocks the testing tools on the draft screen whatever its capitalization
+-- (perfect-season.jsx compares it lowercased) - so once an account has it, "Admin" or "ADMIN" can't be
+-- signed up with or renamed to. The first account to take the name keeps it, so a fresh database (the
+-- tests', or a new project) can still create it.
+create or replace function public.username_is_reserved(p_username text)
+returns boolean language sql stable security invoker set search_path = public, pg_temp as $$
+  select lower(coalesce(p_username, '')) in ('admin')
+     and exists (select 1 from profiles where lower(username) = lower(p_username));
+$$;
+-- Only the functions below ask it (they run as its owner).
+revoke execute on function public.username_is_reserved(text) from public, anon, authenticated;
+
 -- Whether a username can be signed up with, asked before signing up so the form can say why not:
--- ok | taken | blocked | invalid. Anyone may call it; the signup trigger checks again regardless.
+-- ok | taken | blocked | invalid. Anyone may call it; the signup trigger checks again regardless. A
+-- reserved name another account already holds, in any capitalization, is taken.
 create or replace function public.check_username(p_username text)
 returns text language sql stable security definer set search_path = public, pg_temp as $$
   select case
     when p_username is null or p_username !~ '^[A-Za-z0-9_]{3,16}$' then 'invalid'
     when exists (select 1 from profiles where username = p_username) then 'taken'
+    when username_is_reserved(p_username) then 'taken'
     when not text_is_clean(p_username) then 'blocked'
     else 'ok'
   end;
@@ -308,6 +323,10 @@ begin
   -- profile-rules.mjs's USERNAME_RE, the same rule as check_username's 'invalid'.
   if v_username is null or v_username !~ '^[A-Za-z0-9_]{3,16}$' then
     raise exception 'username_invalid' using errcode = 'P0001';
+  end if;
+  -- "Admin" once someone has "admin" (username_is_reserved above).
+  if public.username_is_reserved(v_username) then
+    raise exception 'username_reserved' using errcode = 'P0001';
   end if;
   -- The word filter, which also reads every run of three or more of one letter cut to two, so a blocked
   -- word hidden by tripling a doubled letter ("Asssshole") is refused here too.

@@ -105,7 +105,7 @@ export function makeModeration(state, profileData) {
         // PostgREST hands the database a JSON number as text, so a number is checked as its digits.
         const name = p_new_name == null ? null : String(p_new_name);
         if (name == null || !USERNAME_RE.test(name)) fail("invalid");
-        if (byName(name)) fail("taken");
+        if (byName(name) || profileData.isReservedUsername(name)) fail("taken");
         if (!profileData.isClean(name)) fail("blocked");
         state.profiles.get(p_user_id).username = name;
         for (const table of [state.runs, state.dailyRuns, state.souRuns, state.builds]) {

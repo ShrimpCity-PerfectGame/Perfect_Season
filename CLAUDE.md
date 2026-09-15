@@ -344,7 +344,11 @@ unlocks an `AdminPanel` on the active draft screen: jump to any team+era board i
 specific named player into any open slot, or force a scripted season ending (perfect/champ/lose-
 each-playoff-round/missed-playoffs) via `forceSeason()`. Forced outcomes skip every persistence
 side effect in `finish()` (stats, leaderboard, daily storage) — a forced Unlimited ending does clear its saved draft, so it can't resurface or be charged as a DNF later — use this account to check
-win/loss animations instead of fighting the RNG or hand-rolling a fixture.
+win/loss animations instead of fighting the RNG or hand-rolling a fixture. The panel is gated only in the
+browser, by name, so it must never gain anything that writes real data. Since 1.11.1 the name is reserved:
+once an account holds `admin`, no other capitalization can sign up with it or be renamed to it
+(`username_is_reserved` in `migration-profiles.sql`). On production the owner holds `admin`, which is also
+the site's moderator; on a fresh database (tests, staging) the first account to take it keeps it.
 
 ## Design system
 
