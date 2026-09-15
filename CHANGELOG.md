@@ -13,6 +13,36 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.11.0] — 2026-09-15
+
+### Added
+
+- **Profiles for everyone.** Tap a name on the Leaderboard, on Stats or on the Over/Under board to open
+  that player's profile. Every profile has its own link (gridspin.app/u/name), Back takes you to where you
+  were, and guests can look too.
+- **Your picture.** Upload a photo and drag and zoom it into the circle, or pick one of 12 default
+  avatars. Photos are resized in your browser, and hidden details - including a phone photo's location -
+  are removed before anything is uploaded. Your picture shows in the header.
+- **A bio and a favorite team** on your player card.
+- **22 badges**, from First Down to Every Single Day. They count what you've already done, so the ones
+  you've earned are already on your profile. Your three best sit on your card.
+- **Personal stats:** seasons by wins, your record in each mode, best lineups, the players and team you
+  draft most, your biggest upset, best GM score, Over/Under and Build-a-player bests, and recent drafts.
+- **Report.** Signed-in players can report a profile's picture, bio or username. Moderators get a
+  Reports queue to remove a picture, clear a bio, rename a player or dismiss a report.
+- **Share profile** sends a link to your profile (the share sheet on phones, a copied link on a computer).
+
+### Changed
+
+- **Bios and new usernames are checked against a blocked-word list**, and usernames must be 3 to 16
+  letters, numbers and underscores however an account is created.
+- The profile no longer shows the points bank; ladder points are still there.
+
+### Fixed
+
+- **Over/Under and Build-a-player scores always show the player's own name**, and a malformed
+  Build-a-player result can no longer break the Stats screen.
+
 ## [1.10.1] — 2026-09-14
 
 Fixes from a full review of the 1.8.1–1.10.0 releases.
