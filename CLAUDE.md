@@ -290,7 +290,8 @@ overwrite each other.
   east coast) shared a key and the second paid nothing.
 - **Accepted gaps, priced by `tests/test-economy-security.mjs`** (which prints them): the minigames are
   browser-written, so `claim_minigame` pays 15 a game day per game to anyone with the row (an Over/Under row for the
-  day, or a build from the last 24 hours) - about 30 coins a day without playing, no more than an honest player - and their badges (Stat
+  day, or a build from the last 24 hours) - 30 coins a day without playing (up to 90 at once, claiming the three days a
+  time zone could call today), no more than an honest player over time - and their badges (Stat
   Nerd, Mad Scientist) pay nothing; the Genius flag is the client's word (Big Brain, the Genius ladder); and codes
   are the client's choice, so searching codes offline for 20-0 seasons tops out around 7,000 coins a day. Closed in
   v1.12.0: submit-run refuses a GM season over the cap, ignores GM/Genius flags on a Daily, and `replayDraft`

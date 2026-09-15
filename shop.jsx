@@ -344,9 +344,18 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
   // The detail row opens under its tile's row, which on a phone can be below the screen.
   useEffect(() => { if (selected) detailRef.current?.scrollIntoView?.({ block: "nearest" }); }, [selected]);
   // Buy and Confirm purchase replace each other, and an answered action swaps its buttons (a button that's
-  // disabled or removed drops the keyboard to the top of the page): keep it in the selected item's details.
+  // disabled or removed drops the keyboard to the top of the page): keep it in the selected item's details - or,
+  // on the Showcase tab, where Save showcase disables itself while saving and once saved, in the showcase.
   function refocus() {
-    if (!selected || document.activeElement !== document.body) return;
+    // Lost means on the page itself - or still on a button that's been disabled or removed, which Chrome reports
+    // until it moves focus to the page a moment later.
+    const el = document.activeElement;
+    if (el && el !== document.body && !el.disabled && document.contains(el)) return;
+    if (tab === "showcase") {
+      document.getElementById(`${id}-panel`)?.querySelector("input:not(:disabled), button:not(:disabled)")?.focus();
+      return;
+    }
+    if (!selected) return;
     (detailRef.current?.querySelector("button:not(:disabled)") || document.getElementById(`${id}-pick-${selected}`))?.focus();
   }
   useEffect(() => { if (confirming) confirmRef.current?.focus(); else refocus(); }, [confirming]);

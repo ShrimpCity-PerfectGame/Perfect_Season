@@ -2217,12 +2217,17 @@ export default function PerfectSeason() {
     // successful submitRun) escape uncaught - callers like onAuthed already cleared `pending`
     // by this point, so an unhandled rejection here would lose track of whether the run was
     // actually saved with no way for the caller to react.
+    // The account this save belongs to: an answer that lands after a sign-out (or a different sign-in) mustn't
+    // write this account's stats, name or balance back.
+    const account = accountReq.current;
     try {
       const res = await submitRun(trace);
       let fresh = null;
       if (res.ok) {
+        // The balance the save left, straight from its answer, for a profile card that's already open.
+        if (res.coins && account === accountReq.current) onShopBalance(res.coins.balance);
         fresh = await fetchProfile(uid);
-        if (fresh) {
+        if (fresh && account === accountReq.current) {
           setStats(fresh);
           // The name as it is now: a moderator may have renamed this account since it signed in, and the shop and
           // the minigame boards look the player up by it.
@@ -2321,7 +2326,8 @@ export default function PerfectSeason() {
     const req = ++walletReq.current;
     fetchWallet().then((w) => { if (w && account === accountReq.current && req === walletReq.current) setWallet(w); });
   }
-  // ShopScreen's onBalance: the balance it just loaded or spent down to.
+  // A balance just learned - ShopScreen's onBalance, or what a save or a claim answered with. It outranks any wallet
+  // read still on its way.
   function onShopBalance(balance) {
     walletReq.current++;
     setWallet((w) => ({ ...w, balance }));
@@ -2336,6 +2342,7 @@ export default function PerfectSeason() {
       const res = await claimMinigameCoins(game, date);
       if (account !== accountReq.current || !res?.ok || !(res.credited > 0)) return;
       onCredited(res.credited);
+      onShopBalance(res.balance); // for a profile card that's already open
     } catch (e) {
       // No coins shown; the game's own screen is unaffected.
     }

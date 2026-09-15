@@ -695,7 +695,7 @@ await runTest("5f. a pack's avatars need that pack bought: none without it, anot
 
 // ---------- 6. Earning in the database ----------
 
-await runTest("6a. claim_minigame pays without a game played - the browser writes its own row, dated however it likes - but never more than 15 a game and 30 a UTC day, and never for another player's row", async () => {
+await runTest("6a. claim_minigame pays without a game played - the browser writes its own row, dated however it likes - but never more than 15 a game day, three days of each game at most at once, and never for another player's row", async () => {
   const P = await account("claimer"), Q = await account("bystander");
   const today = utcDate(Date.now());
   const claimsToday = async (uid) => (await owner("select coalesce(sum(amount), 0)::int as coins, count(*)::int as n from wallet_ledger where user_id = $1 and kind = 'minigame' and created_at >= $2", [uid, iso(utcMidnight())]))[0];
@@ -724,6 +724,24 @@ await runTest("6a. claim_minigame pays without a game played - the browser write
   }
   assert(same(await claimsToday(P), { coins: 30, n: 2 }), "30 again the next day, and no more");
   assert(/permission denied for function claim_minigame/.test((await call(null, "claim_minigame", { p_game: "build" })).error || ""), "anon can't claim");
+
+  // With the game's day, as the app sends it: each day some time zone could call today (UTC yesterday, today and
+  // tomorrow) is its own key, so a row forged for each claims three days of a game at once - 90 coins for both
+  // games - and after that, still one day of each a day. A day outside the window, or no day (the UTC date, the same
+  // key as today's), pays nothing more.
+  const R = await account("dayahead");
+  const midnight = utcMidnight();
+  const days = [utcDate(midnight - 1), utcDate(Date.now()), utcDate(midnight + 24 * 3600 * 1000)];
+  for (const day of days) await attempt(R, "insert into sou_runs (date, user_id, username, score) values ($1, $2, 'x', 1)", [day, R]);
+  await attempt(R, "insert into builds (user_id, username, pos, overall, filled) values ($1, 'x', 'QB', 1, '{}')", [R]);
+  let burst = 0;
+  for (const game of ["over_under", "build"]) {
+    for (const day of [...days, null, utcDate(midnight - 24 * 3600 * 1000 - 1)]) {
+      const r = await call(R, "claim_minigame", day ? { p_game: game, p_date: day } : { p_game: game });
+      burst += r.data?.credited || 0;
+    }
+  }
+  assert(burst === 6 * COIN_RULES.minigame, `at most three days of each game at once (${6 * COIN_RULES.minigame} coins), got ${burst}`);
 });
 
 await runTest("6b. the service functions' numbers at their edges - bigint and integer extremes, a number past what numeric rounds, 10,000-entry lists - are refused with their code, or pay exactly what they say", async () => {
@@ -1218,7 +1236,7 @@ await runTest("10. the economy from real seasons graded as submit-run grades the
   }
   if (accepted) lines.push(`game-logic.mjs replayDraft accepts a trace that passes over boards it could pick from (${accepted} of ${traces} such traces); taking only boards with a 110+ player raised a best-available drafter's team score by ${(gain / traces).toFixed(1)} on average`);
   lines.push("the Genius flag is the client's word (it only hides stats on screen): a Genius title pays Big Brain's 300 coins and counts on the Genius ladder, unverifiable");
-  lines.push(`Over/Under and Build-a-player rows are browser-written, so claim_minigame pays ${2 * COIN_RULES.minigame} coins a UTC day without a game played - no more than an honest player's claims`);
+  lines.push(`Over/Under and Build-a-player rows are browser-written, so claim_minigame pays ${2 * COIN_RULES.minigame} coins a day without a game played (${6 * COIN_RULES.minigame} at once, claiming the three days a time zone could call today) - no more than an honest player's claims over time`);
   lines.push(`codes are the client's choice and a lineup's season is known before it's sent, so searching codes offline for 20-0 seasons pays at most about ${economy.ceiling ?? "?"} coins a day (a Legendary in ${economy.ceiling ? (LAUNCH_PRICES.legendary / economy.ceiling).toFixed(1) : "?"} days)`);
   console.log(`  known gaps still open (${lines.length}):`);
   for (const line of lines) console.log(`    - ${line}`);

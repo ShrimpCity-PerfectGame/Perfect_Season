@@ -436,5 +436,71 @@ await runTest("the next account to sign in on the device doesn't see the last ac
   assert(!coinsOf(container) && !container.querySelector(".result-hero .sc-dup"), `but not what it paid shopper, got: ${container.querySelector(".result-hero")?.textContent}`);
 });
 
+// Holds submit-run's season saves until release(). By default the call itself waits, so nothing is written before
+// then; with answerOnly the save goes through at once and only its answer waits, as on a slow connection.
+function holdSaves(someAuth, { answerOnly = false } = {}) {
+  const invoke = someAuth.functions.invoke;
+  const held = { release: null, restore: () => { someAuth.functions.invoke = invoke; } };
+  someAuth.functions.invoke = (name, opts) => {
+    if (name !== "submit-run" || opts?.body?.dnf) return invoke(name, opts);
+    const answer = answerOnly ? invoke(name, opts) : null;
+    return new Promise((resolve) => { held.release = () => resolve(answer || invoke(name, opts)); });
+  };
+  return held;
+}
+async function newSignedInPage(email, username) {
+  await close();
+  const pageAuth = makeMockAuth();
+  await pageAuth.auth.signUp({ email, password: "Password1", options: { data: { username } } });
+  container = await open("http://localhost/", pageAuth);
+  await until(() => container.querySelector(".whoami"), `${username} signed in`);
+  return pageAuth;
+}
+async function draftSixPicks() {
+  await click(tab(container, "Modes"));
+  await flush();
+  await clickMode(container, "Unlimited");
+  await flush(3);
+  for (let round = 0; round < 6; round++) await draftFirstEligible(container);
+}
+
+await runTest("your profile card, already open when a season's save answers, shows the balance it left", async () => {
+  const pageAuth = await newSignedInPage("livecard@example.com", "livecard");
+  const held = holdSaves(pageAuth);
+  try {
+    await draftSixPicks();
+    await until(() => held.release, "the season's save, held");
+    await click(container.querySelector(".whoami"));
+    await until(() => profileOf(container)?.dataset.owner === "true", "your own profile");
+    await until(() => spoken(profileOf(container)).includes("250 coins"), () => `250 coins before the save answers, got: ${spoken(profileOf(container)).slice(0, 300)}`);
+    const { act } = await import("react-dom/test-utils");
+    await act(async () => { held.release(); });
+    const id = [...pageAuth._profiles.values()].find((p) => p.username === "livecard").id;
+    await until(() => pageAuth._wallet.balanceOf(id) > 250, "the save to pay");
+    const balance = pageAuth._wallet.balanceOf(id);
+    await until(() => spoken(profileOf(container)).includes(`${num(balance)} coins`), () => `the ${balance} coins the save left, got: ${spoken(profileOf(container)).slice(0, 300)}`);
+  } finally {
+    held.restore();
+  }
+});
+
+await runTest("a save that answers after signing out puts nothing of that account back", async () => {
+  const pageAuth = await newSignedInPage("racer@example.com", "racer");
+  const held = holdSaves(pageAuth, { answerOnly: true });
+  try {
+    await draftSixPicks();
+    await until(() => held.release, "the season's save, held");
+    const { act } = await import("react-dom/test-utils");
+    await act(async () => { await pageAuth.auth.signOut(); }); // another tab, or the session ending
+    await flush(6);
+    assert(!container.querySelector(".whoami"), "signed out");
+    await act(async () => { held.release(); });
+    await flush(12);
+    assert(!container.querySelector(".whoami") && tab(container, "Account"), `still signed out after the late answer, got: ${text(container).slice(0, 200)}`);
+  } finally {
+    held.restore();
+  }
+});
+
 await close();
 console.log("test-shop-flow.mjs done");

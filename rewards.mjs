@@ -19,7 +19,7 @@ export const COIN_RULES = Object.freeze({
   pointsPer: 10, // 1 coin per this many ladder points the draft earned, when it earned any
   streakPerDay: 5, // a Daily only: per day of the streak it makes...
   streakMax: 50, // ...up to this
-  minigame: 15, // Over/Under and Build-a-player, once each per UTC day (SQL: claim_minigame)
+  minigame: 15, // Over/Under and Build-a-player, once each per game day in the player's calendar (SQL: claim_minigame)
   paidSeasonsPerDay: 20, // Unlimited/Genius/GM seasons that pay per UTC day; Dailies don't count toward it
   welcome: 250, // a new account (SQL: create_wallet)
   startingCap: 10000, // the one-time starting balance's cap (SQL: the backfill)
