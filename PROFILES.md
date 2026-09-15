@@ -354,7 +354,7 @@ isn't a picture we can use. Try a JPEG or PNG." Respect reduced motion.
 | `rank` | `{ fantasy, standard }` — 1-based sitewide rank of each best score, or null values |
 | `moderator` | `{ openReports }` when a moderator views their own profile, else null |
 | `onRetry()` | reload after an error |
-| `onShare()` | `→ Promise<"shared" \| "copied" \| "failed">` |
+| `onShare()` | `→ Promise<"shared" \| "copied" \| "failed" \| "cancelled">` ("cancelled": the share sheet was closed; no status shown) |
 | `onDetailsSaved(details)` | after any bio/team/picture save succeeds |
 | `onLogOut()`, `onPlay()`, `onOpenReports()` | owner actions |
 
@@ -419,8 +419,8 @@ has a visible focus ring, and gets a `pointer:coarse` hit area per CLAUDE.md.
 (status loading → ok/missing/error). Rank: `fetchOwnRank` for each best score, in parallel. Header
 picture: `fetchProfileDetails(userId)` at session restore and login, updated from `onDetailsSaved`.
 Moderator: `isModerator()` at session restore and login; for a moderator viewing their own profile,
-`moderator = { openReports: queue.length }` from `fetchModQueue()`. Share: `navigator.share` when
-available, else copy `${APP_SITE_URL}${profilePath(name)}` to the clipboard.
+`moderator = { openReports: queue.length }` from `fetchModQueue()`. Share: `navigator.share` on phones
+(like the result screen's Share), else copy `${APP_SITE_URL}${profilePath(name)}` to the clipboard.
 
 **Signup.** In AuthPanel's signup, after the existing username rule passes, `checkUsername(username)`:
 `taken` → "That username is taken. Try another one."; `blocked` → "That username isn't allowed. Try

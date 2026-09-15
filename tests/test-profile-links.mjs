@@ -235,11 +235,23 @@ await runTest("Share profile shares or copies the profile's address", async () =
   await flush(3);
   assert(copied === "https://gridspin.test/u/topdog", `expected the profile's address copied, got: ${copied}`);
 
+  // A computer copies even where the browser has a share sheet; a phone opens the sheet.
   let shared = null;
   Object.defineProperty(window.navigator, "share", { value: async (data) => { shared = data; }, configurable: true });
+  copied = null;
+  await click(findButtonByText(profileOf(container), "Share profile"));
+  await flush(3);
+  assert(shared === null && copied === "https://gridspin.test/u/topdog", `expected a computer to copy, got share ${JSON.stringify(shared)}, copy ${copied}`);
+  Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148", configurable: true });
   await click(findButtonByText(profileOf(container), "Share profile"));
   await flush(3);
   assert(shared?.url === "https://gridspin.test/u/topdog", `expected the share sheet to get the address, got: ${JSON.stringify(shared)}`);
+  // Closing the sheet without sharing shows no status.
+  Object.defineProperty(window.navigator, "share", { value: async () => { throw Object.assign(new Error("closed"), { name: "AbortError" }); }, configurable: true });
+  await click(findButtonByText(profileOf(container), "Share profile"));
+  await flush(3);
+  const status = profileOf(container).querySelector("[role=status]")?.textContent || "";
+  assert(status === "", `expected no share status after closing the sheet, got "${status}"`);
 });
 
 let linkerId = null;

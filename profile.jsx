@@ -9,7 +9,8 @@
 //   rank            { fantasy, standard }: 1-based sitewide rank of each best score, or null values
 //   moderator       { openReports } for a moderator looking at their own profile, otherwise null
 //   onRetry()       reload after an error
-//   onShare()       -> Promise<"shared" | "copied" | "failed">: share or copy the profile link
+//   onShare()       -> Promise<"shared" | "copied" | "failed" | "cancelled">: share or copy the profile
+//                      link ("cancelled": the share sheet was closed, so no status is shown)
 //   onDetailsSaved(details)  after the bio, favorite team or picture is saved (mapDetails shape)
 //   onLogOut()      owner only
 //   onPlay()        owner with no drafts yet: go to the draft

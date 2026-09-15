@@ -693,8 +693,6 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .tile{border-top:3px solid var(--ink);padding:10px 2px 0}
 .tile .n{font-family:var(--display);font-weight:400;font-size:38px;line-height:1}
 .tile .l{font-size:13px;color:var(--muted);margin-top:4px}
-.who{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:14px}
-.who .nm{font-family:var(--display);font-weight:400;font-size:40px;line-height:1}
 .frow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .inp{font:inherit;font-size:16px;padding:9px 11px;border:2px solid var(--line2);border-radius:10px;min-width:0;flex:1;max-width:260px;color:var(--ink);background:var(--surface)}
 .inp:focus{outline:none;border-color:var(--accent-ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent-ink) 25%,transparent)}
@@ -742,7 +740,6 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .modal li b{color:var(--ink)}
 .modal .small{font-size:13px;color:var(--muted);margin:0 0 14px;line-height:1.45}
 .sharebox{width:100%;min-height:150px;font:13px/1.45 ui-monospace,Menlo,monospace;background:var(--surface2);color:var(--ink);border:2px solid var(--line2);border-radius:10px;padding:10px;margin-top:10px}
-.bankrow{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .flexnote{border-left:3px solid var(--accent-ink);padding-left:12px;margin-top:10px}
 
 /* ===== positions and grades ===== */
@@ -1077,7 +1074,6 @@ button.pill{font-family:inherit;transition:border-color .12s}
   .rc.rank{grid-template-columns:24px minmax(0,1fr) auto}.rc.rank .alt{grid-column:auto}
   .cell .l,.pp,.slot .sub{font-size:12px}
   .ps select.inp{flex:1 1 130px}
-  .who .nm{font-size:clamp(28px,11vw,40px);overflow-wrap:anywhere}
 }
 @media (max-width:480px){
   .sticky .sp,.sticky .brk{display:none}
@@ -1990,10 +1986,13 @@ export default function PerfectSeason() {
   // The share sheet where the device has one, otherwise the address copied.
   async function shareProfile(name) {
     const url = `${APP_SITE_URL || window.location.origin}${profilePath(name)}`;
-    if (navigator.share) {
+    // The share sheet on phones only, like the result screen's Share: on a computer, copying the link is
+    // what people expect.
+    if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
       try { await navigator.share({ title: `${name} on Gridspin`, url }); return "shared"; }
-      // Closing the share sheet is a choice, not a failure; anything else falls back to copying.
-      catch (e) { if (e?.name === "AbortError") return "shared"; }
+      // Closing the share sheet is a choice, not a failure, and nothing was shared - no status to show.
+      // Anything else falls back to copying.
+      catch (e) { if (e?.name === "AbortError") return "cancelled"; }
     }
     try { await navigator.clipboard.writeText(url); return "copied"; } catch (e) { return "failed"; }
   }

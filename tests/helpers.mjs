@@ -222,7 +222,9 @@ export async function click(el) {
 export async function type(el, value) {
   const act = await getAct();
   await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    // A <textarea>'s value setter lives on its own prototype, not HTMLInputElement's.
+    const proto = el instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
     setter.call(el, value);
     el.dispatchEvent(new window.Event("input", { bubbles: true }));
     el.dispatchEvent(new window.Event("change", { bubbles: true }));
