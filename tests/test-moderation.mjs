@@ -364,8 +364,17 @@ await runTest("moderators can read and delete any picture in the avatars bucket,
   assert(/row-level security/.test(insert.error || ""), `a moderator can't upload into someone's folder: ${describe(insert)}`);
   const update = await run(db, ID.alice, "update storage.objects set name = $1 where name = $2 returning id", [`${ID.carol}/1757800000002.jpg`, carolPath]);
   assert(update.rows?.length === 0, `a moderator can't change someone's picture: ${describe(update)}`);
+  // A delete that reads rows (a where clause, returning) is also held to the select policies, so only a bare
+  // delete shows that the delete policy itself stays inside the avatars bucket.
+  const bare = await run(db, ID.alice, "delete from storage.objects");
+  assert(!bare.error, `a bare delete runs: ${bare.error}`);
+  const afterBare = (await db.query("select bucket_id || '/' || name as key from storage.objects")).rows.map((r) => r.key);
+  assert(afterBare.join() === `other/${bobPath}`, `a moderator's delete never reaches another bucket: ${afterBare}`);
+
+  await db.query("insert into storage.objects (bucket_id, name, owner) values ('avatars', $1, $2)", [carolPath, ID.carol]);
   await db.exec("delete from moderators");
   assert((await names(ID.alice, "avatars")).length === 0 && (await removed(ID.alice, "avatars", carolPath)) === 0, "a removed moderator loses both");
+  assert((await db.query("select count(*)::int as n from storage.objects where name = $1", [carolPath])).rows[0].n === 1, "carol's picture is still there");
 });
 
 // ---------- The mock against the SQL ----------
@@ -441,7 +450,8 @@ await runTest("the mock gives the same answers as the SQL for one shared sequenc
   const mockFilterLive = (await mock.rpc("check_username", { p_username: BLOCKED })).data === "blocked";
   if (!mockFilterLive) console.log("\n    (the blocked-name step is left out until the mock's word filter is in)");
 
-  const erinFiles = [["Bob_2", "picture"], ["Bob_2", "bio"], ["Bob_2", "username"], ["carol", "picture"], ["carol", "bio"], ["carol", "username"], ["carol", "other"], ["dave", "picture"], ["dave", "bio"]];
+  // bob is renamed CAROL partway through: a change of case from another player's name is still a new exact name.
+  const erinFiles = [["CAROL", "picture"], ["CAROL", "bio"], ["CAROL", "username"], ["carol", "picture"], ["carol", "bio"], ["carol", "username"], ["carol", "other"], ["dave", "picture"], ["dave", "bio"]];
   const STEPS = [
     [null, "report_player", { p_username: "bob", p_reason: "bio" }],
     ["carol", "report_player", { p_username: "nobody", p_reason: "bio" }],
@@ -450,6 +460,8 @@ await runTest("the mock gives the same answers as the SQL for one shared sequenc
     ["carol", "report_player", { p_username: "bob", p_reason: "spam" }],
     ["carol", "report_player", { p_username: "bob" }],
     ["carol", "report_player", { p_username: "bob", p_reason: "bio", p_note: "x".repeat(201) }],
+    // The database trims spaces, tabs and line breaks only, so non-breaking spaces still count.
+    ["carol", "report_player", { p_username: "bob", p_reason: "bio", p_note: `\u00a0${"x".repeat(199)}\u00a0` }],
     ["carol", "report_player", { p_username: "bob", p_reason: "bio", p_note: ` \t${"x".repeat(200)}\r\n` }],
     ["carol", "report_player", { p_username: "bob", p_reason: "bio", p_note: "again" }],
     ["carol", "report_player", { p_username: "bob", p_reason: "picture", p_note: "😀".repeat(200) }],
@@ -475,17 +487,19 @@ await runTest("the mock gives the same answers as the SQL for one shared sequenc
     ["alice", "mod_act", { p_user_id: "@bob", p_action: "rename", p_new_name: "carol" }],
     ["alice", "mod_act", { p_user_id: "@bob", p_action: "rename", p_new_name: "bob" }],
     ...(mockFilterLive ? [["alice", "mod_act", { p_user_id: "@bob", p_action: "rename", p_new_name: BLOCKED }]] : []),
-    ["alice", "mod_act", { p_user_id: "@bob", p_action: "rename", p_new_name: "Bob_2" }],
+    ["alice", "mod_act", { p_user_id: "@bob", p_action: "rename", p_new_name: "CAROL" }],
     ["carol", "report_player", { p_username: "bob", p_reason: "picture" }],
-    ["carol", "report_player", { p_username: "Bob_2", p_reason: "bio" }],
+    ["carol", "report_player", { p_username: "CAROL", p_reason: "bio" }],
     ["alice", "mod_queue", {}],
     ["alice", "mod_act", { p_user_id: "@dave", p_action: "dismiss" }],
-    // erin has one report already; nine more make ten, then the limit - checked before duplicates.
+    ["alice", "mod_act", { p_user_id: "@bob", p_action: "dismiss" }],
+    // erin's one report so far has just been dismissed, and still counts: nine more make ten, then the limit,
+    // which is checked before duplicates.
     ...erinFiles.map(([p_username, p_reason]) => ["erin", "report_player", { p_username, p_reason }]),
     ["erin", "report_player", { p_username: "dave", p_reason: "username" }],
-    ["erin", "report_player", { p_username: "Bob_2", p_reason: "picture" }],
+    ["erin", "report_player", { p_username: "CAROL", p_reason: "picture" }],
     ["alice", "mod_queue", {}],
-    ["alice", "mod_act", { p_user_id: "@bob", p_action: "dismiss" }],
+    ["alice", "mod_act", { p_user_id: "@carol", p_action: "dismiss" }],
     ["alice", "mod_queue", {}],
   ];
 
@@ -526,7 +540,9 @@ await runTest("the mock gives the same answers as the SQL for one shared sequenc
     d = firstDiff(usernames(sqlRows, S), usernames(rows, M));
     assert(!d, `${table} usernames differ: ${d}`);
   }
-  assert((await db.query("select username from profiles where id = $1", [ID.bob])).rows[0].username === "Bob_2", "bob ends up renamed");
+  assert((await db.query("select username from profiles where id = $1", [ID.bob])).rows[0].username === "CAROL", "bob ends up renamed");
+  const erinLast = sqlReports.filter((r) => r.reporter_id === ID.erin).length;
+  assert(erinLast === 10, `erin stopped at 10 reports, got ${erinLast}`);
   const detailRows = (rows, side) => sorted(rows.map((r) => canonical({ who: r.user_id, bio: r.bio, avatar_path: r.avatar_path, avatar_preset: r.avatar_preset, favorite_team: r.favorite_team }, side.labels)));
   d = firstDiff(detailRows((await db.query("select * from profile_details")).rows, S), detailRows([...mock._profileDetails.values()], M));
   assert(!d, `profile details differ: ${d}`);
@@ -864,6 +880,7 @@ await runTest("ModerationQueue: Rename player asks for the name, confirms it, sa
   await type(field(), "b!");
   await click(buttonIn(bob(), "Next"));
   assert(errorIn(bob()) === USERNAME_RULE && !bob().querySelector(".md-ask"), `the username rule is checked before asking: ${errorIn(bob())}`);
+  assert(field().getAttribute("aria-describedby") === bob().querySelector(".err").id && field().getAttribute("aria-invalid") === "true", "the message is tied to the name field");
 
   await type(field(), "carol");
   await click(buttonIn(bob(), "Next"));

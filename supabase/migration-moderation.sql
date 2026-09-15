@@ -206,12 +206,13 @@ grant execute on function public.mod_act(uuid, text, text) to anon, authenticate
 -- Moderators can read and delete any picture in the avatars bucket (deleting through the Storage API
 -- needs select as well as delete). These sit beside migration-profiles.sql's own-folder policies;
 -- policies are permissive, so a player keeps access to their own folder and a moderator gets the rest.
+-- is_moderator() is wrapped in a select so Postgres asks once per statement, not once per object.
 drop policy if exists "moderators can read any avatar" on storage.objects;
 create policy "moderators can read any avatar" on storage.objects
   for select to authenticated
-  using (bucket_id = 'avatars' and public.is_moderator());
+  using (bucket_id = 'avatars' and (select public.is_moderator()));
 
 drop policy if exists "moderators can delete any avatar" on storage.objects;
 create policy "moderators can delete any avatar" on storage.objects
   for delete to authenticated
-  using (bucket_id = 'avatars' and public.is_moderator());
+  using (bucket_id = 'avatars' and (select public.is_moderator()));

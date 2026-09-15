@@ -75,6 +75,7 @@ export const MODERATION_CSS = `
 .md-step{margin-top:12px;padding:12px;border-radius:12px;background:var(--surface2);display:grid;gap:10px;min-width:0}
 .md-queue .md-ask{margin:0;font-size:15px;font-weight:700;color:var(--ink);overflow-wrap:anywhere}
 .md-step .md-label{margin-bottom:-6px}
+.md-error{font-size:14px}
 .btn.md-danger{background:var(--loss);border-color:var(--loss);color:var(--bg)}
 
 @media (hover:hover){
@@ -88,6 +89,16 @@ export const MODERATION_CSS = `
 @media (min-width:600px){
   .md-scrim{padding:24px 16px}
   .md-sheet{margin:auto;border-bottom:2px solid var(--ink);border-radius:18px;padding:22px 22px 20px;box-shadow:8px 8px 0 var(--hard)}
+}
+/* Short landscape phones: the reasons share one row, each as wide as its label, and the note field shrinks,
+   so Send is on screen. */
+@media (max-height:500px) and (orientation:landscape){
+  .md-scrim{padding-block:8px}
+  .md-sheet{max-width:640px;padding:14px 18px 12px}
+  .md-sheet .md-title{margin-bottom:6px}
+  .md-reasons{display:flex;flex-wrap:wrap}
+  .md-reason{flex:1 1 auto;min-height:44px;gap:8px;padding:8px 12px;white-space:nowrap}
+  .md-note{min-height:0;height:64px}
 }
 @media (pointer:coarse){
   .md-link{position:relative}
@@ -333,6 +344,8 @@ function QueueItem({ player, onOpenProfile, onDone }) {
   // The action a confirmation step is asking about, if one is showing.
   const confirming = step === "confirm_rename" ? "rename" : step === "remove_picture" || step === "clear_bio" ? step : null;
   const n = player.reports.length;
+  // While the name field is showing, what's wrong is about the name, so it sits under the field.
+  const errorLine = error && <p className="err md-error" id={`${id}-error`} role="alert">{error}</p>;
   return (
     <article ref={card} className="md-player" aria-labelledby={`${id}-name`} data-username={player.username}>
       <div className="md-head">
@@ -371,7 +384,9 @@ function QueueItem({ player, onOpenProfile, onDone }) {
         <form className="md-step" onSubmit={nextFromName} noValidate>
           <label className="md-label" htmlFor={`${id}-new`}>New username for <span className="md-case">{player.username}</span></label>
           <input id={`${id}-new`} className="md-input" data-focus="name" value={name} maxLength={16} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+            aria-invalid={error ? "true" : undefined} aria-describedby={error ? `${id}-error` : undefined}
             onChange={(e) => { setName(e.target.value); setError(""); }} />
+          {errorLine}
           <div className="frow">
             <button type="submit" className="btn">Next</button>
             <button type="button" className="btn" onClick={() => go(null, "rename")}>Cancel</button>
@@ -391,7 +406,7 @@ function QueueItem({ player, onOpenProfile, onDone }) {
         </div>
       )}
 
-      {error && <p className="err" role="alert">{error}</p>}
+      {step !== "rename" && errorLine}
     </article>
   );
 }
