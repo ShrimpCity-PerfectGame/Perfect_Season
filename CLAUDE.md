@@ -192,8 +192,11 @@ UI but skips the optimistic stats update and surfaces the existing `saveError` p
 accepted gap**: Unlimited/challenge-code mode's seed is still client-chosen (`mode.code`), so
 grinding many codes offline for a lucky *legitimate* outcome remains possible — closing that needs
 server-issued/committed seeds, a bigger lift (network round-trip at draft start, rate-limiting),
-not attempted here. `sou_runs` (Stats O/U) and `builds` (Build-a-player) remain fully
-client-writable — lower-stakes minigames, not roster-scoring, a candidate for a later pass. Since
+not attempted here. `sou_runs` (Stats O/U) and `builds` (Build-a-player) remain client-writable —
+lower-stakes minigames, not roster-scoring, a candidate for a later pass — but since v1.11.0 triggers
+(`migration-profiles.sql`) set their `username` from the account (every name on those boards opens a
+profile, so it can't be spoofed) and refuse a build with a made-up position or a non-finite overall (one
+NaN build used to crash the Stats screen for everyone). Since
 v1.11.0 there's one more writer of `profiles`, and only of `username`: a moderator's rename (`mod_act`
 in `migration-moderation.sql`), which rewrites the username snapshots in `runs`, `daily_runs`,
 `sou_runs` and `builds` too. submit-run's `profileToRow` never writes `username`, so the two can't
@@ -212,7 +215,8 @@ overwrite each other.
   PROFILES.md 3.4 and migration-profiles.sql. `tests/test-word-filter.mjs` requires every player name in
   `data/players.json` to pass - add a word only with `insert into blocked_words`, and run that test.
 - **Pictures** are a public Storage bucket, `avatars`: each player writes only under their own
-  `<user id>/` folder, the bucket caps size (256 KB) and type (WebP/JPEG/PNG), and every upload gets a
+  `<user id>/` folder, with exactly the name `<user id>/<ms>.<ext>` and at most 10 files there (so a script
+  can't fill the bucket); the bucket caps size (256 KB) and type (WebP/JPEG/PNG), and every upload gets a
   new name (`profile-rules.mjs`'s `avatarObjectPath`) so no cache shows an old picture. The browser crops
   to 256×256 and strips all metadata (`avatar-image.mjs` - Chrome writes a color profile even into a
   canvas export, so redrawing alone isn't enough).

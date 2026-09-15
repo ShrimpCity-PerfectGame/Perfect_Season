@@ -72,9 +72,11 @@ folder.
 ## 3. Database
 
 All new SQL is re-runnable (`create ... if not exists`, `create or replace`, `drop policy if exists` then
-`create policy`, `on conflict do nothing` / `do update` for seeds). Every function sets
-`set search_path = public` (plus `storage` where needed). Functions that only read are `stable` so the
-client can call them as GET (they get supabase-js's retry). Every `order by` is fully tiebroken.
+`create policy`, `on conflict do nothing` / `do update` for seeds). Every function sets its search path:
+security-definer functions and trigger functions use `set search_path = public, pg_temp` (temporary
+objects last, so a session can't shadow `moderators` or `blocked_words` with a temp table), read-only
+security-invoker ones `public`. Functions that only read are `stable` so the client can call them as GET
+(they get supabase-js's retry). Every `order by` is fully tiebroken.
 
 A function refusing something raises its code as the whole message, e.g.
 `raise exception 'bio_blocked' using errcode = 'P0001';` — PostgREST returns it as
@@ -90,7 +92,7 @@ default) for any function clients must not call directly.
 | column | type | rule |
 |---|---|---|
 | `user_id` | uuid, primary key | references `public.profiles(id) on delete cascade` |
-| `bio` | text not null default `''` | `char_length(bio) <= 160`; no characters from profile-rules.mjs's disallowed set |
+| `bio` | text not null default `''` | `char_length(bio) <= 160`; no characters from profile-rules.mjs's disallowed set (the named constraint `profile_details_bio_characters`, which a re-run replaces) |
 | `avatar_path` | text, null | null, or `<user_id>/<10–16 digits>.(webp\|jpg\|png)` — the row's own folder |
 | `avatar_preset` | text, null | references `avatar_presets(key)` |
 | `favorite_team` | text, null | null or one of the 32 TEAMS codes |
@@ -114,8 +116,17 @@ nobody can read the list except the functions. Seed a basic list (see [3.4](#34-
 **Storage bucket** `avatars`: `public = true`, `file_size_limit = 262144`,
 `allowed_mime_types = {image/webp,image/jpeg,image/png}` (insert … on conflict (id) do update). Policies
 on `storage.objects`, all `to authenticated`, all requiring `bucket_id = 'avatars'` and
-`(storage.foldername(name))[1] = auth.uid()::text`: select, insert (also requiring uploads not paused),
-update, delete. (Supabase needs select as well as delete to delete an object.)
+`(storage.foldername(name))[1] = auth.uid()::text`: select and delete (the whole folder); insert, which
+also requires the exact name `<auth.uid()>/<10–16 digits>.(webp|jpg|png)`, uploads not paused, and room in
+the folder (`avatar_folder_has_room()`: at most 10 files); and update, whose check also requires the exact
+name (so a rename can't dodge it) and uploads not paused. (Supabase needs select as well as delete to
+delete an object.)
+
+**The minigame boards.** `sou_runs` and `builds` stay browser-written (schema.sql), but a before insert or
+update trigger (`use_account_username`) replaces the row's `username` with the account's own, and a before
+insert trigger on `builds` (`check_new_build`) refuses a position other than QB/RB/WR/TE or an overall that
+isn't a finite number (`bad_build`). Old rows are left alone; after migrating, `update sou_runs set username
+= username; update builds set username = username;` rewrites any spoofed names.
 
 **Functions**
 
@@ -125,7 +136,8 @@ update, delete. (Supabase needs select as well as delete to delete an object.)
 | `save_profile(p_bio text, p_favorite_team text)` | jsonb: the details row `{user_id, bio, avatar_path, avatar_preset, favorite_team, updated_at}` | security definer. Trims `p_bio`. Upserts the caller's row, leaving the picture alone. Raises `not_signed_in`, `bio_too_long`, `bio_invalid` (disallowed character), `bio_blocked`, `bad_team`. |
 | `set_avatar(p_path text, p_preset text)` | jsonb: the details row | security definer. At most one non-null (`bad_request`). A path must be in the caller's own folder and match the pattern (`bad_path`); a preset must exist and be free (`bad_preset`). Sets both columns (so choosing one clears the other; both null clears the picture). Doesn't touch storage — the client deletes the old file. Raises `not_signed_in`. |
 | `check_username(p_username text)` | text: `ok` \| `taken` \| `blocked` \| `invalid` | security definer, stable, callable by anon. `invalid` unless `^[A-Za-z0-9_]{3,16}$`; `taken` if a profile has exactly that username; `blocked` if not clean. |
-| `handle_new_user()` | trigger | `create or replace` of schema.sql's signup trigger, now raising `username_blocked` for a username that isn't clean. |
+| `handle_new_user()` | trigger | `create or replace` of schema.sql's signup trigger, now raising `username_invalid` for a username outside `^[A-Za-z0-9_]{3,16}$` (a modified client can call Auth's signup directly) and `username_blocked` for one that isn't clean. |
+| `avatar_folder_has_room()` | boolean | security invoker, volatile; execute for `authenticated` only, because the storage insert policy calls it as the uploading player. Counts the caller's own avatars files (through their read policy) under a per-player lock, so a burst of uploads can't all squeeze past the 10-file cap. |
 | `player_profile(p_username text)` | jsonb or null | stable, security invoker. Exact username match first; otherwise a case-insensitive match only if exactly one account matches. Returns `{ "profile": <the profiles row, every column, to_jsonb>, "details": <details row as above, or null>, "stats": player_stats(id) }`. |
 
 ### 3.2 `player_stats(p_user_id uuid)` in `migration-runs-log.sql` (agent A)
@@ -219,22 +231,33 @@ Plus storage policies letting a moderator select and delete any `avatars` object
 `text_is_clean(t)` is the only implementation that counts. The test mock mirrors it
 (tests/mock-profile-data.mjs's `isClean`) and tests check both agree on a shared list of cases.
 
-Matching (for matching only — the stored text is never changed):
-1. Lowercase; remove zero-width and invisible characters (U+200B–U+200D, U+2060, U+FEFF); fold common
-   accented letters to plain ones.
-2. Map look-alikes: `0→o 1→i 3→e 4→a 5→s 7→t @→a $→s !→i |→l`.
-3. Collapse runs of 3 or more of the same letter to one.
-4. `'word'` entries match a whole token (split on anything that isn't a letter; a trailing `s`/`es`
+Matching (for matching only — the stored text is never changed). migration-profiles.sql's comments are the
+detailed version:
+1. Normalize with NFKC, then NFD (NFKC turns compatibility letters - full-width, styled - into plain ones;
+   NFD then splits accented letters so the accents can go). Drop combining marks, zero-width, invisible and
+   deprecated format characters (including U+061C, U+115F–U+1160, U+17B4–U+17B5, U+180B–U+180F,
+   U+200B–U+200D, U+2060, U+206A–U+206F, U+3164, U+FEFF, U+FFA0, U+FFF9–U+FFFB, U+E0000–U+E0FFF).
+   Lowercase and fold what NFD can't split (sharp s, ae, oe, Cyrillic and Greek look-alikes, U+0251→a,
+   U+0261→g) through an explicit table, never `lower()`, so the result doesn't depend on the locale.
+2. Read the text four ways: with the look-alikes `0→o 1→i 3→e 4→a 5→s 7→t @→a $→s !→i |→l` mapped and as
+   typed (those characters also sit beside words as punctuation - "shit!"), each with runs of three or
+   more of the same letter cut to one and cut to two (a tripled doubled letter hid a slur).
+3. `'word'` entries match a whole token (split on anything that isn't a letter; a trailing `s`/`es`
    plural also matches). `'anywhere'` entries match inside the text with every non-letter removed (so
    spacing or dots between letters don't hide them).
+
+Known gaps, accepted for a basic list: a `'word'` entry spaced out letter by letter, camel-case run-ons in
+usernames, and digits outside the look-alike map. `tests/test-profile-security.mjs` prints them.
 
 Keep the seeded list basic and clearly offensive: common profanity as `'word'`, slurs as `'anywhere'`.
 Don't seed anything that's a common name, a football term, or a substring of ordinary words in
 `'anywhere'` mode. **Must pass**: every player name in `data/players.json` (whole names and each part),
-every TEAMS name and city, and ordinary words with unlucky substrings (Scunthorpe, assassin, class,
-Cassel, Hancock, Cockrell, Titus, Dickson, Sussex, therapist, grapes, shiitake, cocktail, analysis). **Must
-block**: each seeded word plain, capitalized, with look-alike digits/symbols, with invisible characters
-inside, and (`'anywhere'` words) with spaces or dots between letters; usernames split on `_` and digits.
+every TEAMS name and city, each of those with any one letter tripled, and ordinary words with unlucky
+substrings (Scunthorpe, assassin, class, Cassel, Hancock, Cockrell, Titus, Dickson, Sussex, therapist,
+grapes, shiitake, cocktail, analysis). **Must block**: each seeded word plain, capitalized, with look-alike
+digits/symbols, with compatibility or look-alike letters, with invisible characters inside, with a doubled
+letter tripled, and (`'anywhere'` words) with spaces or dots between letters; usernames split on `_` and
+digits.
 
 ---
 
@@ -264,8 +287,11 @@ mapDetails(row)                              → details
 ```
 
 A new photo uploads to `profile-rules.mjs`'s `avatarObjectPath(userId, type)` with `upsert: false` and a
-one-year cache, then `set_avatar` makes it current, then the previous photo is deleted (best effort). If
-`set_avatar` fails the new file is deleted. RPC reads use `READ` (GET); writes are POST.
+one-year cache, then `set_avatar` makes it current, then the previous photo is deleted (best effort, and
+only a file in the player's own folder). If `set_avatar` fails the new file is deleted. A player can fill
+their 10-file folder only through leftovers from failed deletes, so on a full folder the upload clears
+those (never the current photo) and retries once. A refusal while uploads are on is "network";
+"signed_out" only when the session is gone. RPC reads use `READ` (GET); writes are POST.
 
 ### 4.2 `storage-moderation.js` (agent F; phase 0 wrote working versions)
 
@@ -444,7 +470,10 @@ for `/u/(.*)`. `tests/test-build-seo.mjs` checks both, like the `/c/` rules.
   `throw new Error("<code>")`. Direct client writes to the new tables return an RLS error. Escape
   hatches: `_profileDetails`, `_avatarPresets`, `_blockedWords`, `_siteFlags`, `_storageObjects`,
   `_reports`, `_moderators` (plus the existing ones). The mock's storage `getPublicUrl` returns an
-  object's `publicUrl` if a test set one, else `https://storage.mock/<bucket>/<path>`.
+  object's `publicUrl` if a test set one, else `https://storage.mock/<bucket>/<path>`; its storage also
+  has `list()` and enforces the exact file name and the 10-file cap (`AVATAR_FOLDER_LIMIT`). Like the
+  database, the mock's `signUp` refuses a username that breaks the rule or the filter, its `sou_runs` and
+  `builds` inserts take the account's own username, and a bad build is refused with `bad_build`.
 - **Real Postgres.** `tests/pg-fixture.mjs`: `freshDb()` (Supabase-like roles, auth, storage stubs,
   schema.sql and every migration), `addAccount`, `asUser(db, uid, fn)`, `asAnon(db, fn)`,
   `failure(db, sql, params)`, `uuid(n)`. Parity tests run the same fixture through SQL and the mock and

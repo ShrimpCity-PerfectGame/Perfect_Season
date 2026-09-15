@@ -108,16 +108,24 @@ export function makeMockAuth() {
           }
           profiles.set(row.id, { runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, ...row });
         } else if (table === "builds") {
+          // migration-profiles.sql's builds triggers: a real position and a finite overall, or bad_build; and
+          // the account's own username, whatever the browser sent.
+          const overall = Number(row.overall);
+          if (!["QB", "RB", "WR", "TE"].includes(row.pos) || !(Math.abs(overall) < 1e12)) {
+            return Promise.resolve({ error: { code: "P0001", message: "bad_build" } });
+          }
           const id = globalThis.crypto.randomUUID();
-          builds.set(id, { id, created_at: new Date().toISOString(), ...row });
+          builds.set(id, { id, created_at: new Date().toISOString(), ...row, username: profiles.get(row.user_id)?.username ?? row.username });
         } else {
           // daily_runs is keyed per format (its real primary key is (date, format, user_id));
           // sou_runs has no format and stays (date, user_id).
           const key = table === "daily_runs"
             ? `${row.date}:${row.format || "fantasy"}:${row.user_id}`
             : `${row.date}:${row.user_id}`;
-          // Both tables default created_at to now(), which player_stats' tiebreaks read.
-          store.set(key, { created_at: new Date().toISOString(), ...row });
+          // Both tables default created_at to now(), which player_stats' tiebreaks read. sou_runs takes the
+          // account's own username, as its trigger does.
+          const username = table === "sou_runs" ? profiles.get(row.user_id)?.username ?? row.username : row.username;
+          store.set(key, { created_at: new Date().toISOString(), ...row, ...(username !== undefined ? { username } : {}) });
         }
         return Promise.resolve({ error: null });
       },
