@@ -1957,6 +1957,18 @@ export default function PerfectSeason() {
     setProfileData({ name, status: "loading", profile: null, rank: NO_RANK });
     const res = await fetchPlayerProfile(name);
     if (req !== profileReq.current) return;
+    // Your own name not found: a moderator may have renamed you since you signed in. Your account is read
+    // by id instead, and the profile opens again under the name it has now.
+    if (res.status === "missing" && userId && name === user) {
+      const fresh = await fetchProfile(userId).catch(() => null);
+      if (req !== profileReq.current) return;
+      if (fresh?.username && fresh.username !== user) {
+        setStats(fresh);
+        setUser(fresh.username);
+        setProfileOf((p) => (p === name ? fresh.username : p));
+        return;
+      }
+    }
     setProfileData({ name, status: res.status, profile: res.profile || null, rank: NO_RANK });
     if (res.status !== "ok") return;
     const ranks = await Promise.all(FORMATS.map(async (f) => {

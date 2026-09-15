@@ -402,5 +402,22 @@ await runTest("a moderator's own profile offers the Reports queue, and the heade
   assert(!findButtonByText(profileOf(container), "Reports"), "a moderator visiting another profile gets no Reports entry");
 });
 
+await runTest("a player a moderator renames while they're signed in still gets their own profile", async () => {
+  const auth = makeMockAuth();
+  container = await open("http://localhost/", auth);
+  await click(tab(container, "Account"));
+  await flush();
+  await signUp(container, "renamed@example.com", "oldname1");
+  await expectProfile(container, "oldname1", true);
+  const id = [...auth._profiles.values()].find((p) => p.username === "oldname1").id;
+  auth._profiles.get(id).username = "newname1"; // mod_act's rename, in the database
+
+  await click(tab(container, "Leaderboard"));
+  await flush(3);
+  await click(tab(container, "Profile"));
+  await expectProfile(container, "newname1", true);
+  assert(container.querySelector(".whoami")?.getAttribute("aria-label") === "Your profile, newname1", `the header follows the new name, got: ${container.querySelector(".whoami")?.getAttribute("aria-label")}`);
+});
+
 await close();
 console.log("test-profile-links.mjs done");
