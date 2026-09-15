@@ -19,6 +19,11 @@
 --   Block another word:             insert into public.blocked_words (word, match) values ('...', 'word');
 --                                   ('word' = whole word only; 'anywhere' = even inside other words - only
 --                                   for strings that never occur inside ordinary words or names)
+--
+-- Every security definer function below sets search_path = public, pg_temp. Left out of the path, the
+-- caller's temporary schema is searched first for table names, so a session that can create a temporary
+-- table named moderators or blocked_words would have these functions read that instead of the real one.
+-- Naming pg_temp last keeps the real tables first (tests/test-profile-security.mjs tries it).
 
 -- ---------- Tables ----------
 
@@ -116,7 +121,7 @@ revoke all on public.blocked_words from anon, authenticated;
 --      the word plus "s" or "es". An 'anywhere' entry matches inside the letters with everything else
 --      removed, so spaces or dots between the letters don't hide it.
 create or replace function public.text_is_clean(t text)
-returns boolean language sql stable security definer set search_path = public as $$
+returns boolean language sql stable security definer set search_path = public, pg_temp as $$
   with
   fold(src, dst) as (values
       (U&'A\00C0\00C1\00C2\00C3\00C4\00C5\00E0\00E1\00E2\00E3\00E4\00E5\0100\0101\0102\0103\0104\0105\0410\0430\0391\03B1\212B\FF21\FF41', 'a'),
@@ -181,7 +186,7 @@ revoke execute on function public.text_is_clean(text) from public, anon, authent
 
 -- Your bio and favorite team, saved together. Leaves the picture alone.
 create or replace function public.save_profile(p_bio text, p_favorite_team text)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_uid uuid := auth.uid();
   -- Trimmed of exactly what JavaScript's trim() removes, so the browser and the database agree on the
@@ -218,7 +223,7 @@ $$;
 -- your initial). Setting one clears the other. It doesn't touch storage: the browser uploads the photo
 -- first and deletes the old one after this succeeds.
 create or replace function public.set_avatar(p_path text, p_preset text)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_uid uuid := auth.uid();
   v_row public.profile_details;
@@ -250,7 +255,7 @@ $$;
 -- Whether a username can be signed up with, asked before signing up so the form can say why not:
 -- ok | taken | blocked | invalid. Anyone may call it; the signup trigger checks again regardless.
 create or replace function public.check_username(p_username text)
-returns text language sql stable security definer set search_path = public as $$
+returns text language sql stable security definer set search_path = public, pg_temp as $$
   select case
     when p_username is null or p_username !~ '^[A-Za-z0-9_]{3,16}$' then 'invalid'
     when exists (select 1 from profiles where username = p_username) then 'taken'
@@ -263,7 +268,7 @@ $$;
 -- refusing a username with a blocked word. Supabase Auth reports the refusal to the browser as
 -- "Database error saving new user", and no account is created.
 create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if not public.text_is_clean(new.raw_user_meta_data->>'username') then
     raise exception 'username_blocked' using errcode = 'P0001';

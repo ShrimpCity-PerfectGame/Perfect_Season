@@ -47,18 +47,20 @@ create index if not exists reports_open_target_idx on public.reports (target_id,
 -- ---------- Functions ----------
 -- A refusal raises its code as the whole message (raise exception 'limit'), which PostgREST returns as
 -- { message: "limit", code: "P0001" } and storage-moderation.js maps to a reason.
+-- Each sets search_path = public, pg_temp: with pg_temp left out, the caller's temporary schema is searched
+-- first for table names, and a temporary table named moderators would make its creator a moderator here.
 
 -- Whether the signed-in player is a moderator. Stable, so the app calls it as GET. Security definer
 -- because nobody can read moderators directly - which is also why the storage policies at the bottom
 -- call this instead of reading the table themselves.
 create or replace function public.is_moderator()
-returns boolean language sql stable security definer set search_path = public as $$
+returns boolean language sql stable security definer set search_path = public, pg_temp as $$
   select exists (select 1 from moderators where user_id = auth.uid());
 $$;
 
 -- Reports a player (exact username) for one of the four reasons, with an optional note.
 create or replace function public.report_player(p_username text, p_reason text, p_note text default '')
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_uid uuid := auth.uid();
   v_target uuid;
@@ -102,7 +104,7 @@ $$;
 
 -- The Reports queue: one entry per player with open reports, oldest first. Stable, so it's a GET.
 create or replace function public.mod_queue()
-returns jsonb language plpgsql stable security definer set search_path = public as $$
+returns jsonb language plpgsql stable security definer set search_path = public, pg_temp as $$
 begin
   if not is_moderator() then
     raise exception 'not_moderator' using errcode = 'P0001';
@@ -136,7 +138,7 @@ $$;
 -- It doesn't touch storage: remove_picture returns the old path and the app deletes the file, which
 -- the moderator storage policies below allow.
 create or replace function public.mod_act(p_user_id uuid, p_action text, p_new_name text default null)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_mod uuid := auth.uid();
   v_reason text;
