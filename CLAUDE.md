@@ -47,9 +47,20 @@ why `build.mjs` makes every asset path root-relative. The app reads the link wit
 like entering a code (it abandons an Unlimited draft in progress as a DNF, and the card warns
 signed-in players first). The `beat` record is the sharer's own claim, shown only as a headline.
 
-The React component, all its screens, and every piece of game-specific display/UI logic live in
-one file: `perfect-season.jsx` (~175 KB, ~3,000 lines — still large enough that targeted
-`offset`/`limit` reads or grep beat a full-file read). Player and opponent data lives in
+**Profiles (v1.11.0).** Every account has a public profile at `/u/<username>`: a picture (an uploaded
+photo, one of 12 default avatars, or the initial), a bio checked by a blocked-word list, a favorite
+team, 22 badges, personal stats, and a Report button feeding a moderators' Reports queue. Every username
+on the Leaderboard and Stats screens opens its profile. **`PROFILES.md` is the reference** for all of it
+(database functions and error codes, the player_stats shape, the storage modules, component props,
+addresses and history) - read it before touching any of the files below. See "Profiles" under
+Architecture for the rules that matter most.
+
+The main React component and most screens live in `perfect-season.jsx` (~180 KB, ~4,000 lines —
+large enough that targeted `offset`/`limit` reads or grep beat a full-file read). Since v1.11.0 the
+profile feature's screens live in their own files - `profile.jsx`, `avatars.jsx`, `avatar-picker.jsx`
+(with `avatar-image.mjs`) and `moderation.jsx` - sharing display helpers through `ui-common.jsx` and
+rules through `profile-rules.mjs` and `badges.mjs`, so they never import the main component back. New
+screens of any size should follow that pattern. Player and opponent data lives in
 `data/players.json` (~225 KB); the pure scoring/simulation/roster-legality logic shared with the
 `submit-run` Edge Function lives in `game-logic.mjs` — see that section under Architecture below
 before touching either.
@@ -95,7 +106,9 @@ node tests/test-runs-sql.mjs             # runs log + Stats SQL in real Postgres
 # (tests/mock-supabase.mjs) with seeded stress data - no staging writes, no sign-in - and
 # tools/ui-harness/audit.mjs drives it in the installed Chrome (puppeteer-core) at phone sizes,
 # screenshots it, and measures overflow, clipped text, small tap targets, tiny text, iOS input
-# zoom and overlapping controls. Harness query params: as=player|admin|guest|newbie, howto=1.
+# zoom and overlapping controls. Harness query params: as=player|admin|guest|newbie, howto=1, and
+# screen=profile&fixture=veteran|rookie|photo&owner=1 (plus status=, moderator=N, name=) for the
+# profile screen on its own with tests/fixtures/profile-fixture.mjs data.
 node tools/ui-harness/build.mjs   # bundle the harness into build/ui-harness.js (never shipped)
 node tools/ui-harness/audit.mjs --as player --width 375 --tab Leaderboard --out build/ui-audit
 # For a change's final check, still click through the real staging site at desktop and mobile widths.
@@ -106,14 +119,28 @@ node tests/test-sim-engine-independence.mjs  # the season sim rolls identically 
 node tests/test-build-seo.mjs      # runs build.mjs for production and staging: canonical, noindex, robots.txt, sitemap, structured data
 node tests/test-share.mjs          # the spoiler-free share card, challenge links in and out, and the challenge card on Modes
 
+# Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
+# Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.
+node tests/test-player-stats-sql.mjs   # player_stats SQL == tests/mock-profile-stats.mjs for every account
+node tests/test-badges.mjs             # every badge below/at/above its threshold; topBadges order
+node tests/test-profile-data.mjs       # profile_details/storage rules, save_profile/set_avatar/player_profile, storage-profile.js
+node tests/test-word-filter.mjs        # the blocked-word filter in SQL and the mock agree; no real player name is blocked
+node tests/test-moderation.mjs         # reports, limits, moderator actions and rename; mock == SQL; the report sheet and queue
+node tests/test-profile-security.mjs   # attacks a modified browser could try, each asserted blocked
+node tests/test-profile-screen.mjs     # ProfileScreen on its own: owner/visitor/guest, sections, editor
+node tests/test-avatar-picker.mjs      # the picker's tabs, presets, errors (jsdom)
+node tests/test-avatar-image.mjs       # crop/resize/encode and metadata stripping - needs the installed Chrome (CHROME_PATH overrides)
+node tests/test-profile-links.mjs      # /u/name addresses, Back/Forward, every name link, signup's username check
+node tests/run-all.mjs [filter...]     # every test file above in turn (not the difficulty benchmark)
+
 # Rebuild the game data from source (only when adding a season or changing grading)
 cd scripts && python3 build.py && python3 correct.py && python3 rate2.py \
   && python3 boards.py && python3 export.py   # writes data.json
 ```
 
-`npm test` runs the accounts/daily/nav suite; the other test files are run individually as shown
-above. There is no single-test flag — each `tests/*.mjs` file is a standalone script that exits
-non-zero on failure.
+`npm test` runs the accounts/daily/nav suite; `node tests/run-all.mjs` runs every test file one at a
+time (they share build/test-component.mjs, so never in parallel). There is no single-test flag — each
+`tests/*.mjs` file is a standalone script that exits non-zero on failure.
 
 Note: as of this writing, `scripts/*.py` (the nflverse/Pro-Football-Reference data-correction
 pipeline referenced above) and a standalone `data.json` do not exist in this checkout — the player
@@ -137,7 +164,10 @@ runs) goes through a Supabase client instead: `storage.js`'s `getClient()` retur
 time by `build.mjs` — see Build/Run Commands above). Auth, profile reads/writes, and leaderboard/
 daily queries all go through named functions in `storage.js` (`authSignUp`, `fetchProfile`,
 `fetchLeaderboardTop`, `submitRun`, etc.) — never call `getClient()` directly from
-`perfect-season.jsx`. Personal-key reads/writes still go through `sget`/`sset`/`sdel`/
+`perfect-season.jsx` or any screen file. `getClient`, the read-retry option and the profile row mapping
+live in `storage-core.js`; a feature's own module (`storage-profile.js`, `storage-moderation.js`)
+imports from there and `storage.js` re-exports it, so the app still imports everything from
+`./storage.js`. Personal-key reads/writes still go through `sget`/`sset`/`sdel`/
 `clearDraft`, which swallow errors and return null — **assume this half of the API has no
 read-after-write ordering guarantee** (Supabase's Postgres-backed half doesn't have this problem).
 A read that starts after a write can still resolve first. The `pendingClears` ref-counter in the
@@ -163,7 +193,46 @@ accepted gap**: Unlimited/challenge-code mode's seed is still client-chosen (`mo
 grinding many codes offline for a lucky *legitimate* outcome remains possible — closing that needs
 server-issued/committed seeds, a bigger lift (network round-trip at draft start, rate-limiting),
 not attempted here. `sou_runs` (Stats O/U) and `builds` (Build-a-player) remain fully
-client-writable — lower-stakes minigames, not roster-scoring, a candidate for a later pass.
+client-writable — lower-stakes minigames, not roster-scoring, a candidate for a later pass. Since
+v1.11.0 there's one more writer of `profiles`, and only of `username`: a moderator's rename (`mod_act`
+in `migration-moderation.sql`), which rewrites the username snapshots in `runs`, `daily_runs`,
+`sou_runs` and `builds` too. submit-run's `profileToRow` never writes `username`, so the two can't
+overwrite each other.
+
+**Profiles (v1.11.0) - the rules that matter most; `PROFILES.md` has everything else.**
+- **Writes only through security-definer functions.** `profile_details` (bio, picture, default avatar,
+  favorite team), `reports`, `moderators`, `blocked_words`, `site_flags` and `avatar_presets` have RLS on
+  and no client write policy. Players change their own row only through `save_profile`/`set_avatar`;
+  reports and moderator actions only through `report_player`/`mod_act`. Those functions are the
+  security boundary - a modified browser can call them directly - so every limit and the word filter
+  live in SQL, and the browser's checks exist only for friendlier messages. `blocked_words` isn't
+  readable by clients at all, and `text_is_clean` isn't callable by them.
+- **The word filter** (`text_is_clean`) checks bios, new usernames (the signup trigger, plus
+  `check_username` for a friendly message first) and moderator renames. Its matching rules are in
+  PROFILES.md 3.4 and migration-profiles.sql. `tests/test-word-filter.mjs` requires every player name in
+  `data/players.json` to pass - add a word only with `insert into blocked_words`, and run that test.
+- **Pictures** are a public Storage bucket, `avatars`: each player writes only under their own
+  `<user id>/` folder, the bucket caps size (256 KB) and type (WebP/JPEG/PNG), and every upload gets a
+  new name (`profile-rules.mjs`'s `avatarObjectPath`) so no cache shows an old picture. The browser crops
+  to 256×256 and strips all metadata (`avatar-image.mjs` - Chrome writes a color profile even into a
+  canvas export, so redrawing alone isn't enough).
+- **Badges are computed, never stored** (`badges.mjs`, pure, no app imports - v1.12.0's submit-run will
+  import it to pay coins once). Every condition only becomes true over time, except Loyal Fan, which
+  follows the current favorite team. `CINDERELLA_MAX_SCORE` and `SCOUT_MIN_POINTS` were calibrated by
+  simulating drafts; re-run that reasoning (see the comments) if grading or `SPREAD` changes.
+- **`player_stats(user_id)`** lives in `migration-runs-log.sql` beside `site_stats`, mirrored by
+  `tests/mock-profile-stats.mjs` and checked by `tests/test-player-stats-sql.mjs` - change both together,
+  keep orders fully tiebroken, and remember a day's Daily ranks only count once the day is over
+  everywhere (two UTC days later).
+- **Addresses:** a profile is `/u/<username>` (`profilePath`/`parseProfilePath`), every other screen is
+  `/`, and opening a profile pushes a history entry so Back returns to the screen it came from.
+  `vercel.json` rewrites `/u/:name` to the page with `X-Robots-Tag: noindex`.
+- **Runbook** (SQL editor): make someone a moderator -
+  `insert into moderators (user_id) select id from profiles where username = 'NAME';`. Pause all new
+  picture uploads - `update site_flags set enabled = true where key = 'uploads_paused';` (false resumes).
+  Block a word - `insert into blocked_words (word, match) values ('word', 'word');` ('anywhere' only for
+  strings that never occur inside ordinary words or names). Everything else a moderator needs (remove a
+  picture, clear a bio, rename a player, dismiss) is in the app's Reports queue.
 
 **The runs log is the complete history; `profiles.recent` is not.** `recent` keeps only an
 account's last 10 runs. Every finished draft and DNF is also appended to the `runs` table
@@ -279,9 +348,9 @@ The look is "playful sports app + premium streetwear": a cream foundation, ink t
 used sparingly, the Anton display face with Inter for body copy, tactile buttons with a hard offset
 shadow, and navy "scoreboard" moments.
 
-- **Tokens live in `theme.mjs`**, as data with two scopes, and `perfect-season.jsx` turns them into
-  CSS variables. Don't hardcode colors in the stylesheet; add a token to both scopes (a test fails
-  if the scopes' token sets differ).
+- **Tokens live in `theme.mjs`**, as data with three scopes (light, dark, night), and
+  `perfect-season.jsx` turns them into CSS variables. Don't hardcode colors in the stylesheet; add a
+  token to every scope (a test fails if the scopes' token sets differ).
 - **Lime is a fill, never text on cream.** `--accent` is lime and only goes behind `--on-accent`
   text. For accent-colored words, links or underlines use `--accent-ink`: game blue on cream, lime
   only in the dark scope. Lime on cream is ~1.2:1. `tests/test-theme-contrast.mjs` enforces WCAG AA
@@ -290,8 +359,15 @@ shadow, and navy "scoreboard" moments.
   `view === "play"`), plus components that are stadium-dark wherever they appear — `.reel`,
   `.sticky`, `.result-hero`, `.champion`, `.pg`, `.pre`, `.cel`, and the Unlimited tile. The
   Leaderboard is the exception: the root gets `.night` when `view === "board"`, a true-black third
-  scope (its `.champion` takes night tokens too) with lime reserved for #1 and your own row. Everything
-  else is cream. Every scope in `theme.mjs` must define the same tokens; the contrast test checks all.
+  scope (its `.champion` takes night tokens too) with lime reserved for #1 and your own row. The
+  profile's player card (`.pf-card`) is dark wherever it appears too. Everything else is cream (the
+  report sheet forces cream tokens even when it opens over the dark card). Every scope in `theme.mjs`
+  must define the same tokens; the contrast test checks all.
+- **Screens in their own files** (`profile.jsx`, `avatars.jsx`, `avatar-picker.jsx`, `moderation.jsx`)
+  export their stylesheet as a string (`PROFILE_CSS`, ...), which `perfect-season.jsx` appends after its
+  own as `APP_CSS`. Each styles only its own class prefix (`pf-`, `av-`, `ap-`, `md-`) and reuses the
+  app's `.btn`, `.tile`, `.h`, `.note`, `.panel` etc. without restyling them, and puts its responsive,
+  `pointer:coarse` and reduced-motion rules in its own string after its base rules.
 - **Vary the treatment instead of making every block the same card:** one featured lime block (the
   daily), a navy card (Unlimited), orange for a special moment (Over/Under), and plain typography
   with a ruled top edge for stats (`.tile`).
@@ -348,6 +424,9 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+  v1.11.0's migrations go in this order: re-run `migration-runs-log.sql` (adds `player_stats`), then
+  `migration-profiles.sql`, then `migration-moderation.sql`. All three only add objects, so the live
+  site keeps working between them.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging
@@ -416,10 +495,17 @@ Don't hand-edit `data.json`; change the scripts and regenerate.
 
 ## Immediate Next Goals
 
-1. **Housekeeping** — custom domain (currently a free `*.vercel.app` subdomain; add the URL to
-   the share text once one exists), 2026 season data once it's played, an accessibility pass
-   (position colors currently carry meaning on their own).
-2. **Half-PPR**, if wanted, is now a small change rather than a blocked one — see the scoring-format
+1. **v1.12.0 Wallet & Shop** (approved 2026-09-14, after v1.11.0 Profiles): a coin wallet that only goes
+   up from playing (never lost on a bad draft; a one-time career starting balance capped at 10,000, 250
+   for new accounts; the profile's old Bank tile goes), earned for seasons, wins, titles, Dailies,
+   streaks, badges and the minigames, and a cosmetic-only shop (frames, card themes, avatar packs,
+   titles; some badge-only; no real money, nothing that changes a draft or a score). It changes
+   submit-run, which must also start rejecting a finished draft submitted twice (today the same
+   Unlimited trace counts again each time it's sent - career padding by a modified client). It gets its
+   own `SHOP.md`.
+2. **Housekeeping** — 2026 season data once it's played, an accessibility pass (position colors
+   currently carry meaning on their own), separate indexable pages (How to play, Leaderboard).
+3. **Half-PPR**, if wanted, is now a small change rather than a blocked one — see the scoring-format
    note in Architecture. It needs a third `FORMATS` entry, a benchmark column, a `BEST_FIELDS`
    entry, and two `profiles` columns; no data regeneration.
 
