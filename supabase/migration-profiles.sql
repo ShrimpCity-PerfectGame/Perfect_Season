@@ -19,6 +19,11 @@
 --   Block another word:             insert into public.blocked_words (word, match) values ('...', 'word');
 --                                   ('word' = whole word only; 'anywhere' = even inside other words - only
 --                                   for strings that never occur inside ordinary words or names)
+--
+-- Every security definer function below sets search_path = public, pg_temp. Left out of the path, the
+-- caller's temporary schema is searched first for table names, so a session that can create a temporary
+-- table named moderators or blocked_words would have these functions read that instead of the real one.
+-- Naming pg_temp last keeps the real tables first (tests/test-profile-security.mjs tries it).
 
 -- ---------- Tables ----------
 
@@ -116,7 +121,7 @@ revoke all on public.blocked_words from anon, authenticated;
 --      the word plus "s" or "es". An 'anywhere' entry matches inside the letters with everything else
 --      removed, so spaces or dots between the letters don't hide it.
 create or replace function public.text_is_clean(t text)
-returns boolean language sql stable security definer set search_path = public as $$
+returns boolean language sql stable security definer set search_path = public, pg_temp as $$
   with
   fold(src, dst) as (values
       (U&'A\00C0\00C1\00C2\00C3\00C4\00C5\00E0\00E1\00E2\00E3\00E4\00E5\0100\0101\0102\0103\0104\0105\0410\0430\0391\03B1\212B\FF21\FF41', 'a'),
@@ -181,7 +186,7 @@ revoke execute on function public.text_is_clean(text) from public, anon, authent
 
 -- Your bio and favorite team, saved together. Leaves the picture alone.
 create or replace function public.save_profile(p_bio text, p_favorite_team text)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_uid uuid := auth.uid();
   -- Trimmed of exactly what JavaScript's trim() removes, so the browser and the database agree on the
@@ -218,7 +223,7 @@ $$;
 -- your initial). Setting one clears the other. It doesn't touch storage: the browser uploads the photo
 -- first and deletes the old one after this succeeds.
 create or replace function public.set_avatar(p_path text, p_preset text)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_uid uuid := auth.uid();
   v_row public.profile_details;
@@ -250,7 +255,7 @@ $$;
 -- Whether a username can be signed up with, asked before signing up so the form can say why not:
 -- ok | taken | blocked | invalid. Anyone may call it; the signup trigger checks again regardless.
 create or replace function public.check_username(p_username text)
-returns text language sql stable security definer set search_path = public as $$
+returns text language sql stable security definer set search_path = public, pg_temp as $$
   select case
     when p_username is null or p_username !~ '^[A-Za-z0-9_]{3,16}$' then 'invalid'
     when exists (select 1 from profiles where username = p_username) then 'taken'
@@ -260,19 +265,82 @@ returns text language sql stable security definer set search_path = public as $$
 $$;
 
 -- The signup trigger (first defined in schema.sql, whose trigger on auth.users calls this), now also
--- refusing a username with a blocked word. Supabase Auth reports the refusal to the browser as
--- "Database error saving new user", and no account is created.
+-- refusing a username outside the username rule or with a blocked word. Supabase Auth reports the refusal
+-- to the browser as "Database error saving new user", and no account is created.
+-- The rule is checked here, not only in the signup form: Supabase Auth stores whatever metadata a browser
+-- sends, so without it a modified client could sign up as letters the word filter doesn't fold
+-- (mathematical or circled letters), with invisible or direction-changing characters, as another
+-- player's name with a zero-width space in it, or as an empty or overlong name.
 create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_username text := new.raw_user_meta_data->>'username';
 begin
-  if not public.text_is_clean(new.raw_user_meta_data->>'username') then
+  -- profile-rules.mjs's USERNAME_RE, the same rule as check_username's 'invalid'.
+  if v_username is null or v_username !~ '^[A-Za-z0-9_]{3,16}$' then
+    raise exception 'username_invalid' using errcode = 'P0001';
+  end if;
+  -- text_is_clean reads a run of three or more of one letter as a single letter, so a blocked word with a
+  -- doubled letter gets through with that letter stretched ("Niggger" reads as "niger", "Asssshole" as
+  -- "ashole"). A username is read once more, with its look-alike digits as letters and every such run
+  -- cut to two. (Bios and check_username don't take this second reading yet: PROFILES.md 3.4's
+  -- algorithm, which the test mock mirrors, would have to change with it.)
+  if not public.text_is_clean(v_username)
+     or not public.text_is_clean(regexp_replace(
+          translate(v_username, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ013457', 'abcdefghijklmnopqrstuvwxyzoieast'),
+          '([a-z])\1\1+', '\1\1', 'g')) then
     raise exception 'username_blocked' using errcode = 'P0001';
   end if;
   insert into public.profiles (id, username)
-  values (new.id, new.raw_user_meta_data->>'username');
+  values (new.id, v_username);
   return new;
 end;
 $$;
+
+-- ---------- The minigame boards ----------
+-- The browser still writes sou_runs (Over/Under) and builds (Build-a-player) itself: schema.sql's policies
+-- only check that the row's user_id is the caller's. Scores there are taken on trust (CLAUDE.md), but what
+-- the boards and profiles show as text must not be.
+
+-- A row's username is the account's own, whatever the browser sent. Every name on those boards opens that
+-- player's profile, so otherwise a modified client could post under another player's name, or as any text
+-- at all (past the signup word filter), and a moderator's rename would last only until its next insert.
+-- mod_act's rename updates these rows after profiles, so this reads the new name.
+create or replace function public.use_account_username()
+returns trigger language plpgsql security invoker set search_path = public, pg_temp as $$
+begin
+  new.username := coalesce((select p.username from public.profiles p where p.id = new.user_id), new.username);
+  return new;
+end;
+$$;
+
+-- A build's position shows as text on the Stats board and the player's profile, and the Stats board calls
+-- toFixed on its overall. PostgREST sends a NaN or Infinity numeric as a string, so one such row (NaN also
+-- sorts above every number, straight to the top of the board) crashed the Stats screen for everyone. Only
+-- new rows are checked: nothing updates a build but a rename, which must still work on an old bad row.
+create or replace function public.check_new_build()
+returns trigger language plpgsql security invoker set search_path = public, pg_temp as $$
+begin
+  -- abs() of NaN or Infinity is never under a bound, so this also asks for a finite number.
+  if new.pos is null or new.pos not in ('QB', 'RB', 'WR', 'TE') or not coalesce(abs(new.overall) < 1e12, false) then
+    raise exception 'bad_build' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+-- Trigger functions only: nothing calls them directly (a trigger runs without its caller holding execute).
+revoke execute on function public.use_account_username(), public.check_new_build() from public, anon, authenticated;
+
+drop trigger if exists sou_runs_account_username on public.sou_runs;
+create trigger sou_runs_account_username before insert or update on public.sou_runs
+  for each row execute function public.use_account_username();
+drop trigger if exists builds_account_username on public.builds;
+create trigger builds_account_username before insert or update on public.builds
+  for each row execute function public.use_account_username();
+drop trigger if exists builds_check_new on public.builds;
+create trigger builds_check_new before insert on public.builds
+  for each row execute function public.check_new_build();
 
 -- ---------- Reading a profile ----------
 
