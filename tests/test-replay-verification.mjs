@@ -134,5 +134,33 @@ t = tamper(noReroll, (c) => {
 r = gl.replayDraft(t.seed, t.history, t.seq);
 check("rejects a roster whose boards belong to a different seed entirely", !r.ok, r);
 
+// The app leaves a board with a legal pick only by picking from it or by re-spinning it (which puts the new board
+// straight after it). A trace that walks past such a board to draft from later ones - the best six of the
+// sequence's eighteen - was accepted until v1.12.0, and on a Daily it beats any draft the app allows.
+t = (() => {
+  const seed = "verify-seed-skip";
+  const seq = gl.seededSequence(seed);
+  const roster = {};
+  const drafted = new Set();
+  const history = [];
+  for (let i = 1; i < seq.length && history.length < gl.SLOTS.length; i++) { // board 0 is passed over
+    const open = gl.SLOTS.filter((s) => !roster[s]);
+    const player = gl.BOARDS[seq[i]].find((p) => !drafted.has(p.id) && open.some((s) => gl.fits(p.pos, s)));
+    if (!player) continue;
+    const slot = open.find((s) => gl.fits(player.pos, s));
+    history.push({ key: seq[i], id: player.id, season: player.season, slot });
+    roster[slot] = player;
+    drafted.add(player.id);
+  }
+  return { seed, history, seq };
+})();
+check("the skipping trace's first board did have a legal pick", gl.boardHasOption(t.seq[0], new Set(), gl.SLOTS));
+r = gl.replayDraft(t.seed, t.history, t.seq);
+check("rejects a trace that passes over a board it could have picked from", !r.ok && /passed over/.test(r.reason || ""), r);
+// And the same trace with its last board re-spun before the final pick still replays: a re-spin is the legal way on.
+const lastSpin = simulateDraft("verify-seed-5", [{ kind: "team", beforePick: 5 }]);
+r = gl.replayDraft(lastSpin.seed, lastSpin.history, lastSpin.seq);
+check("a re-spin before the final pick still replays as legal", r.ok, r);
+
 console.log(failures === 0 ? "\nAll replayDraft checks passed." : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

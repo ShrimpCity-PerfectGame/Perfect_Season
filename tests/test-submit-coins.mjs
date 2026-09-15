@@ -342,4 +342,15 @@ await runTest("a failed save gives the challenge code back so a retry counts, an
   }
 });
 
+await runTest("a Daily ignores GM and Genius flags: it's recorded, scored and paid as a plain Daily", async () => {
+  const flagged = await signUp("dailyflags");
+  const trace = legalTrace(GL.dailySeed(TODAY, "fantasy"));
+  const res = await submitRun({ mode: { kind: "daily", date: TODAY }, ...trace, gm: true, genius: true, format: "fantasy" });
+  assert(res.ok && res.run.gm === false && res.run.genius === false, `the run isn't GM or Genius: ${show(res.run && { gm: res.run.gm, genius: res.run.genius })}`);
+  const plainPar = GL.botPar(trace.history.map((h) => h.key), { format: "fantasy", gm: false });
+  assert(res.run.par === plainPar && res.run.capUsed === undefined, `scored against the plain par, with no cap: ${show({ par: res.run.par, plainPar, capUsed: res.run.capUsed })}`);
+  const logged = rowsOf(auth._runs, flagged.id);
+  assert(logged.length === 1 && logged[0].gm === false && logged[0].genius === false && logged[0].ladder === "daily", `logged as a plain Daily: ${show(logged)}`);
+});
+
 console.log("test-submit-coins.mjs done");

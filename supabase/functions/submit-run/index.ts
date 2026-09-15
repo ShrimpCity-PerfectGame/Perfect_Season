@@ -141,7 +141,12 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
-  const { mode, history, seq, gm, genius, format: rawFormat } = bodyRaw || {};
+  const { mode, history, seq, gm: rawGm, genius: rawGenius, format: rawFormat } = bodyRaw || {};
+  // A Daily is never GM or Genius - the app offers neither on it - so those flags are ignored there rather than
+  // trusted: a GM flag would score the Daily's ladder points against the easier par of a bot drafting under the
+  // cap, and put the Daily on the GM Stats board.
+  const gm = mode?.kind === "daily" ? false : !!rawGm;
+  const genius = mode?.kind === "daily" ? false : !!rawGenius;
   if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return json({ error: "malformed submission" }, 400);
 
   // Read only from the top level, never mode.format - the format selects both the seed and the

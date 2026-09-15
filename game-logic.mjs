@@ -316,6 +316,11 @@ export function replayDraft(seed, history, seq) {
       roster[h.slot] = player;
       drafted.add(player.id);
       histPtr++;
+    } else if (si + 1 >= seq.length || seq[si + 1] === base[basePtr]) {
+      // The app leaves a board it could pick from only by picking or by re-spinning it, which puts the new board
+      // straight after this one. Walking past it to the next base board instead would let a trace draft the best six
+      // of the sequence's eighteen boards (on a Daily, better than any draft the app allows).
+      return fail("a board with a legal pick was passed over");
     }
     prevKey = key;
   }

@@ -283,9 +283,14 @@ overwrite each other.
   finished season per account per challenge code, in any variant or format. If the profile update then fails it
   gives that row back (or a Daily's `daily_runs` row), so a retry counts. Grinding fresh codes for a lucky outcome
   is still the known gap above; only 20 Unlimited, Genius and GM seasons pay coins per UTC day.
-- **The minigames are the one source a modified browser can fake**: `claim_minigame` pays 15 once a UTC day per
-  game when the player has a `sou_runs`/`builds` row from the last 24 hours, and those tables are browser-written.
-  That caps a cheater at 30 coins a day. Their badges (Stat Nerd, Mad Scientist) pay nothing for the same reason.
+- **Accepted gaps, priced by `tests/test-economy-security.mjs`** (which prints them): the minigames are
+  browser-written, so `claim_minigame` pays 15 once a UTC day per game to anyone with a `sou_runs`/`builds` row
+  from the last 24 hours - 30 coins a day without playing, no more than an honest player - and their badges (Stat
+  Nerd, Mad Scientist) pay nothing; the Genius flag is the client's word (Big Brain, the Genius ladder); and codes
+  are the client's choice, so searching codes offline for 20-0 seasons tops out around 7,000 coins a day. Closed in
+  v1.12.0: submit-run refuses a GM season over the cap, ignores GM/Genius flags on a Daily, and `replayDraft`
+  refuses a trace that walks past a board it could pick from without re-spinning (cherry-picking the best six of
+  eighteen boards - on a Daily, better than any draft the app allows).
 - **Badge items** (Undefeated frame and title, Dynasty card, Daily Winner and Cinderella titles) belong to whoever
   has the badge in `badge_awards`, which submit-run fills as it pays - so an item unlocks with the first finished
   season after its badge is earned.

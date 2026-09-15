@@ -250,7 +250,10 @@ export function makeMockAuth() {
       return { data: { ok: true } };
     }
 
-    const { mode, history, seq, gm, genius, format: rawFormat } = body || {};
+    const { mode, history, seq, gm: rawGm, genius: rawGenius, format: rawFormat } = body || {};
+    // A Daily is never GM or Genius, so those flags are ignored there - mirroring index.ts.
+    const gm = mode?.kind === "daily" ? false : !!rawGm;
+    const genius = mode?.kind === "daily" ? false : !!rawGenius;
     if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return { data: { error: "malformed submission" } };
 
     // Top-level only, allow-listed, missing means fantasy - mirrors index.ts exactly.

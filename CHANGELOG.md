@@ -40,6 +40,8 @@ Nothing yet.
 ### Fixed
 
 - **A Daily whose save failed can be saved again.** The retry used to be told the Daily was already recorded.
+- **The server refuses more drafts the app couldn't have made:** a GM roster over the salary cap, a Daily
+  claiming to be GM or Genius, and a draft that skipped past boards it could have picked from.
 
 ## [1.11.1] — 2026-09-15
 

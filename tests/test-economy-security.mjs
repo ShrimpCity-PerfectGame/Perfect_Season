@@ -979,12 +979,13 @@ await runTest("8c. a GM season must fit under the salary cap: an uncapped roster
     const r = await free(code, trace, { gm: true, format, mode: { gm: true } });
     assert(!r.ok && r.error === "illegal roster" && r.reason === "over the salary cap", `an uncapped roster as GM (${format}, $${capOf(trace.roster, format)}M): ${show(r)}`);
   }
-  const asDaily = draftTrace(GL.dailySeed(TODAY, "fantasy"), { best: true });
-  if (capOf(asDaily.roster) > GL.GM_CAP) {
-    const r = await submitRun({ mode: { kind: "daily", date: TODAY }, history: asDaily.history, seq: asDaily.seq, gm: true });
-    assert(!r.ok && r.reason === "over the salary cap", `a Daily claiming GM is held to the cap too: ${show(r)}`);
-  }
   assert(snapshotOf(cheat.id) === before, "nothing was written: no profile change, runs-log row, code or coins");
+  // A Daily claiming GM isn't a GM season at all: submit-run ignores the flag on a Daily, so it counts as the plain
+  // Daily it is - scored against the plain par and kept off the GM board - whatever the cap would have said.
+  const asDaily = draftTrace(GL.dailySeed(TODAY, "fantasy"), { best: true });
+  const dailyRes = await submitRun({ mode: { kind: "daily", date: TODAY }, history: asDaily.history, seq: asDaily.seq, gm: true });
+  assert(dailyRes.ok && dailyRes.run.gm === false && dailyRes.run.capUsed === undefined,
+    `a Daily claiming GM counts as a plain Daily: ${show(dailyRes.run ? { gm: dailyRes.run.gm, capUsed: dailyRes.run.capUsed } : dailyRes)}`);
   // What the refusal keeps off the books: the same roster's points against the capped bot's par, when it has one.
   const run = settle(code, trace);
   const cappedPar = GL.botPar(trace.history.map((h) => h.key), { format: "fantasy", gm: true });

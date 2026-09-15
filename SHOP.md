@@ -98,7 +98,9 @@ Ledger `kind`s and their `ref`s:
 | `badge_awards` | `user_id` → profiles (cascade), `badge` `^[a-z0-9-]{1,40}$`, `awarded_at`; pk (user_id, badge). The badges whose coins have been paid. |
 | `finished_codes` | `user_id` → profiles (cascade), `code` text 1–32, `created_at`; pk (user_id, code). The free-mode codes an account has finished a season on. |
 
-All four: RLS on, no policies, every privilege revoked from `anon` and `authenticated`.
+All four: RLS on, no policies, every privilege revoked from `anon` and `authenticated` — and the ledger's id sequence
+too (Supabase's default privileges hand clients every new sequence, and one set to its maximum would stop every
+ledger write).
 
 - `wallet_lock(p_user uuid) → bigint` — creates an empty wallet if there's none, locks the row until the transaction
   ends, returns the balance. **Every function that moves coins or decides something on a balance takes this lock
@@ -221,7 +223,11 @@ coinsSummary(season, awards)         → { earned, balance, capped, lines }
 `../../../profile-rules.mjs` the same way it imports `game-logic.mjs`. A DNF is unchanged (no coins). A finished
 season, after the existing verification:
 
-1. A free-mode `mode.code` over 32 characters is refused like a missing one (400).
+1. A free-mode `mode.code` over 32 characters is refused like a missing one (400). A Daily ignores the `gm` and
+   `genius` flags (the app offers neither on it). A GM season whose verified roster is over `GM_CAP` is an illegal
+   roster (400) — the app never lets a pick past the cap, but whether a draft was GM is the client's word. And
+   `replayDraft` (game-logic.mjs) refuses a trace that walks past a board it could have picked from without
+   re-spinning it, which would otherwise draft the best six of a sequence's eighteen boards.
 2. **The duplicate guard.** Daily: the existing `daily_runs` insert; its 409 answer gains `reason: "duplicate"`.
    Free: insert `finished_codes (user_id, code)` first. A unique violation (23505) answers 409
    `{ "error": "this draft is already recorded", "reason": "duplicate" }`; any other error answers 500
