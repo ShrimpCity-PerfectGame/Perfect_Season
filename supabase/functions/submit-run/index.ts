@@ -190,6 +190,11 @@ Deno.serve(async (req) => {
   // competitive Stats-screen leaderboard (the GM-mode cap constraint), so it needs the same
   // trust level as score/outcome, not the client's own report.
   const finalCapUsed = gm ? GL.SLOTS.reduce((sum, s) => sum + GL.playerSalary(roster[s], format), 0) : undefined;
+  // And a GM season has to fit under the cap. The app never lets a pick past it (a player the cap can't cover
+  // can't be locked in), but whether a draft was GM is the client's word: without this, any roster could be sent
+  // as GM - topping the GM board, and scoring its ladder points (and their coins) against a par the bot drafted
+  // under the cap. Refused before anything is written, like any other illegal roster.
+  if (gm && finalCapUsed > GL.GM_CAP) return json({ error: "illegal roster", reason: "over the salary cap" }, 400);
 
   // Par and points are recomputed here from the verified board sequence, exactly like score and
   // capUsed - the client never gets to say how well it did against the bot. The bot plays the

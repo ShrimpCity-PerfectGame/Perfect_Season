@@ -66,6 +66,12 @@ alter table public.badge_awards enable row level security;
 alter table public.finished_codes enable row level security;
 -- No policies, and no privileges either, so a client's read is refused outright rather than coming back empty.
 revoke all on table public.wallets, public.wallet_ledger, public.badge_awards, public.finished_codes from anon, authenticated;
+-- The ledger's id sequence too. Supabase's default privileges give anon and authenticated every sequence made in
+-- public, and whoever holds this one can set it to its last value - after which no ledger row can be written, so
+-- no signup (its welcome coins fail, and the new account with them), no season's coins, no claim and no purchase,
+-- for anyone. PostgREST doesn't offer setval to clients, so this closes a door no request reaches today; a table
+-- no client may touch shouldn't hand out the counter that numbers its rows either way.
+revoke all on sequence public.wallet_ledger_id_seq from anon, authenticated;
 
 -- ---------- Moving coins ----------
 -- Internal: only the functions below (and migration-shop.sql's) call these.
