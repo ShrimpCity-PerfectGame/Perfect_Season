@@ -265,16 +265,26 @@ returns text language sql stable security definer set search_path = public, pg_t
 $$;
 
 -- The signup trigger (first defined in schema.sql, whose trigger on auth.users calls this), now also
--- refusing a username with a blocked word. Supabase Auth reports the refusal to the browser as
--- "Database error saving new user", and no account is created.
+-- refusing a username outside the username rule or with a blocked word. Supabase Auth reports the refusal
+-- to the browser as "Database error saving new user", and no account is created.
+-- The rule is checked here, not only in the signup form: Supabase Auth stores whatever metadata a browser
+-- sends, so without it a modified client could sign up as letters the word filter doesn't fold
+-- (mathematical or circled letters), with invisible or direction-changing characters, as another
+-- player's name with a zero-width space in it, or as an empty or overlong name.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_username text := new.raw_user_meta_data->>'username';
 begin
-  if not public.text_is_clean(new.raw_user_meta_data->>'username') then
+  -- profile-rules.mjs's USERNAME_RE, the same rule as check_username's 'invalid'.
+  if v_username is null or v_username !~ '^[A-Za-z0-9_]{3,16}$' then
+    raise exception 'username_invalid' using errcode = 'P0001';
+  end if;
+  if not public.text_is_clean(v_username) then
     raise exception 'username_blocked' using errcode = 'P0001';
   end if;
   insert into public.profiles (id, username)
-  values (new.id, new.raw_user_meta_data->>'username');
+  values (new.id, v_username);
   return new;
 end;
 $$;
