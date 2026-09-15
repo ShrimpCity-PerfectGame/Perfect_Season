@@ -1,8 +1,10 @@
 -- Migration: profiles (v1.11.0) - bios, pictures, favorite teams, the word filter, and one-read
 -- profile lookups. Run AFTER migration-runs-log.sql (player_profile calls its player_stats), before
 -- shipping the client that reads it. Staging first, then production. Safe to re-run: every object is
--- create-if-missing / create-or-replace, policies are dropped and re-created, and the seeds never
--- overwrite what's already there (re-running can't switch uploads back on or undo a word-list edit).
+-- create-if-missing / create-or-replace, policies and the bio character rule are dropped and re-created,
+-- and the seeds never overwrite what's already there (re-running can't switch uploads back on or undo a
+-- word-list edit). The one change a re-run can make to data: a bio saved under an older, shorter character
+-- rule has each character the current rule refuses replaced by a space.
 --
 -- Contract: PROFILES.md. Only adds objects (plus a stricter handle_new_user), so the site that's live
 -- when this runs keeps working.
@@ -45,11 +47,10 @@ on conflict (key) do update set pack = excluded.pack, free = excluded.free;
 -- "nothing set". v1.12.0 only adds columns.
 create table if not exists public.profile_details (
   user_id        uuid primary key references public.profiles(id) on delete cascade,
-  -- One line of plain text: profile-rules.mjs's BIO_MAX, and none of its disallowed characters
-  -- (control characters, and invisible or direction-changing ones).
+  -- One line of plain text: profile-rules.mjs's BIO_MAX here, and none of its disallowed characters (the
+  -- named constraint below).
   bio            text not null default ''
-                 check (char_length(bio) <= 160)
-                 check (bio !~ U&'[\0001-\001F\007F-\009F\200B\200E\200F\202A-\202E\2060-\2064\2066-\2069\FEFF]'),
+                 check (char_length(bio) <= 160),
   -- An uploaded picture in the player's own folder of the avatars bucket: "<user_id>/<ms>.<ext>"
   -- (profile-rules.mjs's avatarObjectPath). A new name every upload, so no cache shows the old one.
   avatar_path    text check (avatar_path is null or (
@@ -62,6 +63,21 @@ create table if not exists public.profile_details (
   -- A picture is a photo or a default avatar, never both.
   check (avatar_path is null or avatar_preset is null)
 );
+
+-- The characters a bio may not contain: profile-rules.mjs's disallowed set - control characters, line and
+-- paragraph separators, and the invisible or direction-changing ones. A named constraint, replaced on every
+-- run, because `create table if not exists` leaves an existing table alone: a database set up by the first
+-- version of this file has that version's shorter list as an unnamed check, profile_details_bio_check1.
+alter table public.profile_details drop constraint if exists profile_details_bio_check1;
+alter table public.profile_details drop constraint if exists profile_details_bio_characters;
+-- A bio saved under the shorter list can hold a character this one refuses, and the constraint can't be
+-- added over it. Each becomes a space rather than nothing: removing an invisible character could join the
+-- letters around it into a blocked word the filter never saw.
+update public.profile_details
+   set bio = btrim(regexp_replace(bio, U&'[\0001-\001F\007F-\009F\061C\200B\200E\200F\2028\2029\202A-\202E\2060-\2064\2066-\206F\FEFF]', ' ', 'g'))
+ where bio ~ U&'[\0001-\001F\007F-\009F\061C\200B\200E\200F\2028\2029\202A-\202E\2060-\2064\2066-\206F\FEFF]';
+alter table public.profile_details add constraint profile_details_bio_characters
+  check (bio !~ U&'[\0001-\001F\007F-\009F\061C\200B\200E\200F\2028\2029\202A-\202E\2060-\2064\2066-\206F\FEFF]');
 
 -- The word filter's list. Nobody reads it but text_is_clean (no policies, no grants), so it can't be
 -- downloaded and worked around.
@@ -108,61 +124,73 @@ revoke all on public.blocked_words from anon, authenticated;
 -- ---------- The word filter ----------
 -- True when a text has none of the blocked words. Used for bios, new usernames and moderator renames.
 -- It only reads a normalized copy; the text itself is never changed. PROFILES.md 3.4:
---   1. Drop invisible characters (zero-width, soft hyphen, variation selectors, direction marks) and
---      combining accents; spell out sharp s, ae and oe; fold every letter that stands for a plain one
---      to that lowercase letter - ASCII capitals, accented letters, full-width letters, and Cyrillic and
---      Greek look-alikes. Lowercasing only through this table (never lower()) keeps the result
+--   1. Normalize with NFKC, so compatibility forms read as the characters they stand for (full-width,
+--      mathematical, circled and superscript letters, ligatures), then NFD, so every accented letter is
+--      its letter plus accents. (Without NFD, NFKC would rejoin an accent typed after a letter into an
+--      accented letter the fold table doesn't list, and that letter would split the word.)
+--   2. Drop invisible characters (zero-width, soft hyphen, fillers, direction and format controls,
+--      variation selectors, tags) and combining marks; spell out sharp s, ae and oe; fold every letter
+--      that stands for a plain one to that lowercase letter - ASCII capitals, the Latin letters whose mark
+--      NFD can't split off (o, d, h, l and t with stroke, eth, dotless i, kra, script a and g), and
+--      Cyrillic and Greek look-alikes. Lowercasing only through this table (never lower()) keeps the result
 --      independent of the database locale and identical to the browser mock.
---   2. Read the text twice: with the look-alikes 0 1 3 4 5 7 @ $ ! | as o i e a s t a s i l, and as
---      typed. Both readings are checked because those characters also sit next to words as
---      punctuation or numbers ("shit!", "fuck1").
---   3. In each reading, runs of three or more of the same letter count as one.
+--   3. Read the text four ways: with the look-alikes 0 1 3 4 5 7 @ $ ! | as o i e a s t a s i l, and as
+--      typed (those characters also sit next to words as punctuation or numbers: "shit!", "fuck1"); and
+--      in each, every run of three or more of one letter cut to one ("fuuuck") and cut to two (a doubled
+--      letter tripled: "fagggot").
 --   4. A 'word' entry matches a whole token (split on anything that isn't a letter), or a token that is
 --      the word plus "s" or "es". An 'anywhere' entry matches inside the letters with everything else
 --      removed, so spaces or dots between the letters don't hide it.
+-- normalize() uses the database's Unicode tables and the mock uses the browser's, so a character added to
+-- Unicode after the database's version isn't normalized here; tests/test-word-filter.mjs sticks to
+-- characters both know.
 create or replace function public.text_is_clean(t text)
 returns boolean language sql stable security definer set search_path = public, pg_temp as $$
   with
   fold(src, dst) as (values
-      (U&'A\00C0\00C1\00C2\00C3\00C4\00C5\00E0\00E1\00E2\00E3\00E4\00E5\0100\0101\0102\0103\0104\0105\0410\0430\0391\03B1\212B\FF21\FF41', 'a'),
-      (U&'B\0412\0392\FF22\FF42', 'b'),
-      (U&'C\00C7\00E7\0106\0107\0108\0109\010A\010B\010C\010D\0421\0441\FF23\FF43', 'c'),
-      (U&'D\00D0\00F0\010E\010F\0110\0111\0501\FF24\FF44', 'd'),
-      (U&'E\00C8\00C9\00CA\00CB\00E8\00E9\00EA\00EB\0112\0113\0114\0115\0116\0117\0118\0119\011A\011B\0415\0435\0395\FF25\FF45', 'e'),
-      (U&'F\FF26\FF46', 'f'),
-      (U&'G\011C\011D\011E\011F\0120\0121\0122\0123\FF27\FF47', 'g'),
-      (U&'H\0124\0125\0126\0127\041D\04BB\0397\FF28\FF48', 'h'),
-      (U&'I\00CC\00CD\00CE\00CF\00EC\00ED\00EE\00EF\0128\0129\012A\012B\012C\012D\012E\012F\0130\0131\0406\0456\0399\03B9\FF29\FF49', 'i'),
-      (U&'J\0134\0135\0408\0458\FF2A\FF4A', 'j'),
-      (U&'K\0136\0137\0138\041A\043A\039A\03BA\212A\FF2B\FF4B', 'k'),
-      (U&'L\0139\013A\013B\013C\013D\013E\013F\0140\0141\0142\04CF\FF2C\FF4C', 'l'),
-      (U&'M\041C\039C\FF2D\FF4D', 'm'),
-      (U&'N\00D1\00F1\0143\0144\0145\0146\0147\0148\039D\FF2E\FF4E', 'n'),
-      (U&'O\00D2\00D3\00D4\00D5\00D6\00D8\00F2\00F3\00F4\00F5\00F6\00F8\014C\014D\014E\014F\0150\0151\041E\043E\039F\03BF\FF2F\FF4F', 'o'),
-      (U&'P\0420\0440\03A1\03C1\FF30\FF50', 'p'),
-      (U&'Q\FF31\FF51', 'q'),
-      (U&'R\0154\0155\0156\0157\0158\0159\FF32\FF52', 'r'),
-      (U&'S\015A\015B\015C\015D\015E\015F\0160\0161\017F\0218\0219\0405\0455\FF33\FF53', 's'),
-      (U&'T\0162\0163\0164\0165\0166\0167\021A\021B\0422\03A4\03C4\FF34\FF54', 't'),
-      (U&'U\00D9\00DA\00DB\00DC\00F9\00FA\00FB\00FC\0168\0169\016A\016B\016C\016D\016E\016F\0170\0171\0172\0173\03C5\FF35\FF55', 'u'),
-      (U&'V\03BD\FF36\FF56', 'v'),
-      (U&'W\0174\0175\FF37\FF57', 'w'),
-      (U&'X\0425\0445\03A7\03C7\FF38\FF58', 'x'),
-      (U&'Y\00DD\00FD\00FF\0176\0177\0178\0423\0443\03A5\FF39\FF59', 'y'),
-      (U&'Z\0179\017A\017B\017C\017D\017E\0396\FF3A\FF5A', 'z')
+      (U&'A\0251\0410\0430\0391\03B1', 'a'),
+      (U&'B\0412\0392', 'b'),
+      (U&'C\0421\0441', 'c'),
+      (U&'D\00D0\00F0\0110\0111\0501', 'd'),
+      (U&'E\0415\0435\0395', 'e'),
+      (U&'F', 'f'),
+      (U&'G\0261', 'g'),
+      (U&'H\0126\0127\041D\04BB\0397', 'h'),
+      (U&'I\0131\0406\0456\0399\03B9', 'i'),
+      (U&'J\0408\0458', 'j'),
+      (U&'K\0138\041A\043A\039A\03BA', 'k'),
+      (U&'L\0141\0142\04CF', 'l'),
+      (U&'M\041C\039C', 'm'),
+      (U&'N\039D', 'n'),
+      (U&'O\00D8\00F8\041E\043E\039F\03BF', 'o'),
+      (U&'P\0420\0440\03A1\03C1', 'p'),
+      (U&'Q', 'q'),
+      (U&'R', 'r'),
+      (U&'S\0405\0455', 's'),
+      (U&'T\0166\0167\0422\03A4\03C4', 't'),
+      (U&'U\03C5', 'u'),
+      (U&'V\03BD', 'v'),
+      (U&'W', 'w'),
+      (U&'X\0425\0445\03A7\03C7', 'x'),
+      (U&'Y\0423\0443\03A5', 'y'),
+      (U&'Z\0396', 'z')
   ),
   prepared as (
     select translate(
              replace(replace(replace(replace(replace(replace(
-               regexp_replace(coalesce(t, ''), U&'[\00AD\034F\0300-\036F\180E\200B-\200F\202A-\202E\2060-\2069\FE00-\FE0F\FEFF]', '', 'g'),
+               regexp_replace(normalize(normalize(coalesce(t, ''), NFKC), NFD),
+                 U&'[\00AD\0300-\036F\061C\115F-\1160\17B4-\17B5\180B-\180F\1AB0-\1AFF\1DC0-\1DFF\200B-\200F\202A-\202E\2060-\206F\20D0-\20FF\3164\FE00-\FE0F\FE20-\FE2F\FEFF\FFA0\FFF9-\FFFB\+0E0000-\+0E0FFF]',
+                 '', 'g'),
                U&'\00DF', 'ss'), U&'\1E9E', 'ss'), U&'\00E6', 'ae'), U&'\00C6', 'ae'), U&'\0153', 'oe'), U&'\0152', 'oe'),
              (select string_agg(src, '' order by dst) from fold),
              (select string_agg(repeat(dst, char_length(src)), '' order by dst) from fold)) as s
   ),
   readings as (
-    select regexp_replace(translate(s, '013457@$!|', 'oieastasil'), '([a-z])\1\1+', '\1', 'g') as s from prepared
-    union all
-    select regexp_replace(s, '([a-z])\1\1+', '\1', 'g') from prepared
+    select regexp_replace(m.s, '([a-z])\1\1+', cut.keep, 'g') as s
+      from (select translate(s, '013457@$!|', 'oieastasil') as s from prepared
+            union all
+            select s from prepared) as m
+     cross join (values ('\1'), ('\1\1')) as cut(keep)
   ),
   tokens as (
     select tok from readings, regexp_split_to_table(readings.s, '[^a-z]+') as tok where tok <> ''
@@ -200,7 +228,8 @@ begin
   if char_length(v_bio) > 160 then
     raise exception 'bio_too_long' using errcode = 'P0001';
   end if;
-  if v_bio ~ U&'[\0001-\001F\007F-\009F\200B\200E\200F\202A-\202E\2060-\2064\2066-\2069\FEFF]' then
+  -- profile-rules.mjs's disallowed characters, the same set as the profile_details_bio_characters constraint.
+  if v_bio ~ U&'[\0001-\001F\007F-\009F\061C\200B\200E\200F\2028\2029\202A-\202E\2060-\2064\2066-\206F\FEFF]' then
     raise exception 'bio_invalid' using errcode = 'P0001';
   end if;
   if not public.text_is_clean(v_bio) then
@@ -280,15 +309,9 @@ begin
   if v_username is null or v_username !~ '^[A-Za-z0-9_]{3,16}$' then
     raise exception 'username_invalid' using errcode = 'P0001';
   end if;
-  -- text_is_clean reads a run of three or more of one letter as a single letter, so a blocked word with a
-  -- doubled letter gets through with that letter stretched ("Niggger" reads as "niger", "Asssshole" as
-  -- "ashole"). A username is read once more, with its look-alike digits as letters and every such run
-  -- cut to two. (Bios and check_username don't take this second reading yet: PROFILES.md 3.4's
-  -- algorithm, which the test mock mirrors, would have to change with it.)
-  if not public.text_is_clean(v_username)
-     or not public.text_is_clean(regexp_replace(
-          translate(v_username, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ013457', 'abcdefghijklmnopqrstuvwxyzoieast'),
-          '([a-z])\1\1+', '\1\1', 'g')) then
+  -- The word filter, which also reads every run of three or more of one letter cut to two, so a blocked
+  -- word hidden by tripling a doubled letter ("Asssshole") is refused here too.
+  if not public.text_is_clean(v_username) then
     raise exception 'username_blocked' using errcode = 'P0001';
   end if;
   insert into public.profiles (id, username)
@@ -382,9 +405,30 @@ on conflict (id) do update set
   name = excluded.name, public = excluded.public,
   file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
--- A signed-in player works only inside their own folder, "<their id>/...". Adding or replacing a file
--- also requires uploads not to be paused - replacing counts, or the kill switch could be sidestepped by
--- overwriting an existing picture. Supabase needs select as well as delete to delete an object.
+-- Whether the caller's avatars folder has room for one more file: at most 10. The app keeps one photo
+-- there at a time, deleting the one it replaces, so 10 leaves room for leftovers from failed deletes while
+-- a script can't fill the bucket. The insert policy below calls it, so the invoking player needs execute.
+-- Security invoker: it counts what the caller's own select policy shows, which is all of their folder, and
+-- doesn't depend on the function owner's access to storage.objects. Uploads by one player take their turn
+-- (the lock), and the count is taken after the wait - a volatile function's query sees what committed
+-- meanwhile - so a burst of simultaneous uploads can't all find room for one more.
+create or replace function public.avatar_folder_has_room()
+returns boolean language plpgsql volatile security invoker set search_path = public, pg_temp as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended('avatar_folder:' || auth.uid()::text, 0));
+  return (select count(*) from storage.objects o
+           where o.bucket_id = 'avatars' and o.name like (auth.uid()::text || '/%')) < 10;
+end;
+$$;
+revoke execute on function public.avatar_folder_has_room() from public, anon;
+grant execute on function public.avatar_folder_has_room() to authenticated;
+
+-- A signed-in player works only inside their own folder, "<their id>/...". A file they add, or rename, must
+-- be named exactly as the app names uploads - "<their id>/<10-16 digits>.webp|jpg|png", one level and
+-- nothing else (profile-rules.mjs's isOwnAvatarPath) - and adding one needs room in the folder. Adding or
+-- replacing a file also requires uploads not to be paused - replacing counts, or the kill switch could be
+-- sidestepped by overwriting an existing picture. Reading and deleting cover the whole folder, so anything
+-- already there can still be cleared out. Supabase needs select as well as delete to delete an object.
 -- Moderators get their own policies in migration-moderation.sql.
 drop policy if exists "players read their own avatar files" on storage.objects;
 create policy "players read their own avatar files" on storage.objects
@@ -395,8 +439,10 @@ drop policy if exists "players upload avatar files to their own folder" on stora
 create policy "players upload avatar files to their own folder" on storage.objects
   for insert to authenticated
   with check (
-    bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text
+    bucket_id = 'avatars'
+    and name ~ '^[^/]+/[0-9]{10,16}\.(webp|jpg|png)$' and split_part(name, '/', 1) = auth.uid()::text
     and not coalesce((select f.enabled from public.site_flags f where f.key = 'uploads_paused'), false)
+    and public.avatar_folder_has_room()
   );
 
 drop policy if exists "players update their own avatar files" on storage.objects;
@@ -404,7 +450,8 @@ create policy "players update their own avatar files" on storage.objects
   for update to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (
-    bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text
+    bucket_id = 'avatars'
+    and name ~ '^[^/]+/[0-9]{10,16}\.(webp|jpg|png)$' and split_part(name, '/', 1) = auth.uid()::text
     and not coalesce((select f.enabled from public.site_flags f where f.key = 'uploads_paused'), false)
   );
 
