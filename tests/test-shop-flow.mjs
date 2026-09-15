@@ -1,7 +1,8 @@
 // Coins and the shop through the whole app on the mock (SHOP.md 8). A new account starts with 250 coins; a
 // finished season shows what it paid and any new badges, with a way to the shop; buying a frame there puts it on
 // the header picture and the profile card; Back returns to wherever the shop was opened from. A draft that had
-// already counted says so instead of a save error, the daily cap says why a season paid nothing, Over/Under and
+// already counted says so instead of a save error (and claims no record), the board on screen catches up with a
+// season once its save answers, the daily cap says why a season paid nothing, Over/Under and
 // Build-a-player pay 15 once a day, and a guest never sees any of it. The shop is driven only through its
 // contract's test hooks (SHOP.md 7.2), so these checks hold for the real screen as well as phase 0's stub.
 import {
@@ -497,6 +498,49 @@ await runTest("a save that answers after signing out puts nothing of that accoun
     await act(async () => { held.release(); });
     await flush(12);
     assert(!container.querySelector(".whoami") && tab(container, "Account"), `still signed out after the late answer, got: ${text(container).slice(0, 200)}`);
+  } finally {
+    held.restore();
+  }
+});
+
+await runTest("a draft that had already counted claims no sitewide or personal best", async () => {
+  const pageAuth = await newSignedInPage("again@example.com", "again");
+  const id = [...pageAuth._profiles.values()].find((p) => p.username === "again").id;
+  // A board any drafted roster beats, and this code already finished on another device: before the save answers,
+  // this season looks like both a sitewide and a personal best (the account has no best yet).
+  pageAuth._profiles.set("low-id", { id: "low-id", username: "low", runs: 1, dnf: 0, wins: 0, losses: 17, champs: 0, perfect: 0, playoffs: 0, best_score: 1, best_run: { w: 0, l: 17, roster: [] }, recent: [] });
+  pageAuth._finishedCodes.set(`${id}|AGAIN1`, { user_id: id, code: "AGAIN1", created_at: new Date().toISOString() });
+  container = await open("http://localhost/", pageAuth);
+  await until(() => container.querySelector(".whoami"), "signed in again");
+  await click(tab(container, "Modes"));
+  await flush();
+  await type(container.querySelector('input[aria-label="Challenge code"]'), "AGAIN1");
+  await click(findButtonByText(container, "Draft it"));
+  await flush(3);
+  assert(container.querySelector(".seedline code")?.textContent === "AGAIN1", "expected the draft on code AGAIN1");
+  await playSeason(container);
+  await until(() => container.querySelector(".result-hero .sc-dup"), () => `the already-recorded note, got: ${container.querySelector(".result-hero")?.textContent}`);
+  await flush(4);
+  const moments = container.querySelector(".result-hero .moments")?.textContent || "";
+  assert(!moments.includes("sitewide best") && !moments.includes("personal best"), `a season that didn't count sets no record, got: ${moments}`);
+});
+
+await runTest("once a season's save answers, the board includes it: the Modes tile shows the new sitewide best", async () => {
+  const pageAuth = await newSignedInPage("boardie@example.com", "boardie");
+  const held = holdSaves(pageAuth); // a slow connection: the board finish() loads can't include the season yet
+  try {
+    await draftSixPicks();
+    await until(() => held.release, "the season's save, held");
+    await flush(4);
+    const { act } = await import("react-dom/test-utils");
+    await act(async () => { held.release(); });
+    const id = [...pageAuth._profiles.values()].find((p) => p.username === "boardie").id;
+    await until(() => pageAuth._profiles.get(id)?.best_score != null, "the save to land");
+    const best = Number(pageAuth._profiles.get(id).best_score).toFixed(1);
+    await click(tab(container, "Modes"));
+    await flush(4);
+    const tile = () => [...container.querySelectorAll(".hometiles .tile")].find((t) => t.textContent.includes("score sitewide"));
+    await until(() => tile()?.querySelector(".n")?.textContent === best, () => `the sitewide best tile at ${best}, got: ${tile()?.textContent}`);
   } finally {
     held.restore();
   }

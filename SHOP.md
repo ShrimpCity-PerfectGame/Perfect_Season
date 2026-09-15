@@ -463,7 +463,8 @@ New props: `wallet` (`{ balance }` or null — the owner's) and `onOpenShop()`.
 - **Result screen**, signed in, once the save answers: the coins it earned (`coins.earned` as "+186 coins", with the
   season's lines on one compact row and the new badges' coins folded into one "Badges" line) and a Shop button; any new badges by emoji and name; when `capped`, "Unlimited, Genius and GM pay coins for 20
   seasons a day. The Daily always pays."; on `reason: "duplicate"`, "This draft was already recorded, so it didn't
-  count again." in place of the save-error panel. `coins: null` shows nothing about coins.
+  count again." in place of the save-error panel, and no "New sitewide best" or "New personal best" moment (the
+  browser worked those out before the answer). `coins: null` shows nothing about coins.
 - **Wallet.** `fetchWallet()` when your own profile opens and after a season saves or a claim pays → ProfileScreen's
   `wallet`; ShopScreen's `onBalance` keeps it current.
 - **Header picture**: `FramedAvatar` with `myDetails.frame` and the favorite team. `myDetails` also updates from

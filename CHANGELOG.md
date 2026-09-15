@@ -35,13 +35,17 @@ Nothing yet.
 ### Changed
 
 - **A finished draft counts once.** Sending the same finished draft again, or finishing a second season on
-  a challenge code you've already finished, no longer counts, and the result screen says so.
+  a challenge code you've already finished, no longer counts, and the result screen says so (without
+  claiming a new best score for it).
 
 ### Fixed
 
 - **A Daily whose save failed can be saved again.** The retry used to be told the Daily was already recorded.
 - **The server refuses more drafts the app couldn't have made:** a GM roster over the salary cap, a Daily
   claiming to be GM or Genius, and a draft that skipped past boards it could have picked from.
+- **"New sitewide best score" is checked against an up-to-date leaderboard.** The leaderboard reloaded while
+  a season was still saving, so it could miss that season: the Modes screen kept showing the old best, and
+  the next season could claim a sitewide best it hadn't set. It now reloads once the save answers.
 
 ## [1.11.1] — 2026-09-15
 

@@ -2172,9 +2172,8 @@ export default function PerfectSeason() {
       }
       // totals is null when it couldn't be loaded - keep whatever was showing rather than zeros.
       setLb((x) => ({ loading: false, top, totals: totals || x.totals, myRank, error: false, format: boardFormat }));
-      // Never lower the live count. finish() calls this while its own submit-run is still in flight,
-      // so these totals can predate the draft that just finished - and that draft's broadcast echo
-      // has usually already bumped the count past them.
+      // Never lower the live count. These totals can predate drafts whose broadcasts have already
+      // bumped the count past them - including, on a guest's result, the draft that just finished.
       if (totals) setLiveDrafts((n) => (n == null ? totals.runs : Math.max(n, totals.runs)));
     } catch (e) {
       setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1, error: true, format: boardFormat });
@@ -2285,11 +2284,12 @@ export default function PerfectSeason() {
   // A save's answer on the season it belongs to (matched by runId, like addSeasonContext): the coins and badges
   // it paid, or that this draft had already counted (SHOP.md 8). coins stays null when the season counted but
   // its coins couldn't be paid. `payer` is the account that saved it: the result screen stays up after signing
-  // out, and the next account to sign in mustn't see this one's coins.
+  // out, and the next account to sign in mustn't see this one's coins. A season that had already counted set no
+  // record this time, so it loses the sitewide and personal best that finish() worked out before the answer.
   function showSaveAnswer(runId, res) {
     if (!runId || !res) return;
     const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [], payer: res.uid }
-      : res.reason === "duplicate" ? { duplicate: true, payer: res.uid } : null;
+      : res.reason === "duplicate" ? { duplicate: true, payer: res.uid, newSiteBest: false, newBestScore: false } : null;
     if (extras) setResult((r) => (r && r.runId === runId ? { ...r, ...extras } : r));
   }
 
@@ -2551,8 +2551,11 @@ export default function PerfectSeason() {
       addSeasonContext(sim, fmt, saving, mode.kind === "daily" && user ? (stats?.dailyBestStreak || 0) : null);
       // Point the leaderboard at the format just played before refreshing it, so the rank shown
       // beside this result ranks it against its own format rather than the other one's numbers.
+      // The refresh waits for the save: loaded alongside it, the board could miss this season, and
+      // the next season's "New sitewide best" and the Modes tiles would compare against that stale
+      // board. Skipped if the board has been switched to the other format meanwhile.
       showBoardFormat(fmt);
-      loadLeaderboard(fmt);
+      saving.then(() => { if (boardFormatRef.current === fmt) loadLeaderboard(fmt); });
       clearDraft(DRAFT_KEY);
       clearDraftTracked(slotId(mode), mode.kind === "daily" ? DAILY_PROGRESS(mode.date, fmt) : FREE_PROGRESS);
       setWip((w) => ({ ...w, [slotId(mode)]: null }));
