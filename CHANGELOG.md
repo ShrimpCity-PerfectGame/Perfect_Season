@@ -13,6 +13,34 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.12.0] — 2026-09-15
+
+### Added
+
+- **Coins.** Every finished season pays: 20 for the season (40 for the Daily), 2 a win, 10 for making the
+  playoffs, 50 for the title, 150 more for going 20–0, 1 for every 10 ladder points, and up to 50 for a
+  Daily streak. New badges pay 100, 300 or 1,000 (Day One pays 500), and Over/Under and Build-a-player pay
+  15 each once a day. Coins only go down when you spend them: a bad draft or a DNF costs nothing.
+  Unlimited, Genius and GM pay for your first 20 seasons each day; the Daily always pays.
+- **A starting balance.** Everyone who played before coins existed starts with their career so far: 20 a
+  season, 2 a win, 10 a playoff trip, 50 a title and 150 a perfect season, at least 250 and at most 10,000.
+  New accounts start with 250. Badges you've already earned pay out with your next finished season.
+- **The shop.** Spend coins on a frame for your picture, a theme for your player card, a title under your
+  name, or one of three packs of new avatars. Some items come only with a badge. Everything is cosmetic:
+  nothing in the shop changes a draft or a score, and there's no real money.
+- **Showcase.** Choose which three badges sit on your card.
+- **The result screen shows what a season paid**, with any new badges and a way to the shop. Your balance
+  and a Shop button are on your profile card, and your header picture wears your frame.
+
+### Changed
+
+- **A finished draft counts once.** Sending the same finished draft again, or finishing a second season on
+  a challenge code you've already finished, no longer counts, and the result screen says so.
+
+### Fixed
+
+- **A Daily whose save failed can be saved again.** The retry used to be told the Daily was already recorded.
+
 ## [1.11.1] — 2026-09-15
 
 ### Fixed

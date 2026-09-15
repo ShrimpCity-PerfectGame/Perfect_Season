@@ -55,12 +55,21 @@ on the Leaderboard and Stats screens opens its profile. **`PROFILES.md` is the r
 addresses and history) - read it before touching any of the files below. See "Profiles" under
 Architecture for the rules that matter most.
 
+**Coins and the shop (v1.12.0).** Finished seasons, badges and the two minigames pay coins into a wallet
+that never goes below zero, spent in a cosmetic-only shop: frames, card themes, titles and avatar packs
+(some unlocked only by a badge), plus a free three-badge showcase. There's no real money, and nothing
+bought changes a draft or a score. **`SHOP.md` is the reference** (the wallet and shop database functions
+and their codes, submit-run's duplicate guard and reward steps, the storage module, component props and
+test hooks) - read it before touching coins, the shop or submit-run. See "Coins and the shop" under
+Architecture for the rules that matter most.
+
 The main React component and most screens live in `perfect-season.jsx` (~180 KB, ~4,000 lines —
 large enough that targeted `offset`/`limit` reads or grep beat a full-file read). Since v1.11.0 the
 profile feature's screens live in their own files - `profile.jsx`, `avatars.jsx`, `avatar-picker.jsx`
 (with `avatar-image.mjs`) and `moderation.jsx` - sharing display helpers through `ui-common.jsx` and
-rules through `profile-rules.mjs` and `badges.mjs`, so they never import the main component back. New
-screens of any size should follow that pattern. Player and opponent data lives in
+rules through `profile-rules.mjs` and `badges.mjs`, so they never import the main component back. v1.12.0
+added `shop.jsx` and `cosmetics.jsx` the same way, with the item catalog in `shop-catalog.mjs` and every
+coin amount in `rewards.mjs`. New screens of any size should follow that pattern. Player and opponent data lives in
 `data/players.json` (~225 KB); the pure scoring/simulation/roster-legality logic shared with the
 `submit-run` Edge Function lives in `game-logic.mjs` — see that section under Architecture below
 before touching either.
@@ -107,8 +116,10 @@ node tests/test-runs-sql.mjs             # runs log + Stats SQL in real Postgres
 # tools/ui-harness/audit.mjs drives it in the installed Chrome (puppeteer-core) at phone sizes,
 # screenshots it, and measures overflow, clipped text, small tap targets, tiny text, iOS input
 # zoom and overlapping controls. Harness query params: as=player|admin|guest|newbie, howto=1, and
-# screen=profile&fixture=veteran|rookie|photo&owner=1 (plus status=, moderator=N, name=) for the
-# profile screen on its own with tests/fixtures/profile-fixture.mjs data.
+# screen=profile&fixture=veteran|rookie|photo&owner=1 (plus status=, moderator=N, name=, and frame=,
+# card=, title=, coins= to dress the card) for the profile screen on its own with
+# tests/fixtures/profile-fixture.mjs data; screen=shop&coins=N (ShopScreen on the mock), screen=cosmetics
+# [&team=KC|all] (every frame, card theme, title and pack) and screen=picker&owned=sideline,... (the picker).
 node tools/ui-harness/build.mjs   # bundle the harness into build/ui-harness.js (never shipped)
 node tools/ui-harness/audit.mjs --as player --width 375 --tab Leaderboard --out build/ui-audit
 # For a change's final check, still click through the real staging site at desktop and mobile widths.
@@ -131,6 +142,16 @@ node tests/test-profile-screen.mjs     # ProfileScreen on its own: owner/visitor
 node tests/test-avatar-picker.mjs      # the picker's tabs, presets, errors (jsdom)
 node tests/test-avatar-image.mjs       # crop/resize/encode and metadata stripping - needs the installed Chrome (CHROME_PATH overrides)
 node tests/test-profile-links.mjs      # /u/name addresses, Back/Forward, every name link, signup's username check
+
+# Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
+node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
+node tests/test-wallet-sql.mjs         # wallet functions, the daily cap, duplicates, welcome trigger, backfill; SQL == mock
+node tests/test-submit-coins.mjs       # the mock submit-run: coins, badges once, a draft counts once, the cap, failed saves
+node tests/test-shop-sql.mjs           # shop_state/shop_buy/equip_item/set_showcase and paid avatar packs; SQL == mock
+node tests/test-economy-security.mjs   # attacks on coins and purchases a modified browser could try; the economy's numbers
+node tests/test-cosmetics.mjs          # every frame, card theme and title renders; text contrast on every theme and team
+node tests/test-shop-screen.mjs        # ShopScreen on its own: buying, equipping, locked items, showcase, the wallet
+node tests/test-shop-flow.mjs          # the whole app: a season's coins, the shop from the result, a frame in the header
 node tests/run-all.mjs [filter...]     # every test file above in turn (not the difficulty benchmark)
 
 # Rebuild the game data from source (only when adding a season or changing grading)
@@ -165,8 +186,8 @@ time by `build.mjs` — see Build/Run Commands above). Auth, profile reads/write
 daily queries all go through named functions in `storage.js` (`authSignUp`, `fetchProfile`,
 `fetchLeaderboardTop`, `submitRun`, etc.) — never call `getClient()` directly from
 `perfect-season.jsx` or any screen file. `getClient`, the read-retry option and the profile row mapping
-live in `storage-core.js`; a feature's own module (`storage-profile.js`, `storage-moderation.js`)
-imports from there and `storage.js` re-exports it, so the app still imports everything from
+live in `storage-core.js`; a feature's own module (`storage-profile.js`, `storage-moderation.js`,
+`storage-shop.js`) imports from there and `storage.js` re-exports it, so the app still imports everything from
 `./storage.js`. Personal-key reads/writes still go through `sget`/`sset`/`sdel`/
 `clearDraft`, which swallow errors and return null — **assume this half of the API has no
 read-after-write ordering guarantee** (Supabase's Postgres-backed half doesn't have this problem).
@@ -188,7 +209,11 @@ outcome itself, and only then writes via its own service-role client. `finish()`
 win/loss animation instantly from a local call to the same shared `simulateSeason` (so an honest
 client sees identical numbers with no added latency) and submits the trace in the background via
 `storage.js`'s `submitRun`/`submitDnf`; a rejected or failed submission keeps the local celebration
-UI but skips the optimistic stats update and surfaces the existing `saveError` panel. **Known,
+UI but skips the optimistic stats update and surfaces the existing `saveError` panel. Since v1.12.0
+submit-run also refuses a finished draft it has already counted - a Daily once per date and format as
+before, a challenge code once per account through `finished_codes` - answering 409 with `reason:
+"duplicate"`, which the result screen shows instead of `saveError`; then it pays the season's coins and any
+badges (see "Coins and the shop" below). **Known,
 accepted gap**: Unlimited/challenge-code mode's seed is still client-chosen (`mode.code`), so
 grinding many codes offline for a lucky *legitimate* outcome remains possible — closing that needs
 server-issued/committed seeds, a bigger lift (network round-trip at draft start, rate-limiting),
@@ -220,8 +245,8 @@ overwrite each other.
   new name (`profile-rules.mjs`'s `avatarObjectPath`) so no cache shows an old picture. The browser crops
   to 256×256 and strips all metadata (`avatar-image.mjs` - Chrome writes a color profile even into a
   canvas export, so redrawing alone isn't enough).
-- **Badges are computed, never stored** (`badges.mjs`, pure, no app imports - v1.12.0's submit-run will
-  import it to pay coins once). Every condition only becomes true over time, except Loyal Fan, which
+- **Badges are computed, never stored** (`badges.mjs`, pure, no app imports - submit-run imports it too,
+  and `badge_awards` records only which badges have been paid). Every condition only becomes true over time, except Loyal Fan, which
   follows the current favorite team. `CINDERELLA_MAX_SCORE` and `SCOUT_MIN_POINTS` were calibrated by
   simulating drafts; re-run that reasoning (see the comments) if grading or `SPREAD` changes.
 - **`player_stats(user_id)`** lives in `migration-runs-log.sql` beside `site_stats`, mirrored by
@@ -237,6 +262,40 @@ overwrite each other.
   Block a word - `insert into blocked_words (word, match) values ('word', 'word');` ('anywhere' only for
   strings that never occur inside ordinary words or names). Everything else a moderator needs (remove a
   picture, clear a bio, rename a player, dismiss) is in the app's Reports queue.
+
+**Coins and the shop (v1.12.0) - the rules that matter most; `SHOP.md` has everything else.**
+- **Coins only move inside the database.** `wallets`, `wallet_ledger`, `badge_awards`, `finished_codes` and
+  `inventory` aren't readable or writable by clients at all. Seasons and badges are paid only by submit-run's
+  service role (`credit_coins`, `award_badges`); a player reads through `wallet_state`/`shop_state`, claims
+  minigame coins through `claim_minigame` and spends only through `shop_buy`. Every movement is a ledger row
+  under a unique (user, kind, ref), so the same season, badge, day's minigame or purchase can't happen twice,
+  and a wallet's balance can't go below zero (a check constraint, not app code).
+- **The wallet lock.** Every function that moves coins or decides something on a balance calls `wallet_lock`
+  first, before it touches the ledger, so simultaneous purchases and credits take turns and can't deadlock.
+  The read-only `wallet_state` and `shop_state` don't lock: they're called as GET, which PostgREST runs
+  read-only.
+- **Amounts live in `rewards.mjs`** (`COIN_RULES`), which submit-run and the browser share. The three things the
+  database pays by itself - 250 welcome coins (the `profiles_create_wallet` trigger), 15 per minigame, and the
+  one-time starting balance at the bottom of `migration-wallet.sql` - are copies that `tests/test-wallet-sql.mjs`
+  holds to it. Prices, rarities and what's on sale are `shop_items` rows; names and looks live in the browser
+  (`shop-catalog.mjs`, `cosmetics.jsx`).
+- **A finished draft counts once.** submit-run inserts `finished_codes (user, code)` before any other write: one
+  finished season per account per challenge code, in any variant or format. If the profile update then fails it
+  gives that row back (or a Daily's `daily_runs` row), so a retry counts. Grinding fresh codes for a lucky outcome
+  is still the known gap above; only 20 Unlimited, Genius and GM seasons pay coins per UTC day.
+- **The minigames are the one source a modified browser can fake**: `claim_minigame` pays 15 once a UTC day per
+  game when the player has a `sou_runs`/`builds` row from the last 24 hours, and those tables are browser-written.
+  That caps a cheater at 30 coins a day. Their badges (Stat Nerd, Mad Scientist) pay nothing for the same reason.
+- **Badge items** (Undefeated frame and title, Dynasty card, Daily Winner and Cinderella titles) belong to whoever
+  has the badge in `badge_awards`, which submit-run fills as it pays - so an item unlocks with the first finished
+  season after its badge is earned.
+- **Card themes set the card's text scope.** `CardTheme` adds `cs-dark`, `cs-night` or `cs-light`, which
+  perfect-season.jsx maps to theme.mjs's scopes; each theme's painted colors are data in `cosmetics.jsx`, so
+  `tests/test-cosmetics.mjs` can hold its text to WCAG AA, for all 32 teams on Team colors.
+- **Runbook** (SQL editor): change a price - `update shop_items set price = 1500 where id = 'frame-lime';`; take an
+  item off sale (owners keep it) - `update shop_items set active = false where id = 'frame-lime';`; give a pack's
+  avatars to everyone - `update avatar_presets set free = true where pack = 'sideline';`. The seeds in
+  `migration-shop.sql` only add missing items, so these survive a re-run - edit the seed too for new databases.
 
 **The runs log is the complete history; `profiles.recent` is not.** `recent` keeps only an
 account's last 10 runs. Every finished draft and DNF is also appended to the `runs` table
@@ -368,12 +427,14 @@ shadow, and navy "scoreboard" moments.
   `.sticky`, `.result-hero`, `.champion`, `.pg`, `.pre`, `.cel`, and the Unlimited tile. The
   Leaderboard is the exception: the root gets `.night` when `view === "board"`, a true-black third
   scope (its `.champion` takes night tokens too) with lime reserved for #1 and your own row. The
-  profile's player card (`.pf-card`) is dark wherever it appears too. Everything else is cream (the
-  report sheet forces cream tokens even when it opens over the dark card). Every scope in `theme.mjs`
+  profile's player card takes the scope of the card theme it wears, wherever it appears (cosmetics.jsx's
+  `CardTheme`: `cs-dark` for the default Navy, `cs-night` or `cs-light` for others). Everything else is
+  cream (the report sheet forces cream tokens even when it opens over a dark card). Every scope in `theme.mjs`
   must define the same tokens; the contrast test checks all.
-- **Screens in their own files** (`profile.jsx`, `avatars.jsx`, `avatar-picker.jsx`, `moderation.jsx`)
-  export their stylesheet as a string (`PROFILE_CSS`, ...), which `perfect-season.jsx` appends after its
-  own as `APP_CSS`. Each styles only its own class prefix (`pf-`, `av-`, `ap-`, `md-`) and reuses the
+- **Screens in their own files** (`profile.jsx`, `avatars.jsx`, `avatar-picker.jsx`, `moderation.jsx`,
+  `cosmetics.jsx`, `shop.jsx`) export their stylesheet as a string (`PROFILE_CSS`, ...), which
+  `perfect-season.jsx` appends after its own as `APP_CSS` (`COSMETICS_CSS` after `PROFILE_CSS`: its themes
+  win by source order). Each styles only its own class prefix (`pf-`, `av-`, `ap-`, `md-`, `cs-`, `sh-`) and reuses the
   app's `.btn`, `.tile`, `.h`, `.note`, `.panel` etc. without restyling them, and puts its responsive,
   `pointer:coarse` and reduced-motion rules in its own string after its base rules.
 - **Vary the treatment instead of making every block the same card:** one featured lime block (the
@@ -434,7 +495,10 @@ suite and still broke the live Leaderboard for every existing account.
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
   v1.11.0's migrations go in this order: re-run `migration-runs-log.sql` (adds `player_stats`), then
   `migration-profiles.sql`, then `migration-moderation.sql`. All three only add objects, so the live
-  site keeps working between them.
+  site keeps working between them. v1.12.0's: `migration-wallet.sql`, then `migration-shop.sql`, then
+  re-run `migration-profiles.sql` (its `set_avatar` learns the paid packs), then deploy submit-run, then
+  the client. The new submit-run needs `migration-wallet.sql` first - without `finished_codes` every
+  Unlimited, Genius and GM season fails to save.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging
@@ -503,21 +567,14 @@ Don't hand-edit `data.json`; change the scripts and regenerate.
 
 ## Immediate Next Goals
 
-1. **v1.12.0 Wallet & Shop** (approved 2026-09-14, after v1.11.0 Profiles): a coin wallet that only goes
-   up from playing (never lost on a bad draft; a one-time career starting balance capped at 10,000, 250
-   for new accounts; the profile's old Bank tile goes), earned for seasons, wins, titles, Dailies,
-   streaks, badges and the minigames, and a cosmetic-only shop (frames, card themes, avatar packs,
-   titles; some badge-only; no real money, nothing that changes a draft or a score). It changes
-   submit-run, which must also start rejecting a finished draft submitted twice (today the same
-   Unlimited trace counts again each time it's sent - career padding by a modified client). It gets its
-   own `SHOP.md`.
-2. **Housekeeping** — 2026 season data once it's played, an accessibility pass (position colors
+1. **Housekeeping** — 2026 season data once it's played, an accessibility pass (position colors
    currently carry meaning on their own), separate indexable pages (How to play, Leaderboard).
-3. **Half-PPR**, if wanted, is now a small change rather than a blocked one — see the scoring-format
+2. **Half-PPR**, if wanted, is now a small change rather than a blocked one — see the scoring-format
    note in Architecture. It needs a third `FORMATS` entry, a benchmark column, a `BEST_FIELDS`
    entry, and two `profiles` columns; no data regeneration.
 
-**Done:** the game is a real public product now, not a local-only demo. Accounts/stats/leaderboard
+**Done:** **Profiles** (v1.11.0, `PROFILES.md`) and **Coins and the shop** (v1.12.0, `SHOP.md`). Before
+those, the game became a real public product, not a local-only demo. Accounts/stats/leaderboard
 run on Supabase (Postgres + Auth, RLS-gated — see Architecture above) instead of `window.storage`,
 and it's deployed on Vercel (`vercel.json` + `build.mjs`). "Hard mode" (an earlier version of this
 list) shipped as **Genius mode** — same draft, player cards hide every stat cell. Also shipped:

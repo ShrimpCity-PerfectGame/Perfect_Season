@@ -6,8 +6,9 @@ document. **If something here turns out to be wrong or impossible, stop and repo
 a different contract.** After release this file stays as the reference for how profiles work (like
 `SCORING.md` for scoring). CLAUDE.md's rules all still apply.
 
-v1.12.0 (Wallet & Shop) comes after this and will get its own `SHOP.md`. Nothing here should make that
-harder: badges stay pure and importable by the Edge Function, and `profile_details` only grows columns.
+v1.12.0 (Wallet & Shop) built on this, and `SHOP.md` is its reference: `profile_details` grew `frame`,
+`card_theme`, `title` and `showcase`, `set_avatar` accepts the paid packs' avatars, and the player card now
+wears a card theme (SHOP.md 7.3) - where this file says "navy", read "Navy, the default card theme".
 
 ---
 
