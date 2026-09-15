@@ -284,6 +284,8 @@ export function makeMockAuth() {
     // Recomputed from the verified roster, mirroring submit-run/index.ts - never trusted from
     // the client, since capUsed feeds a competitive Stats-screen leaderboard.
     const finalCapUsed = gm ? GL.SLOTS.reduce((sum, s) => sum + GL.playerSalary(roster[s], format), 0) : undefined;
+    // A GM season over the cap is an illegal roster, refused before anything is written - mirroring index.ts.
+    if (gm && finalCapUsed > GL.GM_CAP) return { data: { error: "illegal roster", reason: "over the salary cap" } };
     // Recomputed from the verified boards, mirroring index.ts - par and points are never taken
     // from the client.
     const par = GL.botPar(history.map((h) => h.key), { format, gm: !!gm });
