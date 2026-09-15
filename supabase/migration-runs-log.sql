@@ -215,17 +215,99 @@ $$;
 -- JSON shape: PROFILES.md ("player_stats"). tests/mock-profile-stats.mjs mirrors it and
 -- tests/test-player-stats-sql.mjs checks the two agree.
 --
--- PHASE 0 STUB (agent A writes the real query): returns the empty shape for everyone.
+-- Security invoker over the same publicly readable tables as site_stats, so a guest opening someone's
+-- profile can call it, and it shows nothing a direct select couldn't.
+
+-- One player's rows. runs needs no new index: its unique (user_id, created_at, dnf) index leads with
+-- user_id.
+create index if not exists daily_runs_user_idx on public.daily_runs (user_id);
+create index if not exists sou_runs_user_idx on public.sou_runs (user_id);
+create index if not exists builds_user_idx on public.builds (user_id);
+
+-- Names and teams sort with collate "C" (plain code-point order) because the database's default
+-- collation differs between installs, and names have apostrophes and mixed case, where collations
+-- disagree. Ties in a player's own runs can't go further than created_at: runs' unique key makes it
+-- unique among one player's finished runs.
 create or replace function public.player_stats(p_user_id uuid)
 returns jsonb language sql stable security invoker set search_path = public as $$
+  with
+  mine as (select * from runs where user_id = p_user_id),
+  done as (select * from mine where not dnf),
+  -- Every roster entry of every finished run. A backfilled run can have no roster.
+  entries as (
+    select e->>'name' as name, (e->>'season')::integer as season, e->>'team' as team
+      from done d
+      cross join lateral jsonb_array_elements(case when jsonb_typeof(d.roster) = 'array' then d.roster else '[]'::jsonb end) e
+  ),
+  dailies as (select * from daily_runs where user_id = p_user_id),
+  -- Two of a player's dailies share a created_at only if one transaction wrote both, so date and
+  -- format, the rest of daily_runs' primary key, settle that last tie.
+  best_daily as (select score, w, l from dailies order by score desc, created_at, date, format limit 1)
   select jsonb_build_object(
-    'since', null, 'by_ladder', '[]'::jsonb, 'wins', '[]'::jsonb, 'best_points', null,
-    'go_to_players', '[]'::jsonb, 'team_counts', '[]'::jsonb,
-    'by_format', jsonb_build_object(
-      'fantasy', jsonb_build_object('champs', 0, 'biggest_upset', null, 'best_gm', null),
-      'standard', jsonb_build_object('champs', 0, 'biggest_upset', null, 'best_gm', null)),
-    'dailies', jsonb_build_object('played', 0, 'best_score', null, 'best_w', null, 'best_l', null, 'best_rank', null),
-    'over_under', jsonb_build_object('played', 0, 'best', null),
-    'builds', jsonb_build_object('count', 0, 'best', null)
+    'since', (select min(created_at) from mine),
+    'by_ladder', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'ladder', g.ladder, 'seasons', g.seasons, 'dnf', g.dnf, 'wins', g.wins, 'losses', g.losses,
+               'champs', g.champs, 'perfect', g.perfect, 'playoffs', g.playoffs,
+               'best_score', g.best_score, 'best_score_std', g.best_score_std)
+             order by array_position(array['daily', 'unlimited', 'genius', 'gm'], g.ladder)), '[]'::jsonb)
+        from (select ladder,
+                     count(*) filter (where not dnf) as seasons,
+                     count(*) filter (where dnf) as dnf,
+                     coalesce(sum(w) filter (where not dnf), 0) as wins,
+                     coalesce(sum(l) filter (where not dnf), 0) as losses,
+                     count(*) filter (where not dnf and champ) as champs,
+                     count(*) filter (where not dnf and perfect) as perfect,
+                     count(*) filter (where not dnf and playoffs) as playoffs,
+                     max(score) filter (where not dnf and format = 'fantasy') as best_score,
+                     max(score) filter (where not dnf and format = 'standard') as best_score_std
+                from mine group by ladder) g
+    ),
+    'wins', (
+      select coalesce(jsonb_agg(jsonb_build_object('w', g.w, 'n', g.n) order by g.w), '[]'::jsonb)
+        from (select w, count(*) as n from done where w is not null group by w) g
+    ),
+    'best_points', (select max(points) from done),
+    'go_to_players', (
+      select coalesce(jsonb_agg(jsonb_build_object('name', t.name, 'season', t.season, 'team', t.team, 'count', t.n)
+                                order by t.n desc, t.name collate "C", t.season, t.team collate "C"), '[]'::jsonb)
+        from (select name, season, team, count(*) as n from entries group by name, season, team
+               order by n desc, name collate "C", season, team collate "C" limit 5) t
+    ),
+    'team_counts', (
+      select coalesce(jsonb_agg(jsonb_build_object('team', t.team, 'count', t.n) order by t.n desc, t.team collate "C"), '[]'::jsonb)
+        from (select team, count(*) as n from entries group by team) t
+    ),
+    -- A run with no score (only ever a very old backfilled one) can't be an upset or a best, the same
+    -- as on site_stats' boards.
+    'by_format', (
+      select jsonb_object_agg(f.format, jsonb_build_object(
+        'champs', (select count(*) from done where format = f.format and champ),
+        'biggest_upset', (
+          select jsonb_build_object('score', u.score, 'w', u.w, 'l', u.l, 'ladder', u.ladder, 'created_at', u.created_at)
+            from done u where u.format = f.format and u.champ and u.score is not null
+           order by u.score, u.created_at limit 1),
+        'best_gm', (
+          select jsonb_build_object('score', g.score, 'w', g.w, 'l', g.l)
+            from done g where g.format = f.format and g.gm and g.score is not null
+           order by g.score desc, g.created_at limit 1)
+      )) from (values ('fantasy'), ('standard')) f(format)
+    ),
+    -- A day's finishing places only count once no one anywhere can still post that day's daily:
+    -- submit-run takes a daily dated from yesterday to tomorrow in UTC, so a date two days back is
+    -- final. The UTC date is worked out explicitly, since current_date follows the session's time zone.
+    'dailies', jsonb_build_object(
+      'played', (select count(*) from dailies),
+      'best_score', (select score from best_daily), 'best_w', (select w from best_daily), 'best_l', (select l from best_daily),
+      'best_rank', (
+        select min(1 + (select count(*) from daily_runs o where o.date = d.date and o.format = d.format and o.score > d.score))
+          from dailies d
+         where d.date::date <= (now() at time zone 'utc')::date - 2)
+    ),
+    'over_under', (select jsonb_build_object('played', count(*), 'best', max(score)) from sou_runs where user_id = p_user_id),
+    'builds', jsonb_build_object(
+      'count', (select count(*) from builds where user_id = p_user_id),
+      'best', (select jsonb_build_object('pos', b.pos, 'overall', b.overall) from builds b where b.user_id = p_user_id
+                order by b.overall desc, b.created_at, b.id limit 1))
   );
 $$;
