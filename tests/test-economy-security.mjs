@@ -1113,7 +1113,7 @@ await runTest("8f. 20 Unlimited, Genius and GM seasons pay each UTC day - the 21
 
 // ---------- 9. The browser ----------
 
-await runTest("9a. the shop's browser code has no HTML sinks or links built from data, its one CSS image is a constant, and storage-shop.js never sends a player id", async () => {
+await runTest("9a. the shop's browser code has no HTML sinks or links built from data, its CSS images are constants, and storage-shop.js never sends a player id", async () => {
   const source = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
   const sinks = /dangerouslySetInnerHTML|\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|document\.write\s*\(|\beval\s*\(|new\s+Function\s*\(|srcdoc/;
   for (const file of ["cosmetics.jsx", "shop.jsx", "storage-shop.js", "rewards.mjs", "shop-catalog.mjs"]) {
@@ -1125,7 +1125,16 @@ await runTest("9a. the shop's browser code has no HTML sinks or links built from
     assert(!/\bhref\s*=/.test(text), `${file} builds a link`);
     assert(!/\bsrc\s*=\s*\{/.test(text), `${file} sets an image address`);
     const urls = text.match(/url\(/g) || [];
-    assert(urls.length === (file === "cosmetics.jsx" ? 1 : 0) && (file !== "cosmetics.jsx" || /return `url\("data:image\/svg\+xml,\$\{encodeURIComponent\(svg\)\}"\)`;/.test(text)), `${file}'s CSS images: ${urls.length}`);
+    if (file !== "cosmetics.jsx") {
+      assert(urls.length === 0, `${file}'s CSS images: ${urls.length}`);
+      continue;
+    }
+    // Two, both SVG markup the file builds itself: the Dynasty card's laurel wreath, and the titles' marks - and
+    // markMask is only ever given a literal path, so nothing from a player reaches a stylesheet.
+    const constant = text.match(/return `url\("data:image\/svg\+xml,\$\{encodeURIComponent\(svg\)\}"\)[^`]*`;/g) || [];
+    const markArgs = [...text.matchAll(/\bmarkMask\(([^)]*)\)/g)].map((m) => m[1]);
+    assert(urls.length === 2 && constant.length === 2, `${file}'s CSS images: ${urls.length}, ${constant.length} of them built from its own SVG markup`);
+    assert(markArgs.length > 0 && markArgs.every((arg) => /^"[MLHVZ0-9. -]+"$/.test(arg)), `markMask is only given literal paths, got ${markArgs.join(" | ")}`);
   }
   const calls = [...source("storage-shop.js").matchAll(/\.rpc\("([a-z_]+)",\s*(\{[^}]*\})/g)].map(([, fn, args]) => [fn, [...args.matchAll(/([a-z_]+):/g)].map((x) => x[1])]);
   assert(same(calls.map(([fn]) => fn).sort(), ["claim_minigame", "equip_item", "set_showcase", "shop_buy", "shop_state", "wallet_state"]), `storage-shop.js's calls: ${show(calls)}`);

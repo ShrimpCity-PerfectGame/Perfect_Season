@@ -235,7 +235,8 @@ await runTest("an avatar pack: bought, not equipped, and its avatars become choo
   const { auth, uid } = await player("collector", { coins: 1000 });
   const { c, props } = await openShop("collector", uid);
   await openTab(c, "Avatar packs");
-  assert([...c.querySelectorAll("article.sh-item")].map((a) => a.dataset.item).join() === "pack-sideline,pack-trophy-room,pack-night-game", "the three packs");
+  const packsShown = [...c.querySelectorAll("article.sh-item")].map((a) => a.dataset.item).join();
+  assert(packsShown === "pack-sideline,pack-trophy-room,pack-night-game,pack-draft-day,pack-hall-of-fame", `the five packs, in order, got ${packsShown}`);
   await select(c, "pack-sideline");
   assert(preview(c).querySelector('.sh-pack[aria-label="Headset, Water cooler, Pylon, Penalty flag"]'), "the case shows the pack's avatars");
   await click(button(c, "Buy"));

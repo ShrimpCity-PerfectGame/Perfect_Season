@@ -13,6 +13,20 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.13.0] — 2026-09-15
+
+### Added
+
+- **More to save for in the shop.** Four new titles: War Room and Sleeper Agent (Epic, 6,000 coins each), and First
+  Overall and The GOAT (Legendary, 15,000 each). Epic titles wear a spark and Legendary titles a crown, where other
+  titles have a double stripe.
+- **Two Legendary avatar packs, 15,000 coins each.** Draft day: a podium, a draft card, the call and a draft cap.
+  Hall of Fame: a gold jacket, a bust, laurels and the Hall itself.
+
+### Changed
+
+- In the shop, the badge-reward titles now come after every title you can buy.
+
 ## [1.12.0] — 2026-09-15
 
 ### Added

@@ -138,6 +138,25 @@ await runTest("titles render their names with the hook, and a title on a chip fo
   }
 });
 
+await runTest("the epic titles wear a spark and the legendary ones a crown, on the card and on the shop's chip; the rest keep the stripes", async () => {
+  const { TITLE_MARK } = cosmetics;
+  const markOf = (el) => [...(el?.classList || [])].filter((k) => k.startsWith("cs-title-")).join();
+  for (const id of TITLES) {
+    // The launch catalog's rarity decides the mark; after that TITLE_MARK is keyed by id, so a repriced title keeps it.
+    const want = { epic: "spark", legendary: "crown" }[SHOP_ITEM_BY_ID[id].rarity] || "";
+    assert((TITLE_MARK[id] || "") === want, `${id} (${SHOP_ITEM_BY_ID[id].rarity}) should wear ${want || "no mark"}, TITLE_MARK says ${TITLE_MARK[id]}`);
+    const line = (await show(h("div", null, h(TitleLine, { title: id })))).querySelector("p.cs-title");
+    assert(markOf(line) === (want && `cs-title-${want}`), `${id} on a card: ${line?.outerHTML}`);
+    const chip = (await show(h("div", null, h(ItemPreview, { id })))).querySelector(".cs-chip .cs-title");
+    assert(markOf(chip) === (want && `cs-title-${want}`), `${id} on a chip: ${chip?.outerHTML}`);
+  }
+  assert(Object.keys(TITLE_MARK).every((id) => SHOP_ITEM_BY_ID[id]?.kind === "title"), "TITLE_MARK only names titles");
+  for (const mark of new Set(Object.values(TITLE_MARK))) {
+    const rule = COSMETICS_CSS.match(new RegExp(`\\.cs-title-${mark}::before\\{-webkit-mask:url\\("data:image/svg\\+xml,[^"]+"\\) center/contain no-repeat;mask:url\\(`));
+    assert(rule, `COSMETICS_CSS draws the ${mark} as a mask, with and without the -webkit- prefix`);
+  }
+});
+
 await runTest("Coins reads \"1,240 coins\", with the coin itself decorative", async () => {
   for (const [amount, words] of [[1240, "1,240 coins"], [15000, "15,000 coins"], [0, "0 coins"], [undefined, "0 coins"]]) {
     const c = await show(h(Coins, { amount, size: 18, className: "pf-bal" }));
@@ -165,8 +184,9 @@ await runTest("every catalog item has a decorative thumbnail made only of inline
   }
 });
 
-await runTest("the avatar packs: 12 more presets, not free, named from the catalog, every one drawn", async () => {
-  assert(AVATAR_PRESETS.length === FREE_AVATAR_PRESETS.length + 12, `expected 24 presets, got ${AVATAR_PRESETS.length}`);
+await runTest("the avatar packs: four more presets each, not free, named from the catalog, every one drawn", async () => {
+  assert(AVATAR_PACKS.length === 5 && AVATAR_PACKS.every((p) => p.presets.length === 4), `five packs of four, got ${AVATAR_PACKS.map((p) => p.presets.length)}`);
+  assert(AVATAR_PRESETS.length === FREE_AVATAR_PRESETS.length + 20, `expected 32 presets, got ${AVATAR_PRESETS.length}`);
   assert(new Set(AVATAR_PRESETS.map((p) => p.key)).size === AVATAR_PRESETS.length, "preset keys are unique");
   const starter = AVATAR_PRESETS.filter((p) => p.pack === "starter");
   assert(JSON.stringify(starter) === JSON.stringify(FREE_AVATAR_PRESETS.map((p) => ({ ...p, pack: "starter", free: true }))), "the starter set is unchanged and first");

@@ -583,6 +583,45 @@ await runTest("with only v1.11.0's migrations, set_avatar refuses a paid avatar 
   }
 });
 
+await runTest("a database seeded by v1.12.0 takes v1.13.0's titles and packs on a re-run, the new titles ahead of the badge titles - keeping a price and a sort changed by hand", async () => {
+  const v12 = await freshDb();
+  const q = async (statement, params) => (await v12.query(statement, params)).rows;
+  const NEW_ITEMS = ["title-war-room", "title-sleeper-agent", "title-first-overall", "title-the-goat", "pack-draft-day", "pack-hall-of-fame"];
+  const NEW_PACKS = ["draft-day", "hall-of-fame"];
+  // v1.12.0's catalog: none of the new rows, and the badge titles in their launch places.
+  const asV12 = async () => {
+    await q("delete from avatar_presets where pack = any($1)", [NEW_PACKS]);
+    await q("delete from shop_items where id = any($1)", [NEW_ITEMS]);
+    await q("update shop_items s set sort = v.sort from (values ('title-undefeated', 50), ('title-daily-winner', 60), ('title-cinderella', 70)) as v(id, sort) where s.id = v.id");
+  };
+  const items = () => q("select id, kind, rarity, price, badge, active, sort from shop_items");
+  try {
+    assert(NEW_ITEMS.every((id) => seedOf(id)) && NEW_PACKS.every((pack) => AVATAR_PACKS.some((p) => p.pack === pack)), "the new items are in the catalog");
+    await asV12();
+    assert((await items()).length === SHOP_ITEMS.length - NEW_ITEMS.length, "set up as v1.12.0's catalog");
+    await v12.exec(sql("migration-shop.sql"));
+    const upgraded = (await items()).sort(shopOrder);
+    assert(same(upgraded, catalogSeeds()), `the re-run leaves the catalog exactly as a new database gets it:\n sql  ${show(upgraded.filter((i) => i.kind === "title"))}`);
+    const presets = await q(`select key, pack, free from avatar_presets where pack = any($1) order by key collate "C"`, [NEW_PACKS]);
+    assert(presets.length === 8 && presets.every((p) => p.free === false), `the two packs' eight avatars, not free: ${show(presets)}`);
+    const settled = await items();
+    await v12.exec(sql("migration-shop.sql"));
+    assert(same(await items(), settled), "and running it again changes nothing");
+
+    // Changed with SQL since launch: a price, and Cinderella's place.
+    await asV12();
+    await q("update shop_items set price = 900 where id = 'title-film-room'");
+    await q("update shop_items set sort = 65 where id = 'title-cinderella'");
+    await v12.exec(sql("migration-shop.sql"));
+    assert((await q("select price from shop_items where id = 'title-film-room'"))[0].price === 900, "a price changed by hand stays");
+    const order = (await q(`select id from shop_items where kind = 'title' order by sort, id collate "C"`)).map((r) => r.id);
+    const want = ["film-room", "waiver-hawk", "draft-guru", "cap-wizard", "war-room", "sleeper-agent", "cinderella", "first-overall", "the-goat", "undefeated", "daily-winner"].map((t) => `title-${t}`);
+    assert(order.join() === want.join(), `a hand-set place stays and the other badge titles move back, got ${order.join()}`);
+  } finally {
+    await v12.close();
+  }
+});
+
 // ---------- The lock, and what backs it up ----------
 
 await runTest("shop_buy takes the wallet lock after checking who's asking and before it reads ownership or the balance", async () => {

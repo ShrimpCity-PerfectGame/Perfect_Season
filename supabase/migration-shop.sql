@@ -1,7 +1,7 @@
 -- v1.12.0 Wallet & Shop, part 2: the shop. Contract: SHOP.md (3.2).
 --
 -- Run after migration-wallet.sql, then re-run migration-profiles.sql (its set_avatar lets a player pick the
--- avatars from a pack they own). Re-runnable.
+-- avatars from a pack they own). Re-runnable: v1.13.0's new titles and avatar packs arrive by re-running this file.
 --
 -- Everything sold is cosmetic: a frame around your picture, your player card's theme, a title under your name,
 -- or a pack of avatars. Nothing bought changes a draft or a score. Prices are rows here, so changing one takes a
@@ -53,13 +53,26 @@ insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('title-waiver-hawk', 'title', 'common', 750, null, 20),
   ('title-draft-guru', 'title', 'rare', 2000, null, 30),
   ('title-cap-wizard', 'title', 'rare', 2000, null, 40),
-  ('title-undefeated', 'title', 'badge', null, 'undefeated', 50),
-  ('title-daily-winner', 'title', 'badge', null, 'daily-winner', 60),
-  ('title-cinderella', 'title', 'badge', null, 'cinderella', 70),
+  ('title-war-room', 'title', 'epic', 6000, null, 50),
+  ('title-sleeper-agent', 'title', 'epic', 6000, null, 60),
+  ('title-first-overall', 'title', 'legendary', 15000, null, 70),
+  ('title-the-goat', 'title', 'legendary', 15000, null, 80),
+  ('title-undefeated', 'title', 'badge', null, 'undefeated', 90),
+  ('title-daily-winner', 'title', 'badge', null, 'daily-winner', 100),
+  ('title-cinderella', 'title', 'badge', null, 'cinderella', 110),
   ('pack-sideline', 'avatar_pack', 'common', 750, null, 10),
   ('pack-trophy-room', 'avatar_pack', 'rare', 2000, null, 20),
-  ('pack-night-game', 'avatar_pack', 'epic', 6000, null, 30)
+  ('pack-night-game', 'avatar_pack', 'epic', 6000, null, 30),
+  ('pack-draft-day', 'avatar_pack', 'legendary', 15000, null, 40),
+  ('pack-hall-of-fame', 'avatar_pack', 'legendary', 15000, null, 50)
 on conflict (id) do nothing;
+
+-- v1.13.0 put four titles ahead of the badge titles, which a database seeded by v1.12.0 has at 50, 60 and 70 - the new
+-- titles' places now. Each moves back only from exactly that place, so a sort changed by hand stays and a re-run
+-- changes nothing.
+update public.shop_items s set sort = v.sort
+  from (values ('title-undefeated', 50, 90), ('title-daily-winner', 60, 100), ('title-cinderella', 70, 110)) as v(id, was, sort)
+ where s.id = v.id and s.sort = v.was;
 
 -- What each player has bought. Free items belong to everyone and a badge item to whoever has its badge in
 -- badge_awards, so only bought items get rows.
@@ -77,7 +90,9 @@ create table if not exists public.inventory (
 insert into public.avatar_presets (key, pack, free) values
   ('headset', 'sideline', false), ('cooler', 'sideline', false), ('pylon', 'sideline', false), ('penalty-flag', 'sideline', false),
   ('title-ring', 'trophy-room', false), ('medal', 'trophy-room', false), ('banner', 'trophy-room', false), ('game-ball', 'trophy-room', false),
-  ('floodlights', 'night-game', false), ('scoreboard', 'night-game', false), ('fireworks', 'night-game', false), ('blimp', 'night-game', false)
+  ('floodlights', 'night-game', false), ('scoreboard', 'night-game', false), ('fireworks', 'night-game', false), ('blimp', 'night-game', false),
+  ('podium', 'draft-day', false), ('draft-card', 'draft-day', false), ('the-call', 'draft-day', false), ('draft-cap', 'draft-day', false),
+  ('gold-jacket', 'hall-of-fame', false), ('bust', 'hall-of-fame', false), ('laurels', 'hall-of-fame', false), ('the-hall', 'hall-of-fame', false)
 on conflict (key) do nothing;
 
 -- What a player wears. Null is the default: the Ink frame, the Navy card, no title.

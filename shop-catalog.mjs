@@ -20,33 +20,49 @@ export const RARITY_LABEL = { free: "Free", common: "Common", rare: "Rare", epic
 // How many badges the showcase holds.
 export const SHOWCASE_MAX = 3;
 
+// `rarity` is the pack's launch rarity, like SHOP_ITEMS' below.
 export const AVATAR_PACKS = [
   {
-    pack: "sideline", item: "pack-sideline", name: "Sideline",
+    pack: "sideline", item: "pack-sideline", name: "Sideline", rarity: "common",
     presets: [
       { key: "headset", name: "Headset" }, { key: "cooler", name: "Water cooler" },
       { key: "pylon", name: "Pylon" }, { key: "penalty-flag", name: "Penalty flag" },
     ],
   },
   {
-    pack: "trophy-room", item: "pack-trophy-room", name: "Trophy room",
+    pack: "trophy-room", item: "pack-trophy-room", name: "Trophy room", rarity: "rare",
     presets: [
       { key: "title-ring", name: "Title ring" }, { key: "medal", name: "Medal" },
       { key: "banner", name: "Banner" }, { key: "game-ball", name: "Game ball" },
     ],
   },
   {
-    pack: "night-game", item: "pack-night-game", name: "Night game",
+    pack: "night-game", item: "pack-night-game", name: "Night game", rarity: "epic",
     presets: [
       { key: "floodlights", name: "Floodlights" }, { key: "scoreboard", name: "Scoreboard" },
       { key: "fireworks", name: "Fireworks" }, { key: "blimp", name: "Blimp" },
+    ],
+  },
+  // v1.13.0
+  {
+    pack: "draft-day", item: "pack-draft-day", name: "Draft day", rarity: "legendary",
+    presets: [
+      { key: "podium", name: "Podium" }, { key: "draft-card", name: "Draft card" },
+      { key: "the-call", name: "The call" }, { key: "draft-cap", name: "Draft cap" },
+    ],
+  },
+  {
+    pack: "hall-of-fame", item: "pack-hall-of-fame", name: "Hall of Fame", rarity: "legendary",
+    presets: [
+      { key: "gold-jacket", name: "Gold jacket" }, { key: "bust", name: "Bust" },
+      { key: "laurels", name: "Laurels" }, { key: "the-hall", name: "The Hall" },
     ],
   },
 ];
 export const packItem = (pack) => `pack-${pack}`;
 export const PACK_BY_ITEM = Object.fromEntries(AVATAR_PACKS.map((p) => [p.item, p]));
 
-// The launch catalog, in shop order within each kind (the seeds' sort is 10, 20, 30... in this order).
+// The catalog, in shop order within each kind (the seeds' sort is 10, 20, 30... in this order).
 // `badge` is the badges.mjs id that unlocks a badge item.
 export const SHOP_ITEMS = [
   { id: "frame-ink", kind: "frame", name: "Ink", rarity: "free" },
@@ -68,11 +84,16 @@ export const SHOP_ITEMS = [
   { id: "title-waiver-hawk", kind: "title", name: "Waiver Hawk", rarity: "common" },
   { id: "title-draft-guru", kind: "title", name: "Draft Guru", rarity: "rare" },
   { id: "title-cap-wizard", kind: "title", name: "Cap Wizard", rarity: "rare" },
+  // v1.13.0, ahead of the badge titles (migration-shop.sql moves those back on a database seeded before)
+  { id: "title-war-room", kind: "title", name: "War Room", rarity: "epic" },
+  { id: "title-sleeper-agent", kind: "title", name: "Sleeper Agent", rarity: "epic" },
+  { id: "title-first-overall", kind: "title", name: "First Overall", rarity: "legendary" },
+  { id: "title-the-goat", kind: "title", name: "The GOAT", rarity: "legendary" },
   { id: "title-undefeated", kind: "title", name: "Undefeated", rarity: "badge", badge: "undefeated" },
   { id: "title-daily-winner", kind: "title", name: "Daily Winner", rarity: "badge", badge: "daily-winner" },
   { id: "title-cinderella", kind: "title", name: "Cinderella", rarity: "badge", badge: "cinderella" },
 
-  ...AVATAR_PACKS.map((p, i) => ({ id: p.item, kind: "avatar_pack", name: p.name, rarity: ["common", "rare", "epic"][i] })),
+  ...AVATAR_PACKS.map((p) => ({ id: p.item, kind: "avatar_pack", name: p.name, rarity: p.rarity })),
 ].map((item) => ({ badge: null, ...item }));
 export const SHOP_ITEM_BY_ID = Object.fromEntries(SHOP_ITEMS.map((item) => [item.id, item]));
 

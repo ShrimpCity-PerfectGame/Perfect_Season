@@ -18,6 +18,8 @@ const { ink: INK, cream: CREAM, lime: LIME, blue: BLUE, orange: ORANGE, violet: 
 // The medal gold every scope shares (only ever a fill), and the navy scoreboard sky for the Night game pack.
 const GOLD = THEME.light.tierGoldFill;
 const NIGHT = THEME.dark.bg;
+// The light scope's deep badge gold, for the Hall of Fame pack's folds and seams on gold.
+const GOLD_DEEP = THEME.light.tierGold;
 
 // Straight rays from a center, as one path: a firework burst.
 const burst = (cx, cy, count, from, to, turn = 0) => Array.from({ length: count }, (_, i) => {
@@ -26,12 +28,26 @@ const burst = (cx, cy, count, from, to, turn = 0) => Array.from({ length: count 
   return `M${at(from)}L${at(to)}`;
 }).join("");
 
+// Leaves around a center, one at each angle (degrees clockwise from 3 o'clock) and radius, lying along the circle and
+// tipped `tilt` degrees off it: one side of a laurel wreath, like the Dynasty card's (cosmetics.jsx).
+const leaves = (cx, cy, placed, rx, ry) => placed.map(([deg, r, tilt]) => {
+  const a = (deg * Math.PI) / 180;
+  const x = (cx + r * Math.cos(a)).toFixed(1);
+  const y = (cy + r * Math.sin(a)).toFixed(1);
+  return <ellipse key={`${deg}:${r}`} cx={x} cy={y} rx={rx} ry={ry} transform={`rotate(${deg + tilt} ${x} ${y})`} />;
+});
+const LAUREL = [
+  ...[118, 146, 174, 202, 230].map((deg) => [deg, 24, -28]),
+  ...[132, 160, 188, 216].map((deg) => [deg, 16, 28]),
+  [246, 20, 0],
+];
+
 // The drawings, on the same 64x64 grid as the Gridspin mark (static/icon.svg): a colored disc with
 // bold ink shapes. They have to read in the 24px header, so every shape is big and simple and the
 // small details are only there for the 96px profile card. Nothing here may look like a real team's
 // logo - no stars, horseshoes or bolts on a helmet - or any company's (no words on the blimp). The disc
 // fills the whole square; Avatar clips it round and draws the ring. The Night game pack is drawn on the
-// navy sky, so its shapes are cream and lime rather than ink.
+// navy sky, so its shapes are cream and lime rather than ink; the Hall of Fame pack is gold and cream on black.
 const ART = {
   football: {
     bg: ORANGE,
@@ -342,6 +358,136 @@ const ART = {
         <ellipse cx="30" cy="29" rx="24" ry="12.5" fill={CREAM} />
         <path d="M7.3 25H52.7A24 12.5 0 0 1 52.7 33H7.3A24 12.5 0 0 1 7.3 25Z" fill={BLUE} />
         <path d="M13 29H21M26 29H34" stroke={LIME} strokeWidth="2.6" strokeLinecap="round" />
+      </g>
+    ),
+  },
+
+  // ---- Draft day pack (v1.13.0), on broadcast blue ----
+  // The lectern the picks are read from, its microphone leaning in.
+  podium: {
+    bg: BLUE,
+    art: (
+      <g stroke={INK} strokeWidth="3.5" strokeLinejoin="round">
+        <path d="M37 25C37 18 40.5 13.5 46 11" fill="none" strokeLinecap="round" />
+        <rect x="42.5" y="3.5" width="10" height="14" rx="5" transform="rotate(48 47.5 10.5)" fill={INK} />
+        <path d="M18 32H46L42 61H22Z" fill={CREAM} />
+        <path d="M10 24H54L49.5 33.5H14.5Z" fill={INK} />
+        <rect x="25" y="40" width="14" height="11" rx="2.5" fill={ORANGE} strokeWidth="3" />
+      </g>
+    ),
+  },
+  // The card a team hands in: its pick at the top, checked off.
+  "draft-card": {
+    bg: BLUE,
+    art: (
+      <g transform="rotate(-8 32 33)" stroke={INK} strokeWidth="3.5" strokeLinejoin="round">
+        <rect x="14" y="10" width="36" height="46" rx="4" fill={CREAM} />
+        <path d="M18 10H46A4 4 0 0 1 50 14V22H14V14A4 4 0 0 1 18 10Z" fill={ORANGE} />
+        <path d="M20.5 30H43.5M20.5 37.5H36" fill="none" strokeWidth="3.2" strokeLinecap="round" />
+        <circle cx="40" cy="47" r="6.2" fill={LIME} strokeWidth="3" />
+        <path d="M36.8 47.2L39.2 49.6L43.4 44.6" fill="none" strokeWidth="2.5" strokeLinecap="round" />
+      </g>
+    ),
+  },
+  // The war room's phone, ringing: a desk phone with a dial, its handset in the cradle.
+  "the-call": {
+    bg: BLUE,
+    art: (
+      <g>
+        <path d="M9 13.5L13.5 18M55 13.5L50.5 18M32 5.5V11" stroke={CREAM} strokeWidth="3.4" strokeLinecap="round" />
+        <path d="M13 57L20 33H44L51 57Z" fill={CREAM} stroke={INK} strokeWidth="3.5" strokeLinejoin="round" />
+        <circle cx="32" cy="46" r="7.5" fill={ORANGE} stroke={INK} strokeWidth="3" />
+        <circle cx="32" cy="46" r="2.2" fill={INK} />
+        <path d="M14.5 27C17 16.5 47 16.5 49.5 27" fill="none" stroke={INK} strokeWidth="8" strokeLinecap="round" />
+        <path d="M6 25H22.5L21 32.5C20.6 34.5 19 36 17 36H11.5C9.5 36 7.9 34.5 7.5 32.5Z" fill={INK} />
+        <path d="M41.5 25H58L56.5 32.5C56.1 34.5 54.5 36 52.5 36H47C45 36 43.4 34.5 43 32.5Z" fill={INK} />
+      </g>
+    ),
+  },
+  // The new team's cap, pulled on at the podium - price sticker still on the brim, and no logo.
+  "draft-cap": {
+    bg: BLUE,
+    art: (
+      <g transform="translate(0 -3)" stroke={INK} strokeWidth="3.5" strokeLinejoin="round">
+        <path d="M33 42C42 38 54.5 37.5 61 40.5C62.5 43 60.5 47 54.5 47.5H33Z" fill={INK} />
+        <path d="M5 46C5 32.5 14 22.5 26.5 22C39 21.5 45.5 30 46 42L46.5 46Z" fill={ORANGE} />
+        <path d="M26.5 23.5C21.5 29.5 19.5 37.5 20 45.5M26.5 23.5C32 29 35 37 35.5 45" fill="none" strokeWidth="2.6" />
+        <circle cx="26.5" cy="21.5" r="3.3" fill={INK} strokeWidth="0" />
+        <circle cx="54" cy="43" r="2.5" fill={GOLD} strokeWidth="1.8" />
+      </g>
+    ),
+  },
+
+  // ---- Hall of Fame pack (v1.13.0), gold on black ----
+  // The jacket every inductee gets: gold, over a white shirt and a black tie.
+  "gold-jacket": {
+    bg: INK,
+    art: (
+      <g>
+        <path d="M21 11L10 16C7.5 17.5 6 20 6 24V66H58V24C58 20 56.5 17.5 54 16L43 11L32 30Z" fill={GOLD} />
+        <path d="M21 11L32 30L43 11Z" fill={CREAM} />
+        <path d="M29.5 12.5H34.5L33.5 16.5L35 25.5L32 29.5L29 25.5L30.5 16.5Z" fill={INK} />
+        <path d="M21 11L32 30L26.5 36L15.5 18.5ZM43 11L32 30L37.5 36L48.5 18.5Z" fill={GOLD_DEEP} fillOpacity=".5" />
+        <path d="M32 30V66M16.5 30V66M47.5 30V66" stroke={GOLD_DEEP} strokeWidth="2.2" />
+        <circle cx="32" cy="41.5" r="2.4" fill={INK} />
+        <circle cx="32" cy="50.5" r="2.4" fill={INK} />
+        <path d="M39.5 40.5H46.5L44.5 36.5Z" fill={CREAM} />
+      </g>
+    ),
+  },
+  // A bronze-cast bust on its plinth, with a nameplate.
+  bust: {
+    bg: INK,
+    art: (
+      <g>
+        <rect x="17" y="50" width="30" height="16" fill={CREAM} />
+        <rect x="13" y="45" width="38" height="7" rx="2" fill={CREAM} />
+        <rect x="24" y="54.5" width="16" height="5.5" rx="1" fill={GOLD} />
+        <path d="M15 45.5C15 37 22 32.5 32 32.5S49 37 49 45.5Z" fill={GOLD} />
+        <rect x="27" y="25" width="10" height="9" fill={GOLD} />
+        <ellipse cx="32" cy="19" rx="10" ry="12" fill={GOLD} />
+        <path d="M22.8 16C23.8 9.5 40.2 9.5 41.2 16" fill="none" stroke={GOLD_DEEP} strokeWidth="2.4" strokeLinecap="round" />
+        <path d="M22.5 45C24 40.5 27 37.5 30.5 36.5M41.5 45C40 40.5 37 37.5 33.5 36.5" fill="none" stroke={GOLD_DEEP} strokeWidth="2.2" strokeLinecap="round" />
+      </g>
+    ),
+  },
+  // A gold laurel wreath around a football, tied with a ribbon.
+  laurels: {
+    bg: INK,
+    art: (
+      <g>
+        <g fill={GOLD}>
+          <path d="M28.9 50.8A20 20 0 0 1 23.9 12.7" fill="none" stroke={GOLD} strokeWidth="2.4" strokeLinecap="round" />
+          {leaves(32, 31, LAUREL, 3.3, 7.4)}
+        </g>
+        <g fill={GOLD} transform="translate(64 0) scale(-1 1)">
+          <path d="M28.9 50.8A20 20 0 0 1 23.9 12.7" fill="none" stroke={GOLD} strokeWidth="2.4" strokeLinecap="round" />
+          {leaves(32, 31, LAUREL, 3.3, 7.4)}
+        </g>
+        <g transform="rotate(-35 32 31)">
+          <path d="M22.5 31C25.5 25 38.5 25 41.5 31C38.5 37 25.5 37 22.5 31Z" fill={CREAM} />
+          <path d="M28 31H36" stroke={INK} strokeWidth="2" strokeLinecap="round" />
+        </g>
+        <path d="M32 52.5L26.5 60.5M32 52.5L37.5 60.5" stroke={CREAM} strokeWidth="3.2" strokeLinecap="round" />
+        <circle cx="32" cy="52" r="3.4" fill={CREAM} />
+      </g>
+    ),
+  },
+  // The Hall itself: gold steps and pediment, cream columns.
+  "the-hall": {
+    bg: INK,
+    art: (
+      <g>
+        <path d="M8 25L32 10L56 25Z" fill={GOLD} />
+        <rect x="10" y="26.5" width="44" height="5" fill={GOLD} />
+        <g fill={CREAM}>
+          <rect x="14" y="33.5" width="5.5" height="15" />
+          <rect x="24" y="33.5" width="5.5" height="15" />
+          <rect x="34.5" y="33.5" width="5.5" height="15" />
+          <rect x="44.5" y="33.5" width="5.5" height="15" />
+        </g>
+        <rect x="9" y="50" width="46" height="5" fill={GOLD} />
+        <rect x="5" y="56.5" width="54" height="6" fill={GOLD} />
       </g>
     ),
   },

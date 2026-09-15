@@ -515,7 +515,9 @@ suite and still broke the live Leaderboard for every existing account.
   site keeps working between them. v1.12.0's: `migration-wallet.sql`, then `migration-shop.sql`, then
   re-run `migration-profiles.sql` (its `set_avatar` learns the paid packs), then deploy submit-run, then
   the client. The new submit-run needs `migration-wallet.sql` first - without `finished_codes` every
-  Unlimited, Genius and GM season fails to save.
+  Unlimited, Genius and GM season fails to save. v1.13.0's (four titles, two avatar packs): re-run
+  `migration-shop.sql`, then the client; submit-run doesn't change. New shop items always ship that way - the seed
+  adds missing rows - and a new pack's avatars need their drawings in `avatars.jsx` in the same release.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging

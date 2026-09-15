@@ -8,6 +8,11 @@ improvise a different contract.** After release this file stays as the reference
 no client write policies, database functions that raise their code as the message, read-only functions called as
 GET, one owner per file, prefixed class names.
 
+**Since v1.13.0** the catalog has four more titles (two epic, two legendary, each with a mark of its own in place of
+the double stripe) and two legendary avatar packs, as longer goals for players whose badges paid out a lot at once.
+They arrived by re-running `migration-shop.sql`; [6.2](#62-shop-catalogmjs-phase-0-lead) and 7.1 describe the catalog
+as it is now.
+
 ---
 
 ## 1. What ships
@@ -153,13 +158,16 @@ Runbook: `update shop_items set price = 1500 where id = 'frame-lime';` and
 `update shop_items set active = false where id = 'frame-lime';` (edit the seed too, for new databases). To give an
 item to everyone — an avatar pack included — make it free: `update shop_items set rarity = 'free', price = null where
 id = 'pack-sideline';`. A pack's avatars follow its shop item everywhere (`shop_state`, `set_avatar`, the picker), so
-never change `avatar_presets.free` for a pack.
+never change `avatar_presets.free` for a pack. v1.13.0's titles took the badge titles' places (sort 50–70), so the
+seed moves each badge title back (to 90–110) only while its sort is still that launch value: a hand-set sort stays, and
+a re-run changes nothing.
 
 **`inventory`** `(user_id → profiles cascade, item_id → shop_items(id), acquired_at timestamptz default now(),
 primary key (user_id, item_id))`. RLS on, no policies, privileges revoked from anon and authenticated. Only bought
 items get rows: free items belong to everyone, and a badge item belongs to whoever has its badge in `badge_awards`.
 
-**`avatar_presets`** gains the 12 pack avatars (`pack` = the pack name, `free` false).
+**`avatar_presets`** gains the pack avatars, four a pack (`pack` = the pack name, `free` false): 12 at launch, 20 since
+v1.13.0.
 
 **`profile_details`** gains `frame`, `card_theme` and `title` (text → `shop_items(id)`, null = the default: the Ink
 frame, the Navy card, no title) and `showcase text[] not null default '{}'` (named check
@@ -307,9 +315,9 @@ EQUIP_SLOTS   = ["frame", "card", "title"]        // each slot takes items of it
 DEFAULT_ITEM  = { frame: "frame-ink", card: "card-navy", title: null }
 RARITIES, RARITY_LABEL                           // free, common, rare, epic, legendary, badge ("Badge reward")
 SHOWCASE_MAX  = 3
-SHOP_ITEMS    = [{ id, kind, name, rarity, badge }]   // the launch catalog; the shop shows the server's rarity and price
+SHOP_ITEMS    = [{ id, kind, name, rarity, badge }]   // the catalog; the shop shows the server's rarity and price
 SHOP_ITEM_BY_ID
-AVATAR_PACKS  = [{ pack, item, name, presets: [{ key, name }] }]
+AVATAR_PACKS  = [{ pack, item, name, rarity, presets: [{ key, name }] }]   // rarity: the pack's launch rarity
 PACK_BY_ITEM, packItem(pack) → "pack-<pack>"
 ```
 
@@ -335,17 +343,25 @@ Names and looks live in the browser (cosmetics.jsx draws each id); price, rarity
 | `title-waiver-hawk` | title | Waiver Hawk | common | 750 | |
 | `title-draft-guru` | title | Draft Guru | rare | 2,000 | |
 | `title-cap-wizard` | title | Cap Wizard | rare | 2,000 | |
+| `title-war-room` | title | War Room (v1.13.0, spark) | epic | 6,000 | |
+| `title-sleeper-agent` | title | Sleeper Agent (v1.13.0, spark) | epic | 6,000 | |
+| `title-first-overall` | title | First Overall (v1.13.0, crown) | legendary | 15,000 | |
+| `title-the-goat` | title | The GOAT (v1.13.0, crown) | legendary | 15,000 | |
 | `title-undefeated` | title | Undefeated | badge | – | undefeated |
 | `title-daily-winner` | title | Daily Winner | badge | – | daily-winner |
 | `title-cinderella` | title | Cinderella | badge | – | cinderella |
 | `pack-sideline` | avatar_pack | Sideline | common | 750 | |
 | `pack-trophy-room` | avatar_pack | Trophy room | rare | 2,000 | |
 | `pack-night-game` | avatar_pack | Night game | epic | 6,000 | |
+| `pack-draft-day` | avatar_pack | Draft day (v1.13.0) | legendary | 15,000 | |
+| `pack-hall-of-fame` | avatar_pack | Hall of Fame (v1.13.0) | legendary | 15,000 | |
 
 Seed `sort` is 10, 20, 30… in this order within each kind. The packs' avatars: **Sideline** — `headset` Headset,
 `cooler` Water cooler, `pylon` Pylon, `penalty-flag` Penalty flag; **Trophy room** — `title-ring` Title ring,
 `medal` Medal, `banner` Banner, `game-ball` Game ball; **Night game** — `floodlights` Floodlights, `scoreboard`
-Scoreboard, `fireworks` Fireworks, `blimp` Blimp.
+Scoreboard, `fireworks` Fireworks, `blimp` Blimp; **Draft day** (on broadcast blue) — `podium` Podium, `draft-card`
+Draft card, `the-call` The call, `draft-cap` Draft cap; **Hall of Fame** (gold on black) — `gold-jacket` Gold jacket,
+`bust` Bust, `laurels` Laurels, `the-hall` The Hall.
 
 ### 6.3 `badges.mjs` — unchanged. submit-run imports it; `BADGE_BY_ID[id].coins` is what a badge pays.
 
@@ -383,8 +399,11 @@ CARD_THEME_SCOPE                    // { [card id]: "dark" | "night" | "light" }
   `data-card="<id>"`. Null or unknown = Navy, today's look. **Text must stay readable on every theme** (WCAG AA for
   every text token of the theme's scope against every color painted behind text, all 32 teams for Team colors).
 - **TitleLine**: the title's name from `SHOP_ITEM_BY_ID`, as `<p class="cs-title" data-title="<id>">`; nothing for
-  null or an unknown id.
-- **avatars.jsx**: `AVATAR_PRESETS` adds the 12 pack avatars (`pack`, `free: false`, names from `AVATAR_PACKS`),
+  null or an unknown id. Since v1.13.0 a title in `TITLE_MARK` (the epic ones: a spark; the legendary ones: a crown)
+  also gets `cs-title-spark` or `cs-title-crown`, on the card and on the shop's chip: the mark replaces the double
+  stripe, as a mask painted in the title's own color, so its contrast is the text's. Keyed by id, never by the
+  database's rarity.
+- **avatars.jsx**: `AVATAR_PRESETS` adds the pack avatars (`pack`, `free: false`, names from `AVATAR_PACKS`),
   drawn to the starter set's rules — no team marks, readable at 24px.
 - **avatar-picker.jsx**: a new prop `ownedPacks` (pack names; `starter` is always owned). Choose an avatar groups
   by pack, Starter first; a pack not owned shows its avatars dimmed and unselectable, with "In the shop" by the pack

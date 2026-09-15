@@ -231,7 +231,7 @@ const FRAMES = SHOP_ITEMS.filter((i) => i.kind === "frame");
 const CARDS = SHOP_ITEMS.filter((i) => i.kind === "card");
 const TITLES = SHOP_ITEMS.filter((i) => i.kind === "title");
 const CARD_TITLE = { "card-navy": null, "card-night": "title-film-room", "card-turf": "title-waiver-hawk", "card-team": "title-draft-guru",
-  "card-ticket": "title-cap-wizard", "card-gold-foil": "title-daily-winner", "card-dynasty": "title-undefeated" };
+  "card-ticket": "title-sleeper-agent", "card-gold-foil": "title-the-goat", "card-dynasty": "title-undefeated" };
 
 function SampleCard({ theme, team, name = "shrimpcity", preset = "trophy", frame = null }) {
   const title = CARD_TITLE[theme];

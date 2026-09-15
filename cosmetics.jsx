@@ -149,6 +149,24 @@ const WREATH = (() => {
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 })();
 
+// Titles past rare trade the double stripe for a mark of their own: a spark on the epic ones, a crown on the legendary
+// ones. Keyed by id like every other look, so a price or rarity changed in the database never changes one.
+export const TITLE_MARK = {
+  "title-war-room": "spark", "title-sleeper-agent": "spark",
+  "title-first-overall": "crown", "title-the-goat": "crown",
+};
+const titleClass = (id) => (TITLE_MARK[id] ? `cs-title cs-title-${TITLE_MARK[id]}` : "cs-title");
+// A mark as a mask: only its shape counts, so it's drawn in black and painted in the title's own color, which keeps
+// its contrast the text's.
+const markMask = (d) => {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='${d}' fill='black'/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") center/contain no-repeat`;
+};
+const MARK = {
+  spark: markMask("M6 0L7.6 4.4L12 6L7.6 7.6L6 12L4.4 7.6L0 6L4.4 4.4Z"),
+  crown: markMask("M0.5 2.5L3.6 5.2L6 0.8L8.4 5.2L11.5 2.5L10.4 8.6H1.6ZM1.6 9.8H10.4V11.6H1.6Z"),
+};
+
 export const COSMETICS_CSS = `
 /* ===== cosmetics ===== */
 /* Frames: a ring outside the picture - FramedAvatar sets its width as padding, and --cs-edge, the width of the ring's
@@ -225,6 +243,10 @@ export const COSMETICS_CSS = `
   background:linear-gradient(currentColor,currentColor) 0 0/3px 100% no-repeat,linear-gradient(currentColor,currentColor) 6px 0/3px 100% no-repeat}
 /* On the metal themes the title is gold: the scope's gold text token (deep gold on foil, bright on black). */
 .cs-card-gold-foil .cs-title,.cs-card-dynasty .cs-title{color:var(--tier-gold)}
+/* The epic and legendary titles' marks (TITLE_MARK), in place of the stripes. */
+.cs-title-spark::before,.cs-title-crown::before{width:12px;height:12px;transform:none;background:currentColor}
+.cs-title-spark::before{-webkit-mask:${MARK.spark};mask:${MARK.spark}}
+.cs-title-crown::before{-webkit-mask:${MARK.crown};mask:${MARK.crown}}
 
 .cs-coins{display:inline-flex;align-items:center;gap:6px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
 .cs-coin{flex:none;display:block}
@@ -323,7 +345,7 @@ export function CardTheme({ theme = null, team = null, as: Tag = "div", classNam
 export function TitleLine({ title = null, className = "" }) {
   const id = known(title, "title");
   if (!id) return null;
-  return <p className={`cs-title ${className}`.trim()} data-title={id}>{SHOP_ITEM_BY_ID[id].name}</p>;
+  return <p className={`${titleClass(id)} ${className}`.trim()} data-title={id}>{SHOP_ITEM_BY_ID[id].name}</p>;
 }
 
 // The coin: the Gridspin re-spin arrow on a lime disc. Decorative - Coins says the number in words.
@@ -373,7 +395,7 @@ export function ItemPreview({ id, team = null, username = "", photoUrl = null, p
   if (item.kind === "title") {
     return (
       <span className="cs-preview" aria-hidden="true" data-preview={id}>
-        <span className="cs-chip"><span className="cs-title">{item.name}</span></span>
+        <span className="cs-chip"><span className={titleClass(item.id)}>{item.name}</span></span>
       </span>
     );
   }

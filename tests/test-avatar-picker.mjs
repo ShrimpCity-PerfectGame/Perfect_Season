@@ -167,7 +167,8 @@ await runTest("Choose an avatar groups by pack, Starter first; a pack in the sho
 
   const { container: c3 } = await show(spies({ ownedPacks: AVATAR_PACKS.map((p) => p.pack) }).props);
   await click(tab(c3, "Choose an avatar"));
-  assert(packs(c3).every((p) => p.dataset.owned === "true") && !c3.querySelector(".ap-shop") && presetButtons(c3).length === 24, "owning every pack makes all 24 choosable");
+  const everyAvatar = FREE_AVATAR_PRESETS.length + AVATAR_PACKS.reduce((n, p) => n + p.presets.length, 0);
+  assert(packs(c3).every((p) => p.dataset.owned === "true") && !c3.querySelector(".ap-shop") && presetButtons(c3).length === everyAvatar, `owning every pack makes all ${everyAvatar} choosable`);
 });
 
 await runTest("Remove picture shows only when there is a picture and calls onRemove; Cancel calls onCancel", async () => {
