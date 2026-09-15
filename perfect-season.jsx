@@ -1966,7 +1966,8 @@ export default function PerfectSeason() {
     const ranks = await Promise.all(FORMATS.map(async (f) => {
       const score = scoreOf(res.profile.stats, f);
       if (score == null) return null;
-      try { return (await fetchOwnRank(score, f)) + 1; } catch (e) { return null; }
+      const above = await fetchOwnRank(score, f);
+      return above == null ? null : above + 1;
     }));
     if (req !== profileReq.current) return;
     setProfileData((p) => ({ ...p, rank: Object.fromEntries(FORMATS.map((f, i) => [f, ranks[i]])) }));
@@ -2035,7 +2036,8 @@ export default function PerfectSeason() {
         const mine = scoreOf(stats, boardFormat);
         // Rows are keyed by the account's id - comparing against the username never matched.
         const idx = top.findIndex((q) => q.id === userId);
-        myRank = idx >= 0 ? idx : mine != null ? await fetchOwnRank(mine, boardFormat) : -1;
+        // A rank that couldn't be counted (null) is left out, like no score at all.
+        myRank = idx >= 0 ? idx : mine != null ? (await fetchOwnRank(mine, boardFormat)) ?? -1 : -1;
       }
       // totals is null when it couldn't be loaded - keep whatever was showing rather than zeros.
       setLb((x) => ({ loading: false, top, totals: totals || x.totals, myRank, error: false, format: boardFormat }));

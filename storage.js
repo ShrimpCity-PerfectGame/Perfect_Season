@@ -93,13 +93,18 @@ export async function fetchLeaderboardTop(limit = 10, format = "fantasy") {
   return data.map(rowToProfile);
 }
 // How many players sit strictly above this score in the same format - callers add 1 for a
-// 1-based rank. Ranking across formats would be meaningless: the two score different things.
+// 1-based rank - or null when the count can't be had. Never 0 on a failure: that would show #1.
+// Ranking across formats would be meaningless: the two score different things.
 export async function fetchOwnRank(score, format = "fantasy") {
   const col = bestCol(format);
   // Counted server-side (head: no rows come back) rather than downloading every profile to count
   // them here.
-  const { count, error } = await getClient().from("profiles").select("id", { count: "exact", head: true }).gt(col, score);
-  return error || count == null ? 0 : count;
+  try {
+    const { count, error } = await getClient().from("profiles").select("id", { count: "exact", head: true }).gt(col, score);
+    return error || count == null ? null : count;
+  } catch (e) {
+    return null;
+  }
 }
 
 // Where one season lands among every logged season in its format, from the runs log: how many

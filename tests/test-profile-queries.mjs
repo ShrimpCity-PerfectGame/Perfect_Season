@@ -53,6 +53,12 @@ for (const name of ["site_totals", "site_stats"]) {
 mock.rpc = () => Promise.resolve({ data: null, error: { message: "TypeError: Failed to fetch" } });
 assert(await fetchSiteTotals() === null, "a failed site_totals request should come back null, not zeros");
 mock.rpc = realRpc;
+// Same for a rank: a failed count read as 0 players above would show a profile as #1 sitewide.
+const failingCount = { select: () => ({ gt: () => Promise.resolve({ count: null, error: { message: "TypeError: Failed to fetch" } }) }) };
+mock.from = () => failingCount;
+assert(await fetchOwnRank(100) === null, "a failed rank count should come back null, not 0");
+mock.from = () => { throw new Error("offline"); };
+assert(await fetchOwnRank(100) === null, "a rank count that throws should come back null too");
 
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }
 console.log("test-profile-queries.mjs done");
