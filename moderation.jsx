@@ -64,12 +64,13 @@ export const MODERATION_CSS = `
 .md-queue .md-meta{margin:3px 0 0;font-size:13px;color:var(--muted)}
 .md-bio{margin:12px 0 0;padding-left:12px;border-left:3px solid var(--line2)}
 .md-label{display:block;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.md-queue .md-text{margin:2px 0 0;font-size:15px;color:var(--ink);overflow-wrap:anywhere}
+/* Player text is clipped to its own box, so stacked combining marks can't spill over the queue. */
+.md-queue .md-text{margin:2px 0 0;font-size:15px;color:var(--ink);overflow-wrap:anywhere;overflow:hidden}
 .md-queue .md-text.none{color:var(--muted)}
 .md-reports{list-style:none;margin:12px 0 0;padding:0;border-top:1px solid var(--line)}
 .md-report{display:grid;justify-items:start;gap:4px;min-width:0;padding:10px 0;border-bottom:1px solid var(--line)}
 .md-tag{font-size:12px;font-weight:800;line-height:1.2;border-radius:999px;padding:3px 10px;color:var(--ink);background:var(--surface2);box-shadow:inset 0 0 0 1px var(--line2)}
-.md-queue .md-note-text{margin:0;max-width:100%;font-size:14.5px;color:var(--ink);overflow-wrap:anywhere}
+.md-queue .md-note-text{margin:0;max-width:100%;font-size:14.5px;color:var(--ink);overflow-wrap:anywhere;overflow:hidden}
 .md-by{font-size:13px;color:var(--muted)}
 .md-acts{margin-top:12px}
 .md-step{margin-top:12px;padding:12px;border-radius:12px;background:var(--surface2);display:grid;gap:10px;min-width:0}

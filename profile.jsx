@@ -61,7 +61,8 @@ export const PROFILE_CSS = `
 .pf-tops li{display:inline-flex;align-items:center;gap:7px;padding:4px 12px 4px 4px;border-radius:999px;background:var(--surface2);box-shadow:inset 0 0 0 1.5px var(--tier);
   font-size:13px;font-weight:700;line-height:1.2;color:var(--ink)}
 .pf-tops .pf-e{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--medal);font-size:14px;line-height:1}
-.pf-bio{margin:0;max-width:62ch;font-size:16px;line-height:1.45;color:var(--ink);overflow-wrap:anywhere}
+/* Clipped to its own box: a bio of stacked combining marks would otherwise spill over the card. */
+.pf-bio{margin:0;max-width:62ch;font-size:16px;line-height:1.45;color:var(--ink);overflow-wrap:anywhere;overflow:hidden}
 .pf-facts{display:flex;flex-wrap:wrap;gap:10px 30px;margin:0;padding:12px 0 0;border-top:1px solid var(--line2)}
 .pf-facts>div{display:grid;gap:4px}
 .pf-facts dt{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}

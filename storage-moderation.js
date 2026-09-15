@@ -3,7 +3,7 @@
 // who is asking. Nothing here throws: every failure comes back as a reason the screens put into words.
 import { getClient, READ, rpcReason } from "./storage-core.js";
 import { avatarUrl } from "./storage-profile.js";
-import { AVATAR_BUCKET } from "./profile-rules.mjs";
+import { AVATAR_BUCKET, isOwnAvatarPath } from "./profile-rules.mjs";
 
 // What each database refusal means to the app. Anything else - a dropped connection, a server error, a
 // function that isn't deployed yet - is "network" (storage-core.js's rpcReason).
@@ -79,8 +79,10 @@ export async function modAction(userId, action, newName) {
   if (res?.error) return { ok: false, reason: rpcReason(res.error, MOD_REFUSALS) };
   // The action has landed by now, so a file that can't be deleted doesn't make it a failure. Best effort,
   // like storage-profile.js's removal of a replaced photo.
+  // Only ever a file in that player's own folder: the moderator storage policy could delete any avatar, so a
+  // path that isn't theirs (the database never returns one) is left alone.
   const removed = res?.data?.removed_path;
-  if (typeof removed === "string" && removed) {
+  if (isOwnAvatarPath(userId, removed)) {
     try { Promise.resolve(getClient().storage.from(AVATAR_BUCKET).remove([removed])).catch(() => {}); } catch (e) { /* best effort */ }
   }
   return { ok: true };

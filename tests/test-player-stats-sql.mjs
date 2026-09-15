@@ -225,6 +225,14 @@ for (const r of dailyRuns) mock._dailyRuns.set(`${r.date}:${r.format}:${r.user_i
 for (const r of souRuns) mock._souRuns.set(`${r.date}:${r.user_id}`, r);
 for (const r of builds) mock._builds.set(r.id, r);
 
+// A build a browser logged before 1.11.0 checked them: a numeric NaN, which sorts above every number. It
+// counts as a build but can never be the best. Loaded past the insert check, as rows from before it were.
+const legacyBuild = { id: uuid(800009), user_id: tinkerer.id, username: tinkerer.username, pos: "QB", overall: "NaN", filled: {}, created_at: at(-3, 0) };
+await db.exec("set session_replication_role = replica");
+await insertRows(db, "builds", [legacyBuild]);
+await db.exec("set session_replication_role = default");
+mock._builds.set(legacyBuild.id, legacyBuild);
+
 const sqlStats = async (id) => (await db.query("select player_stats($1) as s", [id])).rows[0].s;
 const mockStats = async (id) => (await mock.rpc("player_stats", { p_user_id: id })).data;
 const ids = [...accounts.map((a) => a.id), uuid(999999)]; // plus an id with no account at all
@@ -330,7 +338,7 @@ await runTest("player_stats: a tie for first is a first, and only days that are 
 });
 
 await runTest("player_stats: builds and Over/Under", async () => {
-  assert(same(of(tinkerer).builds, { count: 5, best: { pos: "RB", overall: 120.5 } }), `builds: ${JSON.stringify(of(tinkerer).builds)}`);
+  assert(same(of(tinkerer).builds, { count: 6, best: { pos: "RB", overall: 120.5 } }), `builds (a NaN build counts but isn't best): ${JSON.stringify(of(tinkerer).builds)}`);
   const bulk = accounts.find((a) => souRuns.filter((r) => r.user_id === a.id).length > 1);
   const mine = souRuns.filter((r) => r.user_id === bulk.id);
   assert(same(of(bulk).over_under, { played: mine.length, best: Math.max(...mine.map((r) => r.score)) }), `over/under: ${JSON.stringify(of(bulk).over_under)}`);

@@ -308,7 +308,9 @@ returns jsonb language sql stable security invoker set search_path = public as $
     'over_under', (select jsonb_build_object('played', count(*), 'best', max(score)) from sou_runs where user_id = p_user_id),
     'builds', jsonb_build_object(
       'count', (select count(*) from builds where user_id = p_user_id),
-      'best', (select jsonb_build_object('pos', b.pos, 'overall', b.overall) from builds b where b.user_id = p_user_id
+      -- Only a finite overall can be a best: builds was browser-written before 1.11.0's check, and numeric
+      -- NaN (which sorts above every number) or Infinity would otherwise win.
+      'best', (select jsonb_build_object('pos', b.pos, 'overall', b.overall) from builds b where b.user_id = p_user_id and abs(b.overall) < 1e12
                 order by b.overall desc, b.created_at, b.id limit 1))
   );
 $$;

@@ -2,7 +2,7 @@
 // column of every profile (an unfiltered select("*")). This pins that totals are summed in the
 // database (site_totals()) and rank is a server-side count, and that the numbers are unchanged.
 import { makeMockAuth } from "./helpers.mjs";
-import { fetchSiteTotals, fetchOwnRank, fetchSiteStats } from "../storage.js";
+import { fetchSiteTotals, fetchOwnRank, fetchSiteStats, fetchTopBuilds } from "../storage.js";
 
 let failed = 0;
 const assert = (cond, msg) => { if (!cond) { failed++; console.error("FAIL:", msg); } };
@@ -53,6 +53,17 @@ for (const name of ["site_totals", "site_stats"]) {
 mock.rpc = () => Promise.resolve({ data: null, error: { message: "TypeError: Failed to fetch" } });
 assert(await fetchSiteTotals() === null, "a failed site_totals request should come back null, not zeros");
 mock.rpc = realRpc;
+// Old browser-written builds can hold a NaN overall (sent as the string "NaN") or a made-up position; a
+// string overall crashed the whole Stats screen. Only finite numbers at real positions come back.
+const realBuilds = mock._builds;
+realBuilds.set("b1", { id: "b1", username: "a", pos: "WR", overall: 120.5, filled: {} });
+realBuilds.set("b2", { id: "b2", username: "b", pos: "QB", overall: "NaN", filled: {} });
+realBuilds.set("b3", { id: "b3", username: "c", pos: "<b>K</b>", overall: 99, filled: {} });
+realBuilds.set("b4", { id: "b4", username: "a", pos: "TE", overall: "101.25", filled: {} });
+const topBuilds = await fetchTopBuilds(10);
+assert(topBuilds.length === 2 && topBuilds.every((b) => typeof b.overall === "number" && Number.isFinite(b.overall)), `only finite builds at real positions, as numbers: ${JSON.stringify(topBuilds)}`);
+realBuilds.clear();
+
 // Same for a rank: a failed count read as 0 players above would show a profile as #1 sitewide.
 const failingCount = { select: () => ({ gt: () => Promise.resolve({ count: null, error: { message: "TypeError: Failed to fetch" } }) }) };
 mock.from = () => failingCount;

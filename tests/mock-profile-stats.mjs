@@ -110,7 +110,9 @@ export function playerStats(state, userId) {
 
   const souRuns = [...state.souRuns.values()].filter((r) => r.user_id === userId);
   const builds = [...state.builds.values()].filter((r) => r.user_id === userId);
-  const bestBuild = [...builds].sort((a, b) => desc(num(a.overall), num(b.overall)) || asc(ms(a.created_at), ms(b.created_at)) || asc(a.id, b.id))[0];
+  // Only a finite overall can be a best (the SQL's abs(overall) < 1e12 leaves out NaN and Infinity).
+  const bestBuild = builds.filter((b) => Math.abs(num(b.overall)) < 1e12)
+    .sort((a, b) => desc(num(a.overall), num(b.overall)) || asc(ms(a.created_at), ms(b.created_at)) || asc(a.id, b.id))[0];
 
   return {
     since: pgTimestamp(mine.reduce((m, r) => {

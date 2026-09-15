@@ -164,10 +164,17 @@ export async function logBuild(userId, { username, pos, overall, filled }) {
   const { error } = await getClient().from("builds").insert({ user_id: userId, username, pos, overall, filled });
   return !error;
 }
+// builds was browser-written with no checks before 1.11.0, so an old row can hold a numeric NaN (PostgREST
+// sends it as the string "NaN", which sorts first) or a made-up position. Those can't be shown - and a
+// string overall once crashed the whole Stats screen - so only a finite overall at a real position comes
+// back, as a number.
+const BUILD_POSITIONS = ["QB", "RB", "WR", "TE"];
 export async function fetchTopBuilds(limit = 10) {
   const { data, error } = await getClient().from("builds").select("*").order("overall", { ascending: false }).limit(limit);
-  if (error || !data) return [];
-  return data.map((r) => ({ username: r.username, pos: r.pos, overall: r.overall, filled: r.filled }));
+  if (error || !Array.isArray(data)) return [];
+  return data
+    .map((r) => ({ username: r.username, pos: r.pos, overall: Number(r.overall), filled: r.filled }))
+    .filter((b) => Number.isFinite(b.overall) && BUILD_POSITIONS.includes(b.pos));
 }
 export async function fetchBuildCount() {
   const { count, error } = await getClient().from("builds").select("*", { count: "exact", head: true });
