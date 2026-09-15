@@ -280,7 +280,15 @@ begin
   if v_username is null or v_username !~ '^[A-Za-z0-9_]{3,16}$' then
     raise exception 'username_invalid' using errcode = 'P0001';
   end if;
-  if not public.text_is_clean(v_username) then
+  -- text_is_clean reads a run of three or more of one letter as a single letter, so a blocked word with a
+  -- doubled letter gets through with that letter stretched ("Niggger" reads as "niger", "Asssshole" as
+  -- "ashole"). A username is read once more, with its look-alike digits as letters and every such run
+  -- cut to two. (Bios and check_username don't take this second reading yet: PROFILES.md 3.4's
+  -- algorithm, which the test mock mirrors, would have to change with it.)
+  if not public.text_is_clean(v_username)
+     or not public.text_is_clean(regexp_replace(
+          translate(v_username, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ013457', 'abcdefghijklmnopqrstuvwxyzoieast'),
+          '([a-z])\1\1+', '\1\1', 'g')) then
     raise exception 'username_blocked' using errcode = 'P0001';
   end if;
   insert into public.profiles (id, username)
