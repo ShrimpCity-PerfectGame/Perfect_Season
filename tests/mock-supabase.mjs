@@ -386,12 +386,15 @@ export function makeMockAuth() {
       async signUp({ email, password, options }) {
         if (authUsers.has(email)) return { data: null, error: { message: "User already registered" } };
         const username = options?.data?.username;
+        // The signup trigger (migration-profiles.sql's handle_new_user) refuses a username outside the
+        // username rule - check_username's "invalid" is the same rule - or one with a blocked word, before
+        // the profile row is written, which reaches the client as Supabase Auth's generic database error.
+        if (profileData.rpcs.check_username({ p_username: username }) === "invalid" || !profileData.isClean(username)) {
+          return { data: null, error: { status: 500, message: "Database error saving new user" } };
+        }
         if ([...profiles.values()].some((r) => r.username === username)) {
           return { data: null, error: { code: "23505", message: 'duplicate key value violates unique constraint "profiles_username_key"' } };
         }
-        // The signup trigger refuses a blocked username (migration-profiles.sql's handle_new_user), which
-        // reaches the client as Supabase Auth's generic database error.
-        if (!profileData.isClean(username)) return { data: null, error: { status: 500, message: "Database error saving new user" } };
         const id = `user-${authUsers.size + 1}`;
         authUsers.set(email, { id, email, password });
         profiles.set(id, { id, username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });

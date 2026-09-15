@@ -31,72 +31,82 @@ export const BLOCKED_WORDS_SEED = [
 // both. Characters are given by code point so nothing invisible or look-alike hides in this file.
 const cp = (from, to = from) => Array.from({ length: to - from + 1 }, (_, i) => String.fromCodePoint(from + i)).join("");
 //
-// Dropped first: zero-width and other invisible characters, and combining accents, so a decomposed
-// "i" followed by U+0301 reads as a plain "i".
-export const FILTER_INVISIBLE = [
-  [0xAD], [0x34F], [0x300, 0x36F], [0x180E], [0x200B, 0x200F], [0x202A, 0x202E], [0x2060, 0x2069], [0xFE00, 0xFE0F], [0xFEFF],
-].map(([from, to]) => cp(from, to)).join("");
-const INVISIBLE = new Set(FILTER_INVISIBLE);
+// 1. NFKC turns compatibility forms into the characters they stand for (full-width, mathematical, circled
+//    and superscript letters, ligatures). NFD then splits every accented letter into its letter and its
+//    accents: without it NFKC would rejoin an accent typed after a letter into an accented letter this
+//    file doesn't list, and that letter would split the word instead of reading as a plain one.
+// 2. Dropped: invisible characters (zero-width, soft hyphen, fillers, direction and format controls,
+//    variation selectors, tags) and combining marks, so the accents NFD split off go, and so does an
+//    accent or joiner typed inside a word.
+export const FILTER_DROPPED = [
+  [0xAD], [0x300, 0x36F], [0x61C], [0x115F, 0x1160], [0x17B4, 0x17B5], [0x180B, 0x180F], [0x1AB0, 0x1AFF], [0x1DC0, 0x1DFF],
+  [0x200B, 0x200F], [0x202A, 0x202E], [0x2060, 0x206F], [0x20D0, 0x20FF], [0x3164], [0xFE00, 0xFE0F], [0xFE20, 0xFE2F], [0xFEFF],
+  [0xFFA0], [0xFFF9, 0xFFFB], [0xE0000, 0xE0FFF],
+].map(([from, to = from]) => [from, to]);
+const dropped = (c) => {
+  const n = c.codePointAt(0);
+  return FILTER_DROPPED.some(([from, to]) => n >= from && n <= to);
+};
 // Letters written as two: sharp s (small and capital), ae and oe (small and capital).
 export const FILTER_EXPANSIONS = [[cp(0xDF), "ss"], [cp(0x1E9E), "ss"], [cp(0xE6), "ae"], [cp(0xC6), "ae"], [cp(0x153), "oe"], [cp(0x152), "oe"]];
-// Then every letter that can stand for a plain one becomes that lowercase letter: ASCII capitals,
-// accented Latin letters in both cases, full-width letters, and the Cyrillic and Greek letters that
-// look like Latin ones (a pasted Cyrillic "c" in the middle of a word otherwise hides it). Lowercasing
-// only through this table, never toLowerCase()/lower(), keeps the result the same in every browser and
-// database locale.
+// 3. Every letter that can stand for a plain one becomes that lowercase letter: ASCII capitals, the Latin
+//    letters that carry their mark in the letter itself (so NFD doesn't split them: o with stroke, d with
+//    stroke, eth, h with stroke, dotless i, kra, l with stroke, t with stroke, script a and g), and the
+//    Cyrillic and Greek letters that look like Latin ones (a pasted Cyrillic "c" in a word otherwise hides
+//    it). Lowercasing only through this table, never toLowerCase()/lower(), keeps the result the same in
+//    every browser and database locale.
 const FOLD_GROUPS = {
-  a: "A" + cp(0xC0, 0xC5) + cp(0xE0, 0xE5) + cp(0x100, 0x105) + cp(0x410) + cp(0x430) + cp(0x391) + cp(0x3B1) + cp(0x212B),
+  a: "A" + cp(0x251) + cp(0x410) + cp(0x430) + cp(0x391) + cp(0x3B1),
   b: "B" + cp(0x412) + cp(0x392),
-  c: "C" + cp(0xC7) + cp(0xE7) + cp(0x106, 0x10D) + cp(0x421) + cp(0x441),
-  d: "D" + cp(0xD0) + cp(0xF0) + cp(0x10E, 0x111) + cp(0x501),
-  e: "E" + cp(0xC8, 0xCB) + cp(0xE8, 0xEB) + cp(0x112, 0x11B) + cp(0x415) + cp(0x435) + cp(0x395),
+  c: "C" + cp(0x421) + cp(0x441),
+  d: "D" + cp(0xD0) + cp(0xF0) + cp(0x110, 0x111) + cp(0x501),
+  e: "E" + cp(0x415) + cp(0x435) + cp(0x395),
   f: "F",
-  g: "G" + cp(0x11C, 0x123),
-  h: "H" + cp(0x124, 0x127) + cp(0x41D) + cp(0x4BB) + cp(0x397),
-  i: "I" + cp(0xCC, 0xCF) + cp(0xEC, 0xEF) + cp(0x128, 0x131) + cp(0x406) + cp(0x456) + cp(0x399) + cp(0x3B9),
-  j: "J" + cp(0x134, 0x135) + cp(0x408) + cp(0x458),
-  k: "K" + cp(0x136, 0x138) + cp(0x41A) + cp(0x43A) + cp(0x39A) + cp(0x3BA) + cp(0x212A),
-  l: "L" + cp(0x139, 0x142) + cp(0x4CF),
+  g: "G" + cp(0x261),
+  h: "H" + cp(0x126, 0x127) + cp(0x41D) + cp(0x4BB) + cp(0x397),
+  i: "I" + cp(0x131) + cp(0x406) + cp(0x456) + cp(0x399) + cp(0x3B9),
+  j: "J" + cp(0x408) + cp(0x458),
+  k: "K" + cp(0x138) + cp(0x41A) + cp(0x43A) + cp(0x39A) + cp(0x3BA),
+  l: "L" + cp(0x141, 0x142) + cp(0x4CF),
   m: "M" + cp(0x41C) + cp(0x39C),
-  n: "N" + cp(0xD1) + cp(0xF1) + cp(0x143, 0x148) + cp(0x39D),
-  o: "O" + cp(0xD2, 0xD6) + cp(0xD8) + cp(0xF2, 0xF6) + cp(0xF8) + cp(0x14C, 0x151) + cp(0x41E) + cp(0x43E) + cp(0x39F) + cp(0x3BF),
+  n: "N" + cp(0x39D),
+  o: "O" + cp(0xD8) + cp(0xF8) + cp(0x41E) + cp(0x43E) + cp(0x39F) + cp(0x3BF),
   p: "P" + cp(0x420) + cp(0x440) + cp(0x3A1) + cp(0x3C1),
   q: "Q",
-  r: "R" + cp(0x154, 0x159),
-  s: "S" + cp(0x15A, 0x161) + cp(0x17F) + cp(0x218, 0x219) + cp(0x405) + cp(0x455),
-  t: "T" + cp(0x162, 0x167) + cp(0x21A, 0x21B) + cp(0x422) + cp(0x3A4) + cp(0x3C4),
-  u: "U" + cp(0xD9, 0xDC) + cp(0xF9, 0xFC) + cp(0x168, 0x173) + cp(0x3C5),
+  r: "R",
+  s: "S" + cp(0x405) + cp(0x455),
+  t: "T" + cp(0x166, 0x167) + cp(0x422) + cp(0x3A4) + cp(0x3C4),
+  u: "U" + cp(0x3C5),
   v: "V" + cp(0x3BD),
-  w: "W" + cp(0x174, 0x175),
+  w: "W",
   x: "X" + cp(0x425) + cp(0x445) + cp(0x3A7) + cp(0x3C7),
-  y: "Y" + cp(0xDD) + cp(0xFD) + cp(0xFF) + cp(0x176, 0x178) + cp(0x423) + cp(0x443) + cp(0x3A5),
-  z: "Z" + cp(0x179, 0x17E) + cp(0x396),
+  y: "Y" + cp(0x423) + cp(0x443) + cp(0x3A5),
+  z: "Z" + cp(0x396),
 };
 export let FILTER_FOLD_FROM = "", FILTER_FOLD_TO = "";
-Object.entries(FOLD_GROUPS).forEach(([letter, chars], i) => {
-  const all = chars + cp(0xFF21 + i) + cp(0xFF41 + i); // full-width capital and small
-  FILTER_FOLD_FROM += all;
-  FILTER_FOLD_TO += letter.repeat([...all].length);
-});
+for (const [letter, chars] of Object.entries(FOLD_GROUPS)) {
+  FILTER_FOLD_FROM += chars;
+  FILTER_FOLD_TO += letter.repeat([...chars].length);
+}
 const FOLD = new Map([...FILTER_FOLD_FROM].map((c, i) => [c, [...FILTER_FOLD_TO][i]]));
-// Look-alikes (PROFILES.md 3.4, step 2).
+// 4. Look-alikes (PROFILES.md 3.4, step 2).
 export const FILTER_LOOKALIKE_FROM = "013457@$!|", FILTER_LOOKALIKE_TO = "oieastasil";
 const LOOKALIKE = new Map([...FILTER_LOOKALIKE_FROM].map((c, i) => [c, FILTER_LOOKALIKE_TO[i]]));
 
-// The two readings of a text the filter checks: with look-alikes mapped, and as typed. Mapping is a
-// second reading rather than the only one because the same characters also sit next to words as
-// punctuation or numbers - read only with "!" as "i", "shit!" is the token "shiti" and "fuck1" is
-// "fucki", and neither would match.
+// The four readings of a text the filter checks. Look-alikes mapped, and as typed: the same characters
+// also sit next to words as punctuation or numbers, and read only with "!" as "i", "shit!" is the token
+// "shiti" and "fuck1" is "fucki". And in each, every run of three or more of one letter cut to one
+// ("fuuuck") and cut to two: a blocked word with a doubled letter otherwise gets through with that letter
+// tripled, which the first cut reads as a single letter.
 export function filterReadings(text) {
-  let s = [...String(text ?? "")].filter((c) => !INVISIBLE.has(c)).join("");
+  let s = [...String(text ?? "").normalize("NFKC").normalize("NFD")].filter((c) => !dropped(c)).join("");
   for (const [from, to] of FILTER_EXPANSIONS) s = s.split(from).join(to);
   s = [...s].map((c) => FOLD.get(c) ?? c).join("");
-  // Runs of three or more of the same letter count as one ("fuuuck").
-  const collapse = (x) => x.replace(/([a-z])\1{2,}/g, "$1");
-  return [collapse([...s].map((c) => LOOKALIKE.get(c) ?? c).join("")), collapse(s)];
+  const mapped = [...s].map((c) => LOOKALIKE.get(c) ?? c).join("");
+  return [mapped, s].flatMap((x) => [x.replace(/([a-z])\1{2,}/g, "$1"), x.replace(/([a-z])\1{2,}/g, "$1$1")]);
 }
 
-// text_is_clean(): false if either reading contains a blocked word. `entries` is [{ word, match }].
+// text_is_clean(): false if any reading contains a blocked word. `entries` is [{ word, match }].
 export function textIsClean(text, entries) {
   const list = [...entries];
   for (const reading of filterReadings(text)) {
@@ -121,6 +131,8 @@ const firstFolder = (path) => {
 // Shaped like storage-js's StorageApiError: `status` is the HTTP status, `statusCode` and `code` come from
 // the Storage API's error body.
 const storageError = (status, statusCode, code, message) => ({ data: null, error: { name: "StorageApiError", message, status, statusCode, code } });
+// avatar_folder_has_room(): the most files one player's avatars folder may hold before an upload is refused.
+export const AVATAR_FOLDER_LIMIT = 10;
 
 // state: { profiles, runs, dailyRuns, souRuns, builds, currentUserId, isModerator }
 // playerStats: tests/mock-profile-stats.mjs's playerStats(state, userId)
@@ -188,12 +200,15 @@ export function makeProfileData(state, { playerStats }) {
     },
   };
 
-  // Supabase Storage with this migration's policies on storage.objects: a signed-in player may add,
-  // read, replace and delete objects only inside their own folder, and may add or replace one only while
-  // uploads aren't paused. Moderators may also delete any avatar (migration-moderation.sql).
+  // Supabase Storage with this migration's policies on storage.objects: a signed-in player may read,
+  // replace and delete objects only inside their own folder; may add one only named exactly
+  // "<their id>/<10-16 digits>.webp|jpg|png", while their folder holds fewer than AVATAR_FOLDER_LIMIT files;
+  // and may add or replace one only while uploads aren't paused. Moderators may also read and delete any
+  // avatar (migration-moderation.sql).
   const storage = {
     from(bucket) {
       const ownFolder = (uid, path) => !!uid && firstFolder(path) === uid;
+      const folderCount = (uid) => [...objects.values()].filter((o) => o.bucket === AVATAR_BUCKET && String(o.path).startsWith(`${uid}/`)).length;
       return {
         async upload(path, body, opts = {}) {
           if (bucket !== AVATAR_BUCKET) return storageError(404, "404", "NoSuchBucket", "Bucket not found");
@@ -201,7 +216,9 @@ export function makeProfileData(state, { playerStats }) {
           const type = opts.contentType || body?.type || "";
           const size = body?.size ?? body?.byteLength ?? body?.length ?? 0;
           const key = `${bucket}/${path}`;
-          if (!ownFolder(uid, path) || uploadsPaused()) return storageError(400, "403", "AccessDenied", "new row violates row-level security policy");
+          if (!uid || !isOwnAvatarPath(uid, path) || uploadsPaused() || folderCount(uid) >= AVATAR_FOLDER_LIMIT) {
+            return storageError(400, "403", "AccessDenied", "new row violates row-level security policy");
+          }
           if (!AVATAR_TYPES.includes(type)) return storageError(415, "415", "InvalidMimeType", `mime type ${type} is not supported`);
           if (size > AVATAR_MAX_BYTES) return storageError(413, "413", "EntityTooLarge", "The object exceeded the maximum allowed size");
           if (objects.has(key) && !opts.upsert) return storageError(409, "409", "KeyAlreadyExists", "The resource already exists");
@@ -223,6 +240,25 @@ export function makeProfileData(state, { playerStats }) {
             }
           }
           return { data: removed, error: null };
+        },
+        // One folder's entries the caller may read, by name: files, and each subfolder once with a null id,
+        // as the real API lists them.
+        async list(prefix = "", opts = {}) {
+          if (bucket !== AVATAR_BUCKET) return storageError(404, "404", "NoSuchBucket", "Bucket not found");
+          const uid = state.currentUserId();
+          const folder = String(prefix ?? "").replace(/\/+$/, "");
+          const entries = new Map();
+          for (const o of objects.values()) {
+            if (!uid || o.bucket !== bucket || !(ownFolder(uid, o.path) || state.isModerator?.(uid))) continue;
+            const parts = String(o.path).split("/");
+            const inside = folder ? (parts[0] === folder && parts.length > 1 ? parts.slice(1) : null) : parts;
+            if (!inside) continue;
+            const name = inside[0];
+            if (inside.length === 1) entries.set(name, { name, id: `${o.bucket}/${o.path}`, metadata: { size: o.size, mimetype: o.contentType } });
+            else if (!entries.has(name)) entries.set(name, { name, id: null, metadata: null });
+          }
+          const sorted = [...entries.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+          return { data: sorted.slice(opts.offset || 0, (opts.offset || 0) + (opts.limit || 100)), error: null };
         },
         getPublicUrl(path) {
           const o = objects.get(`${bucket}/${path}`);

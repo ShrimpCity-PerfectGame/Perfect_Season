@@ -143,24 +143,48 @@ async function uploadsPaused() {
     return null;
   }
 }
-// A failed upload's reason. Storage errors (storage-js's StorageApiError) carry the Storage API's own
-// statusCode/code ("413"/EntityTooLarge, "415"/InvalidMimeType, "403"/AccessDenied, ...) alongside the
-// HTTP status, which differs between Storage versions - so all three are read, then the message.
-async function uploadReason(error) {
+// Storage errors (storage-js's StorageApiError) carry the Storage API's own statusCode/code ("413"/
+// EntityTooLarge, "415"/InvalidMimeType, "403"/AccessDenied, ...) alongside the HTTP status, which differs
+// between Storage versions - so all three are read, then the message.
+const sessionRefused = (error) => error?.code === "InvalidJWT" || /\bjwt\b|exp claim/i.test(String(error?.message || ""));
+// The storage policies said no: uploads paused, the folder full, or a request without the player's session.
+const refusedByPolicy = (error) => !sessionRefused(error) && (String(error?.statusCode ?? "") === "403" || error?.code === "AccessDenied"
+  || Number(error?.status) === 403 || /row-level security/i.test(String(error?.message || "")));
+// A failed upload's reason.
+async function uploadReason(error, userId) {
   const statusCode = String(error?.statusCode ?? "");
   const code = String(error?.code ?? "");
   const status = Number(error?.status);
   const message = String(error?.message || "");
   if (statusCode === "413" || code === "EntityTooLarge" || status === 413 || /maximum allowed size|too large/i.test(message)) return "too_large";
   if (statusCode === "415" || code === "InvalidMimeType" || status === 415 || /mime type/i.test(message)) return "type";
-  if (code === "InvalidJWT" || /\bjwt\b|exp claim/i.test(message)) return "signed_out";
-  if (statusCode === "403" || code === "AccessDenied" || status === 403 || /row-level security/i.test(message)) {
-    // The session was checked before uploading and the path is in the player's own folder, so the
-    // insert policy refused it for the kill switch - unless the flag says uploads are on, in which case
-    // the server no longer took the session.
-    return (await uploadsPaused()) === false ? "signed_out" : "paused";
+  if (sessionRefused(error)) return "signed_out";
+  if (refusedByPolicy(error)) {
+    // The path is always in the player's own folder and named as the policy asks, so it's the kill switch,
+    // or a session that went away since it was checked - or, with neither, a full folder that couldn't be
+    // cleared, which only a retry can fix.
+    if ((await uploadsPaused()) !== false) return "paused";
+    const session = await sessionUserId();
+    return session === null || (session !== undefined && session !== userId) ? "signed_out" : "network";
   }
   return "network";
+}
+// The insert policy refuses an upload into a folder that already holds 10 files, so a script can't fill
+// the bucket. A player only gets there through leftovers - a replaced photo whose delete didn't land, or
+// an upload whose answer was lost on the way back - so those are cleared out, keeping the current
+// picture. True if anything was deleted.
+async function clearLeftovers(userId, keepPath) {
+  try {
+    const bucket = getClient().storage.from(AVATAR_BUCKET);
+    const { data, error } = await bucket.list(userId, { limit: 100 });
+    if (error || !Array.isArray(data)) return false;
+    const leftovers = data.map((f) => `${userId}/${f?.name}`).filter((p) => p !== keepPath && isOwnAvatarPath(userId, p));
+    if (!leftovers.length) return false;
+    const removed = await bucket.remove(leftovers);
+    return !removed?.error && Array.isArray(removed?.data) && removed.data.length > 0;
+  } catch (e) {
+    return false;
+  }
 }
 
 // Uploads an already-cropped picture (the avatar picker makes the blob) and makes it your picture.
@@ -175,10 +199,15 @@ export async function saveAvatarPhoto(userId, blob, previousPath) {
   const session = await sessionUserId();
   if (session === null || (session !== undefined && session !== userId)) return failed("signed_out");
   const path = avatarObjectPath(userId, blob.type);
+  const upload = () => getClient().storage.from(AVATAR_BUCKET).upload(path, blob, { contentType: blob.type, cacheControl: "31536000", upsert: false });
   let uploaded = false;
   try {
-    const up = await getClient().storage.from(AVATAR_BUCKET).upload(path, blob, { contentType: blob.type, cacheControl: "31536000", upsert: false });
-    if (!up || up.error) return failed(await uploadReason(up?.error));
+    let up = await upload();
+    // Refused with uploads switched on: most likely a folder full of leftovers. Clear them and try once more.
+    if (up?.error && refusedByPolicy(up.error) && (await uploadsPaused()) === false && (await clearLeftovers(userId, previousPath))) {
+      up = await upload();
+    }
+    if (!up || up.error) return failed(await uploadReason(up?.error, userId));
     uploaded = true;
     const { data, error, status } = await getClient().rpc("set_avatar", { p_path: path, p_preset: null });
     if (error || !data || typeof data !== "object") {

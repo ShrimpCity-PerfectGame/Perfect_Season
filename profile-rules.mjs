@@ -47,10 +47,12 @@ export const FREE_AVATAR_PRESETS = [
 ];
 
 // ---------- Bios ----------
-// Characters a bio may not contain: control characters, and invisible or direction-changing ones
-// that can hide a word or flip how the text reads. Zero-width joiners (U+200C, U+200D) are allowed,
-// since emoji sequences need them - the word filter ignores them when it matches.
-const DISALLOWED = "\\u0000-\\u001F\\u007F-\\u009F\\u200B\\u200E\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\uFEFF";
+// Characters a bio may not contain: control characters, line and paragraph separators (U+2028, U+2029 -
+// a bio is one line), and invisible, direction-changing or deprecated format characters that can hide a
+// word or flip how the text reads (including the Arabic letter mark, U+061C, and U+206A-U+206F). Zero-width
+// joiners (U+200C, U+200D) are allowed, since emoji sequences need them - the word filter ignores them when
+// it matches. supabase/migration-profiles.sql refuses the same set (save_profile and the bio constraint).
+const DISALLOWED = "\\u0000-\\u001F\\u007F-\\u009F\\u061C\\u200B\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF";
 export const hasDisallowedChars = (text) => new RegExp(`[${DISALLOWED}]`).test(String(text ?? ""));
 // One line of plain text: runs of whitespace (newlines included) become one space, disallowed
 // characters go, and the ends are trimmed. It never shortens the text - the editor shows the count,

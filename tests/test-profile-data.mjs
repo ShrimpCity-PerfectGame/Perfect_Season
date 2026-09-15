@@ -4,7 +4,8 @@
 //   - row-level security: clients read profile_details, avatar_presets and site_flags, can't read
 //     blocked_words, and can't write any of the four directly;
 //   - the functions act only on the caller's own row and enforce every limit and error code;
-//   - the avatars bucket's policies: your own folder only, and no new files while uploads are paused;
+//   - the avatars bucket's policies: your own folder only, uploads named exactly as the app names them,
+//     at most 10 files a folder, and no new files while uploads are paused;
 //   - check_username, the signup trigger, and player_profile's lookup and JSON shape;
 //   - running the migration a second time is harmless;
 //   - the mock returns what the SQL returns for the same list of calls;
@@ -12,7 +13,7 @@
 // The word filter's own cases are in test-word-filter.mjs.
 import { assert, runTest, makeMockAuth } from "./helpers.mjs";
 import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql } from "./pg-fixture.mjs";
-import { makeProfileData, BLOCKED_WORDS_SEED } from "./mock-profile-data.mjs";
+import { makeProfileData, BLOCKED_WORDS_SEED, AVATAR_FOLDER_LIMIT } from "./mock-profile-data.mjs";
 import { playerStats } from "./mock-profile-stats.mjs";
 import { FREE_AVATAR_PRESETS, TEAM_CODES, AVATAR_BUCKET, AVATAR_MAX_BYTES, AVATAR_TYPES, emptyPlayerStats, mapPlayerStats } from "../profile-rules.mjs";
 
@@ -20,6 +21,10 @@ const ch = (...codes) => String.fromCodePoint(...codes);
 // A blocked word of each kind, taken from the list rather than written out here.
 const WORD = BLOCKED_WORDS_SEED.find((b) => b.match === "word").word;
 const ANYWHERE = BLOCKED_WORDS_SEED.find((b) => b.match === "anywhere").word;
+const DOUBLED = BLOCKED_WORDS_SEED.find((b) => /(.)\1/.test(b.word)).word;
+// A doubled letter written three times, and a word in mathematical bold letters.
+const stretched = (w) => w.replace(/(.)\1/, "$1$1$1");
+const mathBold = (w) => [...w].map((c) => ch(0x1D41A + c.charCodeAt(0) - 97)).join("");
 const photo = (uid, n = "1757800000000", ext = "webp") => `${uid}/${n}.${ext}`;
 // Sorted keys, so JSON from Postgres and from the mock compare equal regardless of key order.
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
@@ -128,8 +133,16 @@ await runTest("save_profile trims, enforces the length, character, word and team
     [{ p_bio: "line one\nline two", p_favorite_team: null }, "bio_invalid"],
     [{ p_bio: `flip${ch(0x202E)}ped`, p_favorite_team: null }, "bio_invalid"],
     [{ p_bio: `zero${ch(0x200B)}width`, p_favorite_team: null }, "bio_invalid"],
+    [{ p_bio: `line one${ch(0x2028)}line two`, p_favorite_team: null }, "bio_invalid"],
+    [{ p_bio: `para one${ch(0x2029)}para two`, p_favorite_team: null }, "bio_invalid"],
+    [{ p_bio: `letter${ch(0x61C)}mark`, p_favorite_team: null }, "bio_invalid"],
+    [{ p_bio: `old${ch(0x206A)}format`, p_favorite_team: null }, "bio_invalid"],
+    [{ p_bio: `old${ch(0x206F)}format`, p_favorite_team: null }, "bio_invalid"],
+    [{ p_bio: `a mark at the end${ch(0x61C)}`, p_favorite_team: null }, "bio_invalid"], // not whitespace, so not trimmed
     [{ p_bio: `big ${WORD} energy`, p_favorite_team: null }, "bio_blocked"],
     [{ p_bio: [...ANYWHERE].join("."), p_favorite_team: null }, "bio_blocked"],
+    [{ p_bio: `total ${stretched(DOUBLED)}`, p_favorite_team: null }, "bio_blocked"],
+    [{ p_bio: mathBold(ANYWHERE), p_favorite_team: null }, "bio_blocked"],
     [{ p_bio: "Fine bio", p_favorite_team: "XYZ" }, "bad_team"],
     [{ p_bio: "Fine bio", p_favorite_team: "kc" }, "bad_team"],
     [{ p_bio: "Fine bio", p_favorite_team: "" }, "bad_team"],
@@ -165,6 +178,10 @@ await runTest("save_profile trims, enforces the length, character, word and team
   // The table enforces the same rules if something skips the function.
   assert(/check constraint/.test(await failure(db, "update profile_details set favorite_team = 'XYZ' where user_id = $1", [BOB])), "the table itself refuses a bad team");
   assert(/check constraint/.test(await failure(db, "update profile_details set bio = $2 where user_id = $1", [BOB, "x".repeat(161)])), "the table itself refuses a long bio");
+  for (const code of [0x1, 0x2028, 0x2029, 0x61C, 0x206A, 0x206F, 0x202E, 0xFEFF]) {
+    const err = await failure(db, "update profile_details set bio = $2 where user_id = $1", [BOB, `a${ch(code)}b`]);
+    assert(/profile_details_bio_characters/.test(err), `the table itself refuses U+${code.toString(16).toUpperCase()} in a bio, got ${JSON.stringify(err)}`);
+  }
 });
 
 await runTest("set_avatar takes a photo in your own folder or a free preset, never both, and clears the other", async () => {
@@ -214,6 +231,7 @@ await runTest("check_username answers invalid, taken, blocked or ok, for anyone"
     ["ab", "invalid"], ["a".repeat(17), "invalid"], ["has space", "invalid"], ["dash-name", "invalid"], [`na${ch(0xEF)}ve`, "invalid"],
     [null, "invalid"], ["", "invalid"], ["alice", "taken"], ["Alice", "ok"], ["abc", "ok"], ["a".repeat(16), "ok"],
     ["Cassel_2009", "ok"], [`${WORD}_99`, "blocked"], [`xx${ANYWHERE}xx`, "blocked"], [`The_${WORD.toUpperCase()}`, "blocked"],
+    [stretched(DOUBLED), "blocked"], [`${stretched(DOUBLED).toUpperCase()}_1`, "blocked"], ["Glasss_Jaw", "ok"], ["Goooal_Line", "ok"],
   ];
   for (const who of [null, BOB]) {
     for (const [name, want] of cases) {
@@ -223,14 +241,33 @@ await runTest("check_username answers invalid, taken, blocked or ok, for anyone"
   }
 });
 
-await runTest("the signup trigger refuses a username with a blocked word, and creates every other account", async () => {
+await runTest("the signup trigger refuses a username outside the rule or with a blocked word, and creates every other account", async () => {
   const bad = uuid(50), good = uuid(51);
   const err = await failure(db, "insert into auth.users values ($1, $2)", [bad, { username: `xX_${ANYWHERE}_Xx` }]);
   assert(err === "username_blocked", `a blocked username should raise username_blocked, got ${JSON.stringify(err)}`);
   assert((await owner("select count(*)::int as n from auth.users where id = $1", [bad]))[0].n === 0, "no auth user is left behind");
   assert((await owner("select count(*)::int as n from profiles where id = $1", [bad]))[0].n === 0, "no profile is created");
+  assert((await failure(db, "insert into auth.users values ($1, $2)", [bad, { username: stretched(DOUBLED) }])) === "username_blocked", "a stretched doubled letter is blocked");
+  assert((await failure(db, "insert into auth.users values ($1, $2)", [bad, { username: "has space" }])) === "username_invalid", "a name outside the rule is invalid");
   await owner("insert into auth.users values ($1, $2)", [good, { username: "Hancock_Titus" }]);
   assert((await owner("select username from profiles where id = $1", [good]))[0]?.username === "Hancock_Titus", "a clean username signs up");
+});
+
+await runTest("the mock's signup refuses exactly the usernames the signup trigger refuses", async () => {
+  const names = ["Glasss_Jaw", "has space", "ab", "a".repeat(17), `na${ch(0xEF)}ve`, "", `${WORD}_99`, stretched(DOUBLED), `${stretched(DOUBLED)}_1`,
+    `xX_${ANYWHERE}_Xx`, "Mississippi", "Cockrell_Titus", "alice", mathBold("alice")];
+  const auth = makeMockAuth();
+  auth._profiles.set("existing-alice", { id: "existing-alice", username: "alice" });
+  let n = 0;
+  for (const username of [...names, undefined, 12]) {
+    const id = uuid(600 + n++);
+    const sqlErr = await failure(db, "insert into auth.users values ($1, $2)", [id, username === undefined ? {} : { username }]);
+    const { error } = await auth.auth.signUp({ email: `signup${n}@example.com`, password: "Password1", options: { data: { username } } });
+    const sqlSays = sqlErr === "" ? "ok" : /username_(invalid|blocked)/.test(sqlErr) ? "refused" : /duplicate|unique/.test(sqlErr) ? "taken" : sqlErr;
+    const mockSays = !error ? "ok" : error.status === 500 && error.message === "Database error saving new user" ? "refused" : error.code === "23505" ? "taken" : JSON.stringify(error);
+    assert(sqlSays === mockSays, `signup as ${JSON.stringify(username)}: the trigger says ${sqlSays}, the mock says ${mockSays}`);
+    await auth.auth.signOut();
+  }
 });
 
 await runTest("player_profile: an exact name, else a case-insensitive one only when exactly one account matches", async () => {
@@ -269,7 +306,7 @@ await runTest("player_profile returns the whole profiles row, the details row or
 const avatarFile = (uid, n) => photo(uid, `17578000000${String(n).padStart(2, "0")}`);
 const insertFile = (who, name, bucket = "avatars") => attempt(who, "insert into storage.objects (bucket_id, name) values ($1, $2)", [bucket, name]);
 
-await runTest("avatar files: a player can add, see, change and delete files only in their own folder", async () => {
+await runTest("avatar files: a player can add, see, change and delete files only in their own folder, named as the app names them", async () => {
   await owner("insert into storage.buckets (id, name) values ('other', 'other') on conflict (id) do nothing");
   assert(!(await insertFile(ALICE, avatarFile(ALICE, 1))).error, "alice adds a file to her own folder");
   assert(!(await insertFile(BOB, avatarFile(BOB, 1))).error, "bob adds a file to his");
@@ -278,8 +315,18 @@ await runTest("avatar files: a player can add, see, change and delete files only
     const r = await insertFile(ALICE, name, bucket);
     assert(/row-level security/.test(r.error || ""), `alice must not add a file in ${why}, got ${JSON.stringify(r)}`);
   }
-  const nested = await insertFile(ALICE, `${ALICE}/sub/1757800000004.webp`);
-  assert(!nested.error, "a subfolder of her own folder is still hers (storage.foldername's first folder)");
+  // Only "<her id>/<10-16 digits>.webp|jpg|png": no subfolder, and nothing else for a name.
+  for (const name of [`${ALICE}/sub/1757800000004.webp`, `${ALICE}/1757800000004.webp/1757800000005.webp`, `${ALICE}//1757800000004.webp`,
+    photo(ALICE, "123456789"), photo(ALICE, "12345678901234567"), photo(ALICE, "1757800000004", "gif"), photo(ALICE, "1757800000004", "WEBP"),
+    `${photo(ALICE, "1757800000004")}.png`, `${photo(ALICE, "1757800000004")}\n`, `${ALICE}/1757800000004`, `${ALICE}/x1757800000004.webp`,
+    `${ALICE}/avatar.webp`, `${ALICE}/.webp`, `${ALICE} /1757800000004.webp`]) {
+    const r = await insertFile(ALICE, name);
+    assert(/row-level security/.test(r.error || ""), `alice must not add ${JSON.stringify(name)}, got ${JSON.stringify(r)}`);
+  }
+  assert(!(await insertFile(ALICE, photo(ALICE, "1234567890", "png"))).error && !(await insertFile(ALICE, photo(ALICE, "1234567890123456", "jpg"))).error, "10 and 16 digits, PNG and JPEG, are fine");
+  await owner("delete from storage.objects where name in ($1, $2)", [photo(ALICE, "1234567890", "png"), photo(ALICE, "1234567890123456", "jpg")]);
+  // A file already in a subfolder of hers (put there before this rule) is still hers to see and delete.
+  await owner("insert into storage.objects (bucket_id, name) values ('avatars', $1)", [`${ALICE}/sub/1757800000004.webp`]);
 
   const seen = await attempt(ALICE, "select name from storage.objects order by name");
   assert(seen.rows.length === 2 && seen.rows.every((o) => o.name.startsWith(`${ALICE}/`)), `alice sees only her own files, got ${JSON.stringify(seen.rows)}`);
@@ -292,14 +339,41 @@ await runTest("avatar files: a player can add, see, change and delete files only
   assert(r.affected === 0 && !r.error, "alice can't update bob's file");
   r = await attempt(ALICE, "update storage.objects set name = $2 where name = $1", [avatarFile(ALICE, 1), avatarFile(BOB, 9)]);
   assert(/row-level security/.test(r.error || ""), `alice can't move her file into bob's folder, got ${JSON.stringify(r)}`);
+  r = await attempt(ALICE, "update storage.objects set name = $2 where name = $1", [avatarFile(ALICE, 1), `${ALICE}/sub/1757800000001.webp`]);
+  assert(/row-level security/.test(r.error || ""), `nor rename it to a name an upload couldn't have, got ${JSON.stringify(r)}`);
   r = await attempt(ALICE, "delete from storage.objects where name = $1", [avatarFile(BOB, 1)]);
   assert(r.affected === 0, "alice can't delete bob's file");
   r = await attempt(null, "delete from storage.objects");
   assert(r.affected === 0, "a signed-out visitor can't delete anything");
   assert(/row-level security/.test((await insertFile(null, avatarFile(ALICE, 5))).error || ""), "a signed-out visitor can't upload");
   r = await attempt(ALICE, "delete from storage.objects where name = $1", [`${ALICE}/sub/1757800000004.webp`]);
-  assert(r.affected === 1, "alice deletes her own file");
+  assert(r.affected === 1, "alice deletes her own file, the old one in a subfolder too");
   assert((await owner("select count(*)::int as n from storage.objects where name = $1", [avatarFile(BOB, 1)]))[0].n === 1, "bob's file survived");
+});
+
+await runTest("a player's avatars folder holds at most 10 files: the 11th upload is refused until one is deleted", async () => {
+  const pat = uuid(40), sam = uuid(41);
+  await addAccount(db, { id: pat, username: "pat" });
+  await addAccount(db, { id: sam, username: "sam" });
+  for (let n = 1; n <= 10; n++) assert(!(await insertFile(pat, avatarFile(pat, n))).error, `pat's upload ${n} fits`);
+  let r = await insertFile(pat, avatarFile(pat, 11));
+  assert(/row-level security/.test(r.error || ""), `the 11th is refused, got ${JSON.stringify(r)}`);
+  r = await attempt(pat, "insert into storage.objects (bucket_id, name) values ('avatars', $1) on conflict (bucket_id, name) do update set metadata = '{\"x\": 1}'", [avatarFile(pat, 1)]);
+  assert(/row-level security/.test(r.error || ""), `an upsert over one of the ten still counts as adding, got ${JSON.stringify(r)}`);
+  assert((await attempt(pat, "update storage.objects set metadata = '{\"size\": 3}' where name = $1", [avatarFile(pat, 2)])).affected === 1, "a full folder's files can still be changed");
+  assert(!(await insertFile(sam, avatarFile(sam, 1))).error, "another player's folder isn't affected");
+  assert((await attempt(pat, "delete from storage.objects where name = $1", [avatarFile(pat, 3)])).affected === 1, "pat deletes one");
+  assert(!(await insertFile(pat, avatarFile(pat, 11))).error, "and there's room for one more");
+  // Anything under the folder counts, even a file named in a way an upload can't be now.
+  await owner("delete from storage.objects where name = $1", [avatarFile(pat, 11)]);
+  await owner("insert into storage.objects (bucket_id, name) values ('avatars', $1)", [`${pat}/sub/1757800000099.webp`]);
+  assert(/row-level security/.test((await insertFile(pat, avatarFile(pat, 12))).error || ""), "an old file in a subfolder takes a place too");
+  assert((await owner("select count(*)::int as n from storage.objects where name like $1", [`${pat}/%`]))[0].n === 10, "pat's folder never went past 10");
+  // The policy's helper: the uploading player must be able to run it (the policy calls it as them); signed-out visitors can't.
+  const [fn] = await owner(`select p.prosecdef, has_function_privilege('authenticated', p.oid, 'execute') as authed, has_function_privilege('anon', p.oid, 'execute') as anon
+                              from pg_proc p where p.proname = 'avatar_folder_has_room'`);
+  assert(fn && fn.prosecdef === false && fn.authed === true && fn.anon === false, `avatar_folder_has_room is security invoker, executable by authenticated only: ${JSON.stringify(fn)}`);
+  assert((await call(pat, "avatar_folder_has_room", {})).data === false && (await call(sam, "avatar_folder_has_room", {})).data === true, "it answers for the caller's own folder");
 });
 
 await runTest("while uploads are paused nobody can add or replace a file, but can still see and delete their own", async () => {
@@ -371,6 +445,13 @@ await runTest("the mock returns what the SQL returns for the same calls", async 
     [ONE, "save_profile", { p_bio: `go ${ch(0x1F3C8).repeat(158)}`, p_favorite_team: null }],
     [ONE, "save_profile", { p_bio: "line one\nline two", p_favorite_team: null }],
     [ONE, "save_profile", { p_bio: `flip${ch(0x202E)}ped`, p_favorite_team: null }],
+    [ONE, "save_profile", { p_bio: `line${ch(0x2028)}two`, p_favorite_team: null }],
+    [ONE, "save_profile", { p_bio: `letter${ch(0x61C)}mark`, p_favorite_team: null }],
+    [ONE, "save_profile", { p_bio: `old${ch(0x206C)}format`, p_favorite_team: null }],
+    [ONE, "save_profile", { p_bio: `${ch(0x2028)}separators at the ends are trimmed${ch(0x2029)}`, p_favorite_team: null }],
+    [ONE, "save_profile", { p_bio: `so ${stretched(DOUBLED)}`, p_favorite_team: null }],
+    [ONE, "save_profile", { p_bio: mathBold(ANYWHERE), p_favorite_team: null }],
+    [ONE, "save_profile", { p_bio: `Glasss jaw, ${ch(0x1D5D5, 0x1D5EE, 0x1D601)} and ${ch(0x24D5, 0x24D0, 0x24DD)}`, p_favorite_team: null }],
     [ONE, "save_profile", { p_bio: `family ${ch(0x1F468, 0x200D, 0x1F469)}`, p_favorite_team: "WAS" }],
     [ONE, "save_profile", { p_bio: `${ch(0xFEFF, 0x3000)}trimmed${ch(0xA0, 0x2029)}`, p_favorite_team: null }],
     [ONE, "save_profile", { p_bio: `what a ${[...ANYWHERE].join(" ")}`, p_favorite_team: null }],
@@ -404,6 +485,8 @@ await runTest("the mock returns what the SQL returns for the same calls", async 
     [null, "check_username", { p_username: `${WORD}_lord_99` }],
     [TWO, "check_username", { p_username: `${ANYWHERE.toUpperCase()}1` }],
     [TWO, "check_username", { p_username: "Hancock_Cassel" }],
+    [null, "check_username", { p_username: stretched(DOUBLED) }],
+    [null, "check_username", { p_username: "Goooal_Line" }],
     [null, "player_profile", { p_username: "parity_one" }],
     [null, "player_profile", { p_username: "PARITY_ONE" }],
     [null, "player_profile", { p_username: "Parity_Two" }],
@@ -455,6 +538,24 @@ await runTest("running the migration a second time is harmless", async () => {
   await owner("delete from blocked_words where word = 'ownersaddition'");
 });
 
+await runTest("re-running the migration over the first version's bio rule replaces it, and fixes a bio the new rule refuses", async () => {
+  // The first version of this migration had the character rule as an unnamed column check, with a shorter list.
+  const OLD_RULE = "U&'[\\0001-\\001F\\007F-\\009F\\200B\\200E\\200F\\202A-\\202E\\2060-\\2064\\2066-\\2069\\FEFF]'";
+  await db.exec(`alter table public.profile_details drop constraint profile_details_bio_characters;
+                 alter table public.profile_details add check (bio !~ ${OLD_RULE});`);
+  const bioChecks = async () => (await owner(`select conname from pg_constraint where conrelid = 'public.profile_details'::regclass and contype = 'c'
+                                                and pg_get_constraintdef(oid) like '%bio%' order by conname`)).map((r) => r.conname);
+  assert(same(await bioChecks(), ["profile_details_bio_check", "profile_details_bio_check1"]), `the old rule gets the first version's name: ${await bioChecks()}`);
+  // Saved under the old rule: a line separator and an Arabic letter mark inside, one at an end.
+  await owner("update profile_details set bio = $2 where user_id = $1", [ALICE, `Line one${ch(0x2028)}line two${ch(0x61C)}${ch(0x206A)}`]);
+  await db.exec(sql("migration-profiles.sql"));
+  assert(same(await bioChecks(), ["profile_details_bio_characters", "profile_details_bio_check"]), `the new rule replaces the old one: ${await bioChecks()}`);
+  assert((await owner("select bio from profile_details where user_id = $1", [ALICE]))[0].bio === "Line one line two", "each refused character became a space, and the ends were trimmed");
+  assert(/profile_details_bio_characters/.test(await failure(db, "update profile_details set bio = $2 where user_id = $1", [ALICE, `a${ch(0x2029)}b`])), "the new rule is enforced");
+  await db.exec(sql("migration-profiles.sql"));
+  assert(same(await bioChecks(), ["profile_details_bio_characters", "profile_details_bio_check"]), "and a third run changes nothing");
+});
+
 await db.close();
 
 // ---------- storage-profile.js, end to end against the mock ----------
@@ -482,7 +583,8 @@ function install(overrides = {}) {
       return {
         ...real,
         upload: (...a) => { calls.push({ name: "upload", args: a }); return overrides.upload ? overrides.upload(real, ...a) : real.upload(...a); },
-        remove: (paths) => { calls.push({ name: "remove", args: paths }); return real.remove(paths); },
+        remove: (paths) => { calls.push({ name: "remove", args: paths }); return overrides.remove ? overrides.remove(paths) : real.remove(paths); },
+        list: (...a) => { calls.push({ name: "list", args: a }); return real.list(...a); },
       };
     },
   };
@@ -658,7 +760,8 @@ await runTest("saveAvatarPhoto uploads to your folder, switches to it, deletes t
     [{ name: "StorageApiError", status: 400, statusCode: "413", code: "EntityTooLarge", message: "The object exceeded the maximum allowed size" }, "too_large"],
     [{ name: "StorageApiError", status: 413, statusCode: "413", message: "Payload too large" }, "too_large"],
     [{ name: "StorageApiError", status: 400, statusCode: "415", code: "InvalidMimeType", message: "mime type image/webp is not supported" }, "type"],
-    [{ name: "StorageApiError", status: 400, statusCode: "403", code: "AccessDenied", message: "new row violates row-level security policy" }, "signed_out"], // not paused, so the session was refused
+    // Refused with uploads on, a session, and no leftovers to clear: nothing the player can fix but trying again.
+    [{ name: "StorageApiError", status: 400, statusCode: "403", code: "AccessDenied", message: "new row violates row-level security policy" }, "network"],
     [{ name: "StorageApiError", status: 400, statusCode: "400", code: "InvalidJWT", message: "exp claim timestamp check failed" }, "signed_out"],
     [{ name: "StorageApiError", status: 409, statusCode: "409", code: "KeyAlreadyExists", message: "The resource already exists" }, "network"],
     [{ name: "StorageUnknownError", message: "Failed to fetch" }, "network"],
@@ -669,6 +772,12 @@ await runTest("saveAvatarPhoto uploads to your folder, switches to it, deletes t
   }
   install({ upload: () => Promise.reject(new TypeError("Failed to fetch")) });
   assert((await P.saveAvatarPhoto(ME, blob(100), third)).reason === "network", "a thrown upload is network");
+  // Refused because the session went away between the check and the upload: signed_out.
+  let sessionChecks = 0;
+  calls = install({ upload: () => Promise.resolve({ data: null, error: { name: "StorageApiError", status: 400, statusCode: "403", code: "AccessDenied", message: "new row violates row-level security policy" } }) });
+  window.__ps_supabase__.auth = { ...auth.auth, getSession: async () => (sessionChecks++ === 0 ? auth.auth.getSession() : { data: { session: null }, error: null }) };
+  res = await P.saveAvatarPhoto(ME, blob(100), third);
+  assert(!res.ok && res.reason === "signed_out" && same(objectsIn(ME), [third]), `a session lost mid-upload is signed_out, got ${JSON.stringify(res)}`);
   // A token refresh that can't reach the server isn't a sign-out: the upload is tried, and fails as network.
   calls = install({ upload: () => Promise.resolve({ data: null, error: { name: "StorageUnknownError", message: "Failed to fetch" } }) });
   window.__ps_supabase__.auth = { ...auth.auth, getSession: async () => ({ data: { session: null }, error: { name: "AuthRetryableFetchError", message: "Failed to fetch", status: 0 } }) };
@@ -684,6 +793,69 @@ await runTest("saveAvatarPhoto uploads to your folder, switches to it, deletes t
   await tick();
   auth._moderators.delete(ME);
   assert(res.ok && auth._storageObjects.has(`avatars/${OTHER}/1757800000000.webp`), "someone else's file survives");
+});
+
+await runTest("the mock's avatars bucket follows the storage policies: exact names, your own folder, at most 10 files", async () => {
+  const bucket = auth.storage.from(AVATAR_BUCKET);
+  const refused = async (path, label) => {
+    const r = await bucket.upload(path, blob(10), { contentType: "image/webp" });
+    assert(r.error?.statusCode === "403" && r.error.code === "AccessDenied", `${label} is refused like the policy refuses it, got ${JSON.stringify(r)}`);
+  };
+  await refused(`${ME}/sub/1757800000000.webp`, "a subfolder");
+  await refused(`${ME}/123456789.webp`, "a short number");
+  await refused(`${ME}/avatar.webp`, "any other name");
+  await refused(`${OTHER}/1757800000000.webp`, "someone else's folder");
+  for (const path of objectsIn(ME)) auth._storageObjects.delete(`avatars/${path}`);
+  for (let n = 0; n < AVATAR_FOLDER_LIMIT; n++) assert(!(await bucket.upload(`${ME}/17570000001${String(n).padStart(2, "0")}.webp`, blob(10), { contentType: "image/webp" })).error, `upload ${n + 1} fits`);
+  await refused(`${ME}/1757000000199.webp`, `upload ${AVATAR_FOLDER_LIMIT + 1}`);
+  const listed = await bucket.list(ME);
+  assert(!listed.error && listed.data.length === AVATAR_FOLDER_LIMIT && listed.data.every((f) => f.id && /^\d{13}\.webp$/.test(f.name)), `list shows the folder's files by name: ${JSON.stringify(listed).slice(0, 200)}`);
+  await auth.auth.signOut();
+  assert((await bucket.list(ME)).data.length === 0, "a signed-out visitor lists nothing");
+  await signIn(1);
+  for (const path of objectsIn(ME)) auth._storageObjects.delete(`avatars/${path}`);
+});
+
+await runTest("a full folder: saveAvatarPhoto clears out the leftovers, keeping the current photo, and tries once more", async () => {
+  const put = (path) => auth._storageObjects.set(`avatars/${path}`, { bucket: "avatars", path, contentType: "image/webp", size: 10, owner: ME });
+  const fill = (current) => {
+    for (const path of objectsIn(ME)) auth._storageObjects.delete(`avatars/${path}`);
+    put(current);
+    auth._profileDetails.set(ME, { ...auth._profileDetails.get(ME), avatar_path: current, avatar_preset: null });
+    const leftovers = Array.from({ length: AVATAR_FOLDER_LIMIT - 1 }, (_, i) => `${ME}/17560000000${String(i).padStart(2, "0")}.webp`);
+    leftovers.forEach(put);
+    return leftovers;
+  };
+  const current = `${ME}/1755000000000.webp`;
+  let leftovers = fill(current);
+  let calls = install();
+  await nextMs();
+  let res = await P.saveAvatarPhoto(ME, blob(100), current);
+  await tick();
+  assert(res.ok, `the photo is saved once the leftovers are gone, got ${JSON.stringify(res)}`);
+  assert(calls.filter((c) => c.name === "upload").length === 2 && calls.some((c) => c.name === "list"), "refused, listed, then uploaded again");
+  const cleared = calls.find((c) => c.name === "remove").args;
+  assert(same([...cleared].sort(), [...leftovers].sort()), `exactly the leftovers were cleared, not the current photo: ${JSON.stringify(cleared)}`);
+  assert(same(objectsIn(ME), [res.details.avatarPath]), `then the replaced photo went too, leaving only the new one: ${JSON.stringify(objectsIn(ME))}`);
+
+  // Full, and the leftovers won't delete: no second upload, and the refusal reads as something to retry.
+  leftovers = fill(current);
+  calls = install({ remove: () => Promise.resolve({ data: [], error: null }) });
+  res = await P.saveAvatarPhoto(ME, blob(100), current);
+  assert(!res.ok && res.reason === "network" && calls.filter((c) => c.name === "upload").length === 1, `a folder that can't be cleared is network, got ${JSON.stringify(res)}`);
+  assert(objectsIn(ME).length === AVATAR_FOLDER_LIMIT, "nothing was added");
+
+  // Full while uploads are paused: paused, and nothing is deleted.
+  auth._siteFlags.get("uploads_paused").enabled = true;
+  calls = install();
+  res = await P.saveAvatarPhoto(ME, blob(100), current);
+  auth._siteFlags.get("uploads_paused").enabled = false;
+  assert(!res.ok && res.reason === "paused" && !calls.some((c) => c.name === "remove" || c.name === "list"), `paused, got ${JSON.stringify(res)}`);
+  restore();
+  // Back to one photo, the current picture, which the tests after this start from.
+  for (const path of objectsIn(ME)) auth._storageObjects.delete(`avatars/${path}`);
+  await nextMs();
+  assert((await P.saveAvatarPhoto(ME, blob(100), null)).ok, "a fresh photo to carry on with");
 });
 
 await runTest("setAvatarPreset and removeAvatar switch the picture and delete the photo they replace", async () => {

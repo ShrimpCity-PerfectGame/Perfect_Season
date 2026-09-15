@@ -329,6 +329,36 @@ await runTest("2e. check_username says invalid for every name outside the rule, 
   assert((await owner("select username from profiles where id = $1", [BOB]))[0].username === "bob", "bob kept his name through every refusal");
 });
 
+await runTest("2f. the word filter's former gaps stay closed: compatibility letters, script g, format, tag and variation characters, and a doubled letter tripled - in bios, check_username and renames", async () => {
+  await reset();
+  const closed = [
+    ["letters outside the fold table (mathematical bold)", mathBold(ANYWHERE)],
+    ["letters outside the fold table (circled)", circled(ANYWHERE)],
+    ["look-alikes outside the fold table (Latin script g U+0261)", ANYWHERE_DOUBLED.replace(/g/g, ch(0x261))],
+    ["an invisible format character splitting a whole word (U+206A)", inside(WORD, ch(0x206A))],
+    ["a tag character splitting a whole word (U+E0041)", inside(WORD, ch(0xE0041))],
+    ["a variation selector from the supplement splitting a whole word (U+E0100)", inside(WORD, ch(0xE0100))],
+    ...DOUBLED_WORDS.map((w) => [`a doubled letter stretched to three (${w.length} letters)`, stretchDoubled(w)]),
+  ];
+  const { rows } = await db.query("select u.n, text_is_clean(u.t) as clean from unnest($1::text[]) with ordinality as u(t, n) order by u.n", [closed.map((g) => g[1])]);
+  closed.forEach(([what, text], i) => assert(rows[i].clean === false, `text_is_clean should refuse ${what}: ${show(text)}`));
+  for (const [what, text] of closed) {
+    const r = await call(MALLORY, "save_profile", { p_bio: `so ${text}`, p_favorite_team: null });
+    // U+206A is also one of the characters a bio can't contain at all, which is checked first.
+    const want = text.includes(ch(0x206A)) ? "bio_invalid" : "bio_blocked";
+    assert(r.error === want, `a bio with ${what} should be ${want}, got ${show(r)}`);
+  }
+  const names = DOUBLED_WORDS.flatMap((w) => [stretchDoubled(w), stretchDoubled(w, 4).toUpperCase()]).filter((u) => /^[A-Za-z0-9_]{3,16}$/.test(u));
+  assert(names.length >= 4, `expected stretched usernames to try, got ${show(names)}`);
+  for (const name of names) {
+    const check = await call(null, "check_username", { p_username: name });
+    assert(check.data === "blocked", `check_username(${show(name)}) should be blocked, got ${show(check)}`);
+    const rename = await call(MOD, "mod_act", { p_user_id: BOB, p_action: "rename", p_new_name: name });
+    assert(rename.error === "blocked", `rename to ${show(name)} should be blocked, got ${show(rename)}`);
+  }
+  assert((await detailsOf(MALLORY)) === null && (await owner("select username from profiles where id = $1", [BOB]))[0].username === "bob", "nothing was saved and nobody renamed");
+});
+
 // ---------- 3. Reading what clients must not ----------
 
 await runTest("3a. no client reads blocked_words: not directly, not inside another query, not through planner statistics, and text_is_clean can't be called", async () => {
@@ -582,6 +612,8 @@ const PG_TEMP_LAST = "public, pg_temp";
 const EXPECTED_FUNCTIONS = {
   "check_new_build()": [false, PG_TEMP_LAST, false, false],
   "check_username(p_username text)": [true, PG_TEMP_LAST, true, true],
+  // Called by the avatars insert policy as the uploading player, so they need execute; anon never uploads.
+  "avatar_folder_has_room()": [false, PG_TEMP_LAST, false, true],
   "handle_new_user()": [true, PG_TEMP_LAST, true, true],
   "is_moderator()": [true, PG_TEMP_LAST, true, true],
   "mod_act(p_user_id uuid, p_action text, p_new_name text)": [true, PG_TEMP_LAST, true, true],
@@ -934,17 +966,10 @@ await runTest("9d. the profile screen, the Reports queue and the Report sheet re
 
 // ---------- Known gaps ----------
 // Printed, not asserted: each needs PROFILES.md 3.4's algorithm (and tests/mock-profile-data.mjs) changed. A gap
-// that has since closed isn't printed.
+// that has since closed isn't printed. Gaps closed so far are asserted in 2f.
 {
   const gapDb = await freshDb();
   const gaps = [
-    ["bios", "letters outside the fold table (mathematical bold)", mathBold(ANYWHERE)],
-    ["bios", "letters outside the fold table (circled)", circled(ANYWHERE)],
-    ["bios", "look-alikes outside the fold table (Latin script g U+0261)", ANYWHERE_DOUBLED.replace(/g/g, ch(0x261))],
-    ["bios", "an invisible format character splitting a whole word (U+206A)", inside(WORD, ch(0x206A))],
-    ["bios", "a tag character splitting a whole word (U+E0041)", inside(WORD, ch(0xE0041))],
-    ["bios", "a variation selector from the supplement splitting a whole word (U+E0100)", inside(WORD, ch(0xE0100))],
-    ["bios, check_username, renames", "a doubled letter stretched to three", stretchDoubled(ANYWHERE_DOUBLED)],
     ["bios", "a whole-word entry spaced out", [...WORD].join(" ")],
     ["usernames", "a whole-word entry run into another word (camel case)", `${WORD[0].toUpperCase()}${WORD.slice(1)}Please`],
     ["everywhere", "a digit that isn't in the look-alike map (9 for g)", ANYWHERE_DOUBLED.replace(/g/g, "9")],
