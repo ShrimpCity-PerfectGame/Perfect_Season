@@ -12,8 +12,17 @@
 // client, so Daily is fully closed. Unlimited/challenge-code mode's `mode.code` is still
 // client-chosen, so grinding many codes offline for a lucky legitimate outcome remains possible -
 // an accepted, documented gap, not solved by this function.
+//
+// From v1.12.0 (SHOP.md 4.2) a finished draft also counts only once - a challenge code finishes
+// one season per account, as a Daily already did - and a finished season pays coins and any badges
+// it earned. The amounts come from rewards.mjs, the same file the browser shows them from, and only
+// this function's service role can pay them (credit_coins and award_badges in
+// supabase/migration-wallet.sql).
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as GL from "../../../game-logic.mjs";
+import { seasonReward, badgeRewards, coinsSummary } from "../../../rewards.mjs";
+import { badgeProgress } from "../../../badges.mjs";
+import { mapPlayerStats } from "../../../profile-rules.mjs";
 import gameData from "../../../data/players.json" with { type: "json" };
 
 GL.initGameData(gameData.players, gameData.opponents);
@@ -21,6 +30,9 @@ GL.initGameData(gameData.players, gameData.opponents);
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// Postgres's unique_violation, which PostgREST passes through as the error's code: the one insert
+// failure that means "this draft is already recorded" rather than "the save failed".
+const UNIQUE_VIOLATION = "23505";
 
 // Edge Functions don't add CORS headers on their own - the browser calls this cross-origin (the
 // Vercel-hosted app calling *.supabase.co), so every response (including the preflight OPTIONS
@@ -156,7 +168,9 @@ Deno.serve(async (req) => {
     // the other's boards. Derived here, never taken from the client.
     seed = GL.dailySeed(mode.date, format);
   } else if (mode.kind === "free") {
-    if (typeof mode.code !== "string" || !mode.code) return json({ error: "missing challenge code" }, 400);
+    // finished_codes holds a code of at most 32 characters (the app's own are 4 to 8), so a longer
+    // one is refused here, before the replay, rather than by that insert after it.
+    if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return json({ error: "missing challenge code" }, 400);
     seed = mode.code;
   } else {
     return json({ error: "unknown mode" }, 400);
@@ -207,12 +221,23 @@ Deno.serve(async (req) => {
   // resubmission - profiles must never be updated before this succeeds, or a raced second request
   // would double-count wins/losses. Including `format` in the key is what lets the two formats'
   // dailies coexist while each stays one-per-day.
+  //
+  // Only a unique violation means the draft is already recorded - the app tells the player so,
+  // instead of offering a retry - so any other failure is a failed save.
   if (mode.kind === "daily") {
     const { error: dailyInsertError } = await service.from("daily_runs").insert({
       date: mode.date, format, user_id: user.id, username: existingRow.username,
       w: run.w, l: run.l, score, outcome: run.outcome,
     });
-    if (dailyInsertError) return json({ error: "today's daily is already recorded" }, 409);
+    if (dailyInsertError?.code === UNIQUE_VIOLATION) return json({ error: "today's daily is already recorded", reason: "duplicate" }, 409);
+    if (dailyInsertError) return json({ error: "failed to save" }, 500);
+  } else {
+    // A challenge code the same way, through finished_codes' (user_id, code) primary key: one
+    // finished season per code per account, whichever variant or format it was played in. Without
+    // it the same finished draft counted - and would now pay - every time it was sent.
+    const { error: codeInsertError } = await service.from("finished_codes").insert({ user_id: user.id, code: mode.code });
+    if (codeInsertError?.code === UNIQUE_VIOLATION) return json({ error: "this draft is already recorded", reason: "duplicate" }, 409);
+    if (codeInsertError) return json({ error: "failed to save" }, 500);
   }
 
   const existing = rowToProfile(existingRow);
@@ -225,8 +250,53 @@ Deno.serve(async (req) => {
   }
 
   const { error: writeError } = await service.from("profiles").update(profileToRow(updated)).eq("id", user.id);
-  if (writeError) return json({ error: "failed to save" }, 500);
+  if (writeError) {
+    // The season didn't count, so give the code back and let a retry count it. Best effort: if this
+    // fails as well, the code stays used and a retry answers "already recorded".
+    if (mode.kind === "free") {
+      const { error: releaseError } = await service.from("finished_codes").delete().eq("user_id", user.id).eq("code", mode.code);
+      if (releaseError) console.error("finished_codes release failed:", releaseError.message);
+    }
+    return json({ error: "failed to save" }, 500);
+  }
   await logRun(service, GL.runLogRow(user.id, existingRow.username, run, mode.kind === "daily" ? mode.date : null));
 
-  return json({ ok: true, run });
+  // The season's coins, then the coins for any badge the player now has. The season has already
+  // counted, so a failure here is logged and answered as `coins: null` rather than an error - and
+  // nothing is lost for good: a credit that went through stays paid, and an unpaid badge pays with
+  // the next finished season. supabase-js hands back { data, error } instead of throwing, so each
+  // error is thrown here to reach the catch.
+  let coins: unknown = null;
+  let newBadges: string[] = [];
+  try {
+    const reward = seasonReward(run, { date: mode.date, streak: updated.dailyStreak });
+    const { data: credit, error: creditError } = await service.rpc("credit_coins", {
+      p_user: user.id, p_amount: reward.amount, p_kind: reward.kind, p_ref: reward.ref, p_daily_cap: reward.dailyCap,
+    });
+    if (creditError) throw new Error(`credit_coins: ${creditError.message}`);
+
+    // The badges from the same inputs the profile screen uses. player_stats reads the runs log,
+    // which logRun above has normally just added this season to, so a badge this season earned (a
+    // Cinderella title, a Scout draft) pays now rather than a season later. It only reads, so it
+    // goes out as a GET and gets supabase-js's retry.
+    const { data: stats, error: statsError } = await service.rpc("player_stats", { p_user_id: user.id }, { get: true });
+    if (statsError) throw new Error(`player_stats: ${statsError.message}`);
+    const { data: details, error: detailsError } = await service.from("profile_details").select("favorite_team").eq("user_id", user.id).maybeSingle();
+    if (detailsError) throw new Error(`profile_details: ${detailsError.message}`);
+    const progress = badgeProgress({
+      stats: updated, extra: mapPlayerStats(stats), details: { favoriteTeam: details?.favorite_team ?? null }, joined: existingRow.created_at,
+    });
+    const { data: awards, error: awardError } = await service.rpc("award_badges", { p_user: user.id, p_badges: badgeRewards(progress) });
+    if (awardError) throw new Error(`award_badges: ${awardError.message}`);
+
+    coins = coinsSummary({ ...credit, lines: reward.lines }, awards);
+    newBadges = Array.isArray(awards?.awarded) ? awards.awarded : [];
+  } catch (e) {
+    console.error("coins failed:", e instanceof Error ? e.message : e);
+    coins = null;
+    newBadges = [];
+  }
+
+  // `coins` and `newBadges` are new; a client from before them reads `ok` and `run` as it always did.
+  return json({ ok: true, run, coins, newBadges });
 });
