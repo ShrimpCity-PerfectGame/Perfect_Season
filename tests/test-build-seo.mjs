@@ -62,6 +62,10 @@ check("gridspin.app itself is never noindexed", !!hostRe && !hostRe.test("gridsp
 check("challenge links (/c/CODE) serve the app", (vercel.rewrites || []).some((r) => r.source === "/c/:code" && r.destination === "/page.html"));
 check("challenge links with a trailing slash serve the app too", (vercel.rewrites || []).some((r) => r.source === "/c/:code/" && r.destination === "/page.html"));
 check("challenge links are kept out of search results", (vercel.headers || []).some((h) => h.source === "/c/(.*)" && h.headers.some((x) => x.key === "X-Robots-Tag" && x.value === "noindex")));
+// Profiles (1.11.0) are public at /u/NAME but noindexed for now.
+check("profile addresses (/u/NAME) serve the app", (vercel.rewrites || []).some((r) => r.source === "/u/:name" && r.destination === "/page.html"));
+check("profile addresses with a trailing slash serve the app too", (vercel.rewrites || []).some((r) => r.source === "/u/:name/" && r.destination === "/page.html"));
+check("profiles are kept out of search results", (vercel.headers || []).some((h) => h.source === "/u/(.*)" && !h.has && h.headers.some((x) => x.key === "X-Robots-Tag" && x.value === "noindex")));
 
 if (failures) { console.log(`${failures} failure(s)`); process.exit(1); }
 console.log("test-build-seo.mjs: all passed");
