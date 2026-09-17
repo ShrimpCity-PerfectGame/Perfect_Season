@@ -89,6 +89,29 @@ coin amount in `rewards.mjs`. New screens of any size should follow that pattern
 `submit-run` Edge Function lives in `game-logic.mjs` — see that section under Architecture below
 before touching either.
 
+**The Android app (in progress, 2026-09-17).** The game also ships as an Android app: a Capacitor shell around the
+same build, so there is one game, not two. `capacitor.config.json` names it (`app.gridspin`, "Gridspin",
+`webDir: app/www`); `android/` is the generated project and is committed. **`npm run app:sync`** builds the web
+bundle and copies it in - `tools/app/build-app.mjs` runs the same `build.mjs` with `APP_ENTRY=entry-app.jsx` and
+one environment's settings, then writes `app/www` with `page.html` as `index.html`. `entry-app.jsx` is the app's
+entry: it imports the site's `entry.jsx` and adds the two things a phone needs - Android's hardware Back button
+(`history.back()`, and out of the app when there's nothing to go back to) and a `navigator.share` that opens the
+system share sheet, which an Android web view doesn't have. **None of it reaches the website**: the site's build
+uses `entry.jsx`, so its bundle carries no Capacitor. `npm run app:icons` draws every launcher icon and splash
+from `static/icon.svg` (`tools/app/icons.mjs`), so the app can't ship Capacitor's logo; re-run it after
+`cap sync`. The app's version comes from `package.json` through `android/app/build.gradle` (1.14.0 → versionName
+1.14.0, versionCode 11400). `tools/app/env.local.json` holds each environment's Supabase URL and **anon** key and
+is gitignored - both are public (they ship in every build of the site) but they're the owner's to hand out.
+`node tools/app/build-app.mjs production` builds against the real database; the default is staging, which shows
+the "Test site" banner, and that is what test builds should use.
+
+**Not done yet**: no release signing key, nothing on Google Play (the owner has no Play Console account yet), and
+the app has not been run on a real device - this machine can't run the emulator (no hypervisor installed; enabling
+one needs admin and a reboot, and current Android images no longer run unaccelerated). The first device run should
+check the Back button, the share sheet, and whether Android 15's edge-to-edge drawing puts anything under the
+status or gesture bars. Coin packs are planned as in-app purchases once the app exists - see the owner's plan, not
+this repo.
+
 ## Build/Run Commands
 
 ```bash

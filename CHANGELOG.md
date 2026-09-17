@@ -11,7 +11,8 @@ CLAUDE.md.
 
 ## [Unreleased]
 
-Nothing yet.
+- **An Android app**, wrapping the same game (Capacitor). Nothing about the website changes, and the app isn't on
+  Google Play yet — see "The Android app" in CLAUDE.md.
 
 ## [1.14.0] — 2026-09-17
 

@@ -9,14 +9,22 @@
     "test": "node tests/test-accounts.mjs && node tests/test-daily.mjs && node tests/test-nav.mjs",
     "test:difficulty": "node tests/test-difficulty.mjs",
     "deploy:fn:staging": "node deploy-function.mjs staging",
-    "deploy:fn:prod": "node deploy-function.mjs production"
+    "deploy:fn:prod": "node deploy-function.mjs production",
+    "app:build": "node tools/app/build-app.mjs",
+    "app:sync": "node tools/app/build-app.mjs && npx cap sync android",
+    "app:icons": "node tools/app/icons.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/share": "^8.0.2",
     "@supabase/supabase-js": "^2.116.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
     "@electric-sql/pglite": "^0.5.8",
     "esbuild": "^0.24.0",
     "jsdom": "^25.0.1",

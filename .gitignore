@@ -4,3 +4,8 @@ public/
 *.log
 .claude/scheduled_tasks.lock
 supabase/.temp/
+
+# the Android app: built web assets, its local Supabase settings, and Gradle output
+app/www/
+tools/app/env.local.json
+android/local.properties

@@ -1,0 +1,11 @@
+{
+  "appId": "app.gridspin",
+  "appName": "Gridspin",
+  "webDir": "app/www",
+  "android": {
+    "backgroundColor": "#F7F4EA"
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

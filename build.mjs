@@ -36,8 +36,12 @@ const siteUrl = trim(process.env.SITE_URL
 const canonicalUrl = trim(process.env.CANONICAL_URL || (appEnv === "production" ? PRODUCTION_CANONICAL_URL : siteUrl));
 if (!siteUrl) console.warn("Warning: no SITE_URL - link previews get relative image paths and the share text has no link.");
 
+// The website mounts through entry.jsx. The Android app (tools/app/build-app.mjs) asks for its own entry, which
+// adds the native wiring - so the site's bundle never carries any of it.
+const entry = process.env.APP_ENTRY || "entry.jsx";
+
 await esbuild.build({
-  entryPoints: ["entry.jsx"],
+  entryPoints: [entry],
   bundle: true,
   format: "iife",
   jsx: "automatic",
