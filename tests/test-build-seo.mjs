@@ -84,7 +84,10 @@ for (const page of SITE_PAGES) {
   check(`${at} carries its own words in the HTML`, text.includes(page.h1) && page.intro.every((p) => text.includes(p)), text.slice(0, 160));
   if (page.steps) check(`${at} carries the rules themselves`, text.includes("one team re-spin and one era re-spin") && text.includes(page.note.slice(0, 40)), text.slice(0, 200));
   if (page.boards) check(`${at} lists what each board ranks`, page.boards.every(([name]) => text.includes(name)), text.slice(0, 200));
-  check(`${at} links to the game and the other page`, new RegExp('<a href="/">Play Gridspin</a>').test(html) && SITE_PAGES.filter((o) => o.id !== page.id).every((o) => html.includes(`<a href="${o.path}"`)));
+  const linksTo = (href) => new RegExp(`<a[^>]*href="${href}"`).test(html);
+  check(`${at} links to the game and the other page`,
+    /<a[^>]*href="\/"[^>]*>Play Gridspin<\/a>/.test(html) && linksTo("/") && SITE_PAGES.filter((o) => o.id !== page.id).every((o) => linksTo(o.path)),
+    (html.match(/<a[^>]*href="[^"]*"/g) || []).join(" "));
   // Its own words replace the shell's <noscript> stand-in, so the page has one heading, not two.
   check(`${at} has one heading and no leftover stand-in`, !/<noscript>/.test(html) && (html.match(/<h1[ >]/g) || []).length === 1, (html.match(/<h1[^>]*>[^<]*/g) || []).join(" | "));
   // Same shell as the app: one head to maintain, and the app takes over the moment it loads.

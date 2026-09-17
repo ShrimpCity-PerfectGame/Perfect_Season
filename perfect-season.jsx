@@ -645,10 +645,12 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .herostats{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
 
 /* ===== site footer (Modes only): the brand line, and links to the pages that answer for themselves
-   (site-pages.mjs). Real anchors, so a crawler can follow them; the links reuse .linkbtn's look. ===== */
-.sitefoot{margin:26px 0 6px;padding-top:14px;border-top:2px solid var(--line);display:grid;gap:8px;color:var(--muted);font-size:14px}
+   (site-pages.mjs). Real anchors wearing the app's own button, so a crawler can follow them and they
+   look like everything else here rather than raw blue text. ===== */
+.sitefoot{margin:26px 0 6px;padding-top:14px;border-top:2px solid var(--line);display:grid;gap:10px;color:var(--muted);font-size:14px}
 .sitefoot p{margin:0}
-.sitelinks{display:flex;flex-wrap:wrap;gap:8px 18px}
+.sitelinks{display:flex;flex-wrap:wrap;gap:10px}
+.sitefoot .btn{text-decoration:none}
 
 /* ===== home: format picker + mode tiles ===== */
 .fmtpick{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
@@ -4291,7 +4293,7 @@ export default function PerfectSeason() {
             <p><b>Gridspin</b> is a free football draft game — spin an era, draft the greats, go <span className="nowrap">20–0</span>.</p>
             <p className="sitelinks">
               {SITE_PAGES.map((p) => (
-                <a key={p.id} className="linkbtn" href={p.path}
+                <a key={p.id} className="btn sm" href={p.path}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                     if (openSitePage(p.id)) e.preventDefault();

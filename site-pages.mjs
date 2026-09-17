@@ -8,6 +8,11 @@
 // game. The app also answers these addresses - landing on one opens that screen - so the page a search result
 // promises is the page that loads. Contract: CLAUDE.md, "Search engines".
 
+import { THEME } from "./theme.mjs";
+
+// The light scope's tokens, so the pages are painted in the same colors as the app.
+const T = THEME.light;
+
 export const HOWTO_PATH = "/how-to-play";
 export const BOARD_PATH = "/leaderboard";
 
@@ -41,7 +46,7 @@ const BOARDS = [
   ["Best team score", "The highest-graded roster ever drafted, in each scoring format. Fantasy is full PPR and Championship is standard scoring, and the two never rank against each other."],
   ["Today's Daily", "Everyone gets the same boards each day. The Daily leaderboard starts fresh every morning, and playing day after day builds a streak."],
   ["Points ladders", "Every draft scores ladder points against what a par draft would have managed, kept separately for Unlimited, Genius and GM mode."],
-  ["Biggest upsets", "The lowest team score ever to win the championship - the roster that had no business going all the way."],
+  ["Biggest upsets", "The lowest team score ever to win the championship — the roster that had no business going all the way."],
   ["Career records", "Wins, championships, playoff trips, the longest Daily streak and the best win percentage, on the Stats screen."],
 ];
 
@@ -88,33 +93,55 @@ export const segmentsHtml = (segments) => segments.map((s) => {
 }).join("");
 
 // The page's own content, for inside <div id="root">. Every link is a real href, so a crawler can walk from
-// one page to the next and the app can take over the click once it has mounted.
+// one page to the next and the app can take over the click once it has mounted. It opens the way the game does:
+// the mark, the wordmark and a kicker, then the heading.
 export function sitePageBody(page) {
-  const links = SITE_PAGES.filter((p) => p.id !== page.id).map((p) => `<a href="${p.path}">${esc(p.h1)}</a>`);
   const parts = [
-    "<div class=\"sp\">",
-    "<p class=\"sp-brand\"><a href=\"/\">Gridspin</a> — spin an era, draft the greats, go 20–0.</p>",
+    "<div class=\"spg\">",
+    "<a class=\"spg-brand\" href=\"/\">",
+    "<img src=\"/icon.svg\" width=\"38\" height=\"38\" alt=\"\" />",
+    "<span class=\"spg-word\">Gridspin</span>",
+    "<span class=\"spg-kicker\">🏈 Football draft game</span>",
+    "</a>",
     `<h1>${esc(page.h1)}</h1>`,
-    ...page.intro.map((t) => `<p>${esc(t)}</p>`),
+    ...page.intro.map((t, i) => `<p${i === 0 ? ' class="spg-lede"' : ""}>${esc(t)}</p>`),
   ];
   if (page.steps) {
-    parts.push(`<ol>${page.steps.map((s) => `<li>${segmentsHtml(s)}</li>`).join("")}</ol>`);
-    parts.push(`<p class="sp-note">${esc(page.note)}</p>`);
+    parts.push(`<ol class="spg-steps">${page.steps.map((s) => `<li>${segmentsHtml(s)}</li>`).join("")}</ol>`);
+    parts.push(`<p class="spg-note">${esc(page.note)}</p>`);
   }
   if (page.boards) {
-    parts.push(`<dl>${page.boards.map(([name, text]) => `<dt>${esc(name)}</dt><dd>${esc(text)}</dd>`).join("")}</dl>`);
+    parts.push(`<dl class="spg-boards">${page.boards.map(([name, text]) => `<dt>${esc(name)}</dt><dd>${esc(text)}</dd>`).join("")}</dl>`);
   }
-  parts.push(`<p class="sp-play"><a href="/">Play Gridspin</a>${links.length ? ` · ${links.join(" · ")}` : ""}</p>`, "</div>");
+  const others = SITE_PAGES.filter((p) => p.id !== page.id)
+    .map((p) => `<a class="spg-btn" href="${p.path}">${esc(p.h1)}</a>`);
+  parts.push(`<p class="spg-cta"><a class="spg-btn spg-solid" href="/">Play Gridspin</a>${others.join("")}</p>`, "</div>");
   return parts.join("\n");
 }
 
-// Enough style for the seconds before the app mounts, and for anyone reading with JavaScript off: the site's
-// cream and ink, its display face for the heading, nothing else.
-export const SITE_PAGE_CSS = `.sp{max-width:44rem;margin:0 auto;padding:28px 20px 48px;color:#101114;font:400 16px/1.6 Inter,system-ui,sans-serif}
-.sp h1{margin:.3em 0 .5em;font-family:Anton,Impact,sans-serif;font-weight:400;font-size:clamp(30px,6vw,44px);line-height:1.05;text-transform:uppercase}
-.sp p,.sp dd{margin:0 0 1em}.sp ol{padding-left:1.2em}.sp li{margin-bottom:.7em}
-.sp dt{font-weight:800}.sp dd{margin-left:0}
-.sp a{color:#3155FF}.sp-brand,.sp-note{color:#5E5B52;font-size:14px}.nowrap{white-space:nowrap}`;
+// How the page looks in the seconds before the app mounts, and to anyone reading with JavaScript off. It borrows
+// the game's own look - cream and ink, Anton for the display face, the tactile button with its hard offset
+// shadow - from the same theme.mjs tokens the app uses, so the two can't drift apart. Class names are prefixed
+// spg-: this <style> stays in the head after React replaces the content, and must never style the app (the app
+// already owns .sp, on the draft screen's sticky bar).
+export const SITE_PAGE_CSS = `.spg{max-width:46rem;margin:0 auto;padding:26px 20px 52px;background:${T.bg};color:${T.ink};font:400 16px/1.65 Inter,system-ui,sans-serif}
+.spg-brand{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px;text-decoration:none;color:${T.ink}}
+.spg-word{font-family:Anton,Impact,sans-serif;font-size:24px;line-height:1;text-transform:uppercase;letter-spacing:.02em}
+.spg-kicker{font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;background:${T.surface};border:2px solid ${T.ink};border-radius:999px;padding:4px 10px}
+.spg h1{margin:0 0 14px;font-family:Anton,Impact,sans-serif;font-weight:400;font-size:clamp(34px,7vw,54px);line-height:.95;text-transform:uppercase;text-wrap:balance}
+.spg p{margin:0 0 14px}
+.spg-lede{font-size:18px}
+.spg-steps{margin:0 0 16px;padding-left:1.3em}
+.spg-steps li{margin-bottom:10px}
+.spg-boards{margin:0}
+.spg-boards dt{margin-top:16px;font-family:Anton,Impact,sans-serif;font-weight:400;font-size:19px;text-transform:uppercase;letter-spacing:.01em}
+.spg-boards dd{margin:4px 0 0}
+.spg-note{margin-top:20px;padding-top:12px;border-top:2px solid ${T.line};color:${T.muted};font-size:14px}
+.spg-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:26px}
+.spg-btn{display:inline-flex;align-items:center;border:2px solid ${T.ink};border-radius:10px;background:${T.surface};color:${T.ink};
+  padding:9px 15px;font-weight:700;font-size:14px;line-height:1.2;text-decoration:none;box-shadow:3px 3px 0 ${T.hard}}
+.spg-solid{background:${T.accent};color:${T.onAccent};font-family:Anton,Impact,sans-serif;font-weight:400;font-size:16px;text-transform:uppercase;letter-spacing:.03em}
+.spg .nowrap{white-space:nowrap}`;
 
 // What each page tells search engines it is: a page of this site, under the home page.
 export function sitePageJsonLd(page, canonicalUrl) {
