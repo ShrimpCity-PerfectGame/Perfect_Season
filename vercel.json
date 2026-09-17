@@ -3,6 +3,10 @@
   "outputDirectory": "public",
   "rewrites": [
     { "source": "/", "destination": "/page.html" },
+    { "source": "/how-to-play", "destination": "/how-to-play.html" },
+    { "source": "/how-to-play/", "destination": "/how-to-play.html" },
+    { "source": "/leaderboard", "destination": "/leaderboard.html" },
+    { "source": "/leaderboard/", "destination": "/leaderboard.html" },
     { "source": "/c/:code", "destination": "/page.html" },
     { "source": "/c/:code/", "destination": "/page.html" },
     { "source": "/u/:name", "destination": "/page.html" },

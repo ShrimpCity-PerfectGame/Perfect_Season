@@ -32,6 +32,7 @@ import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
+import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, parseSitePath } from "./site-pages.mjs";
 initGameData(gameData.players, gameData.opponents);
 
 // Baked in by build.mjs's esbuild `define` (same mechanism as SUPABASE_URL - see storage.js).
@@ -642,6 +643,12 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .heroexplain{margin:0 0 18px;color:var(--muted);font-size:15.5px;line-height:1.5;max-width:58ch}
 .herocta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .herostats{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+
+/* ===== site footer (Modes only): the brand line, and links to the pages that answer for themselves
+   (site-pages.mjs). Real anchors, so a crawler can follow them; the links reuse .linkbtn's look. ===== */
+.sitefoot{margin:26px 0 6px;padding-top:14px;border-top:2px solid var(--line);display:grid;gap:8px;color:var(--muted);font-size:14px}
+.sitefoot p{margin:0}
+.sitelinks{display:flex;flex-wrap:wrap;gap:8px 18px}
 
 /* ===== home: format picker + mode tiles ===== */
 .fmtpick{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
@@ -1380,8 +1387,15 @@ function screenOf(state, pathname) {
   if (state?.ps === "profile" && typeof state.name === "string" && state.name) return state;
   if (state?.ps === "view" && HISTORY_VIEWS.includes(state.view)) return state;
   const name = parseProfilePath(pathname);
-  return name ? { ps: "profile", name } : { ps: "view", view: "home" };
+  if (name) return { ps: "profile", name };
+  // /leaderboard is the Leaderboard's own address; /how-to-play opens Modes with the rules over it.
+  return { ps: "view", view: parseSitePath(pathname) === "board" ? "board" : "home" };
 }
+// The address a screen lives at: a profile at /u/<name>, the Leaderboard at /leaderboard (a page search
+// engines have of its own - site-pages.mjs), and every other screen at "/". Every history write passes
+// this, so the address always names what's on screen, and a challenge link or a stray /u/ address tidies
+// itself as soon as the app has mounted.
+const pathFor = (s) => (s.ps === "profile" ? profilePath(s.name) : s.view === "board" ? BOARD_PATH : "/");
 const sameScreen = (a, b) => a.ps === b.ps && (a.ps === "profile" ? a.name === b.name : a.view === b.view);
 // Screens with a history entry of their own, so Back from one returns to the screen it was opened from: a
 // profile, and the shop (SHOP.md 8), which opens from a profile card or a season's result but stays at "/".
@@ -1803,16 +1817,17 @@ function HowTo({ onClose }) {
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="howto-title" onClick={(e) => e.stopPropagation()}>
         <button type="button" className="modal-x" aria-label="Close" onClick={onClose}>×</button>
         <h2 id="howto-title">How to play</h2>
+        {/* The steps are shared with the crawlable /how-to-play page (site-pages.mjs), so the rules can't
+            drift into two versions. A piece marked nowrap keeps "20-0" on one line. */}
         <ol>
-          <li>Each round spins a <b>team and a five-year era</b>, like "Rams, 1999–2005." Draft one player from that board.</li>
-          <li>Fill six spots: <b>QB, RB, WR, TE, and two Flex</b>. A Flex can be any RB, WR, or TE — and it's graded on raw production rather than against his own position, with no upper limit, so <b>your best player is often worth more in Flex</b> than in his natural spot.</li>
-          <li>Every player shows <b>his best season</b> for that team in that era. The stats are real. The fantasy points are hidden.</li>
-          <li>You get <b>one team re-spin and one era re-spin</b> per draft. Use them wisely.</li>
-          <li>Play <b>unlimited</b> drafts any time, or take the <b>daily</b> — one draft a day, the same boards for everyone.</li>
-          <li>Pick a <b>scoring format</b> before you draft. <b>Fantasy</b> is full PPR, where every catch is worth a point. <b>Championship</b> is standard scoring, where catches count for nothing and only yards and touchdowns do — so volume receivers drop and big-play threats rise. Each has its own leaderboard and its own daily.</li>
-          <li>Your six are graded, then your team plays <b>17 games against real NFL teams</b> and, if you're good enough, the playoffs. Win them all for a <b>perfect <span className="nowrap">20–0</span> season</b>.</li>
+          {HOWTO_STEPS.map((step, i) => (
+            <li key={i}>
+              {step.map((part, j) => (typeof part === "string" ? part
+                : <b key={j}>{part.nowrap ? <span className="nowrap">{part.text}</span> : part.text}</b>))}
+            </li>
+          ))}
         </ol>
-        <p className="small">Grades compare each season to the top players at that position in the same era, with a bump for efficiency (QB rating, completion %, yards per carry). Flex is graded on raw production instead, with no positional comparison. Your QB counts a little more than the others.</p>
+        <p className="small">{HOWTO_NOTE}</p>
         <button ref={btn} className="btn solid" onClick={onClose}>Got it, let's draft</button>
       </div>
     </div>
@@ -1820,8 +1835,11 @@ function HowTo({ onClose }) {
 }
 
 export default function PerfectSeason() {
-  // A profile's address (/u/<name>) opens that profile, for guests too; every other address opens Modes.
-  const [view, setView] = useState(() => (typeof window !== "undefined" && parseProfilePath(window.location.pathname) ? "profile" : "home"));
+  // A profile's address (/u/<name>) opens that profile, for guests too; /leaderboard opens the Leaderboard
+  // and /how-to-play the rules (site-pages.mjs); every other address opens Modes.
+  const [view, setView] = useState(() => (typeof window === "undefined" ? "home"
+    : parseProfilePath(window.location.pathname) ? "profile"
+      : parseSitePath(window.location.pathname) === "board" ? "board" : "home"));
   // Whose profile the profile view shows. null there is your own profile from the Profile tab, or the
   // Account tab's login for a guest - see shownProfile below.
   const [profileOf, setProfileOf] = useState(() => (typeof window === "undefined" ? null : parseProfilePath(window.location.pathname)));
@@ -1863,7 +1881,11 @@ export default function PerfectSeason() {
   const [history, setHistory] = useState([]); // one entry per pick, for the recap and for resuming
   const [draftReady, setDraftReady] = useState(false);
   const [resumed, setResumed] = useState(false);
-  const [howTo, setHowTo] = useState(false);
+  // Landing on /how-to-play opens the rules, whether or not this device has seen them. That address stays
+  // while they're open (a reload shows the same page); closing them returns to the screen underneath.
+  const openedAtHowTo = typeof window !== "undefined" && parseSitePath(window.location.pathname) === "howto";
+  const [howTo, setHowTo] = useState(openedAtHowTo);
+  const atHowTo = useRef(openedAtHowTo);
   const [share, setShare] = useState({ state: "idle", text: "" });
   const [confirmReset, setConfirmReset] = useState(false);
   const [mode, setMode] = useState(null);           // { kind: "free"|"daily", code, date, seed, gm, genius, format }
@@ -1991,22 +2013,22 @@ export default function PerfectSeason() {
     const prev = historyScreen.current;
     historyScreen.current = next;
     if (!prev) {
-      // The entry the page opened in: a profile's address loses any trailing slash, and an address under /u/
-      // that isn't a username (Modes is showing) goes back to "/".
-      const tidy = next.ps === "profile" ? profilePath(next.name) : window.location.pathname.startsWith("/u/") ? "/" : null;
-      writeHistory("replaceState", next, tidy);
+      // The entry the page opened in, at the address its screen lives at (pathFor): a profile's address
+      // loses any trailing slash, and an address that names no screen - an address under /u/ that isn't a
+      // username, a challenge link - goes back to "/". /how-to-play keeps its address until the rules close.
+      writeHistory("replaceState", next, atHowTo.current ? null : pathFor(next));
     } else if (sameScreen(prev, next)) {
       // Already written: Back or Forward landed here, or nothing that has an entry changed.
     } else if (next.ps === "profile" && prev.ps === "view" && prev.view === "profile") {
       // Signing in on the Account tab turns that screen into your profile: the same entry, at your address.
-      writeHistory("replaceState", next, profilePath(next.name));
+      writeHistory("replaceState", next, pathFor(next));
     } else if (ownsEntry(next)) {
       if (prev.ps === "view") writeHistory("replaceState", { ...prev, scroll: leftAt.current });
-      writeHistory("pushState", next, next.ps === "profile" ? profilePath(next.name) : "/");
+      writeHistory("pushState", next, pathFor(next));
     } else if (ownsEntry(prev)) {
-      writeHistory("pushState", next, "/");
+      writeHistory("pushState", next, pathFor(next));
     } else {
-      writeHistory("replaceState", next);
+      writeHistory("replaceState", next, pathFor(next));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screenKey]);
@@ -3056,7 +3078,24 @@ export default function PerfectSeason() {
     restart();
   }
 
-  function closeHowTo() { setHowTo(false); sset(HOWTO_KEY, true, false); }
+  function closeHowTo() {
+    setHowTo(false);
+    sset(HOWTO_KEY, true, false);
+    // Opened from /how-to-play: that address described the rules, so closing them puts the screen
+    // underneath back in the address bar.
+    if (atHowTo.current) {
+      atHowTo.current = false;
+      const s = historyScreen.current || { ps: "view", view: "home" };
+      writeHistory("replaceState", s, pathFor(s));
+    }
+  }
+  // A footer link, opened in place: the rules over whatever is on screen, or the Leaderboard tab. False for
+  // a page this build has no screen for, and then the browser just follows the link to it.
+  function openSitePage(id) {
+    if (id === "howto") { setHowTo(true); return true; }
+    if (id === "board") { openTab("board"); return true; }
+    return false;
+  }
 
   async function doShare() {
     // result.rank is this season's rank from the runs log ({rank,total}), or null/undefined when
@@ -4242,6 +4281,24 @@ export default function PerfectSeason() {
             )}
             <button className="btn" style={{ marginTop: 12 }} onClick={leaveSou}>Back to modes</button>
           </>
+        )}
+
+        {/* The site footer, on Modes only (the screen a search result lands on): the brand in plain words,
+            and real links to the pages that have addresses of their own - a crawler follows the href, a
+            player gets the screen without a reload. A modified click (new tab) is left to the browser. */}
+        {view === "home" && (
+          <footer className="sitefoot">
+            <p><b>Gridspin</b> is a free football draft game — spin an era, draft the greats, go <span className="nowrap">20–0</span>.</p>
+            <p className="sitelinks">
+              {SITE_PAGES.map((p) => (
+                <a key={p.id} className="linkbtn" href={p.path}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    if (openSitePage(p.id)) e.preventDefault();
+                  }}>{p.nav}</a>
+              ))}
+            </p>
+          </footer>
         )}
       </div>
     </div>

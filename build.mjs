@@ -3,6 +3,7 @@
 // injection works identically on Windows/PowerShell, macOS, Linux, and Vercel's build image.
 import * as esbuild from "esbuild";
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from "node:fs";
+import { SITE_PAGES, sitePageBody, sitePageJsonLd, SITE_PAGE_CSS } from "./site-pages.mjs";
 
 mkdirSync("public", { recursive: true });
 
@@ -71,13 +72,43 @@ const html = readFileSync("page.html", "utf8")
   .replace("<!--ROBOTS-->", appEnv === "staging" ? '<meta name="robots" content="noindex, nofollow" />' : "");
 writeFileSync("public/page.html", html);
 
+// The pages search engines can read on their own (site-pages.mjs): the same shell as the app, with this page's
+// own title, description, canonical, structured data, and its text inside #root where React replaces it on
+// mount. Every swap is checked, so renaming a tag in page.html fails the build instead of quietly shipping a
+// page carrying the home page's title. vercel.json serves each at its address.
+const swap = (out, what, re, to) => {
+  if (!re.test(out)) throw new Error(`build.mjs: no ${what} in page.html to fill in for the site pages`);
+  return out.replace(re, () => to);
+};
+for (const page of SITE_PAGES) {
+  const url = `${canonicalUrl}${page.path}`;
+  let out = html;
+  out = swap(out, "<title>", /<title>[^<]*<\/title>/, `<title>${page.title}</title>`);
+  out = swap(out, "description", /<meta name="description" content="[^"]*"/, `<meta name="description" content="${page.description}"`);
+  out = swap(out, "canonical", /<link rel="canonical" href="[^"]*"/, `<link rel="canonical" href="${url}"`);
+  out = swap(out, "og:url", /<meta property="og:url" content="[^"]*"/, `<meta property="og:url" content="${url}"`);
+  out = swap(out, "og:title", /<meta property="og:title" content="[^"]*"/, `<meta property="og:title" content="${page.title}"`);
+  out = swap(out, "og:description", /<meta property="og:description" content="[^"]*"/, `<meta property="og:description" content="${page.description}"`);
+  out = swap(out, "twitter:title", /<meta name="twitter:title" content="[^"]*"/, `<meta name="twitter:title" content="${page.title}"`);
+  out = swap(out, "twitter:description", /<meta name="twitter:description" content="[^"]*"/, `<meta name="twitter:description" content="${page.description}"`);
+  out = swap(out, "structured data", /<script type="application\/ld\+json">[\s\S]*?<\/script>/,
+    `<script type="application/ld+json">\n${JSON.stringify(sitePageJsonLd(page, canonicalUrl))}\n</script>`);
+  out = swap(out, "page stylesheet", /<\/head>/, `<style>${SITE_PAGE_CSS}</style>\n</head>`);
+  // The shell's <noscript> stands in for the app on the home page; here the page's own words already do,
+  // and leaving both would give the page a second heading saying something else.
+  out = swap(out, "noscript block", /<noscript>[\s\S]*?<\/noscript>\n?/, "");
+  out = swap(out, "app root", /<div id="root"><\/div>/, `<div id="root">\n${sitePageBody(page)}\n</div>`);
+  writeFileSync(`public/${page.file}`, out);
+}
+
 // Crawl files. Staging still allows crawling on purpose: a crawler has to fetch a page to see its
-// noindex, and a robots.txt block would hide that. Only production gets a sitemap. The site is one
-// page - every screen lives at "/" - so the sitemap has one URL.
+// noindex, and a robots.txt block would hide that. Only production gets a sitemap. Every screen of the app
+// lives at "/", so the sitemap lists that plus the pages that answer for themselves (site-pages.mjs).
 if (appEnv === "production" && canonicalUrl) {
   writeFileSync("public/robots.txt", `User-agent: *\nAllow: /\n\nSitemap: ${canonicalUrl}/sitemap.xml\n`);
   const today = new Date().toISOString().slice(0, 10);
-  writeFileSync("public/sitemap.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${canonicalUrl}/</loc><lastmod>${today}</lastmod></url>\n</urlset>\n`);
+  const urls = [`${canonicalUrl}/`, ...SITE_PAGES.map((p) => `${canonicalUrl}${p.path}`)];
+  writeFileSync("public/sitemap.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${u}</loc><lastmod>${today}</lastmod></url>`).join("\n")}\n</urlset>\n`);
 } else {
   writeFileSync("public/robots.txt", "User-agent: *\nAllow: /\n");
   rmSync("public/sitemap.xml", { force: true });

@@ -13,6 +13,20 @@ CLAUDE.md.
 
 Nothing yet.
 
+## [1.14.0] — 2026-09-17
+
+### Added
+
+- **How to play and the Leaderboard have their own addresses**, gridspin.app/how-to-play and
+  gridspin.app/leaderboard, so a search result or a shared link can open either one directly. Each carries its
+  own text, so it reads even before the game loads.
+- **A footer on the Modes screen** with links to both.
+
+### Changed
+
+- The Leaderboard keeps `/leaderboard` in the address bar while you're on it, the way a profile keeps its own
+  address. A reload comes back to it.
+
 ## [1.13.0] — 2026-09-15
 
 ### Added

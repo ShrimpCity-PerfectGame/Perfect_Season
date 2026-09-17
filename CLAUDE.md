@@ -26,7 +26,7 @@ share text's link: `SITE_URL` if set, else `https://gridspin.app` for production
 `VERCEL_PROJECT_PRODUCTION_URL` (its vercel.app address) for staging. Tests and the UI harness build with
 `APP_SITE_URL` = `https://gridspin.test`.
 
-**Search engines (v1.9.1).** The site is one page, so all of this lives in `page.html` and `build.mjs`:
+**Search engines (v1.9.1, more pages in v1.14.0).** The app is one page, so most of this lives in `page.html` and `build.mjs`:
 production's canonical address is `https://www.gridspin.app` (Vercel forwards the apex to www; people
 still share gridspin.app), with a generated `robots.txt` and one-URL `sitemap.xml`, a search title
 ("Gridspin – Football Draft Game: Can You Go 20–0?"; home screens get the short name via
@@ -35,6 +35,21 @@ still share gridspin.app), with a generated `robots.txt` and one-URL `sitemap.xm
 production addresses never compete with gridspin.app. Keep staging's robots.txt crawlable - a crawler
 has to fetch a page to see its noindex. The bundle is minified. The owner holds Google Search Console
 for the domain; `tests/test-build-seo.mjs` checks all of the above.
+
+**Pages of their own (v1.14.0).** Two screens also answer at their own addresses, so a search result can send
+someone straight to them: `/how-to-play` and `/leaderboard`. `site-pages.mjs` holds both addresses and all their
+copy - including the How to play steps the dialog renders as JSX - so the rules can never exist in two versions;
+`build.mjs` writes `public/how-to-play.html` and `public/leaderboard.html` from the same shell as the app, swapping
+in each page's title, description, canonical, link preview and structured data (every swap asserted, so renaming a
+tag in `page.html` fails the build), dropping the shell's `<noscript>`, and putting the page's words inside
+`<div id="root">`, where React replaces them on mount. `vercel.json` serves each at its address, both are in the
+sitemap, and Modes ends with a `.sitefoot` footer whose real `<a href>` links let a crawler walk between them.
+Landing on either address opens that screen and keeps the address (`parseSitePath`); `pathFor` gives every history
+write the address its screen lives at, so the Leaderboard sits at `/leaderboard` and everything else tidies to
+`/`. Live numbers are never written into the built HTML - a page built yesterday must not claim to be today's
+standings. `tests/test-site-pages.mjs` covers the app's side. **Brand search:** an unrelated itch.io game holds the
+name "Gridspin", so brand queries need off-site mentions (social profiles and community posts linking here) more
+than markup - that part is the owner's to do.
 
 **Sharing (v1.10.0).** `shareText` builds a Wordle-style card and must never name the players (that
 would spoil the daily): a title (`Gridspin Daily N`, numbered from `GRIDSPIN_DAY_ONE` = launch day
@@ -129,6 +144,7 @@ node tests/test-sou-leave.mjs       # Over/Under can't be replayed or left runni
 node tests/test-sim-engine-independence.mjs  # the season sim rolls identically in every JS engine; pins a 2,000-season checksum
 node tests/test-build-seo.mjs      # runs build.mjs for production and staging: canonical, noindex, robots.txt, sitemap, structured data
 node tests/test-share.mjs          # the spoiler-free share card, challenge links in and out, and the challenge card on Modes
+node tests/test-site-pages.mjs     # /how-to-play and /leaderboard: the addresses, the footer links, and the rules matching site-pages.mjs
 
 # Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
 # Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.
@@ -254,7 +270,8 @@ overwrite each other.
   `tests/mock-profile-stats.mjs` and checked by `tests/test-player-stats-sql.mjs` - change both together,
   keep orders fully tiebroken, and remember a day's Daily ranks only count once the day is over
   everywhere (two UTC days later).
-- **Addresses:** a profile is `/u/<username>` (`profilePath`/`parseProfilePath`), every other screen is
+- **Addresses:** a profile is `/u/<username>` (`profilePath`/`parseProfilePath`), the Leaderboard is
+  `/leaderboard` and the rules `/how-to-play` (v1.14.0, see "Pages of their own"), every other screen is
   `/`, and opening a profile pushes a history entry so Back returns to the screen it came from.
   `vercel.json` rewrites `/u/:name` to the page with `X-Robots-Tag: noindex`.
 - **Runbook** (SQL editor): make someone a moderator -
@@ -587,7 +604,8 @@ Don't hand-edit `data.json`; change the scripts and regenerate.
 ## Immediate Next Goals
 
 1. **Housekeeping** — 2026 season data once it's played, an accessibility pass (position colors
-   currently carry meaning on their own), separate indexable pages (How to play, Leaderboard).
+   currently carry meaning on their own). Separate indexable pages shipped in v1.14.0; more of them (each
+   scoring format's leaderboard, a Daily archive) is the obvious next step if search traffic matters.
 2. **Half-PPR**, if wanted, is now a small change rather than a blocked one — see the scoring-format
    note in Architecture. It needs a third `FORMATS` entry, a benchmark column, a `BEST_FIELDS`
    entry, and two `profiles` columns; no data regeneration.

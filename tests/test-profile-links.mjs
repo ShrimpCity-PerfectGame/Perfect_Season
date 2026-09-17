@@ -7,6 +7,7 @@ import {
   makeMockAuth, clickMode,
 } from "./helpers.mjs";
 import { runLogRow } from "../game-logic.mjs";
+import { BOARD_PATH } from "../site-pages.mjs";
 
 // The app's own day key (local time), for today's daily and Over/Under rows.
 const now = new Date();
@@ -134,7 +135,8 @@ await runTest("every name on the Leaderboard opens that player's profile, and Ba
     await click(link);
     await expectProfile(container, name);
     await back();
-    assert(window.location.pathname === "/" && container.querySelector(".champion") && !profileOf(container), `Back from ${name} should return to the Leaderboard, got: ${text(container).slice(0, 200)}`);
+    // Since v1.14.0 the Leaderboard has an address of its own (site-pages.mjs), so Back lands there, not at "/".
+    assert(window.location.pathname === BOARD_PATH && container.querySelector(".champion") && !profileOf(container), `Back from ${name} should return to the Leaderboard at ${BOARD_PATH}, got ${window.location.pathname}: ${text(container).slice(0, 200)}`);
     assert(tab(container, "Leaderboard").classList.contains("on"), "the Leaderboard tab is lit again");
   }
 });
