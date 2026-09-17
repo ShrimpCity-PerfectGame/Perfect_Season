@@ -18,6 +18,8 @@ CLAUDE.md.
   including the rules a first-time player is looking at.
 - In the app, **closing the share sheet no longer says a season was shared** — the button only changes once the
   share actually goes out.
+- The app's **launch screen is Gridspin's**, the mark on its lime coin over the app's cream, instead of the phone's
+  default grey.
 
 ## [1.14.0] — 2026-09-17
 

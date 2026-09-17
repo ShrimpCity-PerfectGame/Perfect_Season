@@ -111,7 +111,12 @@ functions in **`app-shell.mjs`** so the tests can drive them without a device (`
 **None of it reaches the website**: the site's build uses `entry.jsx`, so its bundle carries no Capacitor, and
 nothing there ever dispatches `ps:back`. `npm run app:icons` draws every launcher icon and splash
 from `static/icon.svg` (`tools/app/icons.mjs`), so the app can't ship Capacitor's logo; re-run it after
-`cap sync`. The app's version comes from `package.json` through `android/app/build.gradle` (1.14.0 → versionName
+`cap sync`. It also writes the two brand colours the Android project paints with (`res/values/ic_launcher_background.xml`,
+from theme.mjs's palette): the lime behind the icon and the cream behind the launch screen. The launch screen is
+`AppTheme.NoActionBarLaunch` in `res/values/styles.xml` - Android 12 and newer ignore the template's
+`android:background` and draw their own, so it sets `windowSplashScreenBackground`, `windowSplashScreenAnimatedIcon`
+and `windowSplashScreenIconBackgroundColor`, and takes the `Theme.SplashScreen.IconBackground` parent, which is what
+makes the icon background apply at all. Left as the template had it, the app opened on the system's grey. The app's version comes from `package.json` through `android/app/build.gradle` (1.14.0 → versionName
 1.14.0, versionCode 11400). `tools/app/env.local.json` holds each environment's Supabase URL and **anon** key and
 is gitignored - both are public (they ship in every build of the site) but they're the owner's to hand out.
 `node tools/app/build-app.mjs production` builds against the real database; the default is staging, which shows

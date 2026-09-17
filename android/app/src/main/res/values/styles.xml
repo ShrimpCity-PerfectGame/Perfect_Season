@@ -16,7 +16,13 @@
     </style>
 
 
-    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+    <!-- The launch screen. Android 12 and newer draw their own from these three and ignore android:background:
+         the mark on its lime coin, on the app's cream. Older Androids use the generated splash drawable. The
+         colours come from theme.mjs through tools/app/icons.mjs, so they can't drift from the site's. -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen.IconBackground">
+        <item name="windowSplashScreenBackground">@color/gridspin_cream</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
         <item name="android:background">@drawable/splash</item>
     </style>
 </resources>

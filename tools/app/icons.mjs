@@ -65,7 +65,15 @@ try {
   await browser.close();
 }
 
-// The adaptive icon's background layer, behind the foreground above.
+// The two brand colours the Android project paints with itself, from the same palette the site uses: the lime
+// behind the adaptive icon's foreground (and behind the mark on the launch screen), and the cream the launch
+// screen sits on - see AppTheme.NoActionBarLaunch in res/values/styles.xml.
+const color = (name, value) => `    <color name="${name}">${value}</color>`;
 writeFileSync(path.join(res, "values/ic_launcher_background.xml"),
-  `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">${PALETTE.lime}</color>\n</resources>\n`);
-console.log(`Drew ${written} icons and splash screens from static/icon.svg, and set the icon background to ${PALETTE.lime}.`);
+  `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+${color("ic_launcher_background", PALETTE.lime)}
+${color("gridspin_cream", PALETTE.cream)}
+</resources>
+`);
+console.log(`Drew ${written} icons and splash screens from static/icon.svg, on ${PALETTE.lime} over ${PALETTE.cream}.`);
