@@ -94,10 +94,22 @@ same build, so there is one game, not two. `capacitor.config.json` names it (`ap
 `webDir: app/www`); `android/` is the generated project and is committed. **`npm run app:sync`** builds the web
 bundle and copies it in - `tools/app/build-app.mjs` runs the same `build.mjs` with `APP_ENTRY=entry-app.jsx` and
 one environment's settings, then writes `app/www` with `page.html` as `index.html`. `entry-app.jsx` is the app's
-entry: it imports the site's `entry.jsx` and adds the two things a phone needs - Android's hardware Back button
-(`history.back()`, and out of the app when there's nothing to go back to) and a `navigator.share` that opens the
-system share sheet, which an Android web view doesn't have. **None of it reaches the website**: the site's build
-uses `entry.jsx`, so its bundle carries no Capacitor. `npm run app:icons` draws every launcher icon and splash
+entry: it imports the site's `entry.jsx` and wires Capacitor to the two things a phone needs, which live as plain
+functions in **`app-shell.mjs`** so the tests can drive them without a device (`tests/test-app-shell.mjs`):
+
+- **The hardware Back button.** The game is asked first, through a cancelable `ps:back` event (`BACK_EVENT`): it
+  closes whatever is open over the screen, then leaves any screen other than Modes for Modes, and says so by
+  cancelling. A dialog says what closing it means with `useCloseOnBack` (ui-common.jsx keeps the register; the
+  topmost closes, exactly as Escape does). What the game doesn't take, Back does the ordinary way - a screen that
+  pushed an entry of its own (a profile, the shop) goes back to where it was opened from, and Back from Modes
+  leaves the app. Without this every Back press left the app, from the first-run rules dialog included.
+- **The share sheet.** An Android web view has no `navigator.share`, so the game would quietly copy to the
+  clipboard. `nativeShare` is the Web Share API over Android's sheet, and it keeps the part the game reads:
+  closing the sheet is an `AbortError`, which shows no status. Swallowing it told players a season had been
+  shared that they had just decided not to send.
+
+**None of it reaches the website**: the site's build uses `entry.jsx`, so its bundle carries no Capacitor, and
+nothing there ever dispatches `ps:back`. `npm run app:icons` draws every launcher icon and splash
 from `static/icon.svg` (`tools/app/icons.mjs`), so the app can't ship Capacitor's logo; re-run it after
 `cap sync`. The app's version comes from `package.json` through `android/app/build.gradle` (1.14.0 → versionName
 1.14.0, versionCode 11400). `tools/app/env.local.json` holds each environment's Supabase URL and **anon** key and
@@ -105,12 +117,22 @@ is gitignored - both are public (they ship in every build of the site) but they'
 `node tools/app/build-app.mjs production` builds against the real database; the default is staging, which shows
 the "Test site" banner, and that is what test builds should use.
 
+**Checked in the emulator** (2026-09-17, a Pixel-shaped android-36 AVD - Google's AEHD driver is installed, so
+the emulator does run here; see the owner's notes for the setup): the app launches against the staging database,
+a guest plays a full draft and season, the result screen shares the spoiler-free card through Android's sheet,
+the keyboard resizes the page rather than covering the field, and Back behaves as above. Drive it by element text
+rather than by pixel - `adb shell uiautomator dump` exposes the whole web page as an accessibility tree (run adb
+from Git Bash with `MSYS_NO_PATHCONV=1`, or `/sdcard/...` becomes a Windows path).
+
+**Known cosmetic gap**: the web view sits inside the system bars, so the status and gesture bars stay the window
+background (cream) even on the dark play screen and the black Leaderboard. The fix is to go edge-to-edge
+(`viewport-fit=cover` plus `env(safe-area-inset-*)` padding, and `SystemBars.setStyle` for the icons), but
+Capacitor only passes insets through on WebView 140+ and this emulator has 133 - so it can't be verified here.
+Leave it until there's a device that can show it.
+
 **Not done yet**: no release signing key, nothing on Google Play (the owner has no Play Console account yet), and
-the app has not been run on a real device - this machine can't run the emulator (no hypervisor installed; enabling
-one needs admin and a reboot, and current Android images no longer run unaccelerated). The first device run should
-check the Back button, the share sheet, and whether Android 15's edge-to-edge drawing puts anything under the
-status or gesture bars. Coin packs are planned as in-app purchases once the app exists - see the owner's plan, not
-this repo.
+the app has never run on a real phone. Coin packs are planned as in-app purchases once the app exists - see the
+owner's plan, not this repo.
 
 ## Build/Run Commands
 
@@ -168,6 +190,7 @@ node tests/test-sim-engine-independence.mjs  # the season sim rolls identically 
 node tests/test-build-seo.mjs      # runs build.mjs for production and staging: canonical, noindex, robots.txt, sitemap, structured data
 node tests/test-share.mjs          # the spoiler-free share card, challenge links in and out, and the challenge card on Modes
 node tests/test-site-pages.mjs     # /how-to-play and /leaderboard: the addresses, the footer links, and the rules matching site-pages.mjs
+node tests/test-app-shell.mjs      # the Android app: Back closes a dialog, then leaves a screen, then the app; the share sheet's AbortError
 
 # Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
 # Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.

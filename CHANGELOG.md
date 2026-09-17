@@ -13,6 +13,11 @@ CLAUDE.md.
 
 - **An Android app**, wrapping the same game (Capacitor). Nothing about the website changes, and the app isn't on
   Google Play yet — see "The Android app" in CLAUDE.md.
+- In the app, **Back works the way Android expects**: it closes the rules or a report sheet, then returns to Modes
+  from any other screen, and only leaves the app from Modes itself. It used to leave the app from anywhere,
+  including the rules a first-time player is looking at.
+- In the app, **closing the share sheet no longer says a season was shared** — the button only changes once the
+  share actually goes out.
 
 ## [1.14.0] — 2026-09-17
 

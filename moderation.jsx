@@ -10,7 +10,7 @@ import { reportPlayer, fetchModQueue, modAction } from "./storage.js";
 import { REPORT_REASONS, REPORT_REASON_LABEL, REPORT_NOTE_MAX, REPORTS_PER_DAY, USERNAME_RE, bioLength } from "./profile-rules.mjs";
 import { cssVars } from "./theme.mjs";
 import { Avatar } from "./avatars.jsx";
-import { fmtDate } from "./ui-common.jsx";
+import { fmtDate, useCloseOnBack } from "./ui-common.jsx";
 
 export const MODERATION_CSS = `
 /* ===== moderation.jsx: the Report sheet and the Reports queue ===== */
@@ -141,6 +141,8 @@ export function ReportSheet({ username, onClose }) {
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   const close = () => onCloseRef.current?.();
+  // Android's Back closes the sheet the way Escape does, rather than leaving the profile underneath it.
+  useCloseOnBack(close);
 
   useEffect(() => {
     const opener = document.activeElement;

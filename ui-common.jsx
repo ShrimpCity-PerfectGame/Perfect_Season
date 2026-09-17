@@ -1,7 +1,8 @@
 // Display helpers shared by the main app (perfect-season.jsx) and the screens that live in their own
 // files (profile.jsx, moderation.jsx, ...). Moved here out of perfect-season.jsx so those files don't
 // have to import the main component module back - everything below is a plain function, constant or
-// stateless component, with no app state.
+// stateless component, with no app state, apart from the register of open dialogs at the bottom.
+import { useEffect, useRef } from "react";
 import { TEAMS, BEST_FIELDS, normFormat } from "./game-logic.mjs";
 
 export const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
@@ -67,4 +68,31 @@ export function RosterChips({ roster }) {
       ))}
     </div>
   );
+}
+
+// ---------- Android's Back button (app-shell.mjs) ----------
+// Anything that opens over a screen says here what closing it means, for as long as it is open. Back then
+// closes the one on top, exactly as Escape does, and only once nothing is open does it leave the screen
+// (perfect-season.jsx's Back handler). Dialogs mount in the order they open, so the last registered is the
+// one on top. On the website nothing calls closeTopDialog, so this register is never read.
+const openDialogs = [];
+export function useCloseOnBack(onClose) {
+  // The latest onClose, like the Escape listeners: registered once, but never left holding a stale close.
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const dialog = { close };
+    openDialogs.push(dialog);
+    return () => {
+      const i = openDialogs.indexOf(dialog);
+      if (i >= 0) openDialogs.splice(i, 1);
+    };
+  }, []);
+}
+// Closes the dialog on top of the screen, if there is one. True when one closed.
+export function closeTopDialog() {
+  const top = openDialogs[openDialogs.length - 1];
+  if (!top) return false;
+  top.close.current?.();
+  return true;
 }

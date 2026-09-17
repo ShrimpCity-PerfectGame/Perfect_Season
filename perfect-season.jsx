@@ -21,12 +21,14 @@ import {
 } from "./game-logic.mjs";
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
-  outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips,
+  outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
 import { PICKER_CSS } from "./avatar-picker.jsx";
 import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
+// The one definition of the event the Android shell asks Back with; the website never sends it.
+import { BACK_EVENT } from "./app-shell.mjs";
 import { COSMETICS_CSS, FramedAvatar, Coin } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { BADGE_BY_ID } from "./badges.mjs";
@@ -1806,6 +1808,8 @@ function GridspinMark({ size = 38 }) {
 
 function HowTo({ onClose }) {
   const btn = useRef(null);
+  // Android's Back closes the rules the way Escape does, instead of leaving the screen behind them.
+  useCloseOnBack(onClose);
   useEffect(() => {
     // preventScroll: focusing the button at the bottom otherwise opens the dialog scrolled past
     // steps 1-3 on a phone.
@@ -2058,6 +2062,23 @@ export default function PerfectSeason() {
     const onPop = (e) => onHistoryMove.current(e.state);
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // Android's Back button, asked before the app shell acts on it (app-shell.mjs; the website never sends
+  // this). The rules or a report sheet close first, then any screen other than Modes goes back to Modes -
+  // except the two that pushed an entry of their own, a profile and the shop, which Back walks normally so
+  // it returns to the screen they were opened from, at the spot it was left. Nothing left to close or leave
+  // means Back leaves the app.
+  const onAppBack = useRef(null);
+  onAppBack.current = (e) => {
+    if (closeTopDialog()) { e.preventDefault(); return; }
+    if (shownProfile || view === "shop") return;
+    if (view !== "home") { openTab("home"); e.preventDefault(); }
+  };
+  useEffect(() => {
+    const onBack = (e) => onAppBack.current(e);
+    window.addEventListener(BACK_EVENT, onBack);
+    return () => window.removeEventListener(BACK_EVENT, onBack);
   }, []);
 
   // A tab, or anything that opens a screen the way its tab does. "profile" is your own profile (or, for a
