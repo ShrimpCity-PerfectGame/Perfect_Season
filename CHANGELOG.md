@@ -21,7 +21,7 @@ CLAUDE.md.
 - The app's **launch screen is Gridspin's**, the mark on its lime coin over the app's cream, instead of the phone's
   default grey.
 
-## [1.15.0] — 2026-09-17
+## [1.15.0] — 2026-09-18
 
 ### Added
 
