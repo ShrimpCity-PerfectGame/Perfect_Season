@@ -148,11 +148,25 @@ the keyboard resizes the page rather than covering the field, and Back behaves a
 rather than by pixel - `adb shell uiautomator dump` exposes the whole web page as an accessibility tree (run adb
 from Git Bash with `MSYS_NO_PATHCONV=1`, or `/sdcard/...` becomes a Windows path).
 
-**Known cosmetic gap**: the web view sits inside the system bars, so the status and gesture bars stay the window
-background (cream) even on the dark play screen and the black Leaderboard. The fix is to go edge-to-edge
-(`viewport-fit=cover` plus `env(safe-area-inset-*)` padding, and `SystemBars.setStyle` for the icons), but
-Capacitor only passes insets through on WebView 140+ and this emulator has 133 - so it can't be verified here.
-Leave it until there's a device that can show it.
+**The app draws under the system bars** (v1.15.0), so the page's own background reaches them and they take the
+colour of the screen you're on - cream on Modes, navy on the play screen, black on the Leaderboard - instead of a
+cream frame around a dark page. Three pieces: `tools/app/build-app.mjs` swaps in `viewport-fit=cover` (asserted, and
+only for the app - the same tag on the website would push the page under an iPhone's notch for no gain); the
+stylesheet names the insets once on the root (`--sa-top` and friends, from `env(safe-area-inset-*)`, 0 in every
+browser that isn't drawing under anything) and every edge-anchored rule reads them - the page gutter, the draft's
+sticky bar in both its sizes, the rules dialog, the report sheet, the Players bar, the shop's case; and
+`followSystemBars` (app-shell.mjs) flips the bars' icons from the colour the root is painted, which Android names
+backwards - "DARK" means a dark screen, so it draws light icons. Naming the insets also means a browser can be told
+to pretend it has them, which is how the layout was measured without a device: set `--sa-top` on `.ps` and the app's
+spacing appears on a desktop. **Capacitor only passes the insets through on WebView 140+**; on anything older it
+keeps the web view inside the bars instead, which is exactly how this looked before, so nothing breaks - the
+emulator ran it both ways (133 from the factory image, then 151 once Play updated it).
+
+The emulator to use is the Play Store image (`gridspin-play`, `system-images;android-36;google_apis_playstore;x86_64`):
+signing into Play there lets it update Android System WebView past 140, which is what makes the edge-to-edge half
+visible. Give the AVD `hw.gpu.enabled=yes` and `hw.gpu.mode=host` and launch with `-gpu host` - the config
+avdmanager writes has the GPU off, which makes the whole thing crawl. If its window opens off-screen (it did once),
+move it with a Win32 `MoveWindow` on the `qemu-system-x86_64` process's main window.
 
 **Not done yet**: no release signing key, nothing on Google Play (the owner has no Play Console account yet), and
 the app has never run on a real phone. Coin packs are planned as in-app purchases once the app exists - see the

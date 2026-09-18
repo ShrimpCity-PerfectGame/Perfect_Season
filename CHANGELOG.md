@@ -20,6 +20,9 @@ CLAUDE.md.
   share actually goes out.
 - The app's **launch screen is Gridspin's**, the mark on its lime coin over the app's cream, instead of the phone's
   default grey.
+- The app **draws under the phone's status and gesture bars**, so they take the colour of whatever screen you're on
+  — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
+  clock and battery icons flip to suit. Nothing on the website changes.
 
 ## [1.15.0] — 2026-09-18
 

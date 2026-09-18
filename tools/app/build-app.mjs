@@ -11,7 +11,7 @@
 // the site - but they're the owner's to hand out, so they stay out of the repo. The service_role key is never
 // used here or anywhere a client can reach.
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,6 +63,22 @@ cpSync(path.join(root, "public"), www, {
   recursive: true,
   filter: (src) => !/[\\/](robots\.txt|sitemap\.xml|sw\.js)$/.test(src),
 });
-renameSync(path.join(www, "page.html"), path.join(www, "index.html"));
+const index = path.join(www, "index.html");
+renameSync(path.join(www, "page.html"), index);
+
+// The app draws under the status and gesture bars, so the page's own background reaches them and they take the
+// colour of whatever screen you're on - the cream of Modes, the play screen's navy, the Leaderboard's black. That
+// needs viewport-fit=cover, which also turns on the env(safe-area-inset-*) padding the stylesheet already carries
+// (0 everywhere else). Only the app asks for it: on the website the same tag would push the page under an iPhone's
+// notch for no gain. Asserted, like build.mjs's own swaps, so an edited meta tag fails the build instead of
+// quietly shipping a page that sits under the clock.
+const shell = readFileSync(index, "utf8");
+const viewport = '<meta name="viewport" content="width=device-width, initial-scale=1" />';
+if (!shell.includes(viewport)) {
+  console.error(`Couldn't find the viewport tag in ${index} - has page.html changed?`);
+  process.exit(1);
+}
+writeFileSync(index, shell.replace(viewport, viewport.replace("initial-scale=1", "initial-scale=1, viewport-fit=cover")));
+
 const { version } = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 console.log(`Built app/www for the ${target} database (v${version}, ${SITE[target]}) - run "npx cap sync android" next.`);

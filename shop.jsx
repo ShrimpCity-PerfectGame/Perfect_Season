@@ -168,7 +168,7 @@ export const SHOP_CSS = `
 /* Wide enough for two columns: the case stays in view beside the stock while you browse. */
 @media (min-width:760px){
   .sh-body{grid-template-columns:minmax(0,330px) minmax(0,1fr);align-items:start;column-gap:28px}
-  .sh-stage{grid-row:span 2;position:sticky;top:16px}
+  .sh-stage{grid-row:span 2;position:sticky;top:calc(16px + var(--sa-top,0px))}
 }
 /* One column: the case is above the fold only at the top, so the selected item's details carry a small copy of
    the card wearing it. */

@@ -15,12 +15,12 @@ import { fmtDate, useCloseOnBack } from "./ui-common.jsx";
 export const MODERATION_CSS = `
 /* ===== moderation.jsx: the Report sheet and the Reports queue ===== */
 /* The sheet takes the cream tokens wherever it's mounted: the profile card it opens from is dark. */
-.md-scrim{${cssVars("light")};position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;padding-top:16px;
+.md-scrim{${cssVars("light")};position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;padding-top:calc(16px + var(--sa-top,0px));
   background:color-mix(in srgb,var(--ink) 55%,transparent);color:var(--ink);overflow-y:auto;overscroll-behavior:contain}
 /* A bottom sheet on phones. Auto margins rather than centering, so a sheet taller than the screen
    scrolls from its top instead of being cut off above it. */
 .md-sheet{position:relative;width:100%;max-width:520px;margin:auto auto 0;background:var(--bg);color:var(--ink);
-  border:2px solid var(--ink);border-bottom:0;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));
+  border:2px solid var(--ink);border-bottom:0;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + var(--sa-bottom,0px));
   animation:md-rise .18s ease-out both}
 .md-sheet:focus{outline:none}
 @keyframes md-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
@@ -92,13 +92,13 @@ export const MODERATION_CSS = `
 }
 /* Wider screens: a dialog in the middle instead of a sheet. */
 @media (min-width:600px){
-  .md-scrim{padding:24px 16px}
+  .md-scrim{padding:calc(24px + var(--sa-top,0px)) calc(16px + var(--sa-right,0px)) calc(24px + var(--sa-bottom,0px)) calc(16px + var(--sa-left,0px))}
   .md-sheet{margin:auto;border-bottom:2px solid var(--ink);border-radius:18px;padding:22px 22px 20px;box-shadow:8px 8px 0 var(--hard)}
 }
 /* Short landscape phones: the reasons share one row, each as wide as its label, and the note field shrinks,
    so Send is on screen. */
 @media (max-height:500px) and (orientation:landscape){
-  .md-scrim{padding-block:8px}
+  .md-scrim{padding-block:calc(8px + var(--sa-top,0px)) calc(8px + var(--sa-bottom,0px))}
   .md-sheet{max-width:640px;padding:14px 18px 12px}
   .md-sheet .md-title{margin-bottom:6px}
   .md-reasons{display:flex;flex-wrap:wrap}

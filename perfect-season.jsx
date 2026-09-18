@@ -537,6 +537,13 @@ function PlayoffGame({ game, roster, instant, onFinal, footer }) {
 const GRAIN = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
 const CSS = `
 .ps{${cssVars("light")};--display:'Anton',Impact,'Arial Narrow',sans-serif;
+  /* What the phone's status and gesture bars cover. The Android app draws under them (tools/app/build-app.mjs
+     asks for viewport-fit=cover), so the page's background reaches them and they take the colour of the screen
+     you're on; every browser that isn't drawing under anything reports 0, which is the website. Named here so
+     each edge-anchored rule below reads the same way, and so a browser can be told to pretend it has them:
+     setting --sa-top and friends on .ps shows the app's layout on a desktop. */
+  --sa-top:env(safe-area-inset-top,0px);--sa-right:env(safe-area-inset-right,0px);
+  --sa-bottom:env(safe-area-inset-bottom,0px);--sa-left:env(safe-area-inset-left,0px);
   font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-synthesis:none;-webkit-font-smoothing:antialiased;
   color:var(--ink);background-color:var(--bg);background-image:${GRAIN};min-height:100vh;-webkit-tap-highlight-color:transparent;
   /* decorative hero glow bleeds past the viewport edge; clip (not hidden) so no scroll container is created */
@@ -560,7 +567,8 @@ html:has(.result-hero){overflow-anchor:none}
 :where(.ps) button{font-family:inherit;cursor:pointer;color:inherit}
 .ps button:focus-visible{outline:3px solid var(--accent-ink);outline-offset:3px}
 .slant{display:inline-block;transform:skewX(-8deg)}
-.wrap{max-width:900px;margin:0 auto;padding:18px 16px 56px}
+.wrap{max-width:900px;margin:0 auto;
+  padding:calc(18px + var(--sa-top,0px)) calc(16px + var(--sa-right,0px)) calc(56px + var(--sa-bottom,0px)) calc(16px + var(--sa-left,0px))}
 .top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:14px}
 .title{font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:44px;line-height:.9;margin:0;color:var(--ink)}
 .sub{margin:6px 0 0;color:var(--muted);font-size:15px;max-width:46ch}
@@ -759,7 +767,8 @@ p.gamecoins .earned{display:flex}
 .streak b{font-family:var(--display);font-weight:400;font-size:24px;color:var(--accent-ink)}
 .locked{background:var(--surface);border:2px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
 .locked h3{font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:26px;margin:0 0 6px}
-.modal-bg{position:fixed;inset:0;z-index:50;background:rgba(16,17,20,.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:flex;align-items:flex-start;justify-content:center;padding:24px 14px;overflow-y:auto}
+.modal-bg{position:fixed;inset:0;z-index:50;background:rgba(16,17,20,.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;
+  padding:calc(24px + var(--sa-top,0px)) calc(14px + var(--sa-right,0px)) calc(24px + var(--sa-bottom,0px)) calc(14px + var(--sa-left,0px))}
 .modal{background:var(--bg);color:var(--ink);border:2px solid var(--ink);border-radius:18px;max-width:520px;width:100%;padding:22px 22px 18px;box-shadow:8px 8px 0 var(--hard)}
 .modal h2{font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:40px;line-height:.95;margin:0 0 12px;color:var(--ink)}
 .modal ol{margin:0 0 12px;padding-left:22px}
@@ -812,7 +821,8 @@ p.gamecoins .earned{display:flex}
 .sticky{position:fixed;top:0;left:0;right:0;z-index:30;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
   background:linear-gradient(102deg,color-mix(in srgb,var(--tc1) 78%,var(--bg)) 0%,color-mix(in srgb,var(--bg) 95%,transparent) 58%);transform:translateY(-110%);transition:transform .18s ease-out}
 .sticky.show{transform:none}
-.sticky .in{position:relative;max-width:900px;margin:0 auto;padding:8px 16px 8px 24px;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap}
+.sticky .in{position:relative;max-width:900px;margin:0 auto;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;
+  padding:calc(8px + var(--sa-top,0px)) calc(16px + var(--sa-right,0px)) 8px calc(24px + var(--sa-left,0px))}
 .sticky .stripe{width:6px;background:var(--tc2)!important}
 .sticky .tm{font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:26px;line-height:1;color:#fff;transform:skewX(-7deg)}
 .sticky .yr{font-family:var(--display);font-weight:400;font-size:19px;line-height:1}
@@ -1030,7 +1040,7 @@ p.gamecoins .earned{display:flex}
   .modes{gap:12px}.mode{padding:14px}.mode .mn{font-size:26px}.mode .icon{width:38px;height:38px;font-size:19px;border-radius:10px}
   .btn.reset{margin-left:0}.rc{grid-template-columns:24px 1fr}.rc .alt{grid-column:2}
   .cells{display:grid;grid-template-columns:repeat(4,1fr);width:100%;gap:8px 6px}.cell{width:auto}
-  .sticky .in{padding:6px 12px 7px 18px;gap:4px 8px}.sticky .tm{font-size:24px}.sticky .chip{padding:2px 4px;font-size:10.5px}
+  .sticky .in{gap:4px 8px;padding:calc(6px + var(--sa-top,0px)) calc(12px + var(--sa-right,0px)) 7px calc(18px + var(--sa-left,0px))}.sticky .tm{font-size:24px}.sticky .chip{padding:2px 4px;font-size:10.5px}
   .sticky .btn.sm{padding:4px 8px;font-size:11.5px}.sticky .pk{display:none}.sticky .sp{margin-left:auto}
   .roster{grid-template-columns:repeat(3,minmax(0,1fr))}.title{font-size:36px}
   .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.tile .n{font-size:clamp(26px,9vw,38px)}.tiles .tile:last-child:nth-child(odd){grid-column:1/-1}
@@ -1113,7 +1123,7 @@ p.gamecoins .earned{display:flex}
 .rc.rank .alt{text-align:right}
 .rc.rank .tk{overflow-wrap:anywhere}
 /* Players: the chooser stays reachable on a long board */
-.pickerbar{position:sticky;top:0;z-index:5;background:var(--bg);padding-block:8px;margin-bottom:6px;box-shadow:0 1px 0 var(--line)}
+.pickerbar{position:sticky;top:var(--sa-top,0px);z-index:5;background:var(--bg);padding-block:8px;margin-bottom:6px;box-shadow:0 1px 0 var(--line)}
 @media (max-width:720px) and (orientation:portrait){
   .cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;gap:8px 6px}.cell{width:auto}
   .cell .l,.pp{font-size:12px}

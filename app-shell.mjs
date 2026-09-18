@@ -42,3 +42,44 @@ export function nativeShare(share) {
     }
   };
 }
+
+// ---------- The system bars ----------
+// Drawing under the bars means the page paints behind them, so their icons have to follow what is behind them:
+// dark icons on the cream screens, light ones on the play screen's navy and the Leaderboard's black. Android's
+// names are the other way round from what you'd guess - "DARK" is a dark screen, and it draws light icons.
+export function barStyleFor(color) {
+  const rgb = /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(String(color));
+  if (!rgb) return "DEFAULT"; // an unpainted or unreadable ground: leave the phone's own choice alone
+  const [r, g, b] = rgb.slice(1).map(Number);
+  // Rec. 601 luma, which is plenty: the only question is whether this ground is light or dark.
+  return (r * 299 + g * 587 + b * 114) / 1000 > 140 ? "LIGHT" : "DARK";
+}
+
+// Keeps the bars in step with the screen. The app puts its theme scope on the root element's class
+// (perfect-season.jsx: .ps, .ps.dark, .ps.night), so watching that one attribute catches every change, and the
+// colour is read from the element rather than from a list of scopes - a new scope needs nothing here. `setStyle`
+// is SystemBars.setStyle. Returns a function that stops watching, for the tests.
+export function followSystemBars(setStyle, { doc = document, view = window, retry = 300 } = {}) {
+  let last = null;
+  let timer = null;
+  let watcher = null;
+  const apply = (root) => {
+    const style = barStyleFor(view.getComputedStyle(root).backgroundColor);
+    if (style === last) return;
+    last = style;
+    setStyle({ style });
+  };
+  const start = () => {
+    // The root only exists once React has mounted, which is after this runs.
+    const root = doc.querySelector(".ps");
+    if (!root) { timer = view.setTimeout(start, retry); return; }
+    apply(root);
+    watcher = new view.MutationObserver(() => apply(root));
+    watcher.observe(root, { attributes: true, attributeFilter: ["class"] });
+  };
+  start();
+  return () => {
+    if (timer != null) view.clearTimeout(timer);
+    if (watcher) watcher.disconnect();
+  };
+}

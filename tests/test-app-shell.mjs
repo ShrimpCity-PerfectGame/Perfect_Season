@@ -3,7 +3,7 @@
 // game in jsdom answering a Back press the way the shell asks it to. Nothing here needs a device, and the
 // website is checked too: it must never hear a Back event it wasn't built for.
 import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { BACK_EVENT, goBack, nativeShare } from "../app-shell.mjs";
+import { BACK_EVENT, barStyleFor, followSystemBars, goBack, nativeShare } from "../app-shell.mjs";
 
 // ---------- the shell on its own ----------
 
@@ -57,6 +57,36 @@ await runTest("the share sheet: sharing passes the season on, closing it is an A
   const broken = nativeShare(async () => { throw new Error("Must provide a URL or Message or files"); });
   const failure = await broken({ text: "x" }).then(() => null, (e) => e);
   assert(failure && failure.name !== "AbortError", "a real failure stays a failure, so the game copies instead");
+});
+
+await runTest("the system bars follow the screen they sit over", async () => {
+  // Android's names read backwards: "DARK" is a dark screen, and it draws light icons on it.
+  assert(barStyleFor("rgb(247, 244, 234)") === "LIGHT", "cream takes dark icons");
+  assert(barStyleFor("rgb(16, 17, 20)") === "DARK", "the play screen's navy takes light ones");
+  assert(barStyleFor("rgb(0, 0, 0)") === "DARK", "so does the Leaderboard's black");
+  assert(barStyleFor("rgba(20, 22, 28, 1)") === "DARK", "however the browser writes the colour");
+  assert(barStyleFor("") === "DEFAULT" && barStyleFor(null) === "DEFAULT", "an unreadable ground leaves the phone's own choice alone");
+
+  // The root element the app puts its theme scope on, and a window that reports each scope's colour.
+  const scopes = { ps: "rgb(247, 244, 234)", "ps dark": "rgb(16, 17, 20)", "ps night": "rgb(0, 0, 0)" };
+  const root = { className: "ps", watchers: [] };
+  const doc = { querySelector: (sel) => (sel === ".ps" ? root : null) };
+  const view = {
+    getComputedStyle: (el) => ({ backgroundColor: scopes[el.className] }),
+    MutationObserver: class { constructor(fn) { this.fn = fn; } observe() { root.watchers.push(this); } disconnect() { root.watchers = []; } },
+    setTimeout: () => 0, clearTimeout: () => {},
+  };
+  const styles = [];
+  const stop = followSystemBars((o) => styles.push(o.style), { doc, view });
+  const scope = (className) => { root.className = className; for (const w of root.watchers) w.fn(); };
+  scope("ps dark");
+  scope("ps night"); // dark to black: different scopes, but the icons stay light, so the bars are left alone
+  scope("ps night");
+  scope("ps");
+  assert(styles.join(",") === "LIGHT,DARK,LIGHT", `expected one call per change of ground, got ${styles.join(",")}`);
+  stop();
+  scope("ps dark");
+  assert(styles.length === 3, "and nothing more once it stops watching");
 });
 
 // ---------- the game answering a Back press ----------
