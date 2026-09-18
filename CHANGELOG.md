@@ -21,6 +21,23 @@ CLAUDE.md.
 - The app's **launch screen is Gridspin's**, the mark on its lime coin over the app's cream, instead of the phone's
   default grey.
 
+## [1.15.0] — 2026-09-17
+
+### Added
+
+- **Gridspin installs like an app.** On Android, Chrome now offers to add it to your home screen, where it opens
+  full screen with its own icon — no store, nothing to download. The offer appears as an "Install Gridspin" button
+  beside the live counts, and only when your browser actually makes one; on an iPhone it's Share → Add to Home
+  Screen, as it always was.
+- **A draft keeps working without a signal.** The game, its artwork and every player's stats are kept on your
+  device after the first visit, so a draft still deals boards on the underground. Only the parts that need other
+  people — the leaderboard, your account, saving a season — wait for the network to come back.
+
+### Changed
+
+- Pages and the game's code are still fetched fresh whenever there's a connection, so an update reaches you on the
+  next load rather than the next week.
+
 ## [1.14.0] — 2026-09-17
 
 ### Added

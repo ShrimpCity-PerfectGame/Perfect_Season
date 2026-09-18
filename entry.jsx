@@ -57,3 +57,14 @@ window.storage = makeStorageShim();
 
 const root = createRoot(document.getElementById("root"));
 root.render(<PerfectSeason />);
+
+// The site is installable - a home-screen icon that opens the game full screen - and keeps working without a
+// signal, both of which come from the service worker (service-worker.js, built into /sw.js by build.mjs).
+// Registered after the page has loaded, so it never competes with the first paint, and never inside the
+// Android app, which is already serving these files from the phone. A browser without service workers (or a
+// page opened from a file, like the UI harness) simply doesn't get the offer.
+if ("serviceWorker" in navigator && !window.Capacitor) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => { /* private mode, or a browser that says no */ });
+  });
+}

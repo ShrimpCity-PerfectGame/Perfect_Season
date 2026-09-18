@@ -2,6 +2,7 @@
 // alongside it. A Node script (not a shell-substituted esbuild CLI flag) so the env-var
 // injection works identically on Windows/PowerShell, macOS, Linux, and Vercel's build image.
 import * as esbuild from "esbuild";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from "node:fs";
 import { SITE_PAGES, sitePageBody, sitePageJsonLd, SITE_PAGE_CSS } from "./site-pages.mjs";
 
@@ -62,6 +63,21 @@ await esbuild.build({
 // the site root.
 cpSync("static", "public", { recursive: true });
 
+// The service worker, which is what makes the site installable and what lets a draft carry on with no signal
+// (service-worker.js, sw-rules.mjs; entry.jsx registers it). Its store is named after this exact build - the
+// version plus a fingerprint of the bundle - so a deploy can never leave a player running the release before
+// it: the new worker throws away every store that isn't its own. The bundle's name never changes, so this
+// fingerprint is the only thing that can tell two builds apart.
+const buildId = `${version}-${createHash("sha256").update(readFileSync("public/page.js")).digest("hex").slice(0, 8)}`;
+await esbuild.build({
+  entryPoints: ["service-worker.js"],
+  bundle: true,
+  format: "iife",
+  outfile: "public/sw.js",
+  minify: true,
+  define: { BUILD_ID: JSON.stringify(buildId) },
+});
+
 // page.html (used as-is for local dev, next to build/page.js and static/) points at "build/page.js"
 // and "static/..."; public/ is flat, so rewrite the paths that differ rather than hand-maintain a
 // second copy of the page, and fill in the absolute address link previews need.
@@ -117,4 +133,4 @@ if (appEnv === "production" && canonicalUrl) {
   writeFileSync("public/robots.txt", "User-agent: *\nAllow: /\n");
   rmSync("public/sitemap.xml", { force: true });
 }
-console.log(`Built public/page.js and public/page.html (v${version}, ${appEnv}, ${siteUrl || "no SITE_URL"}, canonical ${canonicalUrl || "none"})`);
+console.log(`Built public/page.js, public/page.html and public/sw.js (${buildId}, ${appEnv}, ${siteUrl || "no SITE_URL"}, canonical ${canonicalUrl || "none"})`);

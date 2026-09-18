@@ -1,0 +1,154 @@
+// Installing the site as an app, and playing it with no signal: the service worker's rules (sw-rules.mjs),
+// what build.mjs writes for it, and the offer the game shows when a browser makes one. The rule that carries
+// the most weight is the one about what is never stored - everything that isn't this site's own files, which
+// is every account, leaderboard, wallet and submit-run call.
+import { execFileSync } from "node:child_process";
+import { readFileSync, existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { setupDom, makeStorage, mount, flush, click, text, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { planFor, BUNDLE, FONT_HOSTS } from "../sw-rules.mjs";
+import { THEME } from "../theme.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SITE = "https://www.gridspin.app";
+// A request as the worker sees one.
+const req = (url, { method = "GET", mode = "no-cors" } = {}) => ({ url, method, mode });
+
+await runTest("the worker touches this site's own files and nothing else", async () => {
+  assert(planFor(req(`${SITE}/`, { mode: "navigate" }), SITE) === "page", "the app itself");
+  assert(planFor(req(`${SITE}/u/laddertest`, { mode: "navigate" }), SITE) === "page", "a profile");
+  assert(planFor(req(`${SITE}/c/ABC123?beat=12-5`, { mode: "navigate" }), SITE) === "page", "a challenge link");
+  assert(planFor(req(`${SITE}/how-to-play`, { mode: "navigate" }), SITE) === "page", "a page of its own");
+  assert(planFor(req(`${SITE}${BUNDLE}`), SITE) === "bundle", "the bundle");
+  for (const asset of ["/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/icon.svg", "/favicon-32.png", "/apple-touch-icon.png", "/og.png", "/site.webmanifest"]) {
+    assert(planFor(req(`${SITE}${asset}`), SITE) === "asset", `${asset} is an asset`);
+  }
+  for (const host of FONT_HOSTS) assert(planFor(req(`https://${host}/css2?family=Anton`), SITE) === "font", `${host}`);
+
+  // Everything sitewide goes to Supabase on another origin. A stored answer to any of these would be a lie:
+  // a leaderboard from last week, a balance already spent, or a season that looks unsaved and is sent twice.
+  const supabase = "https://ndelisxdxjmvcdezzecu.supabase.co";
+  assert(planFor(req(`${supabase}/rest/v1/profiles?select=*`), SITE) === null, "a leaderboard read is left alone");
+  assert(planFor(req(`${supabase}/rest/v1/rpc/shop_state`), SITE) === null, "the shop is left alone");
+  assert(planFor(req(`${supabase}/auth/v1/token?grant_type=password`, { method: "POST" }), SITE) === null, "signing in is left alone");
+  assert(planFor(req(`${supabase}/functions/v1/submit-run`, { method: "POST" }), SITE) === null, "a season is left alone");
+  assert(planFor(req(`${supabase}/storage/v1/object/public/avatars/u/1.webp`), SITE) === null, "a picture is left alone");
+  assert(planFor(req(`${SITE}${BUNDLE}`, { method: "POST" }), SITE) === null, "nothing but GET is answered from store");
+  assert(planFor(req(`${SITE}/robots.txt`), SITE) === null, "the crawl files are the crawlers' business");
+  assert(planFor(req(`${SITE}/sitemap.xml`), SITE) === null, "including the sitemap");
+  assert(planFor(req("https://example.com/tracker.js"), SITE) === null, "and anything else out there");
+  // Another origin serving a path that looks like ours is still another origin: only this site's own files are
+  // ever stored, whatever they are called.
+  assert(planFor(req(`https://cdn.example.com${BUNDLE}`), SITE) === null, "someone else's page.js is not our bundle");
+  assert(planFor(req("https://cdn.example.com/icon-192.png"), SITE) === null, "someone else's icon is not our icon");
+  assert(planFor(req(`${supabase}/icon-192.png`), SITE) === null, "and nothing under the database's own address");
+});
+
+await runTest("build.mjs writes a worker stamped with this exact build", async () => {
+  const build = (env = {}) => {
+    const clean = { ...process.env };
+    for (const k of ["APP_ENV", "SITE_URL", "CANONICAL_URL", "VERCEL_PROJECT_PRODUCTION_URL"]) delete clean[k];
+    execFileSync(process.execPath, ["build.mjs"], { cwd: root, env: { ...clean, ...env }, stdio: "pipe" });
+    const read = (f) => (existsSync(path.join(root, "public", f)) ? readFileSync(path.join(root, "public", f), "utf8") : null);
+    return { sw: read("sw.js"), js: read("page.js"), html: read("page.html") };
+  };
+  const { version } = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+
+  const first = build({ APP_ENV: "staging", SITE_URL: "https://gridspin.test", SUPABASE_URL: "https://one.supabase.co", SUPABASE_ANON_KEY: "one" });
+  assert(first.sw, "public/sw.js is written");
+  const name = (sw) => (sw.match(/gridspin-[\w.-]+/) || [])[0];
+  assert(name(first.sw)?.startsWith(`gridspin-${version}-`), `the store is named after the release, got ${name(first.sw)}`);
+  // The worker is what a browser installs; it has to be able to open the game with nothing else to hand.
+  for (const shell of ["\"/\"", JSON.stringify(BUNDLE), "\"/site.webmanifest\"", "\"/icon-192.png\""]) {
+    assert(first.sw.includes(shell), `the shell it stores includes ${shell}`);
+  }
+  assert(first.html.includes('rel="manifest"'), "the page links the manifest, without which no browser offers to install it");
+  assert(first.js.includes("/sw.js"), "the bundle registers it");
+  assert(/<meta name="theme-color" content="[^"]+"/.test(first.html), "the page ships a theme colour for the app to keep in step");
+
+  // The bundle's name never changes, so the stamp is the only thing that can tell two builds apart: a deploy
+  // has to leave a player on the new one, not on whatever their browser stored last week.
+  const second = build({ APP_ENV: "staging", SITE_URL: "https://gridspin.test", SUPABASE_URL: "https://two.supabase.co", SUPABASE_ANON_KEY: "two" });
+  assert(second.js !== first.js, "a different build makes a different bundle");
+  assert(name(second.sw) !== name(first.sw), `and a differently named store, got ${name(second.sw)} twice`);
+});
+
+// ---------- the offer, in the game ----------
+
+let app = null;
+async function close() {
+  if (!app) return;
+  const { act } = await import("react-dom/test-utils");
+  await act(async () => { app.reactRoot.unmount(); });
+  app = null;
+}
+async function open() {
+  await close();
+  setupDom("http://localhost/");
+  const storage = makeStorage();
+  storage.data["personal:ps-howto-seen"] = "true";
+  window.storage = storage;
+  window.__ps_supabase__ = makeMockAuth();
+  app = await mount();
+  await flush(4);
+  return app.container;
+}
+const offerButton = (c) => [...c.querySelectorAll("button.pill")].find((b) => b.textContent === "Install Gridspin") || null;
+// What Chrome sends: an event it lets the page hold on to, and which reports what the player chose.
+async function browserOffers(container) {
+  const { act } = await import("react-dom/test-utils");
+  let prompted = 0;
+  const event = new window.Event("beforeinstallprompt", { cancelable: true });
+  event.prompt = async () => { prompted++; };
+  await act(async () => { window.dispatchEvent(event); });
+  await flush(2);
+  return { event, prompts: () => prompted, container };
+}
+
+await runTest("the offer to install only appears when the browser makes one", async () => {
+  const c = await open();
+  assert(!offerButton(c), `no offer to begin with, got: ${text(c).slice(0, 120)}`);
+
+  const offer = await browserOffers(c);
+  assert(offer.event.defaultPrevented, "the browser's own bar is held back, so the offer is the game's to make");
+  assert(offerButton(c), "the offer appears beside the live pills");
+
+  await click(offerButton(c));
+  await flush(2);
+  assert(offer.prompts() === 1, "taking it opens the browser's install dialog");
+  assert(!offerButton(c), "and the offer goes: a browser only lets each one be used once");
+});
+
+await runTest("an installed copy is never offered another install", async () => {
+  const c = await open();
+  await browserOffers(c);
+  assert(offerButton(c), "the offer is there");
+  const { act } = await import("react-dom/test-utils");
+  await act(async () => { window.dispatchEvent(new window.Event("appinstalled")); });
+  await flush(2);
+  assert(!offerButton(c), "installing it takes the offer away");
+});
+
+await runTest("an installed copy is painted the colour of the screen it's on", async () => {
+  const c = await open();
+  // What page.html ships (build.mjs writes it out), so the first paint is cream before React has mounted.
+  const meta = document.createElement("meta");
+  meta.setAttribute("name", "theme-color");
+  meta.setAttribute("content", THEME.light.bg);
+  document.head.appendChild(meta);
+  const colour = () => document.querySelector('meta[name="theme-color"]').getAttribute("content");
+  const tab = (label) => [...c.querySelectorAll("nav .tab")].find((b) => b.textContent.startsWith(label));
+
+  await click(tab("Leaderboard"));
+  await flush(3);
+  assert(colour() === THEME.night.bg, `the Leaderboard is true black, got ${colour()}`);
+  await click(tab("Draft"));
+  await flush(3);
+  assert(colour() === THEME.dark.bg, `the play screen is stadium-dark, got ${colour()}`);
+  await click(tab("Modes"));
+  await flush(3);
+  assert(colour() === THEME.light.bg, `and everything else is cream, got ${colour()}`);
+});
+
+await close();

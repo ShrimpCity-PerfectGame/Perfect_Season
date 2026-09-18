@@ -10,7 +10,7 @@ import {
   fetchWallet, claimMinigameCoins,
 } from "./storage.js";
 import gameData from "./data/players.json";
-import { cssVars, PALETTE } from "./theme.mjs";
+import { cssVars, PALETTE, THEME } from "./theme.mjs";
 import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
   hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, rerollCandidate,
@@ -594,6 +594,9 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
 .namelink{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit}
 @media (hover:hover){.namelink:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
 .pill{font-size:13px;font-weight:700;color:var(--ink);background:var(--surface);border:2px solid var(--line2);border-radius:999px;padding:4px 12px}
+/* The offer to install the site as an app (only shown when the browser makes one): a control sitting between
+   two read-outs, so it takes the buttons' inked edge and hard shadow to say it can be pressed. */
+.pill.install{border-color:var(--ink);box-shadow:2px 2px 0 var(--hard)}
 button.pill{font-family:inherit;transition:border-color .12s}
 @media (hover:hover){button.pill:hover{border-color:var(--ink)}}
 .badge{display:inline-block;background:var(--accent);color:var(--on-accent);font-weight:800;font-size:13px;border-radius:6px;padding:3px 8px;margin-top:10px;margin-right:6px}
@@ -2064,6 +2067,28 @@ export default function PerfectSeason() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // Installing the site as an app. Chrome asks before it offers, so the offer is kept until the player takes
+  // it (a browser only lets each one be used once) - and it never appears where it can't be honoured: Safari
+  // sends no such event, and an already-installed copy isn't offered one. iOS installs by hand, through
+  // Share > Add to Home Screen.
+  const [installOffer, setInstallOffer] = useState(null);
+  useEffect(() => {
+    const offered = (e) => { e.preventDefault(); setInstallOffer(e); };
+    const installed = () => setInstallOffer(null);
+    window.addEventListener("beforeinstallprompt", offered);
+    window.addEventListener("appinstalled", installed);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", offered);
+      window.removeEventListener("appinstalled", installed);
+    };
+  }, []);
+  async function install() {
+    const offer = installOffer;
+    if (!offer) return;
+    setInstallOffer(null);
+    try { await offer.prompt(); } catch (e) { /* the browser withdrew it, or it had been used */ }
+  }
+
   // Android's Back button, asked before the app shell acts on it (app-shell.mjs; the website never sends
   // this). The rules or a report sheet close first, then any screen other than Modes goes back to Modes -
   // except the two that pushed an entry of their own, a profile and the shop, which Back walks normally so
@@ -3140,6 +3165,19 @@ export default function PerfectSeason() {
   }
 
   // ---------- Derived ----------
+  // The theme scope this screen is in (Design system, CLAUDE.md): the play screen is stadium-dark, the
+  // Leaderboard true black, everything else cream. The root wears it as a class and the browser is told the
+  // same colour, so the two can't drift apart.
+  const scope = view === "play" ? "dark" : view === "board" ? "night" : "light";
+
+  // The colour a browser paints around the page: the address bar on a phone, and the status bar when the site
+  // has been installed to a home screen. Following the screen means an installed Gridspin is cream on Modes and
+  // black on the Leaderboard instead of one colour fighting the other two. page.html ships the cream one, so the
+  // first paint is right before this runs.
+  useEffect(() => {
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME[scope].bg);
+  }, [scope]);
+
   const board = spin ? BOARDS[`${spin.team}|${spin.w}`] : [];
   const pickNo = SLOTS.length - open.length + 1;
   const disp = display || spin;
@@ -3234,7 +3272,7 @@ export default function PerfectSeason() {
 
   return (
     <OpenProfile.Provider value={openProfile}>
-    <div className={`ps${view === "play" ? " dark" : view === "board" ? " night" : ""}`}>
+    <div className={`ps${scope === "light" ? "" : ` ${scope}`}`}>
       <style>{APP_CSS}</style>
       <div className="wrap">
         <nav className="nav" aria-label="Sections">
@@ -3319,6 +3357,7 @@ export default function PerfectSeason() {
                   <button className="pill" onClick={() => { setView("stats"); if (!siteStats.loaded) loadSiteStats(); }}>🔥 {liveDrafts.toLocaleString()} drafts</button>
                 )}
                 {online != null && <span className="pill">🟢 {online} online now</span>}
+                {installOffer && <button className="pill install" onClick={install}>Install Gridspin</button>}
               </div>
             </header>
 

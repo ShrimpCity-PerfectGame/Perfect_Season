@@ -51,6 +51,25 @@ standings. `tests/test-site-pages.mjs` covers the app's side. **Brand search:** 
 name "Gridspin", so brand queries need off-site mentions (social profiles and community posts linking here) more
 than markup - that part is the owner's to do.
 
+**Installable, and playable without a signal (v1.15.0).** The site is a real app when someone wants it to be:
+`static/site.webmanifest` (standalone, a maskable icon) plus a service worker, which is what a browser wants before
+it offers "Install app" at all. `service-worker.js` and `sw-rules.mjs` are bundled by `build.mjs` into
+`public/sw.js`, stamped with the release and a fingerprint of the bundle - the bundle's name never changes, so that
+stamp is the only thing telling two builds apart. Every deploy therefore names its store differently and the new
+worker throws away the one before it. Pages and `/page.js` are fetched from the network whenever there is one and
+fall back to the store only when there isn't (a player must never run last week's bundle against this week's
+submit-run); the icons, the manifest and the Google fonts are served from the store and refreshed behind the
+player. **Nothing that isn't this site's own files is ever stored**: every account, leaderboard, wallet and
+submit-run call goes to Supabase on another origin and is passed straight through (`planFor`) - a stored answer to
+any of them would be a stale leaderboard, a balance already spent, or a season saved twice. `entry.jsx` registers
+the worker after load, and never inside the Android app, which serves the same files from the phone already. The
+offer to install is the game's own: Chrome's `beforeinstallprompt` is held back and shown as an "Install Gridspin"
+pill beside the live counts (iOS has no such event - it installs by hand through Share > Add to Home Screen).
+`tests/test-pwa.mjs` covers the rules, what the build writes and the offer; the offline half was checked in real
+Chrome with the network cut. **Runbook:** to take the worker off the site, deploy a `public/sw.js` whose only line
+is `self.registration.unregister()`. A bad deploy needs no such thing - pages and the bundle are network-first, so
+the next load has the fix.
+
 **Sharing (v1.10.0).** `shareText` builds a Wordle-style card and must never name the players (that
 would spoil the daily): a title (`Gridspin Daily N`, numbered from `GRIDSPIN_DAY_ONE` = launch day
 2026-09-14, or the Unlimited variant), the record, the 17 regular-season games as squares in rows of
@@ -196,6 +215,7 @@ node tests/test-build-seo.mjs      # runs build.mjs for production and staging: 
 node tests/test-share.mjs          # the spoiler-free share card, challenge links in and out, and the challenge card on Modes
 node tests/test-site-pages.mjs     # /how-to-play and /leaderboard: the addresses, the footer links, and the rules matching site-pages.mjs
 node tests/test-app-shell.mjs      # the Android app: Back closes a dialog, then leaves a screen, then the app; the share sheet's AbortError
+node tests/test-pwa.mjs            # installable and offline: what the service worker stores and never stores, the build's stamp, the install offer
 
 # Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
 # Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.

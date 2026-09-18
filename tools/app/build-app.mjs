@@ -52,14 +52,16 @@ const env = {
 };
 execFileSync(process.execPath, ["build.mjs"], { cwd: root, env, stdio: "inherit" });
 
-// public/ -> app/www, with page.html as the app's entry. robots.txt and the sitemap are for crawlers and have no
-// business inside an app; everything else (the bundle, the icons, the manifest, the pages of their own) comes along.
+// public/ -> app/www, with page.html as the app's entry. robots.txt and the sitemap are for crawlers, and the
+// service worker is the website's (it is how a browser installs the site and how it works offline) - an app
+// serves all of this from the phone already. Everything else - the bundle, the icons, the manifest, the pages
+// of their own - comes along.
 const www = path.join(root, "app/www");
 rmSync(www, { recursive: true, force: true });
 mkdirSync(www, { recursive: true });
 cpSync(path.join(root, "public"), www, {
   recursive: true,
-  filter: (src) => !/[\\/](robots\.txt|sitemap\.xml)$/.test(src),
+  filter: (src) => !/[\\/](robots\.txt|sitemap\.xml|sw\.js)$/.test(src),
 });
 renameSync(path.join(www, "page.html"), path.join(www, "index.html"));
 const { version } = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
