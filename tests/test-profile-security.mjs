@@ -614,6 +614,8 @@ const PG_TEMP_LAST = "public, pg_temp";
 const EXPECTED_FUNCTIONS = {
   "check_new_build()": [false, PG_TEMP_LAST, false, false],
   "check_username(p_username text)": [true, PG_TEMP_LAST, true, true],
+  // The name an account picks after signing in with Google: for the account doing it, so anon can't call it.
+  "claim_username(p_username text)": [true, PG_TEMP_LAST, false, true],
   // Called by the avatars insert policy as the uploading player, so they need execute; anon never uploads.
   "avatar_folder_has_room()": [false, PG_TEMP_LAST, false, true],
   "handle_new_user()": [true, PG_TEMP_LAST, true, true],

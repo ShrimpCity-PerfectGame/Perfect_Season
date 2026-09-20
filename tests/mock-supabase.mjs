@@ -30,7 +30,25 @@ export function makeMockAuth() {
 
   // The v1.11.0 profile modules (PROFILES.md) each own their tables and database functions, in their
   // own files, sharing these tables and the signed-in user.
-  const state = { profiles, runs, dailyRuns, souRuns, builds, currentUserId: () => session?.user?.id ?? null, isModerator: () => false, ownsAvatarPack: () => false };
+  // A profile as the database makes one, and what happens around it: migration-wallet.sql's trigger on
+  // profiles pays the welcome coins. Both ways in - the signup trigger and claim_username - come through here.
+  const createProfile = (id, username) => {
+    profiles.set(id, { id, username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
+    wallet.welcome(id);
+    return profiles.get(id);
+  };
+  // What Google's return leaves behind: a session for that address, on the account that already holds it
+  // if there is one - which is what Supabase does with a provider's verified email - and otherwise a new
+  // account with no profile row until claim_username makes it.
+  const googleSignIn = (email) => {
+    const existing = authUsers.get(email);
+    const id = existing?.id ?? `user-${authUsers.size + 1}`;
+    if (!existing) authUsers.set(email, { id, email, password: null });
+    session = { user: { id, email } };
+    notify("SIGNED_IN");
+    return { id, email };
+  };
+  const state = { profiles, runs, dailyRuns, souRuns, builds, createProfile, currentUserId: () => session?.user?.id ?? null, isModerator: () => false, ownsAvatarPack: () => false };
   const profileData = makeProfileData(state, { playerStats });
   const moderation = makeModeration(state, profileData);
   state.isModerator = moderation.isModerator;
@@ -471,6 +489,7 @@ export function makeMockAuth() {
     _inventory: shop.tables.inventory,
     _wallet: wallet, // its server functions (credit_coins, award_badges) and helpers, for setting up a test
     _failWrites: failWrites, // test-only: tables whose writes inside submit-run fail (see invokeSubmitRun)
+    _googleSignIn: googleSignIn, // test-only: the session Google's return leaves behind, with no browser
     _profiles: profiles, // test-only escape hatch for setup/assertions
     _runs: runs, // test-only escape hatch for setup/assertions
     _builds: builds, // test-only escape hatch for setup/assertions
@@ -493,11 +512,19 @@ export function makeMockAuth() {
         }
         const id = `user-${authUsers.size + 1}`;
         authUsers.set(email, { id, email, password });
-        profiles.set(id, { id, username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
-        wallet.welcome(id); // migration-wallet.sql's create_wallet trigger
+        createProfile(id, username);
         session = { user: { id, email } };
         notify("SIGNED_IN");
         return { data: { user: { id, email } }, error: null };
+      },
+      // Signing in with Google. The real flow leaves the page for Google and comes back with a session in
+      // the address; there is no browser here, so this is what the return leaves behind - and, for an
+      // account Google has not brought before, one with no profile at all until claim_username makes one
+      // (migration-profiles.sql's handle_new_user). An email Google brings back that an account already
+      // holds signs into that account, which is what Supabase does with a provider's verified address.
+      async signInWithOAuth({ provider = "google", options } = {}) {
+        googleSignIn(options?.queryParams?.login_hint || `${provider}@example.com`);
+        return { data: { provider, url: options?.redirectTo || "https://accounts.google.com/o/oauth2/auth" }, error: null };
       },
       async signInWithPassword({ email, password }) {
         const u = authUsers.get(email);

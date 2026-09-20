@@ -24,6 +24,20 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
+## [1.16.0] — unreleased
+
+### Added
+
+- **Sign in with Google.** "Continue with Google" sits beside the email form on the Account tab. Google has no
+  username to give, so the first time you use it the game asks you to pick one — that's the name on the
+  leaderboard and your profile — and the account isn't created until you do. After that it's one tap to sign in.
+- Signing in with Google on an address that already has an account signs you into that account.
+
+### Notes
+
+- Sign in with Apple isn't here: it needs a paid Apple Developer membership. The Android app still uses the email
+  form, since OAuth there needs a deep link back into the app.
+
 ## [1.15.0] — 2026-09-18
 
 ### Added

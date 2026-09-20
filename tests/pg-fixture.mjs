@@ -31,7 +31,9 @@ export async function freshDb({ migrations = MIGRATIONS } = {}) {
     create role service_role nologin bypassrls;
 
     create schema auth;
-    create table auth.users (id uuid primary key, raw_user_meta_data jsonb);
+    -- raw_app_meta_data is how Supabase records which provider made the account ("email", "google"),
+    -- which the signup trigger reads: only a provider's account may arrive without a username.
+    create table auth.users (id uuid primary key, raw_user_meta_data jsonb, raw_app_meta_data jsonb);
     create function auth.uid() returns uuid language sql stable
       as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 
@@ -70,6 +72,12 @@ export async function addAccount(db, row) {
   const jsonCols = new Set(["best_run", "best_run_std", "best_record", "recent", "points_day"]);
   const sets = cols.map((c, i) => `${c} = $${i + 2}${jsonCols.has(c) ? "::jsonb" : ""}`).join(", ");
   await db.query(`update profiles set ${sets} where id = $1`, [row.id, ...cols.map((c) => (jsonCols.has(c) ? JSON.stringify(row[c]) : row[c]))]);
+}
+
+// An account as signing in with Google leaves one: no username, so the signup trigger writes no profile
+// row and claim_username is what creates it (migration-profiles.sql).
+export async function addProviderAccount(db, id, provider = "google") {
+  await db.query("insert into auth.users values ($1, null, $2)", [id, { provider, providers: [provider] }]);
 }
 
 async function as(db, role, uid, fn) {

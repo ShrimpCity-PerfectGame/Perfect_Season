@@ -245,6 +245,19 @@ export async function removeAvatar(previousPath) {
   return setAvatarWithout(previousPath, null);
 }
 
+// The name an account picks after signing in with Google, and what creates its profile row - until then
+// the account has none (migration-profiles.sql's handle_new_user and claim_username; PROFILES.md).
+// Returns the database's own code, or "failed" when the call didn't get through at all.
+const CLAIM_RESULTS = ["ok", "taken", "blocked", "invalid", "already_named", "not_signed_in"];
+export async function claimUsername(name) {
+  try {
+    const { data, error } = await getClient().rpc("claim_username", { p_username: name });
+    return !error && CLAIM_RESULTS.includes(data) ? data : "failed";
+  } catch (e) {
+    return "failed";
+  }
+}
+
 // Whether a username can be signed up with, asked before the signup itself so the form can say why.
 //   "ok" | "taken" | "blocked" | "invalid", or null if the check couldn't run (signup still re-checks).
 const USERNAME_RESULTS = ["ok", "taken", "blocked", "invalid"];

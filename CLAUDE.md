@@ -89,6 +89,22 @@ on the Leaderboard and Stats screens opens its profile. **`PROFILES.md` is the r
 addresses and history) - read it before touching any of the files below. See "Profiles" under
 Architecture for the rules that matter most.
 
+**Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
+Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`
+only allows that for a provider - an email signup still brings its name and passes every check), and the game
+shows a dialog that can't be dismissed until it picks one, through `claim_username`. That function is the only
+way a profile is made outside the signup trigger; it carries the same rules (the username pattern, the reserved
+`admin`, the word filter, uniqueness) because a modified browser can call it directly, and it refuses once the
+caller has a profile, so it can never be a rename. Until a name is claimed the account is on no board, owns
+nothing and has no wallet - the welcome coins ride on the profile insert - and `submit-run` already refuses a
+season for an account with no profile, so nothing can be recorded under a nameless one. `PROFILES.md` 3.1 has
+the function and the codes; `tests/test-signin-google.mjs` drives the flow and `tests/test-profile-data.mjs`
+holds the SQL and the mock to the same answers. **Apple is not done**: Sign in with Apple needs a $99/yr Apple
+Developer membership. **The provider is configured per environment** in the Supabase dashboard (Authentication >
+Providers > Google, with a Google Cloud OAuth client), so staging and production must each be set up - exactly
+the kind of drift the note under Releasing warns about. In the Android app OAuth would leave the web view for a
+browser and need a deep link back; that isn't wired, so the app keeps the email form.
+
 **Coins and the shop (v1.12.0).** Finished seasons, badges and the two minigames pay coins into a wallet
 that never goes below zero, spent in a cosmetic-only shop: frames, card themes, titles and avatar packs
 (some unlocked only by a badge), plus a free three-badge showcase. There's no real money, and nothing
@@ -243,6 +259,7 @@ node tests/test-profile-screen.mjs     # ProfileScreen on its own: owner/visitor
 node tests/test-avatar-picker.mjs      # the picker's tabs, presets, errors (jsdom)
 node tests/test-avatar-image.mjs       # crop/resize/encode and metadata stripping - needs the installed Chrome (CHROME_PATH overrides)
 node tests/test-profile-links.mjs      # /u/name addresses, Back/Forward, every name link, signup's username check
+node tests/test-signin-google.mjs      # signing in with Google: the name it has to pick first, what's refused, and the account it ends up with
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -620,6 +637,9 @@ suite and still broke the live Leaderboard for every existing account.
   Unlimited, Genius and GM season fails to save. v1.13.0's (four titles, two avatar packs): re-run
   `migration-shop.sql`, then the client; submit-run doesn't change. New shop items always ship that way - the seed
   adds missing rows - and a new pack's avatars need their drawings in `avatars.jsx` in the same release.
+  v1.16.0's (signing in with Google): re-run `migration-profiles.sql` (it relaxes the signup trigger and adds
+  `claim_username`), switch the Google provider on in that environment's Supabase project, then the client;
+  submit-run doesn't change.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging

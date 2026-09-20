@@ -334,6 +334,32 @@ returns text language sql stable security definer set search_path = public, pg_t
   end;
 $$;
 
+-- The name an account picks after signing in with a provider, and the only way a profile row is created
+-- outside the signup trigger. It checks the same three things that trigger does, for the same reason: a
+-- modified browser can call this directly, so the form's own checks exist only to say why sooner. It can
+-- never rename anybody - it refuses as soon as the caller has a profile - so renaming stays a moderator's
+-- job (mod_act). The codes are check_username's, plus two for the states only this function can be in:
+--   ok | invalid | taken | blocked | already_named | not_signed_in
+create or replace function public.claim_username(p_username text)
+returns text language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then return 'not_signed_in'; end if;
+  if exists (select 1 from public.profiles p where p.id = v_uid) then return 'already_named'; end if;
+  if p_username is null or p_username !~ '^[A-Za-z0-9_]{3,16}$' then return 'invalid'; end if;
+  -- Reserved reads as taken, the way check_username reports it: no need to tell a stranger which names
+  -- the site holds back.
+  if public.username_is_reserved(p_username) then return 'taken'; end if;
+  if not public.text_is_clean(p_username) then return 'blocked'; end if;
+  insert into public.profiles (id, username) values (v_uid, p_username);
+  return 'ok';
+exception when unique_violation then
+  -- Two people claiming the same name at once: the second one is told it is taken, like anyone else.
+  return 'taken';
+end;
+$$;
+
 -- The signup trigger (first defined in schema.sql, whose trigger on auth.users calls this), now also
 -- refusing a username outside the username rule or with a blocked word. Supabase Auth reports the refusal
 -- to the browser as "Database error saving new user", and no account is created.
@@ -345,7 +371,17 @@ create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_username text := new.raw_user_meta_data->>'username';
+  v_provider text := coalesce(new.raw_app_meta_data->>'provider', 'email');
 begin
+  -- Signing in with Google brings no username - Google has none to give - so that account gets no profile
+  -- row at all until the player picks one through claim_username below. Nothing reads an account without
+  -- one: it is not on any board, submit-run answers "no profile for this account", and the welcome coins
+  -- are paid by the trigger on profiles, so they arrive with the name. Only a provider may arrive nameless;
+  -- an email and password signup still brings its name and still passes every check below, or a modified
+  -- client could sign up nameless through the ordinary form and walk past the rules.
+  if v_username is null and v_provider <> 'email' then
+    return new;
+  end if;
   -- profile-rules.mjs's USERNAME_RE, the same rule as check_username's 'invalid'.
   if v_username is null or v_username !~ '^[A-Za-z0-9_]{3,16}$' then
     raise exception 'username_invalid' using errcode = 'P0001';
@@ -439,6 +475,9 @@ $$;
 
 grant execute on function public.save_profile(text, text), public.set_avatar(text, text),
   public.check_username(text), public.player_profile(text) to anon, authenticated;
+-- Claiming a name is for the account doing it, so anon has no business calling it at all.
+revoke execute on function public.claim_username(text) from public, anon;
+grant execute on function public.claim_username(text) to authenticated;
 
 -- ---------- Pictures: the avatars bucket ----------
 -- Public, so a picture loads from its address with no signed URL. The size and type limits are the

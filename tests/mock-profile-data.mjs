@@ -1,6 +1,7 @@
 // The test mock's side of supabase/migration-profiles.sql: profile_details, avatar_presets,
 // blocked_words, site_flags, the avatars storage bucket with its policies, and the functions
-// text_is_clean, save_profile, set_avatar, check_username and player_profile. Contract: PROFILES.md.
+// text_is_clean, save_profile, set_avatar, check_username, claim_username and player_profile.
+// Contract: PROFILES.md.
 // tests/test-profile-data.mjs runs the same calls through the real SQL (PGlite) and through this mock
 // and requires the same results, and tests/test-word-filter.mjs does the same for the word filter, so
 // every screen test that saves a bio or checks a username is testing what the database does.
@@ -196,6 +197,19 @@ export function makeProfileData(state, { playerStats }) {
         if (!preset || !(preset.free || state.ownsAvatarPack?.(uid, preset.pack))) fail("bad_preset");
       }
       return upsertDetails(uid, { avatar_path: p_path ?? null, avatar_preset: p_preset ?? null });
+    },
+    // The name an account picks after signing in with Google: the only way a profile is made outside the
+    // signup trigger, and never a rename (it refuses once the caller has one). Codes as the SQL returns them.
+    claim_username({ p_username = null } = {}) {
+      const uid = state.currentUserId();
+      if (!uid) return "not_signed_in";
+      if (state.profiles.has(uid)) return "already_named";
+      if (typeof p_username !== "string" || !USERNAME_RE.test(p_username)) return "invalid";
+      if (isReservedUsername(p_username)) return "taken";
+      if (!isClean(p_username)) return "blocked";
+      if ([...state.profiles.values()].some((r) => r.username === p_username)) return "taken";
+      state.createProfile(uid, p_username);
+      return "ok";
     },
     check_username({ p_username = null } = {}) {
       if (typeof p_username !== "string" || !USERNAME_RE.test(p_username)) return "invalid";

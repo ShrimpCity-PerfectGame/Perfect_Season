@@ -36,6 +36,12 @@ export async function authSignUp(email, password, username) {
 export async function authSignIn(email, password) {
   return getClient().auth.signInWithPassword({ email, password });
 }
+// Signing in with Google. The page leaves for Google and comes back to `redirectTo`, where supabase-js
+// reads the session out of the address by itself - no password ever passes through here. An account
+// arriving this way has no profile until it claims a name (storage-profile.js's claimUsername).
+export async function authSignInWithGoogle(redirectTo) {
+  return getClient().auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
+}
 export async function authSignOut() {
   return getClient().auth.signOut();
 }

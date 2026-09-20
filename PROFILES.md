@@ -102,6 +102,13 @@ default) for any function clients must not call directly.
 RLS on; `select using (true)`; no insert/update/delete policy. A row exists only once the player has
 saved something; no row reads as "nothing set".
 
+**An account with no profile row (v1.16.0).** Signing in with Google makes an `auth.users` row with no
+username, and `handle_new_user` writes no `profiles` row for it. That state is deliberate and is what the
+app watches for: a session whose `fetchProfile` comes back null is an account that hasn't picked a name.
+Nothing reads such an account - it is on no board, owns nothing, has no wallet (the welcome coins ride on
+the `profiles` insert), and `submit-run` already answers `no profile for this account`, so a modified
+client can't record a season under it either. `claim_username` is what ends the state.
+
 **`avatar_presets`** `(key text primary key, pack text not null, free boolean not null)`, seeded with
 exactly the 12 keys in profile-rules.mjs's `FREE_AVATAR_PRESETS`, pack `'starter'`, free `true`. RLS on,
 public select. (v1.12.0 adds paid packs.)
@@ -138,7 +145,8 @@ isn't a finite number (`bad_build`). Old rows are left alone; after migrating, `
 | `set_avatar(p_path text, p_preset text)` | jsonb: the details row | security definer. At most one non-null (`bad_request`). A path must be in the caller's own folder and match the pattern (`bad_path`); a preset must exist and be free (`bad_preset`). Sets both columns (so choosing one clears the other; both null clears the picture). Doesn't touch storage — the client deletes the old file. Raises `not_signed_in`. |
 | `check_username(p_username text)` | text: `ok` \| `taken` \| `blocked` \| `invalid` | security definer, stable, callable by anon. `invalid` unless `^[A-Za-z0-9_]{3,16}$`; `taken` if a profile has exactly that username, or it's a reserved name another account holds in any capitalization; `blocked` if not clean. |
 | `username_is_reserved(p_username text)` | boolean | 1.11.1. security invoker, execute revoked from clients. True for a reserved name (`admin`, which unlocks the testing tools whatever its capitalization) when some account already holds it in any capitalization - so the first account keeps it and "Admin" can't join it. Used by `check_username`, the signup trigger (`username_reserved`) and `mod_act`'s rename (`taken`). |
-| `handle_new_user()` | trigger | `create or replace` of schema.sql's signup trigger, now raising `username_invalid` for a username outside `^[A-Za-z0-9_]{3,16}$` (a modified client can call Auth's signup directly), `username_reserved` for a reserved name another account holds in any capitalization, and `username_blocked` for one that isn't clean. |
+| `handle_new_user()` | trigger | `create or replace` of schema.sql's signup trigger, now raising `username_invalid` for a username outside `^[A-Za-z0-9_]{3,16}$` (a modified client can call Auth's signup directly), `username_reserved` for a reserved name another account holds in any capitalization, and `username_blocked` for one that isn't clean. **v1.16.0:** an account from a provider (`raw_app_meta_data->>'provider'` is not `email`) arrives with no username - Google has none to give - and gets **no profile row at all** until it claims one; an email and password signup still brings its name and still passes every check above. |
+| `claim_username(p_username text)` | text: `ok` \| `invalid` \| `taken` \| `blocked` \| `already_named` \| `not_signed_in` | v1.16.0. security definer; execute revoked from anon. The name an account picks after signing in with a provider, and the only way a profile row is created outside the signup trigger. Same three rules as that trigger (reserved reads as `taken`, as in `check_username`), and it refuses once the caller has a profile, so it is never a rename - that stays `mod_act`'s job. A name taken between the check and the insert comes back as `taken`. |
 | `avatar_folder_has_room()` | boolean | security invoker, volatile; execute for `authenticated` only, because the storage insert policy calls it as the uploading player. Counts the caller's own avatars files (through their read policy) under a per-player lock, so a burst of uploads can't all squeeze past the 10-file cap. |
 | `player_profile(p_username text)` | jsonb or null | stable, security invoker. Exact username match first; otherwise a case-insensitive match only if exactly one account matches. Returns `{ "profile": <the profiles row, every column, to_jsonb>, "details": <details row as above, or null>, "stats": player_stats(id) }`. |
 
@@ -270,6 +278,12 @@ back as a status or a reason. Shared plumbing is in `storage-core.js` (`getClien
 `rowToProfile`, `rpcReason`).
 
 ### 4.1 `storage-profile.js` (agent B; phase 0 wrote working versions)
+
+**v1.16.0** adds `claimUsername(name)`, which calls `claim_username` and returns the database's own code
+(or `"failed"` if the call didn't get through). `storage.js` adds `authSignInWithGoogle(redirectTo)`, which
+is `supabase.auth.signInWithOAuth({ provider: "google" })` - the page leaves for Google and comes back with
+the session in the address, which supabase-js reads by itself.
+
 
 ```js
 fetchPlayerProfile(username)

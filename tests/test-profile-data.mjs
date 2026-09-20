@@ -6,13 +6,13 @@
 //   - the functions act only on the caller's own row and enforce every limit and error code;
 //   - the avatars bucket's policies: your own folder only, uploads named exactly as the app names them,
 //     at most 10 files a folder, and no new files while uploads are paused;
-//   - check_username, the signup trigger, and player_profile's lookup and JSON shape;
+//   - check_username, claim_username, the signup trigger, and player_profile's lookup and JSON shape;
 //   - running the migration a second time is harmless;
 //   - the mock returns what the SQL returns for the same list of calls;
 //   - storage-profile.js's statuses and reasons, its uploads and its clean-up.
 // The word filter's own cases are in test-word-filter.mjs.
 import { assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql } from "./pg-fixture.mjs";
+import { freshDb, addAccount, addProviderAccount, asUser, asAnon, failure, uuid, sql } from "./pg-fixture.mjs";
 import { makeProfileData, BLOCKED_WORDS_SEED, AVATAR_FOLDER_LIMIT } from "./mock-profile-data.mjs";
 import { playerStats } from "./mock-profile-stats.mjs";
 import { FREE_AVATAR_PRESETS, TEAM_CODES, AVATAR_BUCKET, AVATAR_MAX_BYTES, AVATAR_TYPES, emptyPlayerStats, mapPlayerStats } from "../profile-rules.mjs";
@@ -245,6 +245,56 @@ await runTest("check_username answers invalid, taken, blocked or ok, for anyone"
     for (const [name, want] of cases) {
       const r = await call(who, "check_username", { p_username: name });
       assert(r.data === want, `check_username(${JSON.stringify(name)}) as ${who ? "bob" : "anon"} should be ${want}, got ${JSON.stringify(r)}`);
+    }
+  }
+});
+
+await runTest("an account from a provider arrives with no name and no profile, and claims one", async () => {
+  const google = uuid(70);
+  await addProviderAccount(db, google);
+  assert((await owner("select count(*)::int as n from auth.users where id = $1", [google]))[0].n === 1, "the account is made");
+  assert((await owner("select count(*)::int as n from profiles where id = $1", [google]))[0].n === 0, "with no profile until it has a name");
+  // Nothing is owed to an account with no profile: the welcome coins ride on the profile row.
+  assert((await owner("select count(*)::int as n from wallets where user_id = $1", [google]))[0].n === 0, "and no wallet yet");
+
+  const refusals = [[null, "invalid"], ["ab", "invalid"], ["has space", "invalid"], ["a".repeat(17), "invalid"],
+    [`${WORD}_99`, "blocked"], [stretched(DOUBLED), "blocked"], ["alice", "taken"], ["ALICE", "ok"]];
+  for (const [name, want] of refusals) {
+    const r = await call(google, "claim_username", { p_username: name });
+    assert(r.data === want, `claim_username(${JSON.stringify(name)}) should be ${want}, got ${JSON.stringify(r)}`);
+    if (want === "ok") break;
+  }
+  const row = (await owner("select username from profiles where id = $1", [google]))[0];
+  assert(row?.username === "ALICE", `the name is written as picked, got ${JSON.stringify(row)}`);
+  assert((await owner("select balance from wallets where user_id = $1", [google]))[0]?.balance === 250, "and the welcome coins arrive with the profile");
+
+  // It is not a rename: a second call, by an account that has a name, changes nothing.
+  assert((await call(google, "claim_username", { p_username: "SomethingElse" })).data === "already_named", "an account with a name can't claim another");
+  assert((await call(BOB, "claim_username", { p_username: "bobby" })).data === "already_named", "nor can one that signed up with an email");
+  assert((await owner("select username from profiles where id = $1", [BOB]))[0].username === "bob", "bob keeps his name");
+  assert((await call(null, "claim_username", { p_username: "nobody" })).error, "signed out, it can't even be called");
+});
+
+await runTest("the mock claims a name exactly as the database does", async () => {
+  const fresh = await freshDb();
+  await addAccount(fresh, { id: uuid(1), username: "alice" });
+  const auth = makeMockAuth();
+  auth._profiles.set("mock-alice", { id: "mock-alice", username: "alice" });
+  const mock = makeProfileData({ profiles: auth._profiles, createProfile: (id, username) => auth._profiles.set(id, { id, username }), currentUserId: () => current, isModerator: () => false }, { playerStats });
+  let current = null;
+
+  const names = [null, "ab", "has space", "a".repeat(17), `${WORD}_99`, stretched(DOUBLED), "alice", mathBold("alice"), "admin", "Fresh_Name"];
+  // Signed out first, then as an account with no profile, then again once it has a name.
+  for (const [who, mockWho] of [[null, null], [uuid(71), "mock-google"], [uuid(71), "mock-google"]]) {
+    if (who) await addProviderAccount(fresh, who).catch(() => {}); // the second pass is the same account
+    current = mockWho;
+    for (const name of names) {
+      const sqlAnswer = who
+        ? (await asUser(fresh, who, () => fresh.query("select claim_username($1) as r", [name]))).rows[0].r
+        : "not_signed_in"; // anon may not call it at all, which the app treats the same way
+      const mockAnswer = mock.rpcs.claim_username({ p_username: name });
+      assert(sqlAnswer === mockAnswer, `claim_username(${JSON.stringify(name)}) as ${who || "anon"}: SQL says ${sqlAnswer}, the mock says ${mockAnswer}`);
+      if (sqlAnswer === "ok") break;
     }
   }
 });

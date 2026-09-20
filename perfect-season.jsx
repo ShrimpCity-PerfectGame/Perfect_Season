@@ -4,9 +4,9 @@ import {
   fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
-  authSignUp, authSignIn, authSignOut, authGetSession, authOnChange, mapAuthError,
+  authSignUp, authSignIn, authSignInWithGoogle, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, submitRun, submitDnf,
-  fetchPlayerProfile, fetchProfileDetails, checkUsername, isModerator, fetchModQueue,
+  fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
 } from "./storage.js";
 import gameData from "./data/players.json";
@@ -1446,6 +1446,61 @@ function RankRows({ rows, empty, value }) {
   );
 }
 
+// The name an account picks after signing in with Google, which Google has none to give. It can't be
+// dismissed and nothing is behind it: until it's answered the account has no profile row at all, so there
+// is nothing to show and nothing it could save (PROFILES.md). Signing out is the way past it.
+function PickName({ email, onClaimed, onSignOut }) {
+  const [name, setName] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const field = useRef(null);
+  useEffect(() => { field.current?.focus({ preventScroll: true }); }, []);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (busy) return;
+    const username = name.trim();
+    if (!USERNAME_RE.test(username)) return setErr(USERNAME_RULE);
+    setBusy(true);
+    setErr("");
+    // The database decides: this is the same call a modified browser would make, and it checks the name
+    // against the same rules signing up does.
+    const answer = await claimUsername(username);
+    setBusy(false);
+    if (answer === "ok") return onClaimed(username);
+    setErr({
+      taken: "That username is taken. Try another one.",
+      blocked: NAME_NOT_ALLOWED,
+      invalid: USERNAME_RULE,
+      already_named: "This account already has a name. Reload the page to use it.",
+      not_signed_in: "You've been signed out. Sign in again.",
+    }[answer] || "Something went wrong. Try again.");
+  }
+
+  return (
+    <div className="modal-bg">
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="pickname-title">
+        <h2 id="pickname-title">Pick your name</h2>
+        <p>{email ? <>Signed in as <b>{email}</b>. </> : null}This is the name on the leaderboard and on your profile.</p>
+        <form onSubmit={submit} noValidate>
+          <div className="fields">
+            <label>Username
+              <input ref={field} className="inp" value={name} maxLength={16} autoComplete="username"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(e) => setName(e.target.value)} />
+            </label>
+          </div>
+          {err && <p className="err" role="alert">{err}</p>}
+          <div className="frow" style={{ marginTop: 10 }}>
+            <button type="submit" className="btn solid" disabled={busy}>{busy ? "Checking…" : "That's my name"}</button>
+            <button type="button" className="btn" onClick={onSignOut}>Sign out</button>
+          </div>
+        </form>
+        <p className="fine">{USERNAME_RULE}</p>
+      </div>
+    </div>
+  );
+}
+
 function AuthPanel({ onAuthed, title, blurb }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -1490,10 +1545,24 @@ function AuthPanel({ onAuthed, title, blurb }) {
 
   // A real form, so a phone keyboard offers "Go" and password managers recognize the login.
   const onSubmit = (e) => { e.preventDefault(); if (!busy) submit(); };
+  // Google, or an email address. The page leaves for Google when this works, so getting an answer back
+  // at all means it didn't - most likely the provider isn't switched on for this environment.
+  async function google() {
+    setErr("");
+    setBusy(true);
+    const { error } = await authSignInWithGoogle(`${window.location.origin}/`);
+    setBusy(false);
+    if (error) setErr("Google sign-in isn't available right now. Use an email address instead.");
+  }
+
   return (
     <div className="panel">
       {title && <h3>{title}</h3>}
       {blurb && <p>{blurb}</p>}
+      <div className="frow">
+        <button type="button" className="btn" disabled={busy} onClick={google}>Continue with Google</button>
+      </div>
+      <p className="fine" style={{ margin: "10px 0" }}>or with an email address</p>
       <div className="seg" role="tablist">
         <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "on" : ""} onClick={() => { setMode("login"); setErr(""); }}>Log in</button>
         <button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "on" : ""} onClick={() => { setMode("signup"); setErr(""); }}>Create account</button>
@@ -1876,6 +1945,8 @@ export default function PerfectSeason() {
   const [userId, setUserId] = useState(null); // Supabase auth user id - the real key for profile reads/writes
   const [stats, setStats] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  // { id, email } while an account that signed in with Google still has no name, and so no profile.
+  const [needsName, setNeedsName] = useState(null);
   const [myDetails, setMyDetails] = useState(null); // your own bio/team/picture (fetchProfileDetails), for the header picture
   const [wallet, setWallet] = useState(null); // your coins (fetchWallet), for your own profile card
   const [isMod, setIsMod] = useState(false); // a moderator, as isModerator() answered at sign-in
@@ -1967,17 +2038,33 @@ export default function PerfectSeason() {
   const capUsed = SLOTS.reduce((sum, s) => sum + (roster[s] ? playerSalary(roster[s], mode?.format) : 0), 0);
   const capRemaining = GM_CAP - capUsed;
 
+  // Who a session belongs to: their profile, or - for an account that signed in with Google and hasn't
+  // picked a name - the dialog that asks for one. An account has no profile row until it claims a name
+  // (PROFILES.md), so "signed in with nothing to show" is exactly that case and nothing else.
+  const adoptSession = useRef(null);
+  adoptSession.current = async (session) => {
+    const id = session?.user?.id;
+    if (!id) return;
+    const prof = await fetchProfile(id);
+    if (prof) {
+      setNeedsName(null);
+      setUserId(id); setUser(prof.username); setStats(prof); loadAccountExtras(id);
+    } else {
+      setNeedsName({ id, email: session.user.email || "" });
+    }
+  };
+
   useEffect(() => {
     (async () => {
       const { data } = await authGetSession();
-      if (data?.session?.user) {
-        const prof = await fetchProfile(data.session.user.id);
-        if (prof) { setUserId(data.session.user.id); setUser(prof.username); setStats(prof); loadAccountExtras(data.session.user.id); }
-      }
+      await adoptSession.current(data?.session);
       setAuthReady(true);
     })();
-    const { data: authSub } = authOnChange((event) => {
-      if (event === "SIGNED_OUT") { setUserId(null); setUser(null); setStats(null); clearAccountExtras(); }
+    const { data: authSub } = authOnChange((event, session) => {
+      if (event === "SIGNED_OUT") { setUserId(null); setUser(null); setStats(null); setNeedsName(null); clearAccountExtras(); }
+      // Coming back from Google lands here, not in the read above: supabase-js takes the session out of
+      // the address after the page has already mounted.
+      else if (event === "SIGNED_IN") adoptSession.current(session);
     });
     loadLeaderboard();
     (async () => {
@@ -2371,6 +2458,14 @@ export default function PerfectSeason() {
     const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [], payer: res.uid }
       : res.reason === "duplicate" ? { duplicate: true, payer: res.uid, newSiteBest: false, newBestScore: false } : null;
     if (extras) setResult((r) => (r && r.runId === runId ? { ...r, ...extras } : r));
+  }
+
+  // The name claimed: from here it's an account like any other, so it goes through the same path a new
+  // signup does - which also saves a season played before signing in.
+  async function onNameClaimed(username) {
+    const id = needsName?.id;
+    setNeedsName(null);
+    if (id) await onAuthed(id, username, true);
   }
 
   async function logOut() {
@@ -3316,6 +3411,7 @@ export default function PerfectSeason() {
         {saveError && <div className="panel"><p style={{ margin: 0 }}>Your last season couldn't be saved. It will be included the next time a save goes through.</p></div>}
         {notice && <div className="panel"><p style={{ margin: 0 }}>{notice}</p></div>}
         {howTo && <HowTo onClose={closeHowTo} />}
+        {needsName && <PickName email={needsName.email} onClaimed={onNameClaimed} onSignOut={logOut} />}
         {resumed && view === "play" && !result && (
           <div className="notice"><span>Picked up your draft where you left off.</span></div>
         )}
