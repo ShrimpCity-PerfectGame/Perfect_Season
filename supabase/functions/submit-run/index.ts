@@ -224,6 +224,13 @@ Deno.serve(async (req) => {
 
   const { data: existingRow } = await service.from("profiles").select("*").eq("id", user.id).single();
   if (!existingRow) return json({ error: "no profile for this account" }, 400);
+  // A guest (v1.17.0) plays and posts like anyone else, except the daily: a guest account can be made
+  // again and again, so letting one count would hand anybody as many goes at the day's boards as they
+  // liked - the one thing "Protect the daily" (CLAUDE.md) exists to stop. The app doesn't offer it, and
+  // this is why a modified client can't either.
+  if (mode.kind === "daily" && existingRow.guest) {
+    return json({ error: "the daily is for accounts", reason: "guest_daily" }, 403);
+  }
 
   // Daily is one draft per day per format (CLAUDE.md's "Protect the daily") - the client's own
   // dailyDone flag is just a courtesy gate, not a security boundary. Insert into daily_runs FIRST

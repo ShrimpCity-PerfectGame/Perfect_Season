@@ -38,6 +38,9 @@ export function rowToProfile(row) {
     pointsBank: row.points_bank || 0, pointsDay: row.points_day ?? null,
     recent: row.recent || [], dailyStreak: row.daily_streak || 0, dailyLast: row.daily_last ?? null,
     dailyBestStreak: row.daily_best_streak || 0, id: row.id,
+    // A guest (v1.17.0): an account made for a visitor who finished a season, so the season could go on
+    // the board. No profile screen, no shop, and never the daily.
+    guest: !!row.guest,
   };
 }
 export function profileToRow(s) {

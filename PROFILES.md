@@ -102,6 +102,15 @@ default) for any function clients must not call directly.
 RLS on; `select using (true)`; no insert/update/delete policy. A row exists only once the player has
 saved something; no row reads as "nothing set".
 
+**Guests (v1.17.0).** `profiles.guest` (boolean, default false) marks an account the site made for a visitor
+who finished a season - Supabase's anonymous sign-in. The signup trigger gives it a profile immediately (the
+season is already waiting for one) with a name from `new_guest_name()`: `Guest_` and five hex characters, a shape
+`username_is_reserved` holds back from everyone else, so a guest's name reads as one wherever it's shown. A guest
+plays and posts like anyone else except the daily, which `submit-run` refuses for it (`guest_daily`, 403), and it
+has no profile screen or shop in the app. `claim_username` is the way out: it is allowed to replace a guest's
+name (once - the flag clears), and it rewrites the account's name snapshots in `runs`, `daily_runs`, `sou_runs`
+and `builds`, exactly as `mod_act`'s rename does.
+
 **An account with no profile row (v1.16.0).** Signing in with Google makes an `auth.users` row with no
 username, and `handle_new_user` writes no `profiles` row for it. That state is deliberate and is what the
 app watches for: a session whose `fetchProfile` comes back null is an account that hasn't picked a name.
@@ -146,7 +155,8 @@ isn't a finite number (`bad_build`). Old rows are left alone; after migrating, `
 | `check_username(p_username text)` | text: `ok` \| `taken` \| `blocked` \| `invalid` | security definer, stable, callable by anon. `invalid` unless `^[A-Za-z0-9_]{3,16}$`; `taken` if a profile has exactly that username, or it's a reserved name another account holds in any capitalization; `blocked` if not clean. |
 | `username_is_reserved(p_username text)` | boolean | 1.11.1. security invoker, execute revoked from clients. True for a reserved name (`admin`, which unlocks the testing tools whatever its capitalization) when some account already holds it in any capitalization - so the first account keeps it and "Admin" can't join it. Used by `check_username`, the signup trigger (`username_reserved`) and `mod_act`'s rename (`taken`). |
 | `handle_new_user()` | trigger | `create or replace` of schema.sql's signup trigger, now raising `username_invalid` for a username outside `^[A-Za-z0-9_]{3,16}$` (a modified client can call Auth's signup directly), `username_reserved` for a reserved name another account holds in any capitalization, and `username_blocked` for one that isn't clean. **v1.16.0:** an account from a provider (`raw_app_meta_data->>'provider'` is not `email`) arrives with no username - Google has none to give - and gets **no profile row at all** until it claims one; an email and password signup still brings its name and still passes every check above. |
-| `claim_username(p_username text)` | text: `ok` \| `invalid` \| `taken` \| `blocked` \| `already_named` \| `not_signed_in` | v1.16.0. security definer; execute revoked from anon. The name an account picks after signing in with a provider, and the only way a profile row is created outside the signup trigger. Same three rules as that trigger (reserved reads as `taken`, as in `check_username`), and it refuses once the caller has a profile, so it is never a rename - that stays `mod_act`'s job. A name taken between the check and the insert comes back as `taken`. |
+| `claim_username(p_username text)` | text: `ok` \| `invalid` \| `taken` \| `blocked` \| `already_named` \| `not_signed_in` | v1.16.0. security definer; execute revoked from anon. The name an account picks for itself, and the only way a profile row is created outside the signup trigger. Same three rules as that trigger (reserved reads as `taken`, as in `check_username`). Refuses once the caller has a profile, **unless it is a guest** (v1.17.0), which may trade the given name for a real one once: that clears `guest` and rewrites the account's name in `runs`, `daily_runs`, `sou_runs` and `builds`. Everyone else is refused, so this is never a rename - that stays `mod_act`'s job. A name taken between the check and the insert comes back as `taken`. |
+| `new_guest_name()` | text | v1.17.0. security definer; execute revoked from clients. `Guest_` and five uppercase hex characters, retried until unused. Only the signup trigger calls it. |
 | `avatar_folder_has_room()` | boolean | security invoker, volatile; execute for `authenticated` only, because the storage insert policy calls it as the uploading player. Counts the caller's own avatars files (through their read policy) under a per-player lock, so a burst of uploads can't all squeeze past the 10-file cap. |
 | `player_profile(p_username text)` | jsonb or null | stable, security invoker. Exact username match first; otherwise a case-insensitive match only if exactly one account matches. Returns `{ "profile": <the profiles row, every column, to_jsonb>, "details": <details row as above, or null>, "stats": player_stats(id) }`. |
 

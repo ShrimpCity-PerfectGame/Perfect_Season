@@ -12,7 +12,7 @@
 //   - storage-profile.js's statuses and reasons, its uploads and its clean-up.
 // The word filter's own cases are in test-word-filter.mjs.
 import { assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { freshDb, addAccount, addProviderAccount, asUser, asAnon, failure, uuid, sql } from "./pg-fixture.mjs";
+import { freshDb, addAccount, addProviderAccount, addGuestAccount, asUser, asAnon, failure, uuid, sql } from "./pg-fixture.mjs";
 import { makeProfileData, BLOCKED_WORDS_SEED, AVATAR_FOLDER_LIMIT } from "./mock-profile-data.mjs";
 import { playerStats } from "./mock-profile-stats.mjs";
 import { FREE_AVATAR_PRESETS, TEAM_CODES, AVATAR_BUCKET, AVATAR_MAX_BYTES, AVATAR_TYPES, emptyPlayerStats, mapPlayerStats } from "../profile-rules.mjs";
@@ -273,6 +273,42 @@ await runTest("an account from a provider arrives with no name and no profile, a
   assert((await call(BOB, "claim_username", { p_username: "bobby" })).data === "already_named", "nor can one that signed up with an email");
   assert((await owner("select username from profiles where id = $1", [BOB]))[0].username === "bob", "bob keeps his name");
   assert((await call(null, "claim_username", { p_username: "nobody" })).error, "signed out, it can't even be called");
+});
+
+await runTest("a guest is given a name, keeps what it plays, and can trade the name for its own", async () => {
+  const one = uuid(80), two = uuid(81);
+  await addGuestAccount(db, one);
+  await addGuestAccount(db, two);
+  const nameOf = async (id) => (await owner("select username, guest from profiles where id = $1", [id]))[0];
+  const first = await nameOf(one), second = await nameOf(two);
+  assert(/^Guest_[0-9A-F]{5}$/.test(first.username), `a guest is named for what it is, got ${JSON.stringify(first)}`);
+  assert(first.guest === true, "and is marked as one");
+  assert(first.username !== second.username, "two guests aren't the same player");
+  assert((await owner("select balance from wallets where user_id = $1", [one]))[0]?.balance === 250, "a guest has a wallet like anyone else");
+
+  // What it played, under the name it had.
+  await owner("insert into runs (user_id, username, ladder, format) values ($1, $2, 'unlimited', 'fantasy')", [one, first.username]);
+  await owner("insert into builds (user_id, username, pos, overall, filled) values ($1, $2, 'QB', 88, '{}'::jsonb)", [one, first.username]);
+
+  assert((await call(one, "claim_username", { p_username: "Taken_By_Guest" })).data === "ok", "it can take a name of its own");
+  const after = await nameOf(one);
+  assert(after.username === "Taken_By_Guest" && after.guest === false, `and stops being a guest, got ${JSON.stringify(after)}`);
+  assert((await owner("select username from runs where user_id = $1", [one]))[0].username === "Taken_By_Guest", "the seasons it played follow the new name");
+  assert((await owner("select username from builds where user_id = $1", [one]))[0].username === "Taken_By_Guest", "so do its builds");
+  assert((await call(one, "claim_username", { p_username: "Again_Please" })).data === "already_named", "and it's a one-time trade, not a rename");
+});
+
+await runTest("nobody else may wear a guest's name", async () => {
+  const shapes = ["Guest_1A2B3", "guest_1a2b3", "GUEST_ABCDE"];
+  for (const name of shapes) {
+    assert((await call(BOB, "check_username", { p_username: name })).data === "taken", `${name} is held back from the signup form`);
+    const err = await failure(db, "insert into auth.users values ($1, $2)", [uuid(90), { username: name }]);
+    assert(err === "username_reserved", `${name} is refused by the signup trigger, got ${JSON.stringify(err)}`);
+  }
+  // Names that only look a bit like one are still anybody's.
+  for (const fine of ["Guest_ZZZZZ", "Guest_12", "Guests_1A2B3", "My_Guest_1"]) {
+    assert((await call(BOB, "check_username", { p_username: fine })).data === "ok", `${fine} is a name anyone can have`);
+  }
 });
 
 await runTest("the mock claims a name exactly as the database does", async () => {

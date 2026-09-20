@@ -4,7 +4,7 @@ import {
   fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
-  authSignUp, authSignIn, authSignInWithGoogle, authSignOut, authGetSession, authOnChange, mapAuthError,
+  authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
   fetchProfile, submitRun, submitDnf,
   fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
@@ -600,6 +600,9 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
    cell, a card, a ranked row - so it takes that spot's type, color and wrapping (overflow-wrap is inherited, so
    the narrow-screen rules on .lb td.nm and .rc.rank .tk still apply) and has no button look of its own. */
 .namelink{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit}
+/* A guest's name on a board: the name as plain text, with a quiet chip saying what it is. */
+.guestchip{margin-left:6px;padding:1px 6px;border:1px solid var(--line2);border-radius:999px;font-size:10.5px;
+  font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);vertical-align:2px}
 @media (hover:hover){.namelink:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
 .pill{font-size:13px;font-weight:700;color:var(--ink);background:var(--surface);border:2px solid var(--line2);border-radius:999px;padding:4px 12px}
 /* The offer to install the site as an app (only shown when the browser makes one): a control sitting between
@@ -1390,8 +1393,11 @@ function PlayerIndex() {
 // module-scope components (PlayerName, RankRows, ...) with no route to the app's navigation, so the
 // app hands its openProfile down through this context instead of threading a prop through each board.
 const OpenProfile = createContext(null);
-function NameLink({ name }) {
+function NameLink({ name, guest }) {
   const openProfile = useContext(OpenProfile);
+  // A guest has no profile screen to open - no picture, no bio, nothing it could set - so its name is
+  // shown as what it is instead of offering an empty page.
+  if (guest) return <>{name}<span className="guestchip">guest</span></>;
   if (!name || !openProfile) return name || null;
   return <button type="button" className="namelink" onClick={() => openProfile(name)}>{name}</button>;
 }
@@ -1453,7 +1459,7 @@ function RankRows({ rows, empty, value }) {
       {rows.map((r, i) => (
         <div className="rc rank" key={r.id || i}>
           <div className="n">{i + 1}</div>
-          <div className="tk"><NameLink name={r.username} /></div>
+          <div className="tk"><NameLink name={r.username} guest={r.guest} /></div>
           <div className="alt">{value(r)}</div>
         </div>
       ))}
@@ -1512,6 +1518,66 @@ function PickName({ email, onClaimed, onSignOut }) {
         </form>
         <p className="fine">{USERNAME_RULE}</p>
       </div>
+    </div>
+  );
+}
+
+// A guest turning into an account of its own. It is the same account throughout - every season, coin and
+// streak stays where it is - so this is an email going onto it and then the one name change a guest is
+// allowed (migration-profiles.sql's claim_username). The email goes first: if that address is taken,
+// nothing has happened yet and they can try another.
+function KeepSeasons({ name, onKept }) {
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [u, setU] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const emailDone = useRef(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (busy) return;
+    const address = email.trim();
+    const username = u.trim();
+    if (!address.includes("@")) return setErr("Enter a valid email address.");
+    if (pw.length < 6) return setErr("Passwords need at least 6 characters.");
+    if (!USERNAME_RE.test(username)) return setErr(USERNAME_RULE);
+    setBusy(true);
+    setErr("");
+    if (!emailDone.current) {
+      const { error } = await authAddEmail(address, pw);
+      if (error) {
+        setBusy(false);
+        return setErr(/already|exists|registered/i.test(error.message || "") ? "An account with that email already exists." : "That didn't work. Try again.");
+      }
+      // Done once: asking Supabase to set the same address twice is an error, and a name that was taken
+      // is worth another try without starting over.
+      emailDone.current = true;
+    }
+    const answer = await claimUsername(username);
+    setBusy(false);
+    if (answer === "ok") return onKept(username);
+    setErr({ taken: "That username is taken. Try another one.", blocked: NAME_NOT_ALLOWED, invalid: USERNAME_RULE }[answer]
+      || "Something went wrong. Try again.");
+  }
+
+  return (
+    <div className="panel">
+      <h3>Keep your seasons</h3>
+      <p>You're playing as <b>{name}</b>, a guest. Your seasons are on the leaderboard, but they only live in
+        this browser. Add an email and pick a name and they're yours for good — the same account, nothing lost.</p>
+      <form onSubmit={submit} noValidate>
+        <div className="fields">
+          <label>Email<input className="inp" type="email" value={email} autoComplete="email" autoCapitalize="none" spellCheck={false} onChange={(e) => setEmail(e.target.value)} /></label>
+          <label>Password<input className="inp" type="password" value={pw} autoComplete="new-password" onChange={(e) => setPw(e.target.value)} /></label>
+          <label>Username<input className="inp" value={u} maxLength={16} autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(e) => setU(e.target.value)} /></label>
+        </div>
+        {err && <p className="err" role="alert">{err}</p>}
+        <div className="frow" style={{ marginTop: 10 }}>
+          <button type="submit" className="btn solid" disabled={busy}>{busy ? "Saving…" : "Keep my seasons"}</button>
+        </div>
+      </form>
+      <p className="fine">{USERNAME_RULE} Your seasons, coins and streak all carry over.</p>
     </div>
   );
 }
@@ -1709,6 +1775,8 @@ export function SeasonMoments({ result, formatLabel }) {
 // badges' coins folded into one "Badges" line, since the badges themselves follow by name; the daily cap when
 // it applied; and a way to the shop. Nothing when the answer carried no coins (coins null). The result screen
 // shows it only to a signed-in player.
+// `onOpenShop` is left out for a guest: the coins it earns are real and carry over the moment it keeps
+// its seasons, but there's no shop to spend them in until then (SHOP.md; v1.17.0).
 export function SeasonCoins({ result, onOpenShop }) {
   const coins = result.coins || null;
   const badges = (Array.isArray(result.newBadges) ? result.newBadges : []).map((id) => BADGE_BY_ID[id]).filter(Boolean);
@@ -1722,7 +1790,7 @@ export function SeasonCoins({ result, onOpenShop }) {
       {coins && (
         <div className="sc-top">
           <EarnedCoins amount={coins.earned} size={24} className="sc-earned" />
-          <button className="btn sm" onClick={onOpenShop}>Shop</button>
+          {onOpenShop && <button className="btn sm" onClick={onOpenShop}>Shop</button>}
         </div>
       )}
       {rows.length > 0 && (
@@ -1766,8 +1834,8 @@ const rankRowClass = (i, mine) => [i === 0 ? "first" : "", mine ? "me" : ""].fil
 function RankCell({ i }) {
   return <td className="rk">{i === 0 && <span className="crown" aria-hidden="true">👑</span>}{i + 1}</td>;
 }
-function PlayerName({ name, mine }) {
-  return <><NameLink name={name} />{mine && <span className="you">You</span>}</>;
+function PlayerName({ name, mine, guest }) {
+  return <><NameLink name={name} guest={guest} />{mine && <span className="you">You</span>}</>;
 }
 const HOWTO_KEY = "ps-howto-seen";
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
@@ -2172,7 +2240,8 @@ export default function PerfectSeason() {
     // A screen that isn't open to this player now - the Reports queue for someone who isn't a moderator, the
     // shop signed out - is Modes instead, and its entry says so. Decided before it's recorded as the current
     // screen, so opening Modes in its place doesn't count as leaving the shop and push an entry mid-traversal.
-    if (s.ps === "view" && ((s.view === "reports" && !isMod) || (s.view === "shop" && !userId))) {
+    // stats?.guest rather than isGuest: this handler is written during render, before the derived values.
+    if (s.ps === "view" && ((s.view === "reports" && !isMod) || (s.view === "shop" && (!userId || stats?.guest)))) {
       s = { ps: "view", view: "home" };
       writeHistory("replaceState", s);
     }
@@ -2245,7 +2314,7 @@ export default function PerfectSeason() {
   }
   // The shop (SHOP.md 8), from your profile card or a season's coins. Signed in only.
   function openShop() {
-    if (!userId) return;
+    if (!userId || isGuest) return; // a guest has no shop: nothing it owns would have anywhere to show
     openTab("shop");
   }
   // The shop's Back: the entry it was opened from, the way the browser's Back gets there. An entry the app
@@ -2485,12 +2554,44 @@ export default function PerfectSeason() {
     if (extras) setResult((r) => (r && r.runId === runId ? { ...r, ...extras } : r));
   }
 
+  // A guest that has kept its seasons: the same account, under its own name from now on, so everything it
+  // has played comes back with that name on it.
+  async function onSeasonsKept(username) {
+    const fresh = (userId && (await fetchProfile(userId))) || null;
+    setUser(fresh?.username || username);
+    if (fresh) setStats(fresh);
+    setNotice(`Your seasons are yours, ${fresh?.username || username}.`);
+    loadLeaderboard();
+  }
+
   // The name claimed: from here it's an account like any other, so it goes through the same path a new
   // signup does - which also saves a season played before signing in.
   async function onNameClaimed(username) {
     const id = needsName?.id;
     setNeedsName(null);
     if (id) await onAuthed(id, username, true);
+  }
+
+  // A season finished by a visitor: rather than asking them to make an account before it counts, the site
+  // takes one for them - Supabase's anonymous sign-in - and posts it under the name the database gives
+  // them. They can keep it later (KeepSeasons), and nothing about how the season is verified changes. Not
+  // the daily: a guest can be made again and again, so it would be as many goes at the day as you like.
+  async function postAsGuest(trace, runId) {
+    const { data, error } = await authSignInAsGuest();
+    const uid = data?.user?.id;
+    const prof = uid ? await fetchProfile(uid) : null;
+    if (error || !prof) {
+      setNotice("That season couldn't be posted. Make an account and it'll be saved.");
+      return;
+    }
+    setPending(null);
+    setUserId(uid);
+    setUser(prof.username);
+    setStats(prof);
+    loadAccountExtras(uid);
+    const res = await submitAndSync(uid, trace);
+    showSaveAnswer(runId, res);
+    setNotice(res.ok ? `Posted to the leaderboard as ${prof.username}. Keep it on the Account tab.` : "");
   }
 
   async function logOut() {
@@ -2747,7 +2848,13 @@ export default function PerfectSeason() {
         history: finishedHistory, seq, gm: !!mode.gm, genius: !!mode.genius, format: fmt,
       };
       const saving = user ? submitAndSync(userId, trace) : Promise.resolve(null);
-      if (!user) { setPending(trace); pendingRun.current = sim.runId; }
+      // The trace is handed over rather than read back from state: it was only just set, and this runs in
+      // the same pass.
+      if (!user) {
+        setPending(trace);
+        pendingRun.current = sim.runId;
+        if (mode.kind !== "daily") postAsGuest(trace, sim.runId);
+      }
       addSeasonContext(sim, fmt, saving, mode.kind === "daily" && user ? (stats?.dailyBestStreak || 0) : null);
       // Point the leaderboard at the format just played before refreshing it, so the rank shown
       // beside this result ranks it against its own format rather than the other one's numbers.
@@ -3154,6 +3261,13 @@ export default function PerfectSeason() {
   // per-format - without that, opening one while the other is in progress would no-op or resume
   // the wrong draft.
   async function startDaily(f) {
+    // One draft a day is per account, and a guest account can be made again and again - so the daily is
+    // for accounts. submit-run refuses one from a guest too; this is only how the app says so.
+    if (isGuest) {
+      setNotice("The daily is one draft a day per account. Keep your seasons on the Account tab and it's yours.");
+      openTab("profile");
+      return;
+    }
     const fmt = normFormat(f ?? format);
     setFormat(fmt);
     sset(FORMAT_KEY, fmt, false);
@@ -3298,6 +3412,9 @@ export default function PerfectSeason() {
   // The theme scope this screen is in (Design system, CLAUDE.md): the play screen is stadium-dark, the
   // Leaderboard true black, everything else cream. The root wears it as a class and the browser is told the
   // same colour, so the two can't drift apart.
+  // An account made for a visitor who finished a season (v1.17.0): on the boards like anyone else, but with
+  // no profile screen, no shop and never the daily, until it keeps its seasons under a name of its own.
+  const isGuest = !!stats?.guest;
   const scope = view === "play" ? "dark" : view === "board" ? "night" : "light";
 
   // The colour a browser paints around the page: the address bar on a phone, and the status bar when the site
@@ -3827,7 +3944,7 @@ export default function PerfectSeason() {
                     <>
                       <SeasonStrip result={result} ladderName={LADDER_LABEL[modeKey({ mode: mode.kind, gm: mode.gm, genius: mode.genius })]} />
                       <SeasonMoments result={result} formatLabel={FORMAT_LABEL[normFormat(result.format)]} />
-                      {userId && result.payer === userId && <SeasonCoins result={result} onOpenShop={openShop} />}
+                      {userId && result.payer === userId && <SeasonCoins result={result} onOpenShop={isGuest ? null : openShop} />}
                       {/* In place of the save-error panel: nothing from this season counted. */}
                       {userId && result.payer === userId && result.duplicate && <p className="sc-note sc-dup">This draft was already recorded, so it didn't count again.</p>}
                     </>
@@ -3873,6 +3990,16 @@ export default function PerfectSeason() {
                 {finished && !user && pending && (
                   <AuthPanel onAuthed={onAuthed} title="Save this season"
                     blurb="Log in or create an account to keep this season in your stats and put your score on the leaderboard." />
+                )}
+
+                {/* Posted without anyone having to sign up for anything. What it costs them to keep it is
+                    said here, where they're looking, rather than left to be found. */}
+                {finished && isGuest && (
+                  <div className="panel guestkeep">
+                    <p style={{ margin: 0 }}>This season is on the leaderboard as <b>{user}</b>, a guest.
+                      {" "}<button className="linkbtn" onClick={() => openTab("profile")}>Keep your seasons</button> and
+                      they're yours for good — same account, nothing lost.</p>
+                  </div>
                 )}
 
                 <h2 className="h">Season</h2>
@@ -3957,7 +4084,13 @@ export default function PerfectSeason() {
             blurb="Log in to track your seasons, best lineup, and championships, and to appear on the leaderboard." />
         )}
 
-        {view === "profile" && shownProfile && (() => {
+        {/* A guest's own tab: not a profile - there's nothing on it they could set - but the way to keep
+            what they've played. Visiting someone else's profile still shows that profile. */}
+        {view === "profile" && shownProfile && isGuest && !profileOf && (
+          <KeepSeasons name={user} onKept={onSeasonsKept} />
+        )}
+
+        {view === "profile" && shownProfile && !(isGuest && !profileOf) && (() => {
           const status = shownData ? shownData.status : "loading";
           const profile = shownData?.profile || null;
           return (
@@ -4008,7 +4141,7 @@ export default function PerfectSeason() {
                   <div className="champion">
                     <div className="pickno">👑 Best {FORMAT_LABEL[lbFormat]} team ever</div>
                     <div className="sc led-wrap"><span className="led">{scoreOf(siteBest, lbFormat).toFixed(1)}</span></div>
-                    <div className="by"><NameLink name={siteBest.username} />{runOf(siteBest, lbFormat) ? `, went ${runOf(siteBest, lbFormat).w}–${runOf(siteBest, lbFormat).l}` : ""}</div>
+                    <div className="by"><NameLink name={siteBest.username} guest={siteBest.guest} />{runOf(siteBest, lbFormat) ? `, went ${runOf(siteBest, lbFormat).w}–${runOf(siteBest, lbFormat).l}` : ""}</div>
                     {runOf(siteBest, lbFormat) && <RosterChips roster={runOf(siteBest, lbFormat).roster} />}
                   </div>
                 ) : (
@@ -4026,7 +4159,7 @@ export default function PerfectSeason() {
                           return (
                             <tr key={q.id} className={rankRowClass(i, mine)}>
                               <RankCell i={i} />
-                              <td className="nm"><PlayerName name={q.username} mine={mine} />{q.bestRecord && <span className="subrec">{q.bestRecord.w}–{q.bestRecord.l}</span>}</td>
+                              <td className="nm"><PlayerName name={q.username} mine={mine} guest={q.guest} />{q.bestRecord && <span className="subrec">{q.bestRecord.w}–{q.bestRecord.l}</span>}</td>
                               <td className="r v">{scoreOf(q, lbFormat) != null ? scoreOf(q, lbFormat).toFixed(1) : "–"}</td>
                               <td className="r lbrec">{q.bestRecord ? `${q.bestRecord.w}–${q.bestRecord.l}` : "–"}</td>
                               <td className="r hide">{draftsOf(q)}{q.dnf ? <span className="muted"> ({q.dnf} DNF)</span> : null}</td>
@@ -4059,7 +4192,7 @@ export default function PerfectSeason() {
                         const mine = !!user && q.username === user;
                         return (
                           <tr key={i} className={rankRowClass(i, mine)}>
-                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} /><span className="subrec">{q.w}–{q.l}</span></td>
+                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} guest={q.guest} /><span className="subrec">{q.w}–{q.l}</span></td>
                             <td className="r v">{q.score.toFixed(1)}</td><td className="r lbrec">{q.w}–{q.l}</td>
                           </tr>
                         );
@@ -4098,7 +4231,7 @@ export default function PerfectSeason() {
                         const mine = !!userId && q.id === userId;
                         return (
                           <tr key={q.id} className={rankRowClass(i, mine)}>
-                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} /></td>
+                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} guest={q.guest} /></td>
                             <td className="r v">{Math.round(pointsOf(q, ladder.mode)).toLocaleString()}</td>
                             <td className="r hide">{draftsOf(q)}</td>
                           </tr>

@@ -38,9 +38,14 @@ The owner approved all of this (2026-09-14, plan v2):
   account. Today the same finished Unlimited draft counts every time it's sent.
 
 Not in v1.12.0: pictures or frames beside names on the boards, gifting, rotating stock or sales, refunds, real
-money, coins for guests, a coin leaderboard, badge earned dates.
+money, coins for guests (v1.17.0 changed that - see below), a coin leaderboard, badge earned dates.
 
 ---
+
+**Guests (v1.17.0).** A guest account earns coins exactly as anyone else does - submit-run pays its seasons, and
+the profile insert pays the 250 welcome coins - but the app gives it no shop and no Shop button on the result
+screen, and the shop route sends it to Modes even from a history entry. The coins are waiting when it keeps its
+seasons (CLAUDE.md, "Guests"), on the same account, so nothing is lost or granted twice.
 
 ## 2. How it fits together
 

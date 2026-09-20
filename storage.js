@@ -36,11 +36,23 @@ export async function authSignUp(email, password, username) {
 export async function authSignIn(email, password) {
   return getClient().auth.signInWithPassword({ email, password });
 }
+// A guest: Supabase's anonymous sign-in, taken when a visitor finishes a season so it can go on the
+// leaderboard (migration-profiles.sql gives the account its profile and its name). Nothing is asked of
+// them, and nothing is kept but the account itself - which they can turn into a real one later.
+export async function authSignInAsGuest() {
+  return getClient().auth.signInAnonymously();
+}
+
 // Signing in with Google. The page leaves for Google and comes back to `redirectTo`, where supabase-js
 // reads the session out of the address by itself - no password ever passes through here. An account
 // arriving this way has no profile until it claims a name (storage-profile.js's claimUsername).
 export async function authSignInWithGoogle(redirectTo) {
   return getClient().auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
+}
+// A guest keeping what it has played: the email and password go onto the same account, so nothing it has
+// done is left behind. Supabase may ask them to confirm the address; the account works meanwhile.
+export async function authAddEmail(email, password) {
+  return getClient().auth.updateUser({ email, password });
 }
 export async function authSignOut() {
   return getClient().auth.signOut();

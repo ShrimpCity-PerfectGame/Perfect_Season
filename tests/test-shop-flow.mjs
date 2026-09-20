@@ -168,16 +168,11 @@ const addedRows = (auth, before, uid) => [...auth._ledger.entries()].filter(([k,
 const guestAuth = makeMockAuth();
 let container = await open("http://localhost/", guestAuth);
 
-await runTest("a guest never sees coins or the shop: a season, Over/Under and Build-a-player", async () => {
-  await playUnlimited(container);
-  await flush(4);
-  assert(!coinsOf(container) && !/\bcoins?\b/i.test(shown(container)), `a guest's result says nothing about coins, got: ${shown(container).slice(0, 300)}`);
-  assert(!named(container, "Shop"), "a guest has no Shop button");
-  assert(container.querySelector(".whoami") === null, "no header picture for a guest");
-
+await runTest("a visitor earns nothing; the guest a finished season makes earns coins but has no shop", async () => {
+  // Before any season there is no account at all, so nothing is paid for anything.
   await playOverUnder(container);
   await flush(4);
-  assert(!container.querySelector(".gamecoins") && !/\bcoins?\b/i.test(shown(container)), `a guest's Over/Under result has no coins, got: ${shown(container).slice(0, 300)}`);
+  assert(!container.querySelector(".gamecoins") && !/coins?/i.test(shown(container)), `a visitor's Over/Under result has no coins, got: ${shown(container).slice(0, 300)}`);
 
   await click(tab(container, "Modes"));
   await flush();
@@ -185,10 +180,19 @@ await runTest("a guest never sees coins or the shop: a season, Over/Under and Bu
   await flush();
   await buildPlayer(container);
   await flush(4);
-  assert(!container.querySelector(".gamecoins") && !/\bcoins?\b/i.test(shown(container)), "a guest's build has no coins");
+  assert(!container.querySelector(".gamecoins") && !/coins?/i.test(shown(container)), "a visitor's build has no coins");
   assert(guestAuth._ledger.size === 0, `nothing was paid to anyone, got ${guestAuth._ledger.size} ledger rows`);
 
-  // Not even by history: an entry for the shop (say, left from before signing out) opens Modes, and says so.
+  // Finishing a season takes an account for them (v1.17.0), so from here the coins are real - but a guest
+  // has nowhere to spend them until it keeps its seasons.
+  await playUnlimited(container);
+  await flush(4);
+  await until(() => container.querySelector(".whoami"), () => `the guest the season posted as, got: ${text(container).slice(0, 200)}`);
+  assert(coinsOf(container), `a guest's season shows what it earned, got: ${shown(container).slice(0, 300)}`);
+  assert(!named(container, "Shop"), "but there's no Shop button behind it");
+  assert(guestAuth._ledger.size > 0, "and the coins are on the account, waiting for it to be kept");
+
+  // Not even by history: an entry for the shop opens Modes, and says so.
   window.history.pushState({ ps: "view", view: "shop" }, "", "/");
   window.history.pushState({ ps: "view", view: "players" }, "", "/");
   await back();
@@ -196,14 +200,24 @@ await runTest("a guest never sees coins or the shop: a season, Over/Under and Bu
   assert(window.history.state?.view === "home", `the entry now says Modes, got ${JSON.stringify(window.history.state)}`);
 });
 
-await runTest("saving a guest's season by signing up shows what it paid", async () => {
-  await playUnlimited(container);
+await runTest("a daily played before signing up is saved by signing up, and shows what it paid", async () => {
+  // The daily is the one season that isn't posted for a guest - it's one draft a day per account - so it
+  // waits for a real account, which is the path this has always checked.
+  const fresh = makeMockAuth();
+  container = await open("http://localhost/", fresh);
+  await click(tab(container, "Modes"));
+  await until(() => findButtonByText(container, "Fantasy daily"), () => `the daily, got: ${text(container).slice(0, 200)}`);
+  await click(findButtonByText(container, "Fantasy daily"));
+  await flush(4);
+  await playSeason(container);
+
   const panel = [...container.querySelectorAll(".panel")].find((p) => p.textContent.includes("Save this season"));
-  assert(panel, "expected the Save this season panel under a guest's result");
+  assert(panel, `expected the Save this season panel under a visitor's daily, got: ${text(container).slice(0, 300)}`);
   await signUp(panel, "saver@example.com", "saver");
   await until(() => coinsOf(container)?.dataset.earned, () => `the saved season's coins, got: ${container.querySelector(".result-hero")?.textContent}`);
-  const uid = [...guestAuth._profiles.values()].find((p) => p.username === "saver").id;
-  const seasonRow = [...guestAuth._ledger.values()].find((r) => r.user_id === uid && r.kind === "season");
+  const uid = [...fresh._profiles.values()].find((p) => p.username === "saver").id;
+  // A daily's coins are recorded under their own kind (the daily cap is separate - SHOP.md).
+  const seasonRow = [...fresh._ledger.values()].find((r) => r.user_id === uid && ["season", "daily"].includes(r.kind));
   assert(seasonRow, "the saved season was paid");
   assert(text(container).includes("Your last season was saved."), "the notice still says the season was saved");
   assert(coinsOf(container).querySelector('[data-badge="first-down"]'), "a first season earns First Down, shown by name");

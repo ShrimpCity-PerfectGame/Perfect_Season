@@ -305,6 +305,32 @@ begin
 end;
 $$;
 
+-- ---------- Guests (v1.17.0) ----------
+
+-- A visitor who finishes a season is signed in anonymously (Supabase's own anonymous sign-in) so that
+-- season can go through submit-run and onto the leaderboard like anyone else's - verified exactly the
+-- same way, because nothing about that path changes. What such an account can't do is the daily: a guest
+-- can be made again and again, and the daily is one draft per account per day (CLAUDE.md, "Protect the
+-- daily"), so submit-run refuses a daily from a guest. The flag is here rather than read from
+-- auth.users because every reader of a name needs it: the boards, the profile lookup, the app's gating.
+alter table public.profiles add column if not exists guest boolean not null default false;
+
+-- The name a guest is given. Five hex characters is a million names, and the unique index is the real
+-- guarantee - the retries only keep it from having to be surprised.
+create or replace function public.new_guest_name()
+returns text language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_name text;
+begin
+  for i in 1..20 loop
+    v_name := 'Guest_' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 5));
+    exit when not exists (select 1 from public.profiles where username = v_name);
+  end loop;
+  return v_name;
+end;
+$$;
+revoke execute on function public.new_guest_name() from public, anon, authenticated;
+
 -- ---------- Usernames ----------
 
 -- Names only one account may hold, in any capitalization (1.11.1). Usernames are otherwise unique only as
@@ -312,10 +338,14 @@ $$;
 -- (perfect-season.jsx compares it lowercased) - so once an account has it, "Admin" or "ADMIN" can't be
 -- signed up with or renamed to. The first account to take the name keeps it, so a fresh database (the
 -- tests', or a new project) can still create it.
+-- v1.17.0 also holds back the shape of a guest's name (Guest_ and five hex characters, below), whoever
+-- is asking and whether or not one exists: a name on a board says "guest" wherever it's shown - a share,
+-- the runs log, a moderator's queue - and not only where the chip is drawn, so nobody else may wear it.
 create or replace function public.username_is_reserved(p_username text)
 returns boolean language sql stable security invoker set search_path = public, pg_temp as $$
-  select lower(coalesce(p_username, '')) in ('admin')
-     and exists (select 1 from profiles where lower(username) = lower(p_username));
+  select coalesce(p_username, '') ~* '^guest_[0-9a-f]{5}$'
+      or (lower(coalesce(p_username, '')) in ('admin')
+          and exists (select 1 from profiles where lower(username) = lower(p_username)));
 $$;
 -- Only the functions below ask it (they run as its owner).
 revoke execute on function public.username_is_reserved(text) from public, anon, authenticated;
@@ -334,25 +364,40 @@ returns text language sql stable security definer set search_path = public, pg_t
   end;
 $$;
 
--- The name an account picks after signing in with a provider, and the only way a profile row is created
--- outside the signup trigger. It checks the same three things that trigger does, for the same reason: a
--- modified browser can call this directly, so the form's own checks exist only to say why sooner. It can
--- never rename anybody - it refuses as soon as the caller has a profile - so renaming stays a moderator's
--- job (mod_act). The codes are check_username's, plus two for the states only this function can be in:
+-- The name an account picks for itself, and the only way a profile row is created outside the signup
+-- trigger. Two accounts can be in that position: one that signed in with a provider, which arrives with
+-- no profile at all, and a guest, which has the name this file gave it and may trade it for a real one
+-- when it stops being a guest (v1.17.0). It checks the same three things the signup trigger does, for the
+-- same reason: a modified browser can call this directly, so the form's own checks exist only to say why
+-- sooner. Everyone else is refused, so this is never a rename - that stays a moderator's job (mod_act).
+-- The codes are check_username's, plus two for the states only this function can be in:
 --   ok | invalid | taken | blocked | already_named | not_signed_in
 create or replace function public.claim_username(p_username text)
 returns text language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_uid uuid := auth.uid();
+  v_old text;
+  v_guest boolean := false;
 begin
   if v_uid is null then return 'not_signed_in'; end if;
-  if exists (select 1 from public.profiles p where p.id = v_uid) then return 'already_named'; end if;
+  select p.username, p.guest into v_old, v_guest from public.profiles p where p.id = v_uid;
+  if v_old is not null and not v_guest then return 'already_named'; end if;
   if p_username is null or p_username !~ '^[A-Za-z0-9_]{3,16}$' then return 'invalid'; end if;
   -- Reserved reads as taken, the way check_username reports it: no need to tell a stranger which names
   -- the site holds back.
   if public.username_is_reserved(p_username) then return 'taken'; end if;
   if not public.text_is_clean(p_username) then return 'blocked'; end if;
-  insert into public.profiles (id, username) values (v_uid, p_username);
+  if v_old is null then
+    insert into public.profiles (id, username) values (v_uid, p_username);
+  else
+    -- A guest keeping what it has played: the same account, under its own name from now on. The name
+    -- snapshots on the boards follow it, exactly as a moderator's rename moves them (mod_act).
+    update public.profiles set username = p_username, guest = false where id = v_uid;
+    update public.runs set username = p_username where user_id = v_uid;
+    update public.daily_runs set username = p_username where user_id = v_uid;
+    update public.sou_runs set username = p_username where user_id = v_uid;
+    update public.builds set username = p_username where user_id = v_uid;
+  end if;
   return 'ok';
 exception when unique_violation then
   -- Two people claiming the same name at once: the second one is told it is taken, like anyone else.
@@ -373,6 +418,12 @@ declare
   v_username text := new.raw_user_meta_data->>'username';
   v_provider text := coalesce(new.raw_app_meta_data->>'provider', 'email');
 begin
+  -- A guest (v1.17.0): signed in anonymously after finishing a season, so it needs a profile immediately -
+  -- the season it just played is waiting for one. The name is ours to give and is marked as a guest's.
+  if coalesce(new.is_anonymous, false) or v_provider = 'anonymous' then
+    insert into public.profiles (id, username, guest) values (new.id, public.new_guest_name(), true);
+    return new;
+  end if;
   -- Signing in with Google brings no username - Google has none to give - so that account gets no profile
   -- row at all until the player picks one through claim_username below. Nothing reads an account without
   -- one: it is not on any board, submit-run answers "no profile for this account", and the welcome coins

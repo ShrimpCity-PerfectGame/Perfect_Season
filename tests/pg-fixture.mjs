@@ -33,7 +33,8 @@ export async function freshDb({ migrations = MIGRATIONS } = {}) {
     create schema auth;
     -- raw_app_meta_data is how Supabase records which provider made the account ("email", "google"),
     -- which the signup trigger reads: only a provider's account may arrive without a username.
-    create table auth.users (id uuid primary key, raw_user_meta_data jsonb, raw_app_meta_data jsonb);
+    create table auth.users (id uuid primary key, raw_user_meta_data jsonb, raw_app_meta_data jsonb,
+      is_anonymous boolean not null default false);
     create function auth.uid() returns uuid language sql stable
       as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 
@@ -72,6 +73,13 @@ export async function addAccount(db, row) {
   const jsonCols = new Set(["best_run", "best_run_std", "best_record", "recent", "points_day"]);
   const sets = cols.map((c, i) => `${c} = $${i + 2}${jsonCols.has(c) ? "::jsonb" : ""}`).join(", ");
   await db.query(`update profiles set ${sets} where id = $1`, [row.id, ...cols.map((c) => (jsonCols.has(c) ? JSON.stringify(row[c]) : row[c]))]);
+}
+
+// A guest: Supabase's anonymous sign-in, which the signup trigger answers with a profile of its own and a
+// name it gives itself (migration-profiles.sql's new_guest_name).
+export async function addGuestAccount(db, id) {
+  await db.query("insert into auth.users (id, raw_user_meta_data, raw_app_meta_data, is_anonymous) values ($1, null, $2, true)",
+    [id, { provider: "anonymous", providers: ["anonymous"] }]);
 }
 
 // An account as signing in with Google leaves one: no username, so the signup trigger writes no profile

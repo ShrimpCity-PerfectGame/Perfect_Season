@@ -89,6 +89,21 @@ on the Leaderboard and Stats screens opens its profile. **`PROFILES.md` is the r
 addresses and history) - read it before touching any of the files below. See "Profiles" under
 Architecture for the rules that matter most.
 
+**Guests (v1.17.0).** A visitor who finishes a season doesn't have to sign up for it to count: the site takes
+an account for them (Supabase's anonymous sign-in), the database names it `Guest_XXXXX` and marks it
+`profiles.guest`, and the season goes through `submit-run` like anyone else's - the verification path doesn't
+change at all. Their name carries a **guest** chip on the boards and isn't a link, because a guest has no profile
+screen, no shop, and **never the daily**: a guest account can be made again and again, so counting one would hand
+anybody as many goes at the day's board as they liked - `submit-run` refuses a daily from a guest (`guest_daily`),
+and the app doesn't offer it. They do earn coins, which wait for them. A guest stops being one from the Account
+tab (`KeepSeasons`): an email and password go onto the same account, then `claim_username` trades the given name
+for a real one and rewrites the name snapshots on the boards, the way a moderator's rename does - the one time
+that function is allowed to change an existing name. Everything played, earned and counted stays. The known cost
+is leaderboard pressure: one person can make guests freely, so **turn on a CAPTCHA for anonymous sign-ins** in
+each Supabase project before this is busy, and remember anonymous users count toward Supabase's monthly actives.
+`tests/test-guest-accounts.mjs` covers the game's side; the naming and the trade-up are held to the real SQL in
+`tests/test-profile-data.mjs`.
+
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
 Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`
 only allows that for a provider - an email signup still brings its name and passes every check), and the game
@@ -260,6 +275,7 @@ node tests/test-avatar-picker.mjs      # the picker's tabs, presets, errors (jsd
 node tests/test-avatar-image.mjs       # crop/resize/encode and metadata stripping - needs the installed Chrome (CHROME_PATH overrides)
 node tests/test-profile-links.mjs      # /u/name addresses, Back/Forward, every name link, signup's username check
 node tests/test-signin-google.mjs      # signing in with Google: the name it has to pick first, what's refused, and the account it ends up with
+node tests/test-guest-accounts.mjs     # guests: a finished season posts without an account, the daily and shop are refused, and keeping the seasons
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -639,7 +655,9 @@ suite and still broke the live Leaderboard for every existing account.
   adds missing rows - and a new pack's avatars need their drawings in `avatars.jsx` in the same release.
   v1.16.0's (signing in with Google): re-run `migration-profiles.sql` (it relaxes the signup trigger and adds
   `claim_username`), switch the Google provider on in that environment's Supabase project, then the client;
-  submit-run doesn't change.
+  submit-run doesn't change. v1.17.0's (guests) does: re-run `migration-profiles.sql` (the `guest` column,
+  `new_guest_name`, and claim_username's trade-up), turn on anonymous sign-ins in that project, **then deploy
+  submit-run** (it refuses a guest's daily), then the client.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging

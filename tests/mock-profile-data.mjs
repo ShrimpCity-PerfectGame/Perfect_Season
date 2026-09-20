@@ -14,6 +14,16 @@ import {
   AVATAR_BUCKET, AVATAR_TYPES, AVATAR_MAX_BYTES,
 } from "../profile-rules.mjs";
 
+// The shape of a name a guest is given (migration-profiles.sql's new_guest_name), which no client may pick.
+export const GUEST_NAME_RE = /^guest_[0-9a-f]{5}$/i;
+export const newGuestName = (taken = new Set()) => {
+  for (let i = 0; i < 20; i++) {
+    const name = `Guest_${Math.random().toString(16).slice(2, 7).toUpperCase()}`;
+    if (!taken.has(name)) return name;
+  }
+  return `Guest_${Date.now().toString(16).slice(-5).toUpperCase()}`;
+};
+
 // Usernames only one account may hold in any capitalization (migration-profiles.sql's username_is_reserved).
 export const RESERVED_USERNAMES = ["admin"];
 
@@ -152,8 +162,12 @@ export function makeProfileData(state, { playerStats }) {
   const isClean = (text) => textIsClean(text, blockedWords.values());
   // migration-profiles.sql's username_is_reserved: a reserved name that some account already holds, in any
   // capitalization.
-  const isReservedUsername = (name) => typeof name === "string" && RESERVED_USERNAMES.includes(name.toLowerCase())
-    && [...state.profiles.values()].some((r) => String(r.username).toLowerCase() === name.toLowerCase());
+  // Names no client may take: one a guest could be given (v1.17.0), whoever is asking, and "admin" once
+  // some account holds it in any capitalization.
+  const isReservedUsername = (name) => typeof name === "string"
+    && (GUEST_NAME_RE.test(name)
+      || (RESERVED_USERNAMES.includes(name.toLowerCase())
+        && [...state.profiles.values()].some((r) => String(r.username).toLowerCase() === name.toLowerCase())));
 
   // Every column of the row, as to_jsonb gives it - v1.12.0's cosmetics (migration-shop.sql) included.
   const detailsJson = (d) => (d ? {
@@ -203,12 +217,14 @@ export function makeProfileData(state, { playerStats }) {
     claim_username({ p_username = null } = {}) {
       const uid = state.currentUserId();
       if (!uid) return "not_signed_in";
-      if (state.profiles.has(uid)) return "already_named";
+      const row = state.profiles.get(uid) || null;
+      if (row && !row.guest) return "already_named";
       if (typeof p_username !== "string" || !USERNAME_RE.test(p_username)) return "invalid";
       if (isReservedUsername(p_username)) return "taken";
       if (!isClean(p_username)) return "blocked";
       if ([...state.profiles.values()].some((r) => r.username === p_username)) return "taken";
-      state.createProfile(uid, p_username);
+      if (!row) state.createProfile(uid, p_username);
+      else state.renameAccount(uid, p_username); // a guest keeping what it played, under its own name
       return "ok";
     },
     check_username({ p_username = null } = {}) {

@@ -3,7 +3,7 @@
 // tests/helpers.mjs re-exports makeMockAuth for the test suites.
 import * as GL from "../game-logic.mjs";
 import { playerStats } from "./mock-profile-stats.mjs";
-import { makeProfileData } from "./mock-profile-data.mjs";
+import { makeProfileData, newGuestName } from "./mock-profile-data.mjs";
 import { makeModeration } from "./mock-moderation.mjs";
 import { makeWallet } from "./mock-wallet.mjs";
 import { makeShop } from "./mock-shop.mjs";
@@ -32,10 +32,21 @@ export function makeMockAuth() {
   // own files, sharing these tables and the signed-in user.
   // A profile as the database makes one, and what happens around it: migration-wallet.sql's trigger on
   // profiles pays the welcome coins. Both ways in - the signup trigger and claim_username - come through here.
-  const createProfile = (id, username) => {
-    profiles.set(id, { id, username, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
+  const createProfile = (id, username, guest = false) => {
+    profiles.set(id, { id, username, guest, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
     wallet.welcome(id);
     return profiles.get(id);
+  };
+  // A guest trading the name it was given for one of its own (migration-profiles.sql's claim_username):
+  // the same account, and the name snapshots on the boards follow it, as a moderator's rename does.
+  const renameAccount = (id, username) => {
+    const row = profiles.get(id);
+    if (!row) return null;
+    Object.assign(row, { username, guest: false });
+    for (const table of [runs, dailyRuns, souRuns, builds]) {
+      for (const r of table.values()) if (r.user_id === id) r.username = username;
+    }
+    return row;
   };
   // What Google's return leaves behind: a session for that address, on the account that already holds it
   // if there is one - which is what Supabase does with a provider's verified email - and otherwise a new
@@ -48,7 +59,7 @@ export function makeMockAuth() {
     notify("SIGNED_IN");
     return { id, email };
   };
-  const state = { profiles, runs, dailyRuns, souRuns, builds, createProfile, currentUserId: () => session?.user?.id ?? null, isModerator: () => false, ownsAvatarPack: () => false };
+  const state = { profiles, runs, dailyRuns, souRuns, builds, createProfile, renameAccount, currentUserId: () => session?.user?.id ?? null, isModerator: () => false, ownsAvatarPack: () => false };
   const profileData = makeProfileData(state, { playerStats });
   const moderation = makeModeration(state, profileData);
   state.isModerator = moderation.isModerator;
@@ -322,6 +333,9 @@ export function makeMockAuth() {
 
     const existingRow = profiles.get(userId);
     if (!existingRow) return { data: { error: "no profile for this account" } };
+    // A guest posts everywhere but the daily: a guest account can be made again and again, and the daily
+    // is one draft per account per day (submit-run/index.ts says the same, and means it).
+    if (mode.kind === "daily" && existingRow.guest) return refused(403, { error: "the daily is for accounts", reason: "guest_daily" });
 
     // The duplicate guard, before anything is written (SHOP.md 4.2). A Daily is keyed by format too, mirroring the
     // real (date, format, user_id) primary key - this mock has no real constraint, so without it the standard daily
@@ -517,6 +531,16 @@ export function makeMockAuth() {
         notify("SIGNED_IN");
         return { data: { user: { id, email } }, error: null };
       },
+      // A guest: Supabase's anonymous sign-in. The signup trigger answers it with a profile straight away,
+      // because the season that prompted it is already waiting to be saved (migration-profiles.sql).
+      async signInAnonymously() {
+        const id = `guest-${authUsers.size + 1}`;
+        authUsers.set(`anon-${id}`, { id, email: null, password: null });
+        createProfile(id, newGuestName(new Set([...profiles.values()].map((p) => p.username))), true);
+        session = { user: { id, email: null, is_anonymous: true } };
+        notify("SIGNED_IN");
+        return { data: { user: { id, is_anonymous: true }, session }, error: null };
+      },
       // Signing in with Google. The real flow leaves the page for Google and comes back with a session in
       // the address; there is no browser here, so this is what the return leaves behind - and, for an
       // account Google has not brought before, one with no profile at all until claim_username makes one
@@ -532,6 +556,20 @@ export function makeMockAuth() {
         session = { user: { id: u.id, email } };
         notify("SIGNED_IN");
         return { data: { user: { id: u.id, email } }, error: null };
+      },
+      // An email and password going onto the account that's signed in - which is how a guest stops being
+      // one. Supabase keeps the account itself, so everything it has played stays with it; here, as there,
+      // an address another account already holds is refused.
+      async updateUser({ email = null, password = null } = {}) {
+        const id = session?.user?.id;
+        if (!id) return { data: null, error: { message: "not signed in" } };
+        if (email && authUsers.has(email) && authUsers.get(email).id !== id) {
+          return { data: null, error: { message: "A user with this email address has already been registered" } };
+        }
+        for (const [key, u] of [...authUsers]) if (u.id === id) authUsers.delete(key);
+        authUsers.set(email || `anon-${id}`, { id, email, password });
+        session = { user: { id, email } };
+        return { data: { user: { id, email } }, error: null };
       },
       async signOut() {
         session = null;

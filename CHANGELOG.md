@@ -24,6 +24,21 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
+## [1.17.0] — unreleased
+
+### Added
+
+- **Finish a season without an account and it still counts.** Your score goes on the leaderboard straight away
+  under a name like `Guest_4F2A1`, with a **guest** chip beside it. No sign-up, no email, nothing to fill in.
+- **Keep your seasons whenever you like.** On the Account tab, add an email and pick a proper name: it's the same
+  account, so every season, coin and streak you earned as a guest comes with you, and your name on the boards
+  changes to the one you picked.
+
+### Notes
+
+- A guest can't play the daily — it's one draft a day per account, and a guest account can be made again and
+  again — and has no profile or shop. Coins still pile up for when you keep them.
+
 ## [1.16.0] — unreleased
 
 ### Added

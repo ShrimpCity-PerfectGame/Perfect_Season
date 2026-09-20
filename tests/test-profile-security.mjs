@@ -616,6 +616,8 @@ const EXPECTED_FUNCTIONS = {
   "check_username(p_username text)": [true, PG_TEMP_LAST, true, true],
   // The name an account picks after signing in with Google: for the account doing it, so anon can't call it.
   "claim_username(p_username text)": [true, PG_TEMP_LAST, false, true],
+  // v1.17.0: only the signup trigger names a guest, running as its owner. No client may ask for a name.
+  "new_guest_name()": [true, PG_TEMP_LAST, false, false],
   // Called by the avatars insert policy as the uploading player, so they need execute; anon never uploads.
   "avatar_folder_has_room()": [false, PG_TEMP_LAST, false, true],
   "handle_new_user()": [true, PG_TEMP_LAST, true, true],
