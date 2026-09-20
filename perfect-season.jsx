@@ -1396,6 +1396,21 @@ function NameLink({ name }) {
   return <button type="button" className="namelink" onClick={() => openProfile(name)}>{name}</button>;
 }
 
+// Coming back from Google with no session: the player changed their mind at Google's screen, or the
+// provider answered with an error. Supabase puts it in the address - in the query for the code flow, in
+// the fragment for the older one - so the game can say what happened instead of looking like the button
+// did nothing at all.
+export function authErrorFromAddress(loc = typeof window === "undefined" ? null : window.location) {
+  if (!loc) return null;
+  for (const part of [loc.search, loc.hash]) {
+    if (!part) continue;
+    const params = new URLSearchParams(String(part).replace(/^[?#]/, ""));
+    const problem = params.get("error_description") || params.get("error");
+    if (problem) return problem.replace(/\+/g, " ");
+  }
+  return null;
+}
+
 // The screens history entries describe: a player's profile, at profilePath(name), or any other view, at "/".
 // The address alone can only name a profile or Modes, so an entry without a screen of its own (a typed
 // address, or one written before this) is read from its address.
@@ -2089,6 +2104,16 @@ export default function PerfectSeason() {
       onDraftFinished: () => setLiveDrafts((n) => (n == null ? n : n + 1)),
     });
     return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); siteActivity.current?.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Google sent them back without signing them in. Said once, and the address tidied so a reload doesn't
+  // repeat it.
+  useEffect(() => {
+    const problem = authErrorFromAddress();
+    if (!problem) return;
+    setNotice(`Signing in with Google didn't finish: ${problem}`);
+    try { window.history.replaceState(null, "", "/"); } catch (e) { /* no history API */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

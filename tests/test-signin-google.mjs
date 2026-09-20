@@ -139,4 +139,20 @@ await runTest("an account that already has a name is never asked for one", async
   assert(signedInAs(c) === "Email_Player", () => `it signs straight in, got ${signedInAs(c)}`);
 });
 
+await runTest("coming back from Google without signing in says so, and tidies the address", async () => {
+  await close();
+  setupDom("http://localhost/?error=access_denied&error_description=The+user+denied+the+request");
+  const storage = makeStorage();
+  storage.data["personal:ps-howto-seen"] = "true";
+  window.storage = storage;
+  auth = makeMockAuth();
+  window.__ps_supabase__ = auth;
+  app = await mount();
+  await flush(6);
+  const c = app.container;
+  assert(/didn't finish/.test(text(c)) && /denied the request/.test(text(c)), () => `the game says what happened, got: ${text(c).slice(0, 200)}`);
+  assert(window.location.pathname === "/" && !window.location.search, `the address is tidied, got ${window.location.pathname}${window.location.search}`);
+  assert(!dialog(c), "and nobody is asked to pick a name");
+});
+
 await close();
