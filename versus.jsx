@@ -50,12 +50,6 @@ export const VERSUS_CSS = `
    .roster, so it inherits the single-player draft's whole look and moves with it. What is here is only what
    1v1 adds - two rosters side by side, the clock, and the lobby. */
 .versus{display:grid;gap:18px}
-.vs-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
-.vs-vs{display:flex;gap:10px;align-items:center;font-weight:800}
-.vs-vs .vs-who{display:flex;flex-direction:column;line-height:1.1}
-.vs-vs .vs-nm{font-size:16px}
-.vs-vs .vs-tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
-.vs-vs .vs-x{font-family:var(--display);font-size:20px;opacity:.6}
 /* On the team card, top right, where the card already had room. Tabular so it doesn't jitter as it counts. */
 /* On its own dark pill, not straight onto the card: the card carries the team's colours, so the clock was
    white on whatever those happened to be - 1.96:1 over the Jets' white stripe and 2.79:1 over the Rams' yellow,
@@ -67,11 +61,7 @@ export const VERSUS_CSS = `
   color:#fff;font-variant-numeric:tabular-nums;background:rgba(6,10,22,.88);border-radius:10px;padding:2px 9px}
 .vs-reelclock .vs-s{font-size:16px;opacity:.75;margin-left:1px}
 .vs-reelclock.low{color:var(--loss)}
-.vs-clockbox{display:flex;gap:10px;align-items:baseline}
-.vs-turn{font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:13px;margin:0}
-.vs-turn.mine{color:var(--accent-ink)}
-.vs-clock{font-variant-numeric:tabular-nums;font-weight:800;font-size:26px;font-family:var(--display);margin:0}
-.vs-clock.low,.vs-tick.low{color:var(--loss)}
+.vs-tick.low{color:var(--loss)}
 .vs-tick{font-variant-numeric:tabular-nums}
 .vs-link{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .vs-link code{font-size:15px;padding:8px 10px;border:2px solid var(--line);border-radius:10px;background:var(--surface);word-break:break-all}
@@ -81,7 +71,10 @@ export const VERSUS_CSS = `
 /* Both rosters above the board, each the draft's own strip - one row of eight rather than the six single
    player fills, so the pair costs about 130px at the top instead of pushing the board off the screen. */
 .vs-rosters{display:grid;gap:10px;grid-template-columns:1fr;margin:2px 0 10px}
-.vs-side-hd{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800;margin:0 0 8px;opacity:.85}
+/* NOT uppercased, because this line carries a username. The app uppercases labels and leaves data alone - the
+   leaderboard does exactly this, .lb th against .lb td - and a username is data: somebody chose ShrimpCity
+   over shrimpcity, and text-transform throws that choice away. */
+.vs-side-hd{font-size:12px;letter-spacing:.06em;font-weight:800;margin:0 0 8px;opacity:.85}
 .vs-side-hd .vs-sub{font-family:var(--display);font-size:16px;letter-spacing:0;margin-left:6px}
 .vs-rosters .roster{grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin-bottom:0}
 .vs-rosters .slot{min-height:52px;padding:6px 8px}
@@ -90,7 +83,7 @@ export const VERSUS_CSS = `
    the block - the same pair .cel uses, because this is the same celebration. */
 .vs-final{display:grid;gap:6px;justify-items:center;text-align:center;padding:18px 0;position:relative;overflow:hidden}
 .vs-score{font-family:var(--display);font-size:56px;line-height:1;font-variant-numeric:tabular-nums}
-.vs-beat{margin:0;font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:13px;opacity:.85}
+.vs-beat{margin:0;font-weight:800;letter-spacing:.04em;font-size:14px;opacity:.85}
 .vs-lines{display:grid;gap:3px;font-size:13px;margin-top:8px;max-width:420px}
 .vs-lines .vs-ln{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding:4px 0}
 /* The powerups, under the reel: an icon, the name, and how many are left. The icon carries the row on a phone,
@@ -118,8 +111,10 @@ export const VERSUS_CSS = `
 .vs-boom-title{margin:0;font-family:var(--display);text-transform:uppercase;line-height:.92;
   font-size:clamp(40px,12vw,84px);color:var(--vs-tone,#fff);text-wrap:balance;max-width:12ch;
   text-shadow:0 4px 24px rgba(0,0,0,.55)}
-.vs-boom-who{margin:0;font-weight:800;text-transform:uppercase;letter-spacing:.07em;line-height:1.25;
-  font-size:clamp(14px,3.4vw,19px);color:#fff;text-wrap:balance;max-width:26ch;opacity:.92}
+/* Not uppercased either: this line names a player and a person, and both own their capitalisation. Only the
+   headline above it is a label, and only that is transformed. */
+.vs-boom-who{margin:0;font-weight:800;letter-spacing:.02em;line-height:1.3;
+  font-size:clamp(15px,3.6vw,21px);color:#fff;text-wrap:balance;max-width:28ch;opacity:.95}
 /* One tint each, so the three don't land as the same wash of dark. The tint is the headline's colour and the
    glow behind it; the words underneath stay white, because that line has to read at 14px. */
 .vs-boom.tone-spin{--vs-tone:#8FB0FF}
