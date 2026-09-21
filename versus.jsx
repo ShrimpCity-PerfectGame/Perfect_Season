@@ -104,17 +104,44 @@ export const VERSUS_CSS = `
 .vs-plist .vs-pi{font-size:18px;margin-top:2px;width:22px;text-align:center}
 .vs-pd{font-size:13px;opacity:.8;margin-top:3px}
 /* What just happened. A fixed row, so the board does not jump when a line appears and goes. */
-.vs-flashrow{min-height:30px}
-.vs-flash{margin:0;padding:6px 10px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--line2);
-  font-weight:700;font-size:13.5px;display:inline-flex;gap:8px;align-items:center;animation:vs-in .28s ease-out}
-@keyframes vs-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+/* A powerup, across the whole screen. pointer-events:none throughout, and that is not optional: one of these
+   can land while you are on the clock, so it must never swallow a tap, a Lock in, or the board underneath it.
+   It paints its own dark ground rather than trusting whatever is behind it. */
+.vs-boom{position:fixed;inset:0;z-index:60;display:grid;place-items:center;pointer-events:none;
+  background:radial-gradient(60% 45% at 50% 50%,rgba(6,10,22,.86),rgba(6,10,22,.5) 65%,rgba(6,10,22,0));
+  animation:vs-boom-bg 2.4s ease-out forwards}
+.vs-boom-in{display:grid;justify-items:center;gap:12px;padding:0 24px;text-align:center;
+  animation:vs-boom-pop 2.4s cubic-bezier(.2,.9,.25,1) forwards}
+.vs-boom-icon{font-size:clamp(56px,17vw,104px);line-height:1;filter:drop-shadow(0 6px 18px rgba(0,0,0,.6))}
+/* The powerup's name at the size of the screen, and who did it underneath. Two lines rather than one sentence:
+   the big one is what you read without reading, the small one is the detail you look at if you want it. */
+.vs-boom-title{margin:0;font-family:var(--display);text-transform:uppercase;line-height:.92;
+  font-size:clamp(40px,12vw,84px);color:var(--vs-tone,#fff);text-wrap:balance;max-width:12ch;
+  text-shadow:0 4px 24px rgba(0,0,0,.55)}
+.vs-boom-who{margin:0;font-weight:800;text-transform:uppercase;letter-spacing:.07em;line-height:1.25;
+  font-size:clamp(14px,3.4vw,19px);color:#fff;text-wrap:balance;max-width:26ch;opacity:.92}
+/* One tint each, so the three don't land as the same wash of dark. The tint is the headline's colour and the
+   glow behind it; the words underneath stay white, because that line has to read at 14px. */
+.vs-boom.tone-spin{--vs-tone:#8FB0FF}
+.vs-boom.tone-dip{--vs-tone:#FFC46B}
+.vs-boom.tone-steal{--vs-tone:#C9A6FF}
+@keyframes vs-boom-bg{0%{opacity:0}10%{opacity:1}72%{opacity:1}100%{opacity:0}}
+@keyframes vs-boom-pop{
+  0%{opacity:0;transform:scale(.72)}
+  9%{opacity:1;transform:scale(1.07)}
+  17%{transform:scale(1)}
+  72%{opacity:1;transform:scale(1)}
+  100%{opacity:0;transform:scale(1.05)}
+}
 /* Who still holds what. Struck through rather than merely dimmed: a spent one has to read without colour. */
 .vs-track{list-style:none;display:flex;gap:8px;margin:6px 0 0;padding:0}
 .vs-tk{font-size:14px;line-height:1;opacity:.95}
 .vs-tk.spent{opacity:.4;text-decoration:line-through}
 .vs-note{font-size:13px;opacity:.85}
 .vs-err{color:var(--loss);font-weight:700;font-size:13px}
-@media (prefers-reduced-motion:reduce){.vs-flash{animation:none}}
+/* No motion, but the announcement still happens - it appears, holds for its moment, and React takes it away.
+   Both parts need it: .vs-boom carries the fade, .vs-boom-in the pop. */
+@media (prefers-reduced-motion:reduce){.vs-boom,.vs-boom-in{animation:none}}
 @media (max-width:900px){.vs-rosters .roster{grid-template-columns:repeat(4,minmax(0,1fr))}}
 /* On a phone the pair has to stay out of the board's way, so the strips lose the season line and shrink to
    two rows of four. The season is still one tap away on the card, and the sticky bar carries your slots as
@@ -148,7 +175,6 @@ export const VERSUS_CSS = `
   .vs-them .slot[data-filled="1"]{border-style:solid;background:var(--surface2)}
   .vs-them .vs-track{margin-top:4px}
   .vs-powers .btn{padding:7px 9px}
-  .vs-flashrow:empty{display:none;min-height:0}
 }
 `;
 
@@ -318,22 +344,32 @@ function PowerupTrack({ left, label }) {
 // What just happened, in one line. Derived from the rows rather than remembered as it goes: a client that
 // reconnects mid-match sees the same last event as one that never left, and there is no running log to keep in
 // step with the match. Keyed so the screen can tell a new event from a re-render of the same one.
+// Each one carries three things, because the announcement and the announcement's words are different jobs:
+//   title   the powerup, in one or two words, at the size of the screen - what you read without reading
+//   detail  who did it and to whom, underneath
+//   text    the whole thing as a sentence, for the live region: a screen reader wants "ShrimpCity stole Tiki
+//           Barber", not a headline and a caption read as two unrelated fragments
+// `tone` tints the overlay, so the three powerups don't all land as the same wash of dark.
 export function latestEvent(match, state, nameOf) {
   if (!match || !state) return null;
   const out = [];
   for (const r of match.respins || []) {
-    const pu = POWERUPS.find((x) => x.id === (r.kind === "era" ? "era" : "team"));
-    out.push({ at: r.pickNo * 4, key: `respin:${r.pickNo}:${r.kind}`, icon: pu.icon,
-      text: `${nameOf(r.by)} re-spun the ${r.kind === "era" ? "era" : "team"}` });
+    const era = r.kind === "era";
+    const pu = POWERUPS.find((x) => x.id === (era ? "era" : "team"));
+    out.push({ at: r.pickNo * 4, key: `respin:${r.pickNo}:${r.kind}`, icon: pu.icon, tone: "spin",
+      title: "Re-spin", detail: `${nameOf(r.by)} — a new ${era ? "era" : "team"}`,
+      text: `${nameOf(r.by)} re-spun the ${era ? "era" : "team"}` });
   }
   for (const d of match.dips || []) {
-    out.push({ at: (d.boardIdx * 2 + 1) * 4 + 1, key: `dip:${d.boardIdx}:${d.by}`, icon: "⚡",
+    out.push({ at: (d.boardIdx * 2 + 1) * 4 + 1, key: `dip:${d.boardIdx}:${d.by}`, icon: "⚡", tone: "dip",
+      title: "Double dip", detail: `${nameOf(d.by)} takes two off this board`,
       text: `${nameOf(d.by)} doubled up — two off this board, and no pick on the next` });
   }
   for (const p of match.picks || []) {
     if (!p.stolenBy) continue;
     const taken = state.roster[p.stolenBy]?.[p.slot];
-    out.push({ at: p.pickNo * 4 + 2, key: `steal:${p.pickNo}`, icon: "😈",
+    out.push({ at: p.pickNo * 4 + 2, key: `steal:${p.pickNo}`, icon: "😈", tone: "steal",
+      title: "Stolen", detail: taken ? `${nameOf(p.stolenBy)} took ${optionName(taken)}` : `${nameOf(p.stolenBy)} took the pick`,
       text: `${nameOf(p.stolenBy)} stole ${taken ? optionName(taken) : "the pick"}` });
   }
   if (!out.length) return null;
@@ -342,6 +378,10 @@ export function latestEvent(match, state, nameOf) {
 
 // Shows the newest event for a few seconds, then lets it go. Keyed on the event, so the same one never
 // re-announces itself when the match is re-read - which it is, every two seconds.
+// Held exactly as long as the overlay's animation runs. It was five seconds when this was a small line above
+// the board, which is far too long for something covering the screen - and it has to be the same number as the
+// CSS, or the overlay either vanishes mid-animation or sits there finished.
+const FLASH_MS = 2400;
 function useFlash(event) {
   const [shown, setShown] = useState(null);
   const seen = useRef(null);
@@ -349,7 +389,7 @@ function useFlash(event) {
     if (!event || event.key === seen.current) return undefined;
     seen.current = event.key;
     setShown(event);
-    const t = setTimeout(() => setShown(null), 5000);
+    const t = setTimeout(() => setShown(null), FLASH_MS);
     return () => clearTimeout(t);
   }, [event?.key]);
   return shown;
@@ -827,11 +867,20 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
 
       {/* What just happened, for a few seconds. Derived from the match's rows, so a client that reconnects
           mid-board sees the same thing as one that never left. */}
-      <div className="vs-flashrow" aria-live="polite">
-        {flash ? (
-          <p className="vs-flash" key={flash.key}><span aria-hidden="true">{flash.icon}</span> {flash.text}</p>
-        ) : null}
-      </div>
+      {/* A powerup is the loudest thing that happens in a duel, so it takes the whole screen for a moment
+          rather than a line above the board that is easy to miss entirely. Announced separately and once, in a
+          live region, because the overlay itself is decoration - a screen reader should hear "ShrimpCity stole
+          Tom Brady", not a description of an animation. */}
+      <p className="vh" aria-live="polite">{flash ? flash.text : ""}</p>
+      {flash ? (
+        <div className={`vs-boom tone-${flash.tone}`} key={flash.key} aria-hidden="true">
+          <div className="vs-boom-in">
+            <span className="vs-boom-icon">{flash.icon}</span>
+            <p className="vs-boom-title">{flash.title}</p>
+            <p className="vs-boom-who">{flash.detail}</p>
+          </div>
+        </div>
+      ) : null}
 
       {/* Above the board, where the single-player draft keeps its roster strip: what you still have open is
           the thing you are reading the board against, so it has to be on screen while you choose - not eight

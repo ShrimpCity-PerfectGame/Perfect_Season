@@ -25,7 +25,8 @@
 //   screen=shop&coins=N[&team=KC]                  ShopScreen on the mock, signed in with N coins (default 4,210), a
 //                                                  few items owned, a badge item owned through its badge, and a
 //                                                  badge earned but not yet paid (its item says it unlocks next season)
-//   screen=versus[&waiting=1][&done=1][&picks=N]     a duel on the mock: mid-board, from the other side, or played out
+//   screen=versus[&waiting=1][&done=1][&boom=1][&picks=N]   a duel on the mock: mid-board, from the other side, played
+//                                                  out, or with a powerup announcement firing on load
 //   screen=picker[&owned=sideline,night-game][&current=trophy]   the avatar picker on its own, on Choose an avatar,
 //                                                  owning the listed packs (default: sideline)
 import { useState } from "react";
@@ -487,6 +488,18 @@ async function setUpVersus() {
       playerId: o.kind === "player" ? o.id : undefined,
       team: o.kind === "player" ? undefined : o.team, season: o.season,
     });
+  }
+  // ?boom=steal|respin|dip spends that powerup, so its full-screen announcement fires on load - otherwise
+  // there is no way to look at any of them without playing a match by hand. (boom=1 means steal.)
+  const boom = params.get("boom");
+  if (boom) {
+    const before = vs._replay(code);
+    if (before?.turn) {
+      await signIn(before.turn.side === "host" ? MINE : THEIRS);
+      if (boom === "respin") await vs.invokeMatchPick({ code, respin: "team" });
+      else if (boom === "dip") await vs.invokeMatchPick({ code, dip: true });
+      else if (!before.turn.first) await vs.invokeMatchPick({ code, steal: true });
+    }
   }
   // Signed in as whoever is on the clock, so the board renders in the state it is picked from. ?waiting=1 shows
   // it from the other side instead - the half of a match where the board is read and not touched.

@@ -40,6 +40,9 @@ CLAUDE.md.
   opponent as well, so it is a real decision. A **steal**, which takes the pick they just made and sends them
   back to the board for another. And a **double dip**, two off one board in exchange for giving up your next
   pick, which leaves them the board after to themselves.
+- **A powerup takes the whole screen.** Spend one and both players see it: the icon, the powerup in letters
+  the size of the screen — RE-SPIN, DOUBLE DIP, STOLEN — and who did what underneath. It used to be a line of
+  small text above the board that was easy to miss entirely.
 - **A result screen that says one thing.** The football score, big, winner first the way a score is
   written — then "Rival beat ShrimpCity" under it, and each roster with its own number above it. Confetti if
   you won.
