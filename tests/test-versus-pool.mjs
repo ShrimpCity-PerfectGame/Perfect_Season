@@ -9,12 +9,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, runTest } from "./helpers.mjs";
 import { initGameData, BOARDS, TEAMS, WINDOWS } from "../game-logic.mjs";
+import { initVersusData, unitsOn } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => JSON.parse(readFileSync(path.join(root, f), "utf8"));
 const raw = read("data/versus-pool.json");
 const players = read("data/players.json");
 initGameData(players.players, players.opponents);
+// unitsOn reads the pool through these, so the last test can ask what a board actually offers rather than
+// counting rows in the file and hoping the two agree - which is exactly where they stopped agreeing.
+initVersusData(raw);
 
 // The file packs its rows as arrays with the column names given once, because it ships in the page every
 // visitor loads. Expanded here the same way versus-logic.mjs expands it - and the shape of that packing is
@@ -44,13 +48,22 @@ await runTest("the file is packed the way the game unpacks it", async () => {
 await runTest("one defense and one kicker for every team-season the game knows", async () => {
   const want = [];
   for (let season = FIRST; season <= LAST; season++) for (const team of Object.keys(TEAMS)) want.push(`${team}|${season}`);
-  // Four fewer than 32 x 27: the league had 31 teams until Houston joined in 2002.
-  const missingD = want.filter((k) => !defenses.has(k));
-  const missingK = want.filter((k) => !kickers.has(k));
-  assert(missingD.length === 3 && missingD.every((k) => k.startsWith("HOU|")),
-    `only the seasons Houston did not exist are missing a defense, got ${JSON.stringify(missingD)}`);
+  // Two kinds of gap, and only these two. Houston did not exist until 2002. And nflverse only half has JAX
+  // 2001 and 2002 - eight weeks of sixteen - while games.csv gives the full year's points allowed, so the row
+  // would be a whole season's points against beside half a season's sacks and takeaways. There is no Pro
+  // Football Reference correction on this side of the data the way there is for players, so the builder leaves
+  // an incomplete team-season out rather than shipping it as a whole one.
+  const NEVER_PLAYED = ["HOU|1999", "HOU|2000", "HOU|2001"];
+  const ONLY_HALF = ["JAX|2001", "JAX|2002"];
+  const absent = [...NEVER_PLAYED, ...ONLY_HALF].sort();
+  const missingD = want.filter((k) => !defenses.has(k)).sort();
+  const missingK = want.filter((k) => !kickers.has(k)).sort();
+  assert(JSON.stringify(missingD) === JSON.stringify(absent),
+    `only Houston before it existed and the half-seasons are missing a defense, got ${JSON.stringify(missingD)}`);
+  // The two lists have to match: a team the data only half has must be missing BOTH, or a board would offer a
+  // three-game fill-in as that team's kicker beside no defense at all.
   assert(JSON.stringify(missingK) === JSON.stringify(missingD), `and the kickers match exactly, got ${JSON.stringify(missingK)}`);
-  assert(pool.defenses.length === 861 && pool.kickers.length === 861, `861 of each, got ${pool.defenses.length} and ${pool.kickers.length}`);
+  assert(pool.defenses.length === 859 && pool.kickers.length === 859, `859 of each, got ${pool.defenses.length} and ${pool.kickers.length}`);
   assert(defenses.size === pool.defenses.length && kickers.size === pool.kickers.length, "with no team-season listed twice");
 });
 
@@ -126,6 +139,9 @@ await runTest("every board carries a defense and a kicker for every year of its 
     for (let season = from; season <= to; season++) {
       if (season < FIRST || season > LAST) continue;
       if (team === "HOU" && season < 2002) continue; // the Texans did not exist yet
+      // ...and the two nflverse only half has, which the builder leaves out rather than rate off eight weeks.
+      // A board being a year or two short is the honest outcome; section 8 already handles a thin board.
+      if (team === "JAX" && (season === 2001 || season === 2002)) continue;
       if (!defenses.has(`${team}|${season}`)) short.push(`${key} has no ${season} defense`);
       if (!kickers.has(`${team}|${season}`)) short.push(`${key} has no ${season} kicker`);
     }
@@ -138,25 +154,32 @@ await runTest("a board can be one deep at a position, which is why section 8 exi
   // This test exists so nobody later assumes the data makes that impossible: it does not, and it is not rare.
   const thin = [];
   const shallowUnit = [];
+  const oneKicker = [];
   for (const [key, list] of Object.entries(BOARDS)) {
     const by = {};
     for (const p of list) by[p.pos] = (by[p.pos] || 0) + 1;
     for (const pos of ["QB", "RB", "WR", "TE"]) if ((by[pos] || 0) < 2) thin.push(`${key}: ${by[pos] || 0} ${pos}`);
     const [team, w] = key.split("|");
     const [from, to] = WINDOWS[Number(w)];
-    let d = 0, k = 0;
-    for (let season = Math.max(from, FIRST); season <= Math.min(to, LAST); season++) {
-      if (defenses.has(`${team}|${season}`)) d++;
-      if (kickers.has(`${team}|${season}`)) k++;
-    }
-    if (d < 2 || k < 2) shallowUnit.push(`${key}: ${d} defenses, ${k} kickers`);
+    // Asked of what the board actually OFFERS, which is unitsOn - not of how many rows the pool holds. The two
+    // differ for kickers: a defense appears once per year of the era, but a kicker appears once per KICKER, in
+    // his best season. A team whose kicker held the job all five years therefore offers exactly one.
+    const units = unitsOn(key);
+    if (units.defenses.length < 2) shallowUnit.push(`${key}: ${units.defenses.length} defenses`);
+    if (units.kickers.length < 2) oneKicker.push(`${key}: ${units.kickers[0]?.name || "none"}`);
   }
   assert(thin.length > 0, "boards one deep at a position are real - if this ever passes with zero, section 8 can be simplified");
   assert(thin.some((s) => /1 QB$/.test(s)), `including one-quarterback boards, got ${JSON.stringify(thin.slice(0, 3))}`);
 
-  // The other half of the same question: a defense or a kicker is never the scarce thing, because every board
-  // offers one per year of its era. Both players can always be served those, whatever else is contested.
-  assert(shallowUnit.length === 0, `every board is at least two deep at defense and kicker, got:\n    ${shallowUnit.slice(0, 5).join("\n    ")}`);
+  // A defense is genuinely never scarce: one per year, so every board has at least two.
+  assert(shallowUnit.length === 0, `every board is at least two deep at defense, got:\n    ${shallowUnit.slice(0, 5).join("\n    ")}`);
+
+  // A kicker is, and this test used to claim otherwise by counting pool rows instead of offered ones - which
+  // said "both players can always be served a kicker" over a board holding exactly one. Section 8 is what
+  // actually handles it, the same way it handles a one-quarterback board.
+  assert(oneKicker.length > 0 && oneKicker.length < 80,
+    `one-kicker boards are real and not the majority, got ${oneKicker.length} of ${Object.keys(BOARDS).length}`);
+  assert(Object.keys(BOARDS).every((key) => unitsOn(key).kickers.length >= 1), "but no board is ever left with none");
 });
 
 console.log("test-versus-pool.mjs done");

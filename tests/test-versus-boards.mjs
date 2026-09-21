@@ -111,13 +111,17 @@ await runTest("what fits where: a defense is not a flex", async () => {
 });
 
 await runTest("a defense and a kicker are each worth exactly one roster slot", async () => {
-  // VERSUS.md 6: SLOT_WORTH is 1/6.25, which is what one ordinary slot is worth in the six-player weighted mean.
-  // The check that matters is that it is not a tuned number: a defense rated X above average and a running back
-  // rated X above average move a final score by the same amount.
+  // VERSUS.md 6: SLOT_WORTH is one ordinary slot's share of the weighted mean, which is 1/(QB_WEIGHT + 6) =
+  // 1/7.25 now the kicker is one of the seven scored picks. It read 1/6.25 here, from before that.
+  //
+  // Pinned to the number, not to its own formula. Checking optionValue against (rating - AVERAGE) * SLOT_WORTH
+  // passes for ANY value of SLOT_WORTH, so it could never have caught the constant drifting - which is how the
+  // figures in VERSUS.md stayed a version behind. The cross-kind assertions below are the real ones.
+  assert(Math.abs(SLOT_WORTH - 1 / 7.25) < 1e-9, `SLOT_WORTH is 1/7.25, got 1/${(1 / SLOT_WORTH).toFixed(4)}`);
   const board = optionsOn("BAL|1");
   const dst = board.find((o) => o.kind === "dst");
   const asDefense = optionValue(dst, "DST", "fantasy");
-  assert(Math.abs(asDefense - (dst.rating - AVERAGE_RATING) * SLOT_WORTH) < 1e-9, "a defense is worth what it is above average");
+  assert(Math.abs(asDefense - (dst.rating - AVERAGE_RATING) / 7.25) < 1e-9, "a defense is worth what it is above average");
   const rb = board.find((o) => o.kind === "player" && o.pos === "RB");
   const asBack = optionValue(rb, "RB", "fantasy");
   const sameEdge = { ...dst, rating: rb.rating };

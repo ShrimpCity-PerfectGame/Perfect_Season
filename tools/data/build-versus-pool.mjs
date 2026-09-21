@@ -117,23 +117,54 @@ function zScores(rows, value) {
 // The weights lean on points allowed because that is the outcome; the rest are how it was done.
 const DEFENSE_WEIGHTS = { allowed: 0.5, takeaways: 0.22, sacks: 0.18, scores: 0.1 };
 
-function rateDefenses(season, teamRows, allowedTable) {
+// The team-seasons nflverse only half has. Its team file says how many games each row covers, and for a few it
+// is not the season: JAX 2001 and 2002 are eight weeks of sixteen. Points allowed comes from games.csv and IS
+// the full year, so such a row contradicts itself - a whole season's points against beside half a season's
+// sacks and takeaways. 2002 JAX came out at 17 sacks, the league minimum that year, and 51.6, 27th of 32;
+// whole, it rates about 66 and mid-pack. That is 1.5-2.0 points of match score against a median margin of 4.8.
+//
+// It is the same upstream damage CLAUDE.md's provenance note says the player pipeline corrects against Pro
+// Football Reference, and there is no correction source here - so an incomplete team-season is left out rather
+// than shipped as a whole one. The kickers go with it: the weekly file has the same hole, which is why JAX 2002
+// offered a three-game fill-in who went 3 for 5. One game short is tolerated, since six rows are and their
+// stats are attributed correctly.
+function incompleteIn(season, teamRows, allowedTable) {
+  const skip = new Set();
+  for (const t of teamRows) {
+    const team = code(t.team);
+    const pa = allowedTable.get(`${season}|${team}`);
+    if (!team || !pa) continue;
+    const covered = num(t.games);
+    if (covered && covered < pa.games - 1) {
+      skip.add(team);
+      console.log(`  ${season}: dropped ${team} - nflverse covers ${covered} of ${pa.games} games`);
+    }
+  }
+  return skip;
+}
+
+function rateDefenses(season, teamRows, allowedTable, skip = new Set()) {
   const rows = teamRows
     .map((t) => ({ team: code(t.team), pa: allowedTable.get(`${season}|${code(t.team)}`), row: t }))
     .filter((r) => {
       // A team that played no games that season is not a team. nflverse carries a blank-coded row in 1999 holding
       // a few plays it could not attribute, and left in it rated as a defense that allowed nothing all year -
       // and, worse, dragged every real team's z-score toward it.
-      if (r.team && r.pa) return true;
-      console.log(`  ${season}: dropped a row with no games (team ${JSON.stringify(r.team)})`);
-      return false;
+      if (!r.team || !r.pa) {
+        console.log(`  ${season}: dropped a row with no games (team ${JSON.stringify(r.team)})`);
+        return false;
+      }
+      return !skip.has(r.team);
     })
     .map(({ team, pa, row: t }) => ({
       season, team, games: pa.games,
       allowedPerGame: pa.allowed / pa.games,
       takeaways: num(t.def_interceptions) + num(t.fumble_recovery_opp),
       sacks: num(t.def_sacks),
-      scores: num(t.def_tds) + num(t.def_safeties) + num(t.def_fg_blocks) + num(t.def_punt_blocks),
+      // Touchdowns and safeties only, as the note above says and VERSUS.md 6 says: points the defense put on
+      // the board itself. Blocked kicks were in here too, which score nothing and belong to the field-goal and
+      // punt block units - about 40% of this component's size, and a straight contradiction of both.
+      scores: num(t.def_tds) + num(t.def_safeties),
       ints: num(t.def_interceptions),
       fumbles: num(t.fumble_recovery_opp),
       tds: num(t.def_tds),
@@ -161,7 +192,7 @@ const KICK_WEIGHTS = { accuracy: 0.4, distance: 0.38, volume: 0.22 };
 // a little evidence, which is all three kicks are worth.
 const ACCURACY_SHRINK = 10;
 
-function rateKickers(season, weekRows) {
+function rateKickers(season, weekRows, skip = new Set()) {
   // Counted week by week, because a kicker belongs to the team he kicked for. The season file holds only the team
   // he *ended* on and credits it with the whole year: Riley Patterson's 2023 was fourteen games in Detroit and
   // three in Cleveland, filed entirely under Cleveland, which left Detroit with a four-kick fill-in.
@@ -169,7 +200,8 @@ function rateKickers(season, weekRows) {
   for (const w of weekRows) {
     if (w.position !== "K" || (w.season_type && w.season_type !== "REG")) continue;
     const team = code(w.team);
-    if (!team || team === "NA") continue;
+    // Same hole as the defenses: half a season of weeks makes a fill-in look like the team's kicker.
+    if (!team || team === "NA" || skip.has(team)) continue;
     const key = `${w.player_id || w.player_name}|${team}`;
     const t = tally.get(key) || {
       team, name: w.player_display_name || w.player_name,
@@ -227,7 +259,19 @@ for (let season = FIRST; season <= LAST; season++) {
     console.log(`${season}: no team stats yet (${e.message.slice(0, 40)}) - stopping here`);
     break;
   }
-  const rated = rateDefenses(season, teamRows.filter((t) => t.season_type === "REG" || !t.season_type), allowed);
+  const regular = teamRows.filter((t) => t.season_type === "REG" || !t.season_type);
+  // A season that hasn't been played yet is not a season. The only guard used to be the 404 on the team file,
+  // and nflverse publishes that file from week one - stats_team_reg_2026.csv already exists with two games in
+  // it - so re-running this would have quietly emitted 32 fully-rated 2026 defenses and kickers off a fortnight.
+  const slate = Math.max(0, ...regular.map((t) => allowed.get(`${season}|${code(t.team)}`)?.games || 0));
+  if (slate < 16) {
+    console.log(`${season}: only ${slate} games played - not a finished season, stopping here`);
+    break;
+  }
+  // Worked out once and applied to both sides, so a team nflverse only half has is missing its defense AND its
+  // kicker rather than one of the two - tests/test-versus-pool.mjs holds the two lists to each other.
+  const skip = incompleteIn(season, regular, allowed);
+  const rated = rateDefenses(season, regular, allowed, skip);
   defenses.push(...rated);
   let weekRows = [];
   try {
@@ -235,7 +279,7 @@ for (let season = FIRST; season <= LAST; season++) {
   } catch (e) {
     console.log(`${season}: no player weeks (${e.message.slice(0, 40)})`);
   }
-  const kicks = rateKickers(season, weekRows);
+  const kicks = rateKickers(season, weekRows, skip);
   kickers.push(...kicks);
   const top = [...rated].sort((a, b) => b.rating - a.rating)[0];
   const boot = [...kicks].sort((a, b) => b.rating - a.rating)[0];

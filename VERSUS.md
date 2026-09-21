@@ -231,9 +231,23 @@ tight end does, and nothing on the screen calls it a penalty. The consequence wo
 other anyway.
 
 `SLOT_WORTH` is `1 / (QB_WEIGHT + 6)` — **precisely what one ordinary slot is worth** in the weighted mean
-above, because that is exactly what the defense is: one of your eight picks. Nothing is tuned by feel. It puts the best defense in the data at about 7.5 points off the opponent and the worst at about 5.6 back,
+above, because that is exactly what the defense is: one of your eight picks. Nothing is tuned by feel. It puts
+the best defense in the data (112.7) at **6.58 points** off the opponent and the worst (29.4) at **4.91 back**,
 against a measured median margin of 4.8 points between two rosters drafted off the same boards (p90 13.8) — so
 both picks can decide a close match, which they should, while the six players still decide most of them.
+
+Those two figures were 7.5 and 5.6 here until the review pass measured them: they were computed as `1/6.25`,
+before the kicker moved into the weighted mean and made it `1/7.25`. Measured rather than derived, a defense or
+a kicker swings a match about 60% as hard as a player slot — the units' ratings have a standard deviation of
+about 13.7 against the players' wider spread, so they are priced at one slot per rating point but their pool is
+narrower. Replacing both sides' defense with a league-average one flips the winner in 8.6–10.8% of matches, and
+the kicker in about 9.5%, against 33% for the quarterbacks. That is the intent holding.
+
+One known loose end, not a bug but worth knowing before anyone re-tunes: `RATING_PER_SD = 18` is applied to a
+weighted sum of four correlated z-scores that is never itself standardised, and that sum's own SD is about
+0.745 — so the constant delivers about 13.5 rather than 18, and the top ~15 points of the 0–130 scale are never
+reached. Standardising the composite before `scale()` would make the name true, and would move all 1,718
+ratings, so it is a balance decision rather than a correction.
 
 A defense is subtracted from **the other roster**, which is what a defense does. In a head-to-head the difference
 is the same either way, but the numbers a player reads afterwards should say what happened: *their defense took

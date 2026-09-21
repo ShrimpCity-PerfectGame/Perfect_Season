@@ -909,7 +909,10 @@ export function versusShareText(match, result, side, siteUrl) {
     `${result[mine].score} to ${result[theirs].score} on the boards`,
   ];
   // The two things a 1v1 has that a season doesn't, and the only two worth a line.
-  if (result[mine].kicker) lines.push(`My kicker ${signed(result[mine].kicker)}`);
+  // No kicker line. sideScore returns { roster, against, score } and matchResult adds `points` - there has never
+  // been a `kicker` field, so the line this used to hold could not fire, and the card silently promised one of
+  // the only two numbers worth having. The kicker is inside `roster` now: it is one of the seven picks averaged,
+  // not a separate term the way it was when this was written.
   if (result[mine].against) lines.push(`Their defense ${signed(-result[mine].against)}`);
   if (siteUrl) lines.push(`Play me: ${siteUrl}`);
   return lines.join("\n");
