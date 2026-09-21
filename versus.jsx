@@ -57,8 +57,12 @@ export const VERSUS_CSS = `
 .vs-vs .vs-tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
 .vs-vs .vs-x{font-family:var(--display);font-size:20px;opacity:.6}
 /* On the team card, top right, where the card already had room. Tabular so it doesn't jitter as it counts. */
+/* On its own dark pill, not straight onto the card: the card carries the team's colours, so the clock was
+   white on whatever those happened to be - 1.96:1 over the Jets' white stripe and 2.79:1 over the Rams' yellow,
+   both under the 3:1 large text needs, and a text-shadow counts for nothing in WCAG. The pill makes it the same
+   readable clock on all 32 teams. The number is what says time is short; .low only colours what it already says. */
 .vs-reelclock{position:absolute;top:12px;right:16px;font-family:var(--display);font-size:34px;line-height:1;
-  color:#fff;font-variant-numeric:tabular-nums;text-shadow:0 1px 3px rgba(0,0,0,.5)}
+  color:#fff;font-variant-numeric:tabular-nums;background:rgba(6,10,22,.88);border-radius:10px;padding:2px 9px}
 .vs-reelclock .vs-s{font-size:18px;opacity:.75;margin-left:1px}
 .vs-reelclock.low{color:var(--loss)}
 .vs-clockbox{display:flex;gap:10px;align-items:baseline}
@@ -96,9 +100,12 @@ export const VERSUS_CSS = `
 .vs-pd{font-size:13px;opacity:.8;margin-top:3px}
 /* What just happened. A fixed row, so the board does not jump when a line appears and goes. */
 .vs-flashrow{min-height:30px}
-.vs-open{border-color:var(--accent);font-variant-numeric:tabular-nums}
 .vs-flash{margin:0;padding:6px 10px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--line2);
   font-weight:700;font-size:13.5px;display:inline-flex;gap:8px;align-items:center;animation:vs-in .28s ease-out}
+/* After .vs-flash, not before it: same specificity, and .vs-flash sets the border SHORTHAND, which resets
+   border-color. Declared first, the opening window's lime edge never drew at all and its banner was
+   indistinguishable from an ordinary event line. (CLAUDE.md: base rules before the rules that override them.) */
+.vs-open{border-color:var(--accent);font-variant-numeric:tabular-nums}
 @keyframes vs-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 /* Who still holds what. Struck through rather than merely dimmed: a spent one has to read without colour. */
 .vs-track{list-style:none;display:flex;gap:8px;margin:6px 0 0;padding:0}
@@ -128,12 +135,15 @@ export const VERSUS_CSS = `
   .vs-rosters .slot{min-height:38px;padding:4px 6px}
   .vs-rosters .slot .sub{display:none}
   .vs-rosters .slot .v{font-size:12px;margin-top:1px}
-  .vs-rosters .slot .k{font-size:10.5px}
+  /* 12px is the floor tools/ui-harness/audit.mjs holds the whole app to; these were 10.5 and 10. */
+  .vs-rosters .slot .k{font-size:12px}
   .vs-side-hd{margin-bottom:3px;font-size:11px}
   .vs-them .roster{grid-template-columns:repeat(8,minmax(0,1fr));gap:3px}
-  .vs-them .slot{min-height:28px;padding:3px 1px;text-align:center}
+  .vs-them .slot{min-height:30px;padding:3px 1px;text-align:center}
   .vs-them .slot .v{display:none}
-  .vs-them .slot .k{font-size:10px}
+  .vs-them .slot .k{font-size:12px}
+  /* Filled has to read without colour, because on this strip the name is gone: the solid edge and the
+     position bar .slot.filled already draws are the shape saying so, and the background only tints it. */
   .vs-them .slot[data-filled="1"]{border-style:solid;background:var(--surface2)}
   .vs-them .vs-track{margin-top:4px}
   .vs-powers .btn{padding:7px 9px}
@@ -362,11 +372,24 @@ function RosterStrip({ roster, label, sub, them }) {
       <div className="roster" data-side={label}>
         {VERSUS_SLOTS.map((slot) => {
           const o = roster[slot];
+          // `filled` is the app's own class for a slot with somebody in it - the inset position-coloured bar -
+          // and `pos-*` is what sets the --pc that bar is drawn in. This was written as `on`, a class no
+          // stylesheet in the app has ever had, so every filled slot kept the dashed empty-slot border and none
+          // of the position colour.
           return (
-            <div key={slot} className={`slot ${o ? "on" : ""}`} data-slot={slot} data-filled={o ? "1" : "0"}>
-              <div className="k">{VS_SLOT_LABEL[slot]}</div>
-              <div className="v">{o ? optionName(o) : <span style={{ color: "var(--muted)", fontWeight: 400 }}>Open</span>}</div>
-              {o && <div className="sub">{shortYr(o.season)} {TEAMS[o.team][0]}{slot.startsWith("FLEX") ? `, ${o.pos}` : ""}</div>}
+            <div key={slot} className={`slot pos-${slot.startsWith("FLEX") ? "FLEX" : slot} ${o ? "filled" : ""}`}
+                 data-slot={slot} data-filled={o ? "1" : "0"}>
+              {/* One line of words for assistive tech at every width, and the painted version hidden from it.
+                  The opponent's strip drops .v on a phone, which took the only text saying whether a slot was
+                  filled out of the tree with it - leaving a 1.23:1 background and a 1.91:1 border as the entire
+                  signal, which is colour carrying meaning on its own (CLAUDE.md, Design system). */}
+              <span className="vh">
+                {o ? `${POS_NAME[slot.startsWith("FLEX") ? "FLEX" : slot] || VS_SLOT_LABEL[slot]}: ${optionName(o)}`
+                   : `${POS_NAME[slot.startsWith("FLEX") ? "FLEX" : slot] || VS_SLOT_LABEL[slot]}, open`}
+              </span>
+              <div className="k" aria-hidden="true">{VS_SLOT_LABEL[slot]}</div>
+              <div className="v" aria-hidden="true">{o ? optionName(o) : <span style={{ color: "var(--muted)", fontWeight: 400 }}>Open</span>}</div>
+              {o && <div className="sub" aria-hidden="true">{shortYr(o.season)} {TEAMS[o.team][0]}{slot.startsWith("FLEX") ? `, ${o.pos}` : ""}</div>}
             </div>
           );
         })}
@@ -402,8 +425,13 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
         <div className="pickno"><span>{turnLabel}</span><span>{left} left on the board</span></div>
         {/* The clock lives on the team card rather than in a bar of its own: it was the only thing in that bar
             not already said by the roster headings and the line beside it. */}
+        {/* role="timer" rather than a bare aria-label on a div, which isn't reliably exposed - and it carries
+            aria-live="off", which is the point: the reel around it is a polite live region, so a per-second
+            countdown inside it had a screen reader re-reading the whole board every second, for forty-five
+            seconds a turn and sixteen turns a match. Read on demand, not announced. */}
         {seconds != null ? (
-          <div className={`vs-reelclock ${seconds <= 10 ? "low" : ""}`} aria-label={`${seconds} seconds left`}>
+          <div className={`vs-reelclock ${seconds <= 10 ? "low" : ""}`}
+               role="timer" aria-live="off" aria-label={`${seconds} seconds left in this turn`}>
             {seconds}<span className="vs-s">s</span>
           </div>
         ) : null}
@@ -444,11 +472,17 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
               const id = optionId(o);
               const gone = taken.has(id);
               const slotsFor = open.filter((sl) => optionFits(o, sl));
-              const off = gone || !slotsFor.length || !myTurn;
+              // What the single-player draft greys out, and all it greys out: an option already taken, or one
+              // that fits no slot you have left. Waiting for the other player is NOT one of them. Dimming the
+              // whole board for their whole turn put cream on navy at 3.43:1 and the stat labels at 2.28:1 -
+              // both under AA - for about half of a sixteen-pick match, with nothing saying why.
+              const dim = gone || !slotsFor.length;
+              // Reading the board while you wait is the whole point of waiting; picking off it is not.
+              const off = dim || !myTurn;
               const isSel = selected === id;
               return (
-                <div key={id} className={`card ${isSel ? "sel" : ""} ${off ? "off" : ""}`} data-opt={id}>
-                  <button className="hit" disabled={off || busy} onClick={() => setSelected(isSel ? null : id)} aria-expanded={isSel}>
+                <div key={id} className={`card ${isSel ? "sel" : ""} ${dim ? "off" : ""}`} data-opt={id}>
+                  <button className="hit" disabled={dim || busy} onClick={() => setSelected(isSel ? null : id)} aria-expanded={isSel}>
                     <div className="row">
                       <div>
                         <div className="nm-row"><span className="pp">{optionTag(o)}</span><span className="nm">{optionName(o)}</span></div>
@@ -466,7 +500,7 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
                     <div className="drafts">
                       {/* Both Flex slots are the same choice, so one Flex button rather than two identical ones. */}
                       {slotsFor.filter((sl) => !sl.startsWith("FLEX") || sl === slotsFor.find((x) => x.startsWith("FLEX"))).map((sl) => (
-                        <button key={sl} className="btn solid" disabled={busy} onClick={() => onPick(o, sl)}>
+                        <button key={sl} className="btn solid" disabled={off || busy} onClick={() => onPick(o, sl)}>
                           🔒 Lock in · {VS_SLOT_LABEL[sl]}
                         </button>
                       ))}
@@ -595,6 +629,9 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     if (lastAt.current === atPick) return;
     lastAt.current = atPick;
     setError(null);
+    // The open card goes with it. Left alone, a card expanded on your turn kept its Lock in buttons on screen
+    // after the turn moved - pressing one only ever earned a refusal from the server.
+    setSelected(null);
   }, [atPick]);
   // The board's opening window (VERSUS.md 7): the seconds in which the first pick can't land yet, so the other
   // player has a real chance to take it. Null whenever nobody could use one.
@@ -659,7 +696,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           Open a lobby and send the link. You and whoever takes it draft from the same eight boards — six players,
           a defense and a kicker each — and the better roster wins. No dice.
         </p>
-        {error ? <p className="vs-err">{errorText(error)}</p> : null}
+        {error ? <p className="vs-err" role="alert">{errorText(error)}</p> : null}
         <div className="vs-powers">
           <button className="btn primary" onClick={open} disabled={busy}>Open a lobby</button>
           <button className="btn" onClick={onBack}>Back</button>
@@ -740,6 +777,11 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
 
   return (
     <section className="versus vs-draft" data-view="draft" data-code={match.code}>
+      {/* The lobby, the result and the signed-out view all name themselves; the screen a whole match is played
+          on went straight from the page's h1 to the board's position headings, which is a heading-order
+          failure and left both rosters unreachable by heading navigation. Visually hidden: the board says
+          what this is far better than a title would. */}
+      <h2 className="vh">1v1 draft — board {Math.min(state.boardIdx + 1, MATCH_BOARDS)} of {MATCH_BOARDS}</h2>
       {showRules ? <VersusHowTo onClose={closeRules} /> : null}
       {/* The bar the single-player draft floats once you scroll past the reel, carrying what a 1v1 needs
           instead: who is on the clock, the seconds left, and both rosters as chips. */}
@@ -761,17 +803,27 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
         </div>
       </div>
 
-      {error ? <p className="vs-err">{errorText(error)}</p> : null}
+      {error ? <p className="vs-err" role="alert">{errorText(error)}</p> : null}
 
       {/* What just happened, for a few seconds. Derived from the match's rows, so a client that reconnects
           mid-board sees the same thing as one that never left. */}
       <div className="vs-flashrow" aria-live="polite">
+        {/* Seen and announced separately, because this row is a polite live region and the seen version ticks
+            every second - which had a screen reader re-reading the sentence ten times over. The spoken one says
+            the same thing once, without a number in it. */}
         {opening ? (
           <p className="vs-flash vs-open">
             <span aria-hidden="true">🔀</span>
-            {myTurn
-              ? ` The board opens in ${lookLeft}s — ${name(match, look.follower)} can take the first pick.`
-              : ` ${lookLeft}s to take the first pick on this board.`}
+            <span aria-hidden="true">
+              {myTurn
+                ? ` The board opens in ${lookLeft}s — ${name(match, look.follower)} can take the first pick.`
+                : ` ${lookLeft}s to take the first pick on this board.`}
+            </span>
+            <span className="vh">
+              {myTurn
+                ? `The board waits a few seconds before it opens — ${name(match, look.follower)} can take the first pick.`
+                : "You have a few seconds to take the first pick on this board."}
+            </span>
           </p>
         ) : flash ? (
           <p className="vs-flash" key={flash.key}><span aria-hidden="true">{flash.icon}</span> {flash.text}</p>
@@ -820,7 +872,10 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
                   </button>
                 );
               })}
-              <button className="btn linkish vs-pu-help" onClick={() => setShowRules(true)}>
+              {/* Named here because every span inside is either aria-hidden or display:none on a phone, which
+                  left the button with no accessible name at all below 480px - the same pattern the draft's
+                  re-spin buttons already carry an aria-label for. */}
+              <button className="btn linkish vs-pu-help" aria-label="How 1v1 works" onClick={() => setShowRules(true)}>
                 <span className="vs-pi" aria-hidden="true">?</span>
                 <span className="rs-long">How 1v1 works</span>
                 <span className="rs-short" aria-hidden="true">Rules</span>

@@ -40,6 +40,8 @@ import { makeMockAuth } from "../../tests/mock-supabase.mjs";
 import { veteranProfile, rookieProfile, photoProfile, VETERAN_ROW } from "../../tests/fixtures/profile-fixture.mjs";
 import { FREE_AVATAR_PRESETS, TEAM_CODES } from "../../profile-rules.mjs";
 import { BOARDS, SLOTS, TEAMS, fits, runLogRow } from "../../game-logic.mjs";
+import { VersusScreen } from "../../versus.jsx";
+import * as V from "../../versus-logic.mjs";
 
 const params = new URLSearchParams(location.search);
 const who = params.get("as") || "player";
@@ -81,6 +83,9 @@ const mock = makeMockAuth();
 window.__ps_supabase__ = mock;
 window.storage = memoryStorage();
 if (params.get("howto") !== "1") window.storage.set("ps-howto-seen", "true", false);
+// 1v1 keeps its own first-run flag (VERSUS_HOWTO_KEY), so without this every visit opens the rules over the
+// board and nothing automated ever sees the screen underneath.
+if (params.get("howto") !== "1") window.storage.set("ps-vs-howto-seen", "true", false);
 
 // 24 other players, including the longest username allowed and very large numbers.
 const NAMES = ["abcdefghijklmnop", "bigplayben", "flexgod", "gronkspike", "dailydan", "Mississippi_Kid1", "sb_or_bust", "tdmachine",
@@ -420,6 +425,78 @@ async function setUpShop() {
   return { uid, username };
 }
 
+// ---------- screen=versus: a 1v1 mid-draft, the screen a whole match is played on ----------
+// The lobby was the only 1v1 screen anything automated ever saw, which is how a board with no accessible name
+// on its rules button, no h2, and a roster strip whose filled slots said so in colour alone all got through.
+// This builds a real match on the mock - two accounts, an invite taken, a few picks made - and hands the real
+// VersusScreen the same match_state a player's browser would have.
+function VersusPreview({ userId, username, code }) {
+  // The main landmark and the h1 are the app shell's, reproduced here so axe judges this screen rather than the
+  // fixture around it - perfect-season.jsx renders exactly these two when it mounts VersusScreen for real.
+  return (
+    <div className="ps dark">
+      <style>{APP_CSS}</style>
+      <main id="content">
+        <div className="wrap">
+          <h1 className="vh">1v1</h1>
+          <VersusScreen userId={userId} username={username} code={code} format="fantasy"
+            onBack={() => console.log("back")} onCode={(c) => console.log("code", c)}
+            onShare={(t) => console.log("share", t)} siteUrl="https://gridspin.test" />
+        </div>
+      </main>
+    </div>
+  );
+}
+
+async function setUpVersus() {
+  const you = params.get("name") || "shrimpcity";
+  const MINE = `${you}@harness.test`, THEIRS = "rival@harness.test";
+  const pw = "harness-only";
+  // Every call reads the signed-in account, exactly as the real functions read auth.uid(), so building a match
+  // means taking each player's seat in turn.
+  const signIn = async (email) => {
+    await mock.auth.signOut();
+    await mock.auth.signInWithPassword({ email, password: pw });
+  };
+
+  const { data: a } = await mock.auth.signUp({ email: MINE, password: pw, options: { data: { username: you } } });
+  const mine = a.user.id;
+  const { data: b } = await mock.auth.signUp({ email: THEIRS, password: pw, options: { data: { username: "rival" } } });
+  const theirs = b.user.id;
+
+  const vs = mock._versus;
+  await signIn(MINE);
+  const code = vs.rpcs.create_match({ p_format: "fantasy" }).code;
+  await signIn(THEIRS);
+  vs.rpcs.join_match({ p_code: code });
+
+  // A few picks in, so the board is mid-match rather than freshly dealt: options taken, both rosters part
+  // filled, and the roster strips showing filled slots beside open ones.
+  const turns = Number(params.get("picks") || 3);
+  for (let i = 0; i < turns; i++) {
+    const st = vs._replay(code);
+    if (!st || st.done || !st.turn) break;
+    await signIn(st.turn.side === "host" ? MINE : THEIRS);
+    const best = V.autoPick(st.boardKey, st.taken, st.roster[st.turn.side], "fantasy");
+    if (!best) break;
+    const o = best.option;
+    // Past the board's opening window, or every one of these is refused as board_opening and the fixture is a
+    // freshly dealt board pretending to be a match in progress.
+    await vs.invokeMatchPick({
+      code, boardIdx: st.boardIdx, kind: o.kind, slot: best.slot,
+      playerId: o.kind === "player" ? o.id : undefined,
+      team: o.kind === "player" ? undefined : o.team, season: o.season,
+    }, { now: Date.now() + (V.LOOK_SECONDS + 2) * 1000 });
+  }
+  // Signed in as whoever is on the clock, so the board renders in the state it is picked from. ?waiting=1 shows
+  // it from the other side instead - the half of a match where the board is read and not touched.
+  const st = vs._replay(code);
+  const onClock = st?.turn?.side === "guest" ? THEIRS : MINE;
+  const asEmail = params.get("waiting") === "1" ? (onClock === MINE ? THEIRS : MINE) : onClock;
+  await signIn(asEmail);
+  return { uid: asEmail === MINE ? mine : theirs, username: asEmail === MINE ? you : "rival", code };
+}
+
 // ---------- screen=picker: the avatar picker with some packs owned ----------
 function PickerPreview() {
   const owned = (params.get("owned") ?? "sideline").split(",").filter(Boolean);
@@ -441,6 +518,11 @@ function PickerPreview() {
 }
 
 (async () => {
+  if (params.get("screen") === "versus") {
+    const { uid, username, code } = await setUpVersus();
+    createRoot(document.getElementById("root")).render(<VersusPreview userId={uid} username={username} code={code} />);
+    return;
+  }
   if (params.get("screen") === "picker") {
     createRoot(document.getElementById("root")).render(<PickerPreview />);
     return;

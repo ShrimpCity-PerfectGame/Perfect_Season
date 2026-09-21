@@ -33,6 +33,11 @@ await page.setViewport({ width: 390, height: 844 });
 const SCREENS = [
   ["Modes", "?as=player", null],
   ["the 1v1 lobby", "?as=player", { tile: "1v1" }],
+  // The screen a whole match is played on, which nothing automated used to see - the lobby was the only 1v1
+  // screen on this list, and a rules button with no accessible name, a missing h2 and a roster strip saying
+  // "filled" in colour alone all went out under it. Both halves: your turn, and the other player's.
+  ["the 1v1 draft", "?screen=versus", null],
+  ["the 1v1 draft while the other player picks", "?screen=versus&waiting=1", null],
   ["Modes as a guest", "?as=guest", null],
   ["the rules", "?as=player&howto=1", null],
   ["the Draft screen", "?as=player", "Draft"],
