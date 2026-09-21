@@ -113,15 +113,30 @@ const fitsAny = (o, open) => open.some((s) => optionFits(o, s));
 // This is the whole reason the rule exists: 33 of the 160 boards hold a single quarterback or a single tight
 // end, and two players who both still need one cannot both be served from it.
 export function boardServesBoth(key, taken, openFirst, openSecond) {
-  const options = optionsOn(key).filter((o) => !taken.has(optionId(o)));
-  if (!options.some((o) => fitsAny(o, openFirst))) return false;
-  const forSecond = options.filter((o) => fitsAny(o, openSecond));
-  if (forSecond.length >= 2) return true;
-  return forSecond.length === 1 && !fitsAny(forSecond[0], openFirst);
+  return boardServes(key, taken, openFirst, openSecond, 1);
 }
 
-// The next board that can serve both, walking the sequence the way boardAt does in single player. `used` is every
-// board already dealt or spun in, so nothing repeats.
+// The general form, because a board does not always get drafted once each: a double dip takes two off it before
+// the other player picks (VERSUS.md 7), and a board the other player has forfeited gets drafted once in total.
+//
+//   openSecond null   nobody picks after them, so one option is the whole requirement
+//   firstPicks n      the first player takes n before the second picks at all
+//
+// The second player is safe when either some option they can use is one the first player could never take, or
+// more of the shared ones remain than the first player can possibly remove.
+export function boardServes(key, taken, openFirst, openSecond, firstPicks = 1) {
+  const options = optionsOn(key).filter((o) => !taken.has(optionId(o)));
+  const forFirst = options.filter((o) => fitsAny(o, openFirst));
+  if (forFirst.length < firstPicks) return false;
+  if (!openSecond) return true;
+  const forSecond = options.filter((o) => fitsAny(o, openSecond));
+  const exclusive = forSecond.filter((o) => !fitsAny(o, openFirst));
+  return exclusive.length >= 1 || forSecond.length - exclusive.length > firstPicks;
+}
+
+// The next board that can serve the players about to draft it, walking the sequence the way boardAt does in
+// single player. `used` is every board already dealt or spun in, so nothing repeats. `openSecond` is null on a
+// board the other player has forfeited to a double dip - then it only has to serve the one.
 //
 // The sequence holds eighteen entries for eight boards. If they were somehow all unusable it widens to the rest
 // of the boards in the same seeded order rather than leaving a player with nothing - a case that should never
@@ -129,12 +144,12 @@ export function boardServesBoth(key, taken, openFirst, openSecond) {
 export function nextBoard(seed, seq, used, taken, openFirst, openSecond) {
   for (const key of seq) {
     if (used.has(key)) continue;
-    if (boardServesBoth(key, taken, openFirst, openSecond)) return key;
+    if (boardServes(key, taken, openFirst, openSecond)) return key;
   }
   const rng = mulberry32(hashStr(`${seed}-widen`));
   const rest = Object.keys(BOARDS).filter((k) => !used.has(k) && !seq.includes(k));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
-  return rest.find((key) => boardServesBoth(key, taken, openFirst, openSecond)) || null;
+  return rest.find((key) => boardServes(key, taken, openFirst, openSecond)) || null;
 }
 
 // ---------- Replaying a match ----------
@@ -147,58 +162,66 @@ export const openSlots = (roster) => VERSUS_SLOTS.filter((s) => !roster[s]);
 // anything a client said - only the picks and re-spins the database holds.
 //
 // `picks` are match_picks rows in pick_no order; `respins` are matches.respins entries.
-export function replayMatch({ code, picks = [], respins = [] }) {
+export function replayMatch({ code, picks = [], respins = [], dips = [] }) {
   const seq = seededSequence(code);
   const roster = { host: emptyRoster(), guest: emptyRoster() };
   const taken = new Set();
   const used = new Set();
-  const boards = []; // one { key, followKey } per board: the two are the same unless the follower re-spun
+  const boards = []; // one per board index; `key` is null for a board nobody was left to draft
   const spins = new Map(respins.map((r) => [`${r.pickNo}|${r.kind}`, r]));
-  const pending = (pickNo, boardIdx, key, side) => ({
-    seq, boards, roster, taken, used, boardIdx, pickNo, boardKey: key,
-    turn: { ...turnAt(pickNo), side }, done: false,
-  });
+  const openOf = (side) => openSlots(roster[side]);
+  let pickNo = 0;
 
   for (let boardIdx = 0; boardIdx < MATCH_BOARDS; boardIdx++) {
     const lead = firstPickerOn(boardIdx);
     const follow = lead === "host" ? "guest" : "host";
-    let key = nextBoard(code, seq, used, taken, openSlots(roster[lead]), openSlots(roster[follow]));
+    // Whoever took two off the board before gives up this one (VERSUS.md 7). The board is dealt for whoever is
+    // left, which is what a double dip really costs: the other player gets a board to themselves.
+    const forfeit = dips.find((d) => d.boardIdx === boardIdx - 1)?.by;
+    const base = [lead, follow].filter((side) => side !== forfeit);
+    if (!base.length) { boards.push({ key: null, followKey: null, order: [] }); continue; }
+
+    // Dealt for the players it was dealt to, before anyone declared anything: a dip is decided after seeing the
+    // board, so it can't be what chose it.
+    let key = nextBoard(code, seq, used, taken, openOf(base[0]), base[1] ? openOf(base[1]) : null);
     if (!key) break;
     used.add(key);
-    // A re-spin is attached to the pick it changes the board for. The leader's lands before either has picked,
-    // so it replaces the board for BOTH of them - the follower still drafts the same board the leader did.
-    for (const kind of ["team", "era"]) {
-      const spin = spins.get(`${boardIdx * 2 + 1}|${kind}`);
-      if (!spin) continue;
-      used.add(spin.key);
-      key = spin.key;
-    }
-    const board = { key, followKey: key };
+
+    // A dip inserts a second turn for whoever spent it, back to back with their first.
+    const order = [...base];
+    const dip = dips.find((d) => d.boardIdx === boardIdx);
+    if (dip && order.includes(dip.by)) order.splice(order.indexOf(dip.by) + 1, 0, dip.by);
+
+    const board = { key, followKey: key, order: [...order] };
     boards.push(board);
+    const keyFor = (side) => (side === base[0] ? board.key : board.followKey);
 
-    const first = picks.find((p) => p.pickNo === boardIdx * 2 + 1);
-    if (!first) return pending(boardIdx * 2 + 1, boardIdx, key, lead);
-    // A stolen first pick is on the follower's roster, in the slot THEY chose, and stealing was their whole turn
-    // (VERSUS.md 7) - so the second pick of this board is the leader, taking again from the same board.
-    const stolen = !!first.stolenBy;
-    take(first, key, roster[stolen ? follow : lead], taken);
-    const secondSide = stolen ? lead : follow;
-
-    // The follower's re-spin lands after the leader has already taken something off this board, so it can only
-    // be their own: they walk away to a board of their own and pick there. A follower who stole never picks
-    // from a board at all, so there is nothing for a re-spin of theirs to move.
-    if (!stolen) {
-      for (const kind of ["team", "era"]) {
-        const spin = spins.get(`${boardIdx * 2 + 2}|${kind}`);
-        if (!spin) continue;
-        used.add(spin.key);
-        board.followKey = spin.key;
+    for (let i = 0; i < order.length; i++) {
+      const side = order[i];
+      pickNo++;
+      // A re-spin is spent before a player's FIRST pick on a board. The board's opening pick moves the board for
+      // everyone on it; anyone else's moves only their own, since the board has already been picked over.
+      if (order.indexOf(side) === i) {
+        for (const kind of ["team", "era"]) {
+          const spin = spins.get(`${pickNo}|${kind}`);
+          if (!spin) continue;
+          used.add(spin.key);
+          if (i === 0) { board.key = spin.key; board.followKey = spin.key; } else board.followKey = spin.key;
+        }
       }
+      const pick = picks.find((p) => p.pickNo === pickNo);
+      if (!pick) {
+        return {
+          seq, boards, roster, taken, used, boardIdx, pickNo, boardKey: keyFor(side),
+          turn: { boardIdx, first: i === 0, side }, done: false,
+        };
+      }
+      // A stolen pick is on the thief's roster, in the slot they chose. Stealing was their whole turn, so the
+      // turn that was theirs becomes another one for the player they robbed.
+      const thief = pick.stolenBy;
+      take(pick, keyFor(side), roster[thief || side], taken);
+      if (thief) order[i + 1] = side;
     }
-    const secondKey = stolen ? key : board.followKey;
-    const second = picks.find((p) => p.pickNo === boardIdx * 2 + 2);
-    if (!second) return pending(boardIdx * 2 + 2, boardIdx, secondKey, secondSide);
-    take(second, secondKey, roster[secondSide], taken);
   }
   return {
     seq, boards, roster, taken, used,
@@ -355,4 +378,44 @@ export function stealableSlots({ key, taken, option, stealerRoster, leaderRoster
 
 export function stealsLeft(picks, side) {
   return MATCH_STEALS - picks.filter((p) => p.stolenBy === side).length;
+}
+
+// ---------- Double dip (VERSUS.md 7) ----------
+
+export const MATCH_DIPS = 1; // one each per match
+
+// Two options that fill two DIFFERENT open slots. Two quarterbacks on a board are two options and one slot, so
+// counting options alone would allow a dip that can't be completed.
+function twoFit(options, open) {
+  for (let a = 0; a < open.length; a++) {
+    for (let b = a + 1; b < open.length; b++) {
+      const first = options.filter((o) => optionFits(o, open[a]));
+      const second = options.filter((o) => optionFits(o, open[b]));
+      if (!first.length || !second.length) continue;
+      if (first.length > 1 || second.length > 1 || optionId(first[0]) !== optionId(second[0])) return true;
+    }
+  }
+  return false;
+}
+
+// Whether a player may take two off this board and give up the next one. Declared after seeing the board, so it
+// is checked against the board as it stands, and refused - costing nothing - when:
+//
+//   it is the last board          there is no next pick to forfeit, so there is nothing to pay with;
+//   they have one slot open       two picks need two slots to go in;
+//   the board can't fill two      two options that fit two different slots of theirs;
+//   it would strand the other     only when someone still picks after them. A dip by the player picking second
+//                                 is free of that: nobody is left to be stranded.
+export function canDoubleDip({ key, taken, boardIdx, dipperRoster, otherRoster, picksAfter }) {
+  if (boardIdx >= MATCH_BOARDS - 1) return false;
+  const open = openSlots(dipperRoster);
+  if (open.length < 2) return false;
+  const options = optionsOn(key).filter((o) => !taken.has(optionId(o)));
+  if (!twoFit(options, open)) return false;
+  if (!picksAfter) return true;
+  return boardServes(key, taken, open, openSlots(otherRoster), 2);
+}
+
+export function dipsLeft(dips, side) {
+  return MATCH_DIPS - dips.filter((d) => d.by === side).length;
 }

@@ -21,9 +21,10 @@ prefixed class names, and nothing reaches production without going through stagi
   and its kicker in each year. Any board can fill any open slot, so a defense can go fifth and a kicker first -
   the order is the player's to choose. A board that cannot serve *both* players is skipped before it is dealt
   (section 8), so no draft order can strand either of them.
-- Each player carries the same **powerups** (section 7): two re-spins, a **steal**, and a **steal the pick**.
-  A leader's re-spin deals a board to *both* of them; a follower's is a board of their own. A steal takes the
-  pick the other player has just made, and sends them back to the board for another.
+- Each player carries the same **powerups** (section 7): two re-spins, a **steal**, a **double dip** and a
+  **steal the pick**. A leader's re-spin deals a board to *both* of them; a follower's is a board of their own.
+  A steal takes the pick the other player just made and sends them back to the board for another. A double dip
+  takes two off one board and gives up the next, which the other player then has to themselves.
 - Each pick has a **clock**. When it runs out the pick is made for you: the most valuable available option that
   fits an open slot. A dropped connection loses you a pick, not the match.
 - When both rosters are full the server grades them, and **the higher score wins — always**. There is no
@@ -64,6 +65,7 @@ browsers cannot each hold the truth. So a match is the first thing in Gridspin w
 | `status` | text not null | `open` \| `drafting` \| `done` \| `abandoned` |
 | `turn_deadline` | timestamptz null | when the player on the clock loses the pick |
 | `respins` | jsonb not null default `[]` | every re-spin spent, `{ pickNo, kind, by, key }` (section 7) — enough for a reconnecting client to rebuild the same boards |
+| `dips` | jsonb not null default `[]` | every double dip spent, `{ boardIdx, by }` (section 7) — which board was drafted three times, and which one after it only once |
 | `result` | jsonb null | both sides' scores and the three parts each was built from (section 6), written once, by the server |
 | `winner_id` | uuid null | set with `result`; null for a draw |
 | `created_at` / `ended_at` | timestamptz | |
@@ -127,8 +129,9 @@ their own pick: it refuses with `not_your_turn`, `no_steals_left`, `bad_slot` (i
 `would_strand` (the leader would have nothing left on that board), then updates the leader's pick row to the
 thief and puts the leader back on the clock for the board's second pick.
 
-`POST { code, respin: "team" | "era" }` and `POST { code, stealPick: true }` are the other two, with the rules in
-section 7.
+`POST { code, respin: "team" | "era" }`, `POST { code, dip: true }` and `POST { code, stealPick: true }` are the
+others, with the rules in section 7. A dip answers `no_dips_left`, `last_board`, `no_room` (fewer than two slots
+open, or the board can't fill two of them) or `would_strand`.
 
 `POST { code, claim: "clock" }` is how a client says the clock has run out. The function checks
 `turn_deadline` **itself** — a client that lies is refused — and, if it really has passed, makes the pick the
@@ -282,6 +285,30 @@ the thief's and `stolen_by` records who did it. That is what keeps the two uniqu
 honest — the option is still drafted exactly once, by exactly one player. `replayMatch` reads `stolen_by` and
 knows the board's second pick belongs to the leader, re-picking, rather than to the follower.
 
+### Double dip
+
+Take **two** off one board, and give up your pick on the next one. One per match, each.
+
+The arithmetic is what makes it work and is worth stating plainly: two picks on this board and none on the next
+is still two picks across two boards, so both rosters still come out at exactly eight. Nothing else in the mode
+has to bend for it. (The forfeit is your own next pick, not theirs — a dip that cost the *other* player a pick
+would leave them with seven players and an empty slot, and every other rule here depends on both rosters filling.)
+
+It is a real trade rather than a free extra. You take two off a board you like; the other player gets the next
+board **to themselves**, uncontested, picking whatever they want off it with nobody to take it first. And the
+board you doubled on is two options poorer when they pick from it.
+
+Declared on your turn, after seeing the board — that is the whole point of it — and refused, costing nothing,
+when:
+
+1. it is the **last board**: there is no next pick to forfeit, so there is nothing to pay with;
+2. you have **one slot open**: two picks need two slots to go into;
+3. the board can't **fill two** of your slots. Two quarterbacks are two options and one slot, so this is a check
+   on slots, not on how much is left;
+4. it would **strand the other player** — only when someone still picks after you. `boardServes(..., 2)`, the
+   same rule as section 8 with the first player taking two instead of one. A dip by the player picking second is
+   free of that check: nobody is left to be stranded.
+
 ### Steal the pick
 
 Spent by the player who would pick *second* on a board, before the board's first pick lands: the order on that
@@ -367,8 +394,10 @@ gets a versus variant: the two scores, the result, and a link to play the winner
   always has a legal option, over every ordering of every slot; and a match played out sixteen picks deep from
   many seeds always ends with two full, legal rosters. Re-spins too: a leader's moves the board for both, a
   follower's moves only their own, neither lands on a board still waiting in the sequence, and two on one board
-  can't land on each other. And the steal: it lands on the thief's roster, leaves the leader's empty, puts him
-  back on the same board for the board's second pick, and is refused when it would leave him nothing there.
+  can't land on each other. The steal: it lands on the thief's roster, leaves the leader's empty, puts him back
+  on the same board for the board's second pick, and is refused when it would leave him nothing there. And the
+  double dip, played out over whole matches from both sides of the snake: two picks on the board, none on the
+  next, the other player alone on it, sixteen picks and two full rosters all the same.
 - `tests/test-versus-flow.mjs` — the whole thing in jsdom on the mock: create, join, sixteen picks alternating
   correctly, a defense taken fifth and a kicker first, a timeout auto-picking, the result and the records.
 - `tests/test-a11y.mjs` gains the new screens.
@@ -382,6 +411,7 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 4. The Edge Function and its rule tests.
 5. The mock (so the jsdom tests can drive a match without a network).
 6. The screens, then the flow test.
-7. Steal the pick (section 7), once there is a draft screen to spend it from. Steal itself is built.
+7. Steal the pick (section 7), once there is a draft screen to spend it from. The re-spins, the steal and the
+   double dip are built.
 8. Records, the board, the share card.
 9. Staging, then production, as a version.

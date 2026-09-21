@@ -33,6 +33,9 @@ create table if not exists public.matches (
   -- an odd pickNo is the leader's and moves the board for both players, an even one is the follower's and moves
   -- only their own. This list is what lets a client that reconnects rebuild the boards as they were played.
   respins       jsonb not null default '[]'::jsonb,
+  -- Every double dip spent: { boardIdx, by } (VERSUS.md 7). Whoever took two off a board gives up the next one,
+  -- so this is what tells a replay that a board is drafted three times and the one after it once.
+  dips          jsonb not null default '[]'::jsonb,
   -- Both sides' scores, the parts they were built from, and the football final (VERSUS.md 6) - written once, by
   -- the server, when the sixteenth pick lands. The higher score always wins; nothing here is a coin toss.
   result        jsonb,
@@ -77,6 +80,7 @@ create table if not exists public.match_picks (
 
 -- Added after the fact for a table that may already exist, since this file is re-run rather than replaced.
 alter table public.match_picks add column if not exists stolen_by uuid references auth.users(id) on delete set null;
+alter table public.matches add column if not exists dips jsonb not null default '[]'::jsonb;
 
 alter table public.matches enable row level security;
 alter table public.match_picks enable row level security;
@@ -136,7 +140,8 @@ returns jsonb language sql stable security definer set search_path = public, pg_
     'hostName', (select username from public.profiles where id = m.host_id),
     'guestName', (select username from public.profiles where id = m.guest_id),
     'format', m.format, 'status', m.status, 'turnDeadline', m.turn_deadline,
-    'respins', m.respins, 'result', m.result, 'winnerId', m.winner_id, 'createdAt', m.created_at,
+    'respins', m.respins, 'dips', m.dips,
+    'result', m.result, 'winnerId', m.winner_id, 'createdAt', m.created_at,
     'picks', coalesce((
       select jsonb_agg(jsonb_build_object(
         'pickNo', p.pick_no, 'userId', p.user_id, 'boardIdx', p.board_idx, 'kind', p.kind,

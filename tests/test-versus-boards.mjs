@@ -14,7 +14,7 @@ import {
   optionsOn, unitsOn, optionId, optionFits, optionValue, turnAt, firstPickerOn,
   boardServesBoth, replayMatch, autoPick, openSlots, matchResult, footballFinal, offenseScore,
   respinBoard, respinsLeft, MATCH_RESPINS, firstPickerOn as leadOn,
-  stealableSlots, stealsLeft, MATCH_STEALS, optionValue as worth,
+  stealableSlots, stealsLeft, MATCH_STEALS, canDoubleDip, dipsLeft, MATCH_DIPS, MATCH_BOARDS as BOARDS_N,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -341,6 +341,97 @@ await runTest("a steal that would leave the leader nothing is refused", async ()
   const noRoom = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, { kind: "player" }]));
   assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: noRoom, leaderRoster: openLeader, leaderSlot: "QB" }) === null,
     "a full roster can't steal anything");
+});
+
+// Plays a whole match with powerups in it, and returns the state at the end. `events` is called before each
+// pick and may return a dip to declare, so a test can drive one without hand-writing sixteen rows.
+function playWithDips(code, dipAt, format = "fantasy") {
+  const picks = [], dips = [];
+  for (let n = 0; n < 40; n++) {
+    const state = replayMatch({ code, picks, dips });
+    if (state.done) return { picks, dips, state };
+    const { side, boardIdx } = state.turn;
+    if (dipAt && dipAt.boardIdx === boardIdx && dipAt.by === side && !dips.length) {
+      const other = side === "host" ? "guest" : "host";
+      const picksAfter = state.boards[boardIdx].order.slice(state.boards[boardIdx].order.indexOf(side) + 1).some((x) => x !== side);
+      if (canDoubleDip({
+        key: state.boardKey, taken: state.taken, boardIdx,
+        dipperRoster: state.roster[side], otherRoster: state.roster[other], picksAfter,
+      })) {
+        dips.push({ boardIdx, by: side });
+        continue; // replay again, now with the extra turn in the order
+      }
+    }
+    const got = autoPick(state.boardKey, state.taken, state.roster[side], format);
+    assert(got, `pick ${state.pickNo} (${side}, board ${boardIdx}): something was available`);
+    picks.push({
+      pickNo: state.pickNo, kind: got.option.kind, slot: got.slot, stolenBy: null,
+      playerId: got.option.kind === "player" ? got.option.id : null,
+      team: got.option.kind === "player" ? null : got.option.team, season: got.option.season,
+    });
+  }
+  throw new Error("a match that never finished");
+}
+
+await runTest("a double dip takes two off one board and gives up the next", async () => {
+  for (const by of ["host", "guest"]) {
+    for (const boardIdx of [0, 3]) {
+      const code = `DIP${by}${boardIdx}`;
+      const { picks, dips, state } = playWithDips(code, { boardIdx, by });
+      assert(dips.length === 1, `${code}: the dip was allowed`);
+      const other = by === "host" ? "guest" : "host";
+
+      // Two picks on the board, none on the next - so still eight each, and still sixteen in all.
+      const mine = (b) => state.boards[b].order.filter((x) => x === by).length;
+      assert(mine(boardIdx) === 2, `${code}: two of theirs on board ${boardIdx}, got ${mine(boardIdx)}`);
+      assert(mine(boardIdx + 1) === 0, `${code}: none on the next, got ${mine(boardIdx + 1)}`);
+      assert(state.boards[boardIdx + 1].order.length === 1 && state.boards[boardIdx + 1].order[0] === other,
+        `${code}: the other player has that board to themselves`);
+      assert(picks.length === 16, `${code}: sixteen picks all the same, got ${picks.length}`);
+
+      // And the rosters still come out full and legal, which is the whole reason this shape works.
+      for (const side of ["host", "guest"]) {
+        for (const slot of VERSUS_SLOTS) assert(state.roster[side][slot], `${code}: ${side} filled ${slot}`);
+      }
+      const ids = ["host", "guest"].flatMap((side) => VERSUS_SLOTS.map((sl) => optionId(state.roster[side][sl])));
+      assert(new Set(ids).size === 16, `${code}: nothing was drafted twice`);
+      assert(dipsLeft(dips, by) === MATCH_DIPS - 1 && dipsLeft(dips, other) === MATCH_DIPS, `${code}: one dip spent, by one player`);
+    }
+  }
+});
+
+await runTest("a double dip is refused when it would cost the other player their pick, or can't be paid for", async () => {
+  const opening = replayMatch({ code: "DIPNO", picks: [], dips: [] });
+  const key = opening.boardKey;
+  const lead = leadOn(0), follow = lead === "host" ? "guest" : "host";
+  const full = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, { kind: "player" }]));
+  const oneOpen = { ...full, QB: null };
+  const bare = (slots) => Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, slots.includes(sl) ? null : { kind: "player" }]));
+
+  assert(canDoubleDip({ key, taken: opening.taken, boardIdx: 0, dipperRoster: opening.roster[lead], otherRoster: opening.roster[follow], picksAfter: true }),
+    "an empty roster on a full board can dip");
+  assert(!canDoubleDip({ key, taken: opening.taken, boardIdx: BOARDS_N - 1, dipperRoster: opening.roster[lead], otherRoster: opening.roster[follow], picksAfter: true }),
+    "but never on the last board - there is no next pick to give up");
+  assert(!canDoubleDip({ key, taken: opening.taken, boardIdx: 0, dipperRoster: oneOpen, otherRoster: opening.roster[follow], picksAfter: true }),
+    "nor with one slot open - two picks need two slots");
+
+  // Two quarterbacks are two options and one slot: a board can hold two things you could take and still not
+  // hold two you can USE.
+  const qbOnly = new Set(optionsOn(ONE_QB).map(optionId));
+  const twoQbBoard = Object.keys(BOARDS).find((k) => (BOARDS[k] || []).filter((p) => p.pos === "QB").length >= 2);
+  const onlyQbsLeft = new Set(optionsOn(twoQbBoard).filter((o) => !(o.kind === "player" && o.pos === "QB")).map(optionId));
+  assert(!canDoubleDip({ key: twoQbBoard, taken: onlyQbsLeft, boardIdx: 0, dipperRoster: bare(["QB", "RB"]), otherRoster: full, picksAfter: false }),
+    "two quarterbacks fill one slot between them, so that is not a dip");
+  assert(qbOnly.size > 0, "(the one-QB board is still the one-QB board)");
+
+  // The stranding case: the other player still has to be able to pick after two are gone.
+  const tight = new Set(optionsOn(ONE_QB).map(optionId));
+  const { defenses, kickers } = unitsOn(ONE_QB);
+  for (const keep of [defenses[0], defenses[1], kickers[0]]) tight.delete(optionId(keep));
+  assert(!canDoubleDip({ key: ONE_QB, taken: tight, boardIdx: 0, dipperRoster: bare(["DST", "K"]), otherRoster: bare(["DST"]), picksAfter: true }),
+    "taking the last two things they could use is refused");
+  assert(canDoubleDip({ key: ONE_QB, taken: tight, boardIdx: 0, dipperRoster: bare(["DST", "K"]), otherRoster: bare(["DST"]), picksAfter: false }),
+    "...but the same dip is fine when nobody picks after them");
 });
 
 await runTest("the result is the raw numbers, and the same every time", async () => {
