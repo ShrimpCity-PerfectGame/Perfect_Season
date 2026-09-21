@@ -622,7 +622,8 @@ function ModeTable({ ladders }) {
   return (
     <div className="pf-sec">
       <h2 className="h">By mode</h2>
-      <div className="pf-scroll">
+      {/* Wide enough to scroll sideways on a phone, so it takes focus: a keyboard has no other way to move it. */}
+      <div className="pf-scroll" tabIndex={0} role="group" aria-label="Season by season, scroll sideways for more">
         <table className="pf-table">
           <thead>
             <tr><td className="pf-stick" />{cols.map(([label]) => <th scope="col" key={label}>{label}</th>)}</tr>

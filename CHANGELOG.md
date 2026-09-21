@@ -24,6 +24,17 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
+## [1.18.0] — unreleased
+
+### Changed
+
+- **The game reads properly with a screen reader and a keyboard.** Every screen now names itself, the tab bar and
+  the screen are separate landmarks with a "skip to the game" link before them, leaderboard columns say what they
+  are, the season-by-season table on a profile can be scrolled without a mouse, and dialogs keep the keyboard
+  inside them until they're closed.
+- **Position colours no longer carry meaning on their own.** A roster chip on a best-lineup card now says the slot
+  it filled — QB, RB, WR, TE or Flex — instead of leaving it to the colour.
+
 ## [1.17.0] — unreleased
 
 ### Added

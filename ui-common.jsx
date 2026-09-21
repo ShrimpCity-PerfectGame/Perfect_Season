@@ -61,13 +61,34 @@ export function RosterRows({ roster }) {
 export function RosterChips({ roster }) {
   return (
     <div className="chips" style={{ flexWrap: "wrap", marginTop: 6 }}>
-      {roster.map((p, i) => (
-        <span key={i} className={`chip on pos-${(p.slot || "").startsWith("FLEX") ? "FLEX" : p.slot || ""}`}>
-          {p.name} · {shortYr(p.season)}
-        </span>
-      ))}
+      {roster.map((p, i) => {
+        const slot = (p.slot || "").startsWith("FLEX") ? "FLEX" : p.slot || "";
+        return (
+          // The slot is written, not only coloured: the colours alone say nothing to a player who can't tell
+          // them apart, and which slot a name filled is the whole point of the chip.
+          <span key={i} className={`chip on pos-${slot}`}>
+            <b className="chip-slot">{SLOT_LABEL[p.slot] || slot}</b> {p.name} · {shortYr(p.season)}
+          </span>
+        );
+      })}
     </div>
   );
+}
+
+// Tab stays inside a dialog while one is open: at the last control it comes back to the first, and at the
+// first with Shift it goes to the last. Without it Tab walks out into the page behind, which a screen reader
+// then reads as though the dialog weren't there at all. Pass the dialog's own element.
+export function keepFocusInside(e, container) {
+  if (e.key !== "Tab" || !container) return;
+  const focusable = [...container.querySelectorAll(
+    "button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])",
+  )];
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (!first) return;
+  const active = container.ownerDocument?.activeElement;
+  if (e.shiftKey && (active === first || active === container)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
 }
 
 // ---------- Android's Back button (app-shell.mjs) ----------

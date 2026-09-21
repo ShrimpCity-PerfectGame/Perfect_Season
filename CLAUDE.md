@@ -283,6 +283,7 @@ node tests/test-avatar-image.mjs       # crop/resize/encode and metadata strippi
 node tests/test-profile-links.mjs      # /u/name addresses, Back/Forward, every name link, signup's username check
 node tests/test-signin-google.mjs      # signing in with Google: the name it has to pick first, what's refused, and the account it ends up with
 node tests/test-guest-accounts.mjs     # guests: a finished season posts without an account, the daily and shop are refused, and keeping the seasons
+node tests/test-a11y.mjs           # axe-core over every screen in the installed Chrome; and that a roster chip names its slot, which axe can't see
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -733,9 +734,14 @@ Don't hand-edit `data.json`; change the scripts and regenerate.
 
 ## Immediate Next Goals
 
-1. **Housekeeping** — 2026 season data once it's played, an accessibility pass (position colors
-   currently carry meaning on their own). Separate indexable pages shipped in v1.14.0; more of them (each
-   scoring format's leaderboard, a Daily archive) is the obvious next step if search traffic matters.
+1. **Housekeeping** — 2026 season data once it's played. The accessibility pass landed in v1.18.0: every screen
+   is clean under axe-core (`tests/test-a11y.mjs` keeps it that way), the app has a `main` landmark and a skip
+   link, every screen names itself with an `h1` (visually hidden where the design shows a logo instead), table
+   headers say what their column is, the profile's wide table can be scrolled from a keyboard, all three dialogs
+   keep Tab inside them (`keepFocusInside` in ui-common.jsx), and a roster chip names the slot its colour stands
+   for - colour is never the only thing carrying meaning. Separate indexable pages shipped in v1.14.0, a third in
+   v1.17.0; more of them (each scoring format's leaderboard, a Daily archive) is the obvious next step if search
+   traffic matters.
 2. **Half-PPR**, if wanted, is now a small change rather than a blocked one — see the scoring-format
    note in Architecture. It needs a third `FORMATS` entry, a benchmark column, a `BEST_FIELDS`
    entry, and two `profiles` columns; no data regeneration.

@@ -21,7 +21,7 @@ import {
 } from "./game-logic.mjs";
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
-  outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog,
+  outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -599,6 +599,13 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
 /* A username that opens that player's profile. It reads as the name itself wherever it sits - a leaderboard
    cell, a card, a ranked row - so it takes that spot's type, color and wrapping (overflow-wrap is inherited, so
    the narrow-screen rules on .lb td.nm and .rc.rank .tk still apply) and has no button look of its own. */
+/* For text only a screen reader needs: a screen's name where the design shows a logo instead, or a column
+   heading a sighted reader gets from the shape of the table. Not display:none, which is never announced. */
+.vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+/* The skip link: off-screen until it takes focus, then a button at the top of the page. */
+.skip{position:absolute;left:-9999px;top:0;z-index:70}
+.skip:focus{left:8px;top:8px;background:var(--accent);color:var(--on-accent);border:2px solid var(--ink);
+  border-radius:10px;padding:8px 14px;font-weight:800;text-decoration:none;box-shadow:3px 3px 0 var(--hard)}
 .namelink{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit}
 /* A guest's name on a board: the name as plain text, with a quiet chip saying what it is. */
 .guestchip{margin-left:6px;padding:1px 6px;border:1px solid var(--line2);border-radius:999px;font-size:10.5px;
@@ -833,6 +840,10 @@ p.gamecoins .earned{display:flex}
 .sticky .sp{margin-left:auto;display:flex;gap:6px}
 .chips{display:flex;gap:4px}
 .chip{font-size:11px;font-weight:800;padding:3px 6px;border-radius:5px;border:1px dashed var(--line2);color:var(--muted)}
+/* The slot a chip's colour stands for, said in letters as well - the colour is the decoration, not the fact. */
+.chip-slot{opacity:.75;letter-spacing:.04em}
+/* Reads as the h3 it used to be: it's a heading level, not a size (the level below the screen's own name). */
+.locked-h{margin:0 0 4px;font-size:1.17em;font-weight:700}
 .chip.on{border:1px solid transparent;color:var(--pc,var(--accent-ink));background:color-mix(in srgb,var(--pc,var(--accent)) 16%,transparent)}
 .brk{display:none}
 .sec{margin:0 0 22px}
@@ -1471,6 +1482,7 @@ function RankRows({ rows, empty, value }) {
 // dismissed and nothing is behind it: until it's answered the account has no profile row at all, so there
 // is nothing to show and nothing it could save (PROFILES.md). Signing out is the way past it.
 function PickName({ email, onClaimed, onSignOut }) {
+  const dialog = useRef(null);
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1500,7 +1512,8 @@ function PickName({ email, onClaimed, onSignOut }) {
 
   return (
     <div className="modal-bg">
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="pickname-title">
+      <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="pickname-title" tabIndex={-1}
+        onKeyDown={(e) => keepFocusInside(e, dialog.current)}>
         <h2 id="pickname-title">Pick your name</h2>
         <p>{email ? <>Signed in as <b>{email}</b>. </> : null}This is the name on the leaderboard and on your profile.</p>
         <form onSubmit={submit} noValidate>
@@ -1973,6 +1986,7 @@ function GridspinMark({ size = 38 }) {
 
 function HowTo({ onClose }) {
   const btn = useRef(null);
+  const dialog = useRef(null);
   // Android's Back closes the rules the way Escape does, instead of leaving the screen behind them.
   useCloseOnBack(onClose);
   useEffect(() => {
@@ -1985,7 +1999,8 @@ function HowTo({ onClose }) {
   }, []);
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="howto-title" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="howto-title" tabIndex={-1}
+        onKeyDown={(e) => keepFocusInside(e, dialog.current)} onClick={(e) => e.stopPropagation()}>
         <button type="button" className="modal-x" aria-label="Close" onClick={onClose}>×</button>
         <h2 id="howto-title">How to play</h2>
         {/* The steps are shared with the crawlable /how-to-play page (site-pages.mjs), so the rules can't
@@ -3522,6 +3537,8 @@ export default function PerfectSeason() {
     <div className={`ps${scope === "light" ? "" : ` ${scope}`}`}>
       <style>{APP_CSS}</style>
       <div className="wrap">
+        {/* First stop for a keyboard or a screen reader, and out of everyone else's way until it's focused. */}
+        <a className="skip" href="#content">Skip to the game</a>
         <nav className="nav" aria-label="Sections">
           {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"], ["stats", "Stats"]].map(([k, l]) => (
             <button key={k} className={`tab ${tabOn(k) ? "on" : ""}`} aria-current={tabOn(k) ? "page" : undefined} onClick={() => openTab(k)}>
@@ -3543,6 +3560,9 @@ export default function PerfectSeason() {
           </div>
         </nav>
 
+        {/* Everything that isn't the tab bar is one region, so nothing sits outside a landmark and a screen
+            reader can move between the nav and the screen. */}
+        <main id="content">
         {/* The worst way for a staging site to fail is quietly looking like the real one. */}
         {IS_STAGING && (
           <div className="stagebar">
@@ -3731,7 +3751,8 @@ export default function PerfectSeason() {
         {/* ---------------- PLAY ---------------- */}
         {view === "play" && !mode && (
           <div className="locked">
-            <h3>No draft going right now</h3>
+            <h1 className="vh">Draft</h1>
+            <h2 className="locked-h">No draft going right now</h2>
             <p className="note" style={{ marginTop: 0 }}>Pick a mode to start one.</p>
             <div className="frow" style={{ marginTop: 10 }}>
               <button className="btn solid" onClick={startDaily}>Play today's daily</button>
@@ -3742,6 +3763,7 @@ export default function PerfectSeason() {
 
         {view === "play" && mode && (
           <>
+            <h1 className="vh">Draft</h1>
             {mode && (
               <div className="modebar">
                 <button className={`mb ${mode.kind === "free" ? "on" : ""}`} onClick={() => mode.kind !== "free" && resumeFree()}>Unlimited</button>
@@ -4117,6 +4139,7 @@ export default function PerfectSeason() {
         {/* ---------------- LEADERBOARD ---------------- */}
         {view === "board" && (
           <>
+            <h1 className="vh">Leaderboards</h1>
             {lb.loading && lb.top.length === 0 ? (
               <p className="muted">Loading the leaderboard…</p>
             ) : lb.error ? (
@@ -4152,7 +4175,7 @@ export default function PerfectSeason() {
                   <>
                     <h2 className="h">Top 10{" "}— {FORMAT_LABEL[lbFormat]}</h2>
                     <table className="lb">
-                      <thead><tr><th></th><th>Player</th><th className="r">Best score</th><th className="r lbrec">Best record</th><th className="r hide">Drafts</th><th className="r hide">Perfect</th></tr></thead>
+                      <thead><tr><th><span className="vh">Rank</span></th><th>Player</th><th className="r">Best score</th><th className="r lbrec">Best record</th><th className="r hide">Drafts</th><th className="r hide">Perfect</th></tr></thead>
                       <tbody>
                         {lb.top.map((q, i) => {
                           const mine = !!userId && q.id === userId;
@@ -4186,7 +4209,7 @@ export default function PerfectSeason() {
                   </p>
                 ) : (
                   <table className="lb">
-                    <thead><tr><th></th><th>Player</th><th className="r">Team score</th><th className="r lbrec">Record</th></tr></thead>
+                    <thead><tr><th><span className="vh">Rank</span></th><th>Player</th><th className="r">Team score</th><th className="r lbrec">Record</th></tr></thead>
                     <tbody>
                       {dailyBoard.rows.slice(0, 10).map((q, i) => {
                         const mine = !!user && q.username === user;
@@ -4225,7 +4248,7 @@ export default function PerfectSeason() {
                   </p>
                 ) : (
                   <table className="lb">
-                    <thead><tr><th></th><th>Player</th><th className="r">Points</th><th className="r hide">Drafts</th></tr></thead>
+                    <thead><tr><th><span className="vh">Rank</span></th><th>Player</th><th className="r">Points</th><th className="r hide">Drafts</th></tr></thead>
                     <tbody>
                       {ladder.rows.map((q, i) => {
                         const mine = !!userId && q.id === userId;
@@ -4250,6 +4273,7 @@ export default function PerfectSeason() {
         {/* ---------------- STATS ---------------- */}
         {view === "stats" && (
           <>
+            <h1 className="vh">Stats</h1>
             {!siteStats.loaded ? (
               <p className="muted">Loading stats…</p>
             ) : (
@@ -4368,7 +4392,7 @@ export default function PerfectSeason() {
         )}
 
         {/* ---------------- PLAYER INDEX ---------------- */}
-        {view === "players" && <PlayerIndex />}
+        {view === "players" && <><h1 className="vh">Player index</h1><PlayerIndex /></>}
 
         {/* ---------------- BUILD-A-PLAYER ---------------- */}
         {view === "buildplayer" && bap && bap.stage === "pickpos" && (
@@ -4595,7 +4619,7 @@ export default function PerfectSeason() {
               <p className="note" style={{ marginTop: 0 }}>{souBoard.loading ? "Loading today's scores…" : "No finished rounds yet today."}</p>
             ) : (
               <table className="lb">
-                <thead><tr><th></th><th>Player</th><th className="r">Score</th></tr></thead>
+                <thead><tr><th><span className="vh">Rank</span></th><th>Player</th><th className="r">Score</th></tr></thead>
                 <tbody>
                   {souBoard.rows.map((q, i) => (
                     <tr key={i} className={user && q.username === user ? "me" : ""}>
@@ -4626,6 +4650,7 @@ export default function PerfectSeason() {
             </p>
           </footer>
         )}
+        </main>
       </div>
     </div>
     </OpenProfile.Provider>

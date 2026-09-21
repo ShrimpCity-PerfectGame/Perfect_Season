@@ -10,7 +10,7 @@ import { reportPlayer, fetchModQueue, modAction } from "./storage.js";
 import { REPORT_REASONS, REPORT_REASON_LABEL, REPORT_NOTE_MAX, REPORTS_PER_DAY, USERNAME_RE, bioLength } from "./profile-rules.mjs";
 import { cssVars } from "./theme.mjs";
 import { Avatar } from "./avatars.jsx";
-import { fmtDate, useCloseOnBack } from "./ui-common.jsx";
+import { fmtDate, useCloseOnBack, keepFocusInside } from "./ui-common.jsx";
 
 export const MODERATION_CSS = `
 /* ===== moderation.jsx: the Report sheet and the Reports queue ===== */
@@ -157,16 +157,6 @@ export function ReportSheet({ username, onClose }) {
   }, []);
   useEffect(() => { if (sent) closeButton.current?.focus({ preventScroll: true }); }, [sent]);
 
-  // Tab stays inside the sheet: the × is always the first button and Cancel or Close the last.
-  function keepFocusInside(e) {
-    if (e.key !== "Tab" || !sheet.current) return;
-    const buttons = [...sheet.current.querySelectorAll("button:not(:disabled)")];
-    const first = buttons[0], last = buttons[buttons.length - 1];
-    if (!first) return;
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === sheet.current)) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  }
-
   const trimmed = note.trim();
   const length = bioLength(trimmed); // code points, the way the database counts
   const tooLong = length > REPORT_NOTE_MAX;
@@ -187,7 +177,7 @@ export function ReportSheet({ username, onClose }) {
     // Closes on a tap that starts and ends on the dim backdrop - not on a text selection dragged out of the sheet.
     <div className="md-scrim" onPointerDown={(e) => { pressedScrim.current = e.target === e.currentTarget; }}
       onClick={(e) => { if (pressedScrim.current && e.target === e.currentTarget) close(); pressedScrim.current = false; }}>
-      <div ref={sheet} className="md-sheet" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1} onKeyDown={keepFocusInside}>
+      <div ref={sheet} className="md-sheet" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1} onKeyDown={(e) => keepFocusInside(e, sheet.current)}>
         <button type="button" className="md-x" aria-label="Close" onClick={close}>×</button>
         <h2 className="h md-title" id={`${id}-title`}>Report <span className="md-case">{username}</span></h2>
         {sent ? (

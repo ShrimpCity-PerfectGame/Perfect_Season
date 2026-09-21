@@ -1,7 +1,7 @@
 {
   "name": "perfect-season",
   "private": true,
-  "version": "1.17.0",
+  "version": "1.18.0",
   "type": "module",
   "scripts": {
     "check": "esbuild perfect-season.jsx --bundle --format=esm --platform=node --jsx=automatic --outfile=build/app.js --external:react --external:react-dom",
@@ -26,6 +26,7 @@
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
     "@electric-sql/pglite": "^0.5.8",
+    "axe-core": "^4.13.0",
     "esbuild": "^0.24.0",
     "jsdom": "^25.0.1",
     "puppeteer-core": "^25.10.0",
