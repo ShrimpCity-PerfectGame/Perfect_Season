@@ -330,12 +330,22 @@ grant execute on function public.versus_top(integer) to anon, authenticated;
 do $$
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'matches') then
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'matches') then
       alter publication supabase_realtime add table public.matches;
     end if;
-    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'match_picks') then
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'match_picks') then
       alter publication supabase_realtime add table public.match_picks;
     end if;
   end if;
 end;
 $$;
+
+-- REPLICA IDENTITY FULL, which Realtime needs to do its half of the job here. Both tables have RLS on, and
+-- Realtime evaluates that policy per subscriber before it delivers anything - so it has to be able to see the
+-- columns the policy names. With the default identity an UPDATE carries only the primary key in its old
+-- record, and `matches`' policy reads `status`, `host_id` and `guest_id`: none of which are the primary key.
+-- The cost is write amplification on the WAL, which for two tables holding a handful of rows each is nothing,
+-- and the alternative is a socket that silently delivers nothing and a match that only moves when the poll
+-- gets round to it.
+alter table public.matches replica identity full;
+alter table public.match_picks replica identity full;

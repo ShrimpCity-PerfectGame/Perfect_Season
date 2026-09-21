@@ -98,13 +98,17 @@ export async function playMove(move) {
 // `onChange` is deliberately not handed the payload. Postgres sends the row that changed, but a screen needs the
 // whole match (the other player's roster, the boards, whose turn it is), and rebuilding that from a stream of
 // row deltas is a second source of truth waiting to disagree with match_state. So a change means "read again".
-export function subscribeMatch(matchId, onChange) {
+// `onStatus(live)` says whether the socket is actually delivering: true on SUBSCRIBED, false on an error, a
+// timeout or a close. Without it a failed subscription was completely silent - the screen fell back to its
+// two-second poll and simply felt slow, with nothing anywhere saying why. The caller uses it to poll faster
+// when it is on its own, so a broken socket costs responsiveness rather than correctness.
+export function subscribeMatch(matchId, onChange, onStatus = () => {}) {
   const client = getClient();
   const channel = client.channel(`match-${matchId}`);
   for (const table of ["matches", "match_picks"]) {
     channel.on("postgres_changes", { event: "*", schema: "public", table, filter: table === "matches" ? `id=eq.${matchId}` : `match_id=eq.${matchId}` }, () => onChange());
   }
-  channel.subscribe();
+  channel.subscribe((status) => onStatus(status === "SUBSCRIBED"));
   return { unsubscribe: () => client.removeChannel(channel) };
 }
 

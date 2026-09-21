@@ -561,6 +561,9 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // asking again every 300ms. `claimAgain` is what re-arms the effect, since `match` is deliberately not a dep.
   const claim = useRef({ at: null, tries: 0 });
   const [claimAgain, setClaimAgain] = useState(0);
+  // Whether the Realtime socket has actually confirmed itself. False until it says SUBSCRIBED, and false again
+  // the moment it errors or closes - which is what decides how hard the poll below has to work.
+  const [live, setLive] = useState(false);
   // Every hook here runs on every render of this screen, lobby or draft - one that only ran on the draft would
   // be React error #310 the moment a lobby turned into one.
   const [stuck, sentinel] = useStuck();
@@ -607,7 +610,8 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // delta applied by hand - the match is one shape, and match_state is where it comes from.
   useEffect(() => {
     if (!match?.id) return undefined;
-    const sub = subscribeMatch(match.id, () => refresh(match.code));
+    setLive(false); // until this socket says otherwise; a new match is a new subscription
+    const sub = subscribeMatch(match.id, () => refresh(match.code), setLive);
     return () => sub.unsubscribe();
   }, [match?.id, match?.code, refresh]);
 
@@ -634,17 +638,21 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // stops. Realtime can be off in a project, blocked by a network, or simply drop, and the first time anyone
   // notices is a player sitting on a finished turn waiting out a clock they cannot affect.
   //
-  // Every two seconds for the whole match, including your own turn. It skipped your turn at first, on the
-  // reasoning that your own moves refresh the screen themselves - but the other player can act DURING your
-  // turn: the other player can steal the pick you just made, which happens while you are on the clock. A
-  // client that stops reading whenever it believes it is their turn would never learn it had stopped being.
-  // A lobby reads too, or a host whose Realtime is not delivering never learns that anybody joined - which is
-  // the very first thing that has to work.
+  // The whole match, including your own turn. It skipped your turn at first, on the reasoning that your own
+  // moves refresh the screen themselves - but the other player can act DURING your turn: they can steal the
+  // pick you just made, which happens while you are on the clock. A client that stops reading whenever it
+  // believes it is their turn would never learn it had stopped being. A lobby reads too, or a host whose
+  // Realtime is not delivering never learns that anybody joined - which is the very first thing that has to work.
+  //
+  // How often depends on whether the socket is actually delivering. Confirmed, this is a backstop and two
+  // seconds is plenty. Not confirmed, it is the ONLY thing moving the match on, and two seconds is exactly the
+  // lag a player feels waiting for an opponent's pick to appear - so it drops to 700ms and the match keeps up.
+  // Self-correcting on purpose: a Realtime that breaks in production costs responsiveness, never correctness.
   useEffect(() => {
     if (!match?.code || match.status === "done" || match.status === "abandoned") return undefined;
-    const t = setInterval(() => refresh(match.code), 2000);
+    const t = setInterval(() => refresh(match.code), live ? 2000 : 700);
     return () => clearInterval(t);
-  }, [match?.code, match?.status, refresh]);
+  }, [match?.code, match?.status, refresh, live]);
 
   // Every hook above every early return: what each player still holds, and the one-line announcement of
   // whatever just happened.
