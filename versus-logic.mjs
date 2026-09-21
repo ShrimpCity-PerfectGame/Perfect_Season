@@ -37,9 +37,22 @@ export const DECISIVE_GAP = 20;
 let DEFENSES = new Map(); // "TEAM|season" -> the row from data/versus-pool.json
 let KICKERS = new Map();
 
+// data/versus-pool.json packs its rows as arrays with the column names given once, because it ships in the page
+// every visitor loads and repeating eight key names 1,722 times is 80 KB of nothing. Expanded once, here.
+// An already-expanded row (a test fixture written by hand) is taken as it is.
+const expand = (rows, columns, kind) => (rows || []).map((r) => {
+  if (!Array.isArray(r)) return { ...r, kind };
+  const o = { kind };
+  for (let i = 0; i < columns.length; i++) o[columns[i]] = r[i];
+  return o;
+});
+
 export function initVersusData(pool) {
-  DEFENSES = new Map((pool?.defenses || []).map((d) => [`${d.team}|${d.season}`, { ...d, kind: "dst" }]));
-  KICKERS = new Map((pool?.kickers || []).map((k) => [`${k.team}|${k.season}`, { ...k, kind: "k" }]));
+  const columns = pool?.columns || {};
+  const defenses = expand(pool?.defenses, columns.defenses || [], "dst");
+  const kickers = expand(pool?.kickers, columns.kickers || [], "k");
+  DEFENSES = new Map(defenses.map((d) => [`${d.team}|${d.season}`, d]));
+  KICKERS = new Map(kickers.map((k) => [`${k.team}|${k.season}`, k]));
 }
 
 // ---------- What a board holds ----------

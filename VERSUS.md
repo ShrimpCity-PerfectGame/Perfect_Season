@@ -221,6 +221,14 @@ it to a dice roll would make those decisions pointless. An exact tie is shown as
 `["QB", "RB", "WR", "TE"]`, `SLOTS` stays six, and no existing score, board or leaderboard moves. A
 defense/kicker position in the main game would be a different project with its own contract.
 
+**What it costs everyone.** The file ships in the page every visitor loads, 1v1 player or not. Its rows are
+packed as arrays with the column names given once (`initVersusData` expands them), which takes it from 170 KB
+to 67 KB — but 67 KB it remains, and it took the built bundle past the 1,000,000-byte ceiling
+`tests/test-build-seo.mjs` keeps as a minification check (the bundle was already ~988 KB). The ceiling moved to
+1.2 MB. **The honest fix, if this ever needs to move again:** load the pool when the 1v1 screen opens rather
+than at startup. That needs `service-worker.js`'s `planFor` to learn about a second chunk, which is why it
+didn't happen in this release rather than because it isn't worth doing.
+
 ## 7. Powerups
 
 ### Re-spins

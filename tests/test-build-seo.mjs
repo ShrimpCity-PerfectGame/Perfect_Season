@@ -51,7 +51,12 @@ let ld = null;
 try { ld = JSON.parse(attr(prod.html, /<script type="application\/ld\+json">([\s\S]*?)<\/script>/)); } catch (e) { /* reported below */ }
 check("structured data is valid JSON naming the site", ld && ld["@graph"].some((n) => n["@type"] === "WebSite" && n.name === "Gridspin" && n.url === "https://www.gridspin.app/"), ld && JSON.stringify(ld));
 check("the share link people see stays gridspin.app", prod.js.includes('"https://gridspin.app"'));
-check("the bundle is minified", prod.js.length < 1_000_000, `${prod.js.length} bytes`);
+// A ceiling, not a budget: what it catches is a build that forgot to minify, which is about 1.9 MB. It was
+// 1,000,000 until v1.19.0, when 1v1's defenses and kickers (data/versus-pool.json, 67 KB packed) took the real
+// bundle past it - the bundle was already ~988 KB. If this needs raising again, ask first whether the thing
+// being added belongs in the page every visitor loads: the honest fix for that file is to load it when the 1v1
+// screen opens rather than at startup, which needs the service worker to learn about a second chunk.
+check("the bundle is minified", prod.js.length < 1_200_000, `${prod.js.length} bytes`);
 check("the tab title leads with the name", /<title>Gridspin – /.test(prod.html));
 // The same page answers challenge links (/c/CODE), where relative asset paths would break.
 check("the app and icons load from root-relative paths", prod.html.includes('<script src="/page.js">') && prod.html.includes('href="/icon.svg"') && prod.html.includes('href="/site.webmanifest"') && !/(src|href)="(?!\/|https?:)[^"]+\.(js|svg|png|webmanifest)"/.test(prod.html), prod.html.match(/(src|href)="[^"]+"/g));

@@ -242,16 +242,25 @@ for (let season = FIRST; season <= LAST; season++) {
   console.log(`${season}: ${rated.length} defenses (best ${top?.team} ${top?.rating}), ${kicks.length} kickers (best ${boot?.name} ${boot?.rating})`);
 }
 
-// The file the game reads: small rows, one decimal place at most, sorted so a diff between two runs is readable.
+// The file the game reads. Rows are arrays rather than objects, with the column names given once at the top:
+// this file is bundled into the page every visitor loads, including the ones who never play 1v1, and repeating
+// eight key names 1,722 times costs about 80 KB of that for nothing. versus-logic.mjs's initVersusData expands
+// them by `columns`, so the shape stays self-describing rather than positional-by-convention.
+//
+// Sorted by team then season, so a diff between two runs is readable.
 const byTeamSeason = (a, b) => (a.team === b.team ? a.season - b.season : a.team < b.team ? -1 : 1);
+const DEFENSE_COLUMNS = ["season", "team", "rating", "pa", "ints", "fum", "sacks", "tds"];
+const KICKER_COLUMNS = ["season", "team", "name", "rating", "made", "att", "long", "from50", "xp"];
+const row = (columns, o) => columns.map((c) => o[c]);
 const out = {
   built: new Date().toISOString().slice(0, 10),
   source: "nflverse: nfldata/games.csv, nflverse-data stats_team_reg, stats_player_week",
-  defenses: defenses.sort(byTeamSeason).map((d) => ({
+  columns: { defenses: DEFENSE_COLUMNS, kickers: KICKER_COLUMNS },
+  defenses: defenses.sort(byTeamSeason).map((d) => row(DEFENSE_COLUMNS, {
     season: d.season, team: d.team, rating: d.rating,
     pa: Math.round((d.pointsAllowed / d.games) * 10) / 10, ints: d.ints, fum: d.fumbles, sacks: Math.round(d.sacks), tds: d.tds,
   })),
-  kickers: kickers.sort(byTeamSeason).map((k) => ({
+  kickers: kickers.sort(byTeamSeason).map((k) => row(KICKER_COLUMNS, {
     season: k.season, team: k.team, name: k.name, rating: k.rating,
     made: k.made, att: k.att, long: k.long, from50: k.from50, xp: k.xpMade,
   })),

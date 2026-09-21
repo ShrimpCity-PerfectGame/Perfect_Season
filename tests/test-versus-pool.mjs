@@ -12,13 +12,34 @@ import { initGameData, BOARDS, TEAMS, WINDOWS } from "../game-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => JSON.parse(readFileSync(path.join(root, f), "utf8"));
-const pool = read("data/versus-pool.json");
+const raw = read("data/versus-pool.json");
 const players = read("data/players.json");
 initGameData(players.players, players.opponents);
+
+// The file packs its rows as arrays with the column names given once, because it ships in the page every
+// visitor loads. Expanded here the same way versus-logic.mjs expands it - and the shape of that packing is
+// itself part of what this test holds, since a column added to one end and read at the other would be silent.
+const expand = (rows, columns) => rows.map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i]])));
+const pool = {
+  ...raw,
+  defenses: expand(raw.defenses, raw.columns.defenses),
+  kickers: expand(raw.kickers, raw.columns.kickers),
+};
 
 const FIRST = 1999, LAST = 2025;
 const at = (rows) => new Map(rows.map((r) => [`${r.team}|${r.season}`, r]));
 const defenses = at(pool.defenses), kickers = at(pool.kickers);
+
+await runTest("the file is packed the way the game unpacks it", async () => {
+  assert(Array.isArray(raw.columns?.defenses) && Array.isArray(raw.columns?.kickers), "it names its columns");
+  assert(raw.defenses.every((r) => Array.isArray(r) && r.length === raw.columns.defenses.length),
+    "and every defense row matches them");
+  assert(raw.kickers.every((r) => Array.isArray(r) && r.length === raw.columns.kickers.length),
+    "as does every kicker row");
+  // What the packing is for: an object per row would cost about 80 KB more in the page every visitor loads.
+  const size = JSON.stringify(raw).length;
+  assert(size < 110_000, `the file stays small: ${(size / 1024).toFixed(0)} KB`);
+});
 
 await runTest("one defense and one kicker for every team-season the game knows", async () => {
   const want = [];
