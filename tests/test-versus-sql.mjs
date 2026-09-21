@@ -168,6 +168,7 @@ await runTest("every function this migration adds is definer, searches pg_temp l
     "match_state(p_code text)": [true, "public, pg_temp", true, true],
     "new_match_code()": [true, "public, pg_temp", false, false],
     "record_versus(p_winner uuid, p_loser uuid)": [true, "public, pg_temp", false, false],
+    "finish_match(p_match uuid, p_result jsonb, p_winner uuid, p_loser uuid)": [true, "public, pg_temp", false, false],
     "versus_top(p_limit integer)": [true, "public, pg_temp", true, true],
   };
   const rows = await owner(`select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig,
@@ -176,7 +177,7 @@ await runTest("every function this migration adds is definer, searches pg_temp l
       has_function_privilege('anon', p.oid, 'execute') as anon,
       has_function_privilege('authenticated', p.oid, 'execute') as authenticated
     from pg_proc p where p.pronamespace = 'public'::regnamespace
-      and p.proname in ('can_play_versus', 'create_match', 'join_match', 'match_state', 'new_match_code', 'record_versus', 'versus_top') order by 1`);
+      and p.proname in ('can_play_versus', 'create_match', 'finish_match', 'join_match', 'match_state', 'new_match_code', 'record_versus', 'versus_top') order by 1`);
   const actual = Object.fromEntries(rows.map((r) => [r.sig, [r.definer, r.search_path, r.anon, r.authenticated]]));
   assert(JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(Object.keys(expected).sort()),
     `a new function needs a deliberate entry here, got ${JSON.stringify(Object.keys(actual))}`);
@@ -206,6 +207,45 @@ await runTest("the 1v1 board ranks by wins, fully tiebroken, and only counts peo
   assert(after.pvp_wins === before.pvp_wins + 1 && loser.pvp_losses === 5, `one win, one loss: ${after.pvp_wins}/${loser.pvp_losses}`);
   const direct = await attempt(HOST, "update profiles set pvp_wins = 99 where id = $1", [HOST]);
   assert(!!direct.error || direct.affected === 0, `and a client can't write its own record: ${JSON.stringify(direct)}`);
+});
+
+// The write that ends a match. It used to be two unguarded calls from the Edge Function, and every way they
+// could go wrong was permanent: a lost record nothing could retry, a double-counted win if it did, or sixteen
+// picks on a drafting row that answers already_finished to every later move.
+await runTest("finishing a match writes the result and both records, once", async () => {
+  await owner("update profiles set pvp_wins = 0, pvp_losses = 0");
+  const code = (await call(HOST, "create_match", {})).data.code;
+  await call(GUEST, "join_match", { p_code: code });
+  const id = (await owner("select id from matches where code = $1", [code]))[0].id;
+  const result = { winner: "host", margin: 4.2, host: { score: 71.2, points: 24 }, guest: { score: 67.0, points: 17 } };
+
+  const first = (await owner("select finish_match($1, $2, $3, $4) as r", [id, JSON.stringify(result), HOST, GUEST]))[0].r;
+  assert(first.ok && !first.already_done, `it finishes: ${JSON.stringify(first)}`);
+  const m = (await owner("select status, winner_id, result, ended_at, turn_deadline from matches where id = $1", [id]))[0];
+  assert(m.status === "done" && m.winner_id === HOST, `the match is done and won: ${JSON.stringify([m.status, m.winner_id])}`);
+  assert(m.result?.margin === 4.2 && m.ended_at && m.turn_deadline === null, `with its result and no clock: ${JSON.stringify(m.result)}`);
+  const won = (await owner("select pvp_wins from profiles where id = $1", [HOST]))[0];
+  const lost = (await owner("select pvp_losses from profiles where id = $1", [GUEST]))[0];
+  assert(won.pvp_wins === 1 && lost.pvp_losses === 1, `one win, one loss: ${won.pvp_wins}/${lost.pvp_losses}`);
+
+  // Both screens notice the sixteenth pick at once, and both claim the clock. The second one counts nothing.
+  const twice = (await owner("select finish_match($1, $2, $3, $4) as r", [id, JSON.stringify(result), HOST, GUEST]))[0].r;
+  assert(twice.ok && twice.already_done, `a second call says so rather than doing it again: ${JSON.stringify(twice)}`);
+  const still = (await owner("select pvp_wins from profiles where id = $1", [HOST]))[0];
+  assert(still.pvp_wins === 1, `and nothing moved twice, got ${still.pvp_wins}`);
+
+  // A draw moves neither record, and neither does a match missing a profile on one side - a win with no
+  // matching loss is a record that never balances.
+  const drawCode = (await call(OTHER, "create_match", {})).data.code;
+  await call(GUEST, "join_match", { p_code: drawCode });
+  const drawId = (await owner("select id from matches where code = $1", [drawCode]))[0].id;
+  await owner("select finish_match($1, $2, null, null) as r", [drawId, JSON.stringify({ winner: null })]);
+  const after = (await owner("select pvp_wins, pvp_losses from profiles where id = $1", [GUEST]))[0];
+  assert(after.pvp_losses === 1, `a draw moves nothing, got ${after.pvp_losses}`);
+  assert((await owner("select status from matches where id = $1", [drawId]))[0].status === "done", "but the match is still ended");
+
+  assert((await call(HOST, "finish_match", { p_match: id, p_result: null, p_winner: null, p_loser: null })).error,
+    "and a client cannot call it at all");
 });
 
 await runTest("the mock ranks the 1v1 board exactly as the SQL does", async () => {

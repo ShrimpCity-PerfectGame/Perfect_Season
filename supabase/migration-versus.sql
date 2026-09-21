@@ -239,6 +239,49 @@ returns void language sql security definer set search_path = public, pg_temp as 
   update public.profiles set pvp_losses = pvp_losses + 1 where id = p_loser and exists (select 1 from w);
 $$;
 revoke execute on function public.record_versus(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.record_versus(uuid, uuid) to service_role;
+
+-- Ending a match: the result and both records, once, in one transaction.
+--
+-- The Edge Function used to do this as two unguarded calls - write the result, then record_versus - and neither
+-- checked its answer. Every way that could go wrong was permanent. A failed record left a match marked done
+-- with neither player's record moved and nothing able to retry it, because the function refuses a match that is
+-- no longer `drafting`. Retrying the other order double-counted the win instead, since record_versus is a bare
+-- increment. And a failed status write left sixteen picks on a `drafting` row, which answers already_finished
+-- to every later move: a match nobody can finish, grade or leave.
+--
+-- One function fixes all of it. The row is locked and re-checked, so whichever caller gets there first is the
+-- one that counts and a second is told `already_done` rather than incrementing anything twice; and because the
+-- records and the status commit together, a failure leaves the match exactly as it was, for the next call to
+-- finish properly.
+create or replace function public.finish_match(p_match uuid, p_result jsonb, p_winner uuid, p_loser uuid)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare m public.matches;
+begin
+  select * into m from public.matches where id = p_match for update;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  -- Not an error the caller has to handle: the other screen's clock claim got here first, which is exactly what
+  -- is supposed to happen when both players' tabs notice the sixteenth pick at once.
+  if m.status <> 'drafting' then return jsonb_build_object('ok', true, 'already_done', true); end if;
+
+  update public.matches
+     set status = 'done', result = p_result, winner_id = p_winner,
+         ended_at = now(), turn_deadline = null
+   where id = p_match;
+
+  -- A draw moves neither, and a match missing a profile on either side moves neither - a win with no
+  -- corresponding loss would be a record that never balances.
+  if p_winner is not null and p_loser is not null
+     and exists (select 1 from public.profiles where id = p_winner)
+     and exists (select 1 from public.profiles where id = p_loser) then
+    update public.profiles set pvp_wins = pvp_wins + 1 where id = p_winner;
+    update public.profiles set pvp_losses = pvp_losses + 1 where id = p_loser;
+  end if;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+revoke execute on function public.finish_match(uuid, jsonb, uuid, uuid) from public, anon, authenticated;
+grant execute on function public.finish_match(uuid, jsonb, uuid, uuid) to service_role;
 
 -- The 1v1 board (VERSUS.md 10): ranked by wins, then by how few losses they took getting them, then by name so
 -- the order is fully tiebroken - the rule every other board here follows. Only accounts that have played one

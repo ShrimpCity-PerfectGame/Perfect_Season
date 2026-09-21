@@ -175,6 +175,40 @@ await runTest("a board takes one reordering powerup, not two", async () => {
   assert(pickStealsLeft(m.swaps, off) === 1, "the follower keeps their steal for a board they can use it on");
 });
 
+// Three powerups that used to be accepted, written, counted, and then never read - the counter went down and
+// the board did not move. Refused costs nothing and keeps them for a turn that works.
+await runTest("a powerup that would do nothing is refused, not spent", async () => {
+  const m = newMatch("RULES4C");
+  const on = m.state().turn.side;
+
+  // A re-spin belongs before your FIRST pick on a board. A dip gives the dipper two turns back to back, and
+  // replayMatch only ever looks a spin up on the first of them.
+  assert(m.move(on, { dip: true }).ok, "the leader doubles up");
+  assert(m.takeSomething().ok, "and takes the first of their two");
+  const second = m.state();
+  assert(second.turn.side === on && !second.turn.ownFirst, `still their board, second turn: ${JSON.stringify(second.turn)}`);
+  assert(m.move(on, { respin: "team" }).reason === "respin_too_late", "a re-spin on that second turn is refused");
+  assert(m.move(on, { respin: "era" }).reason === "respin_too_late", "either of them");
+  assert(m.respins.length === 0, "and neither was spent");
+
+  // One dip a board, whoever asks. replayMatch applies only the first entry it finds for a board, so a second
+  // was written, counted against that player's one dip, and then ignored entirely - no extra pick, no forfeit.
+  assert(m.takeSomething().ok, "the dipper takes the second of their two");
+  const off = m.state().turn.side;
+  assert(off !== on, `now the other player, on the same board: ${JSON.stringify(m.state().turn)}`);
+  assert(m.move(off, { dip: true }).reason === "already_dipped", "who cannot dip a board that is already dipped");
+  assert(m.dips.length === 1, "one dip written, not two");
+
+  // The board AFTER a dip belongs to one player, because the dipper forfeited it - so there is no order on it
+  // to reverse, and Steal the pick spent there changed nothing while marking the board swapped for good.
+  assert(m.takeSomething().ok, "the other player finishes the dipped board");
+  const solo = m.state();
+  assert(solo.turn.turns === 1, `the forfeited board has one picker: ${JSON.stringify(solo.turn)}`);
+  assert(m.move(solo.turn.side === "host" ? "guest" : "host", { stealPick: true }).reason === "already_leading",
+    "so nobody can swap it");
+  assert(m.swaps.length === 0, "and no swap was written");
+});
+
 await runTest("a steal takes the pick just made, and only that one", async () => {
   const m = newMatch("RULES5");
   const first = m.takeSomething();

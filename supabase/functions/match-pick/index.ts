@@ -54,9 +54,14 @@ const rowsToPicks = (match: any, rows: any[]) => (rows || []).map((r: any) => ({
   stolenBy: r.stolen_by ? sideOf(match, r.stolen_by) : null,
 }));
 
+// Throws rather than returning [] on a failed read, and the handler answers 500. A dropped select used to
+// present an empty match to decideMove, which says "board 0, pick 1" - harmless for a pick, where the primary
+// key refuses it, but a RE-SPIN would be appended for pick 1 and retroactively replace board 0, orphaning every
+// pick already made on it. One bad minute on the database, and the match is unrecoverable.
 const readPicks = async (service: any, match: any) => {
-  const { data } = await service.from("match_picks").select("*").eq("match_id", match.id).order("pick_no");
-  return rowsToPicks(match, data);
+  const { data, error } = await service.from("match_picks").select("*").eq("match_id", match.id).order("pick_no");
+  if (error) throw new Error(`could not read the picks: ${error.message}`);
+  return rowsToPicks(match, data ?? []);
 };
 
 Deno.serve(async (req) => {
@@ -145,15 +150,16 @@ Deno.serve(async (req) => {
   const result = V.matchResult({ code, format: match.format, host: after.roster.host, guest: after.roster.guest });
   if (!result) return json({ error: "failed to grade" }, 500);
   const winnerId = result.winner ? idOf(match, result.winner) : null;
-  await service.from("matches").update({
-    status: "done", result, winner_id: winnerId, ended_at: new Date().toISOString(), turn_deadline: null,
-  }).eq("id", match.id);
-  // The records move together or not at all (record_versus), and are kept apart from wins and championships on
-  // purpose - VERSUS.md 1. A draw moves neither.
-  if (result.winner) {
-    await service.rpc("record_versus", {
-      p_winner: winnerId, p_loser: idOf(match, result.winner === "host" ? "guest" : "host"),
-    });
-  }
+  // The result and both records land together, or neither does - one locked transaction in the database rather
+  // than two writes here that nothing checked. See finish_match in migration-versus.sql for what each of the
+  // old failure modes cost. A failure leaves the match untouched and finishable; a second caller is told the
+  // first one already did it, which is what happens when both screens notice the sixteenth pick at once.
+  const { data: done, error: finishError } = await service.rpc("finish_match", {
+    p_match: match.id,
+    p_result: result,
+    p_winner: winnerId,
+    p_loser: result.winner ? idOf(match, result.winner === "host" ? "guest" : "host") : null,
+  });
+  if (finishError || done?.error) return json({ error: "failed to save" }, 500);
   return json({ ok: true, result });
 });

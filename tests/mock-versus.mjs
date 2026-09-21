@@ -105,12 +105,23 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     return matchState({ p_code: m.code });
   }
 
-  // record_versus: the two columns move together or not at all.
-  function recordVersus(winnerId, loserId) {
-    const w = state.profiles.get(winnerId), l = state.profiles.get(loserId);
-    if (!w || !l) return;
+  // finish_match: the result and both records, once, in one go. The SQL takes a row lock and re-checks the
+  // status so a second caller counts nothing; here the status check alone is that, since nothing runs in
+  // parallel. A win with no matching loss is refused on both sides - a record that never balances.
+  function finishMatch(m, result, now) {
+    if (m.status !== "drafting") return { ok: true, already_done: true };
+    m.status = "done";
+    m.result = result;
+    m.winner_id = result.winner ? idOf(m, result.winner) : null;
+    m.ended_at = new Date(now).toISOString();
+    m.turn_deadline = null;
+    if (!result.winner) return { ok: true };
+    const w = state.profiles.get(m.winner_id);
+    const l = state.profiles.get(idOf(m, result.winner === "host" ? "guest" : "host"));
+    if (!w || !l) return { ok: true };
     w.pvp_wins = (w.pvp_wins || 0) + 1;
     l.pvp_losses = (l.pvp_losses || 0) + 1;
+    return { ok: true };
   }
 
   // The match-pick Edge Function. `now` is a test hook, standing in for the server's clock so a test can let a
@@ -177,12 +188,8 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     if (!after.done) { restartClock(); return changed({ data: { ok: true } }); }
 
     const result = V.matchResult({ code, format: m.format, host: after.roster.host, guest: after.roster.guest });
-    m.status = "done";
-    m.result = result;
-    m.winner_id = result.winner ? idOf(m, result.winner) : null;
-    m.ended_at = new Date(now).toISOString();
-    m.turn_deadline = null;
-    if (result.winner) recordVersus(m.winner_id, idOf(m, result.winner === "host" ? "guest" : "host"));
+    if (!result) return changed(httpError("failed to grade", 500));
+    finishMatch(m, result, now);
     return changed({ data: { ok: true, result } });
   }
 

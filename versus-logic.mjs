@@ -266,7 +266,11 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], swaps =
       if (!pick) {
         return {
           seq, boards, roster, taken, used, boardIdx, pickNo, boardKey: keyFor(side),
-          turn: { boardIdx, first: i === 0, side }, done: false,
+          // `first` is the board's opening pick. `ownFirst` is THIS player's first turn on it, which is not the
+          // same thing once a dip or a steal has given somebody two turns on one board - and it is the exact
+          // condition the spin lookup above uses, so decideMove has to be able to ask it too.
+          turn: { boardIdx, first: i === 0, side, ownFirst: order.indexOf(side) === i, turns: order.length },
+          done: false,
         };
       }
       // A stolen pick is on the thief's roster, in the slot they chose. Stealing was their whole turn, so the
@@ -516,9 +520,11 @@ const refuse = (reason, status = 409) => ({ ok: false, reason, status });
 
 // Whether a board is still in its opening window, and until when. `deadline` is the turn's, always set
 // TURN_SECONDS out, so the turn's start is known without storing it.
-export function lookWindow({ state, swaps = [], picks = [], deadline = 0 }) {
+export function lookWindow({ state, swaps = [], dips = [], picks = [], deadline = 0 }) {
   if (!state || state.done || !state.turn.first || !deadline) return null;
   if (swaps.some((w) => w.boardIdx === state.boardIdx)) return null; // already swapped: nothing left to wait for
+  if (state.turn.turns < 2) return null; // a board only one player is on: nobody is waiting to take anything
+  if (dips.some((d) => d.boardIdx === state.boardIdx)) return null; // dipped, so the swap is refused anyway
   const follower = state.turn.side === "host" ? "guest" : "host";
   if (pickStealsLeft(swaps, follower) < 1) return null; // they have none to spend
   return { until: deadline - TURN_SECONDS * 1000 + LOOK_SECONDS * 1000, follower };
@@ -552,6 +558,10 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
   if (move.stealPick) {
     if (pickStealsLeft(swaps, side) < 1) return refuse("no_steals_left");
     if (side === onClock || !state.turn.first) return refuse("already_leading");
+    // Nothing to reverse on a board only one player is on - the one after a double dip, which its dipper
+    // forfeited. It was accepted there, spent the powerup, changed no order at all, and then marked the board
+    // already_swapped for the rest of the match.
+    if (state.turn.turns < 2) return refuse("already_leading");
     // Once per board, whoever spends it. Both players have one, so without this the second could simply flip
     // the board back - the order ends where it started and two powerups are gone, which is a worse game than
     // either of them not having spent one.
@@ -572,6 +582,10 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
 
   if (move.respin === "team" || move.respin === "era") {
     if (respinsLeft(respins, side)[move.respin] < 1) return refuse("no_respins_left");
+    // A re-spin is spent before your FIRST pick on a board, and replayMatch only ever looks one up there. On a
+    // second turn - a dipper's, or a robbed leader's replacement - this was accepted, written, and then never
+    // read: the counter ticked down to zero while the board sat exactly where it was. Refused costs nothing.
+    if (!state.turn.ownFirst) return refuse("respin_too_late");
     const board = respinBoard({
       code, kind: move.respin, pickNo: state.pickNo, key,
       seq: state.seq, used: state.used, taken: state.taken, roster: mine, otherRoster: theirs,
@@ -583,6 +597,9 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
   if (move.dip) {
     if (dipsLeft(dips, side) < 1) return refuse("no_dips_left");
     if (state.boardIdx >= MATCH_BOARDS - 1) return refuse("last_board");
+    // One dip a board. replayMatch applies only the first entry it finds for a board, so a second was accepted,
+    // written, counted against the player's one dip, and then ignored entirely - no extra pick, no forfeit.
+    if (dips.some((d) => d.boardIdx === state.boardIdx)) return refuse("already_dipped");
     const order = state.boards[state.boardIdx].order;
     const picksAfter = order.slice(order.indexOf(side) + 1).some((s) => s !== side);
     if (!canDoubleDip({ key, taken: state.taken, boardIdx: state.boardIdx, dipperRoster: mine, otherRoster: theirs, picksAfter })) {
@@ -616,7 +633,7 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
   // ...but not yet, if the board has only just opened and the other player could still take the first pick off
   // them. The clock is unaffected: it runs its full length from the same start, so this costs the leader
   // thinking time, not their turn.
-  const look = lookWindow({ state, swaps, picks, deadline });
+  const look = lookWindow({ state, swaps, dips, picks, deadline });
   if (look && now < look.until) return refuse("board_opening");
   const wanted = optionsOn(key).find((o) => (move.kind === "player"
     ? o.kind === "player" && o.id === Number(move.playerId) && o.season === Number(move.season)

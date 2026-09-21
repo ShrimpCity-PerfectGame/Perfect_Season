@@ -636,7 +636,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // The board's opening window (VERSUS.md 7): the seconds in which the first pick can't land yet, so the other
   // player has a real chance to take it. Null whenever nobody could use one.
   const look = state && match?.status === "drafting"
-    ? lookWindow({ state, swaps: match.swaps || [], picks: match.picks || [], deadline: match.turnDeadline ? Date.parse(match.turnDeadline) : 0 })
+    ? lookWindow({ state, swaps: match.swaps || [], dips: match.dips || [], picks: match.picks || [], deadline: match.turnDeadline ? Date.parse(match.turnDeadline) : 0 })
     : null;
   const lookLeft = useCountdown(look ? new Date(look.until).toISOString() : null);
   const opening = !!look && lookLeft > 0;
@@ -716,7 +716,13 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
         <h2 className="h">Your lobby</h2>
         <div className="vs-link">
           <code>{link}</code>
-          <button className="btn sm" onClick={() => { copy(link); setCopied(true); }}>{copied ? "Copied" : "Copy link"}</button>
+          {/* Says Copied only if it was, and goes back to itself - it used to latch on for the rest of the
+              session, and said so even when the clipboard had refused. */}
+          <button className="btn sm" onClick={async () => {
+            if (!(await copy(link))) return;
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 2500);
+          }}>{copied ? "Copied" : "Copy link"}</button>
         </div>
         <p className="vs-wait"><span className="vs-dot" /> Waiting for an opponent…</p>
         <p className="vs-note">The first person to open the link is your opponent. Keep this page open.</p>
@@ -733,6 +739,19 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // flight. Rendering the board here read a turn that no longer exists; with no error boundary anywhere, that
   // took the whole app down, and it landed on whoever didn't make the last pick. The poll is still running, so
   // this is a beat, not a state anyone sits in.
+  // A match somebody ended by hand (the runbook's `status = 'abandoned'`) fell through to the draft view: a
+  // board with no clock, cards that looked pickable, and every click refused by the server. The poll correctly
+  // stops on this status, which only made it look more frozen.
+  if (match.status === "abandoned") {
+    return (
+      <section className="versus" data-view="abandoned" data-code={match.code}>
+        <h2 className="h">Match ended</h2>
+        <p className="vs-note">This match was ended before it finished, so there's no result. Nothing was recorded for either player.</p>
+        <button className="btn" onClick={onBack}>Back</button>
+      </section>
+    );
+  }
+
   if (state?.done && match.status !== "done") {
     return (
       <section className="versus" data-view="grading" data-code={match.code}>
@@ -848,6 +867,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
 
       {state.boardKey ? (
         <Board
+          key={state.boardKey}
           boardKey={state.boardKey} taken={state.taken} roster={state.roster[side || "host"]}
           myTurn={myTurn && !opening} busy={busy} selected={selected} setSelected={setSelected}
           turnLabel={myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`} seconds={left}
@@ -920,8 +940,16 @@ export function versusShareText(match, result, side, siteUrl) {
 
 const name = (match, side) => (side === "host" ? match.hostName || "Host" : side === "guest" ? match.guestName || "Opponent" : "");
 const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
-function copy(text) {
-  try { navigator.clipboard?.writeText(text); } catch (e) { /* a browser that won't; the link is on screen */ }
+// Resolves to whether it actually landed. writeText REJECTS on a denied permission rather than throwing, so the
+// try/catch alone caught nothing and the button said "Copied" over a clipboard that had not changed - and left
+// an unhandled rejection behind it.
+async function copy(text) {
+  try {
+    await navigator.clipboard?.writeText(text);
+    return true;
+  } catch (e) {
+    return false; // a browser that won't, or a permission refused; the link is on screen either way
+  }
 }
 
 // A refusal in words. Every one of these is a reason from VERSUS.md 4 and 7 - the screen never invents one.
@@ -947,7 +975,19 @@ const ERRORS = {
   nothing_to_steal: "There's nothing to steal yet.",
   already_leading: "You already pick first on this board.",
   already_swapped: "The order on this board has already been swapped.",
+  already_dipped: "Somebody has already doubled up on this board.",
+  respin_too_late: "A re-spin goes before your first pick on a board.",
   conflict: "That pick just went — try again.",
+  // The server's own answers. Without these a player was told "That didn't work" for a match that had ended,
+  // a session that had expired, and for both of the 500s - which are the two worth telling apart, because one
+  // of them means the match needs help rather than another try.
+  not_your_match: "You're not in this match.",
+  already_finished: "This match is over.",
+  too_early: "The clock hasn't run out yet.",
+  no_option: "Something has gone wrong with this board — the match may need to be abandoned.",
+  "failed to save": "The server couldn't save that. Try again.",
+  "failed to grade": "The server couldn't work out the result. The match may need to be abandoned.",
+  unauthorized: "Sign in to play.",
   signed_out: "Sign in to play.",
   network: "Couldn't reach the server. Try again.",
 };
