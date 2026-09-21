@@ -7,7 +7,7 @@ import {
   setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, clickMode,
   assert, runTest, waitForCrypto, makeMockAuth,
 } from "./helpers.mjs";
-import { replayMatch, optionId, VERSUS_SLOTS } from "../versus-logic.mjs";
+import { replayMatch, optionId, VERSUS_SLOTS, LOOK_SECONDS } from "../versus-logic.mjs";
 import { TEAMS, WINDOWS } from "../game-logic.mjs";
 
 setupDom();
@@ -44,9 +44,17 @@ async function signUp(email, username) {
 }
 const versus = () => container.querySelector(".versus");
 let matchCode = null; // the match tests three and four share
+// A board opens with a window in which its first pick cannot land, so the other player can take it (VERSUS.md
+// 7). These tests are about the screen, not about waiting ten seconds, so the turn is aged past it - by moving
+// its deadline back, which is exactly what the passing of time would do.
+function pastOpeningWindow(code) {
+  const m = auth._versus._matches.get(code);
+  if (m?.turn_deadline) m.turn_deadline = new Date(Date.parse(m.turn_deadline) - (LOOK_SECONDS + 1) * 1000).toISOString();
+}
 async function openMatch(email, code) {
   await signIn(email);
   window.history.pushState({ ps: "view", view: "versus", code }, "", `/vs/${code}`);
+  pastOpeningWindow(code);
   window.dispatchEvent(new window.PopStateEvent("popstate", { state: { ps: "view", view: "versus", code } }));
   await flush();
   await flush();
@@ -215,6 +223,46 @@ await runTest("the follower spends a re-spin, and walks away to a board of their
   assert(auth._versus._matches.get(code).respins.length === 1, "the match recorded it");
   assert(before.pickNo === after.pickNo, "and it cost no pick");
   assert(findButtonByText(container, "Re-spin era").disabled, "with none of that kind left");
+});
+
+await runTest("the powerups show for both players, and say who has spent what", async () => {
+  const code = matchCode;
+  await openMatch("beta@x.test", code);
+  // The bar is on screen for whoever is looking, not only the player on the clock: Steal the pick is spent
+  // off your own turn, so a bar that appeared only on your turn could never offer it.
+  // Named here rather than imported: node cannot load a .jsx, and naming them makes the test fail loudly if
+  // one is ever quietly dropped from the bar.
+  const EXPECTED = ["Team", "Era", "Double", "Steal", "First"];
+  const labels = [...container.querySelectorAll(".vs-powers .btn")].map((b) => b.textContent.replace(/\s+/g, " ").trim());
+  assert(labels.length === EXPECTED.length + 1, `every powerup plus the rules button: ${JSON.stringify(labels)}`);
+  for (const short of EXPECTED) assert(labels.some((l) => l.includes(short)), `${short} is on the bar`);
+
+  // And a track under each roster, so a player can see what the other still holds without remembering it.
+  const tracks = [...container.querySelectorAll(".vs-track")];
+  assert(tracks.length === 2, `one track per player, got ${tracks.length}`);
+  assert(tracks.every((t) => t.querySelectorAll("li").length === 5), "each showing all five");
+  // A spent one reads as spent without colour - struck through, and said in words for a screen reader.
+  const spent = [...container.querySelectorAll(".vs-track .vs-tk")].filter((li) => li.classList.contains("spent"));
+  assert(spent.every((li) => li.textContent.includes("used")), "a spent powerup says so in words");
+});
+
+await runTest("the screen keeps reading even while it is your own turn", async () => {
+  // The other player can act DURING your turn - Steal the pick is spent while you are on the clock, and takes
+  // the board's opening pick off you. A screen that stopped reading whenever it believed it was its turn would
+  // never learn it had stopped being, and Realtime is not something to bet the draft on.
+  const code = matchCode;
+  await openMatch("beta@x.test", code);
+  assert(container.querySelector(".versus").dataset.view === "draft", "the draft is on screen");
+
+  // Flip the sides behind the screen's back, the way the server would after a swap, and touch nothing else.
+  const m = auth._versus._matches.get(code);
+  const wasHost = m.host_id;
+  m.host_id = m.guest_id;
+  m.guest_id = wasHost;
+  for (let i = 0; i < 40 && container.querySelector(".vs-turn")?.textContent === "Your pick"; i++) await flush();
+  await flush();
+  assert(container.querySelector(".vs-turn")?.textContent !== "Your pick",
+    `the screen noticed without being told: ${container.querySelector(".vs-turn")?.textContent}`);
 });
 
 await runTest("the 1v1 board shows the records, apart from every other board", async () => {

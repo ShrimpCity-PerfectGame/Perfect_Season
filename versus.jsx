@@ -31,7 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMatch, joinMatch, fetchMatch, playMove, subscribeMatch, versusPath, sget, sset } from "./storage.js";
 import {
   replayMatch, optionsOn, optionId, optionFits, openSlots, matchResult,
-  VERSUS_SLOTS, MATCH_BOARDS, respinsLeft, dipsLeft, stealsLeft, pickStealsLeft,
+  VERSUS_SLOTS, MATCH_BOARDS, TURN_SECONDS, LOOK_SECONDS, lookWindow, respinsLeft, dipsLeft, stealsLeft, pickStealsLeft,
 } from "./versus-logic.mjs";
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
 import {
@@ -89,8 +89,19 @@ export const VERSUS_CSS = `
 .vs-plist li{display:flex;gap:10px;align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:9px}
 .vs-plist .vs-pi{font-size:18px;margin-top:2px;width:22px;text-align:center}
 .vs-pd{font-size:13px;opacity:.8;margin-top:3px}
+/* What just happened. A fixed row, so the board does not jump when a line appears and goes. */
+.vs-flashrow{min-height:30px}
+.vs-open{border-color:var(--accent);font-variant-numeric:tabular-nums}
+.vs-flash{margin:0;padding:6px 10px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--line2);
+  font-weight:700;font-size:13.5px;display:inline-flex;gap:8px;align-items:center;animation:vs-in .28s ease-out}
+@keyframes vs-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+/* Who still holds what. Struck through rather than merely dimmed: a spent one has to read without colour. */
+.vs-track{list-style:none;display:flex;gap:8px;margin:6px 0 0;padding:0}
+.vs-tk{font-size:14px;line-height:1;opacity:.95}
+.vs-tk.spent{opacity:.4;text-decoration:line-through}
 .vs-note{font-size:13px;opacity:.85}
 .vs-err{color:var(--loss);font-weight:700;font-size:13px}
+@media (prefers-reduced-motion:reduce){.vs-flash{animation:none}}
 @media (max-width:900px){.vs-rosters .roster{grid-template-columns:repeat(4,minmax(0,1fr))}}
 /* On a phone the pair has to stay out of the board's way, so the strips lose the season line and shrink to
    two rows of four. The season is still one tap away on the card, and the sticky bar carries your slots as
@@ -245,6 +256,80 @@ export function VersusHowTo({ onClose }) {
       </div>
     </div>
   );
+}
+
+// What each player still holds. Derived from the match's own rows, like everything else here - there is no
+// "powerups used" to keep in step with anything, only the respins, dips and swaps that already exist.
+export function powerupsFor(match, side) {
+  const respins = respinsLeft(match.respins || [], side);
+  return {
+    team: respins.team, era: respins.era,
+    dip: dipsLeft(match.dips || [], side),
+    steal: stealsLeft(match.picks || [], side),
+    stealPick: pickStealsLeft(match.swaps || [], side),
+  };
+}
+
+// The icon row under a roster: lit for one still held, struck through for one spent. Readable without colour -
+// a spent powerup is struck through and marked in its label, not merely dimmed.
+function PowerupTrack({ left, label }) {
+  return (
+    <ul className="vs-track" aria-label={`${label}: powerups`}>
+      {POWERUPS.map((pu) => {
+        const spent = left[pu.id] < 1;
+        return (
+          <li key={pu.id} className={`vs-tk ${spent ? "spent" : ""}`} title={`${pu.label} — ${spent ? "used" : "still has it"}`}>
+            <span aria-hidden="true">{pu.icon}</span>
+            <span className="vh">{pu.label}: {spent ? "used" : "unused"}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// What just happened, in one line. Derived from the rows rather than remembered as it goes: a client that
+// reconnects mid-match sees the same last event as one that never left, and there is no running log to keep in
+// step with the match. Keyed so the screen can tell a new event from a re-render of the same one.
+export function latestEvent(match, state, nameOf) {
+  if (!match || !state) return null;
+  const out = [];
+  for (const r of match.respins || []) {
+    const pu = POWERUPS.find((x) => x.id === (r.kind === "era" ? "era" : "team"));
+    out.push({ at: r.pickNo * 4, key: `respin:${r.pickNo}:${r.kind}`, icon: pu.icon,
+      text: `${nameOf(r.by)} re-spun the ${r.kind === "era" ? "era" : "team"}` });
+  }
+  for (const d of match.dips || []) {
+    out.push({ at: (d.boardIdx * 2 + 1) * 4 + 1, key: `dip:${d.boardIdx}:${d.by}`, icon: "⚡",
+      text: `${nameOf(d.by)} doubled up — two off this board, and no pick on the next` });
+  }
+  for (const w of match.swaps || []) {
+    out.push({ at: (w.boardIdx * 2 + 1) * 4 - 1, key: `swap:${w.boardIdx}:${w.by}`, icon: "🔀",
+      text: `${nameOf(w.by)} took the first pick on this board` });
+  }
+  for (const p of match.picks || []) {
+    if (!p.stolenBy) continue;
+    const taken = state.roster[p.stolenBy]?.[p.slot];
+    out.push({ at: p.pickNo * 4 + 2, key: `steal:${p.pickNo}`, icon: "😈",
+      text: `${nameOf(p.stolenBy)} stole ${taken ? optionName(taken) : "the pick"}` });
+  }
+  if (!out.length) return null;
+  return out.sort((a, b) => a.at - b.at)[out.length - 1];
+}
+
+// Shows the newest event for a few seconds, then lets it go. Keyed on the event, so the same one never
+// re-announces itself when the match is re-read - which it is, every two seconds.
+function useFlash(event) {
+  const [shown, setShown] = useState(null);
+  const seen = useRef(null);
+  useEffect(() => {
+    if (!event || event.key === seen.current) return undefined;
+    seen.current = event.key;
+    setShown(event);
+    const t = setTimeout(() => setShown(null), 5000);
+    return () => clearTimeout(t);
+  }, [event?.key]);
+  return shown;
 }
 
 // Your roster, as the draft screen shows one: a strip of slots with who is in them.
@@ -424,13 +509,33 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const left = useCountdown(match?.status === "drafting" && !state?.done ? match.turnDeadline : null);
   // ...and a slow read behind it, because a draft that only moves when a socket delivers is a draft that
   // stops. Realtime can be off in a project, blocked by a network, or simply drop, and the first time anyone
-  // notices is a player sitting on a finished turn waiting out a clock they cannot affect. Every two seconds
-  // while it is not your move, and never while it is: your own moves refresh the screen themselves.
+  // notices is a player sitting on a finished turn waiting out a clock they cannot affect.
+  //
+  // Every two seconds for the whole match, including your own turn. It skipped your turn at first, on the
+  // reasoning that your own moves refresh the screen themselves - but the other player can act DURING your
+  // turn: Steal the pick is spent while you are on the clock, and takes the board's first pick off you. A
+  // client that stops reading whenever it believes it is their turn would never learn it had stopped being.
+  // A lobby reads too, or a host whose Realtime is not delivering never learns that anybody joined - which is
+  // the very first thing that has to work.
   useEffect(() => {
-    if (!match?.code || match.status === "done" || myTurn) return undefined;
+    if (!match?.code || match.status === "done" || match.status === "abandoned") return undefined;
     const t = setInterval(() => refresh(match.code), 2000);
     return () => clearInterval(t);
-  }, [match?.code, match?.status, myTurn, refresh]);
+  }, [match?.code, match?.status, refresh]);
+
+  // Every hook above every early return: what each player still holds, whether this board's order has already
+  // been flipped, and the one-line announcement of whatever just happened.
+  const mine = state && side ? powerupsFor(match, side) : null;
+  const theirs = state && side ? powerupsFor(match, side === "host" ? "guest" : "host") : null;
+  const alreadySwapped = !!state && (match.swaps || []).some((w) => w.boardIdx === state.boardIdx);
+  const flash = useFlash(latestEvent(match, state, (s) => name(match, s)));
+  // The board's opening window (VERSUS.md 7): the seconds in which the first pick can't land yet, so the other
+  // player has a real chance to take it. Null whenever nobody could use one.
+  const look = state && match?.status === "drafting"
+    ? lookWindow({ state, swaps: match.swaps || [], picks: match.picks || [], deadline: match.turnDeadline ? Date.parse(match.turnDeadline) : 0 })
+    : null;
+  const lookLeft = useCountdown(look ? new Date(look.until).toISOString() : null);
+  const opening = !!look && lookLeft > 0;
 
   // When the clock runs out somebody has to say so, and it may be either of them - that is what keeps a match
   // alive when the other player has closed the tab. Asked once, a beat after zero, so the two screens don't
@@ -513,11 +618,12 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           <p className="vs-note">
             {name(match, mine)} {result[mine].score} · {name(match, theirs)} {result[theirs].score}
           </p>
-        </div>
-        <div className="vs-lines">
-          <div className="vs-ln"><span>Your offense</span><b>{result[mine].offense}</b></div>
-          <div className="vs-ln"><span>Your kicker</span><b>{signed(result[mine].kicker)}</b></div>
-          <div className="vs-ln"><span>Their defense</span><b>{signed(-result[mine].against)}</b></div>
+          {result[mine].against || result[theirs].against ? (
+            <p className="vs-note">
+              {result[theirs].against ? `Your defense took ${result[theirs].against} off them.` : ""}
+              {result[mine].against ? ` Theirs took ${result[mine].against} off you.` : ""}
+            </p>
+          ) : null}
         </div>
         <div className="vs-rosters">
           <RosterStrip roster={state.roster[mine]} label={name(match, mine)} sub={`${result[mine].score}`} />
@@ -532,12 +638,6 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   }
 
   const boardTeam = state?.boardKey ? state.boardKey.split("|")[0] : "ARI";
-  const powers = state ? {
-    respin: respinsLeft(match.respins, side),
-    dip: dipsLeft(match.dips, side),
-    steal: stealsLeft(match.picks.map((p) => ({ stolenBy: p.stolenBy })), side),
-    stealPick: pickStealsLeft(match.swaps, side),
-  } : null;
 
   return (
     <section className="versus vs-draft" data-view="draft" data-code={match.code}>
@@ -576,12 +676,33 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
 
       {error ? <p className="vs-err">{errorText(error)}</p> : null}
 
+      {/* What just happened, for a few seconds. Derived from the match's rows, so a client that reconnects
+          mid-board sees the same thing as one that never left. */}
+      <div className="vs-flashrow" aria-live="polite">
+        {opening ? (
+          <p className="vs-flash vs-open">
+            <span aria-hidden="true">🔀</span>
+            {myTurn
+              ? ` The board opens in ${lookLeft}s — ${name(match, look.follower)} can take the first pick.`
+              : ` ${lookLeft}s to take the first pick on this board.`}
+          </p>
+        ) : flash ? (
+          <p className="vs-flash" key={flash.key}><span aria-hidden="true">{flash.icon}</span> {flash.text}</p>
+        ) : null}
+      </div>
+
       {/* Above the board, where the single-player draft keeps its roster strip: what you still have open is
           the thing you are reading the board against, so it has to be on screen while you choose - not eight
           sections further down. */}
       <div className="vs-rosters">
-        <RosterStrip roster={state.roster[side || "host"]} label="Your roster" />
-        <RosterStrip roster={state.roster[side === "host" ? "guest" : "host"]} label={`${name(match, side === "host" ? "guest" : "host")}'s roster`} />
+        <div>
+          <RosterStrip roster={state.roster[side || "host"]} label="Your roster" />
+          {mine ? <PowerupTrack left={mine} label="You" /> : null}
+        </div>
+        <div>
+          <RosterStrip roster={state.roster[side === "host" ? "guest" : "host"]} label={`${name(match, side === "host" ? "guest" : "host")}'s roster`} />
+          {theirs ? <PowerupTrack left={theirs} label={name(match, side === "host" ? "guest" : "host")} /> : null}
+        </div>
       </div>
 
       <div ref={sentinel} aria-hidden="true" />
@@ -589,15 +710,19 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
       {state.boardKey ? (
         <Board
           boardKey={state.boardKey} taken={state.taken} roster={state.roster[side || "host"]}
-          myTurn={myTurn} busy={busy} selected={selected} setSelected={setSelected}
-          controls={myTurn && powers ? (
+          myTurn={myTurn && !opening} busy={busy} selected={selected} setSelected={setSelected}
+          controls={side ? (
             <div className="rerolls vs-powers">
               {POWERUPS.map((pu) => {
-                const n = pu.id === "team" ? powers.respin.team : pu.id === "era" ? powers.respin.era : powers[pu.id];
+                const n = mine[pu.id];
+                // Steal the pick is the one spent off your own turn (VERSUS.md 7), so the bar shows for both
+                // players - which also means each can see what the other still holds.
+                const offTurn = pu.id === "stealPick";
+                const wrongTurn = offTurn ? (myTurn || !state.turn.first || alreadySwapped) : (!myTurn || opening);
                 const illegal = (pu.id === "dip" && state.boardIdx >= MATCH_BOARDS - 1)
-                  || ((pu.id === "steal" || pu.id === "stealPick") && state.turn.first);
+                  || (pu.id === "steal" && state.turn.first);
                 return (
-                  <button key={pu.id} className="btn vs-pu" disabled={busy || n < 1 || illegal}
+                  <button key={pu.id} className="btn vs-pu" disabled={busy || n < 1 || illegal || wrongTurn}
                     title={`${pu.blurb} ${n} left.`}
                     aria-label={`${pu.label}. ${pu.blurb} ${n} left.`}
                     onClick={() => send(pu.id === "team" ? { respin: "team" } : pu.id === "era" ? { respin: "era" } : { [pu.id]: true })}>
@@ -672,8 +797,10 @@ const ERRORS = {
   no_room: "You can't double here — you need two open slots and two picks on the board to fill them.",
   last_board: "There's no next pick to give up.",
   would_strand: "That would leave the other player with nothing to pick.",
+  board_opening: "The board has just opened — give the other player a moment.",
   nothing_to_steal: "There's nothing to steal yet.",
   already_leading: "You already pick first on this board.",
+  already_swapped: "The order on this board has already been swapped.",
   conflict: "That pick just went — try again.",
   signed_out: "Sign in to play.",
   network: "Couldn't reach the server. Try again.",

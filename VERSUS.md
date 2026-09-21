@@ -51,6 +51,13 @@ browsers cannot each hold the truth. So a match is the first thing in Gridspin w
   what it is told;
 - nothing a client says about whose turn it is, what is still available, or who won is trusted.
 
+**Realtime is an optimisation, never the mechanism.** Every screen in a match also re-reads `match_state` every
+two seconds, for the whole match — the lobby included, and **including your own turn**. Both of those were
+learned the hard way. A lobby that doesn't read never learns anybody joined. And a screen that stops reading
+whenever it believes it is its turn never learns it has stopped being: the other player can act *during* your
+turn, because Steal the pick is spent while you are on the clock and takes the board's opening pick off you. A
+draft that only moves when a socket delivers is a draft that stops.
+
 ## 3. Database (`supabase/migration-versus.sql`)
 
 **`matches`**
@@ -135,7 +142,14 @@ highest-rated: a 112 defense and a 112 quarterback are not the same number of po
 
 `POST { code, respin }`, `{ code, steal: true, slot }`, `{ code, dip: true }` and `{ code, stealPick: true }`
 are the powerups, with the rules and refusals in section 7. All of them restart the clock — spending one is a
-turn's worth of thinking too.
+turn's worth of thinking too. `stealPick` is decided **above** the turn check, because it is spent when it is
+not your turn.
+
+**Every refusal here is an HTTP status, and supabase-js turns any non-2xx into an `error` with the body behind
+`error.context`.** So `storage-versus.js`'s `playMove` has to read that body, exactly as `submitRun` does —
+without it every carefully-worded refusal in this section reaches the player as "couldn't reach the server",
+which is precisely what happened the first time two players pressed Steal in the same round. The test mock
+returns refusals in the same shape for that reason.
 
 On the last pick the function **computes the result** (section 6) and writes `matches.result`, `winner_id`,
 `status = 'done'` and, through `record_versus`, `pvp_wins` / `pvp_losses` on both profiles — together or not at
@@ -192,14 +206,20 @@ kicker first without the draft ever reaching a slot it can't fill.
 **The result**, in `versus-logic.mjs`, shared by the browser and the Edge Function:
 
 ```
-offense = the weighted mean of your six players (QB ×1.25), exactly as single player computes it
-yours   = offense + (your kicker − 65) × SLOT_WORTH − (their defense − 65) × SLOT_WORTH
+your score = the weighted mean of your SEVEN picks (QB ×1.25, the kicker as one more ordinary slot)
+             − (their defense − 65) × SLOT_WORTH
 higher score wins, every time; an exact tie is a tie
 ```
 
-`SLOT_WORTH = 0.16`, which is `1 / 6.25` — **precisely what one ordinary roster slot is worth** in the weighted
-mean above, because that is exactly what a defense or a kicker is: one of your eight picks. Nothing is tuned by
-feel. It puts the best defense in the data at about 7.5 points off the opponent and the worst at about 5.6 back,
+**The kicker is averaged in, not added on.** He was a separate `+` term at first, and that was wrong: a
+below-average kicker then read as *"your kicker: −2.1"*, a line of negative points for having drafted one at
+all. Averaged with the players he behaves like every other pick — a weak one lowers your score the way a weak
+tight end does, and nothing on the screen calls it a penalty. The consequence worth stating: a 1v1 score is
+**not** comparable to a single-player team score (seven picks against six), and the two never rank against each
+other anyway.
+
+`SLOT_WORTH` is `1 / (QB_WEIGHT + 6)` — **precisely what one ordinary slot is worth** in the weighted mean
+above, because that is exactly what the defense is: one of your eight picks. Nothing is tuned by feel. It puts the best defense in the data at about 7.5 points off the opponent and the worst at about 5.6 back,
 against a measured median margin of 4.8 points between two rosters drafted off the same boards (p90 13.8) — so
 both picks can decide a close match, which they should, while the six players still decide most of them.
 
@@ -288,7 +308,11 @@ replacement rather than being handed one. It also means a steal is only availabl
 pick second, and only for the pick just made: there is nothing to steal before the leader has picked, and a
 roster raided three boards later would be a different game.
 
-Two things refuse a steal, both costing nothing:
+**A pick that has changed hands cannot change hands again.** That is what keeps a steal a decision rather than a
+reflex: nobody spends theirs simply taking back what was taken from them. The robbed player picks again instead,
+and if they want their own steal it has to be for something new.
+
+Two more things refuse a steal, both costing nothing:
 
 1. the player fits nothing you still have open — you have to have somewhere to put him;
 2. **it would strand the leader.** A steal empties their slot and sends them back to the board, and the board
@@ -332,8 +356,24 @@ board is swapped and you pick first. Nothing else changes — the board is still
 both, and the snake resumes as normal on the next one. One per match, each. It is the simplest of the three
 powerups, because it moves nothing but who goes first.
 
-Not built yet: it needs a draft screen to be spent from, and unlike Steal it changes no state that isn't already
-derivable, so it waits for the screens.
+**It is the one move besides the clock made while it is NOT your turn**, and that is forced: it belongs to the
+player picking second and must be spent before the first pick, which is exactly when the other player is on the
+clock. Behind `decideMove`'s turn check — where it sat until it was played by hand — it could never be spent
+at all, and the powerup bar shows for **both** players for the same reason.
+
+**One swap per board**, whoever spends it. Both players hold one, so without that rule the second could simply
+flip the board back: the order ends where it started and two powerups are gone, which is a worse game than
+neither of them spending one. Refused as `already_swapped`.
+
+**The opening window.** Being allowed to spend it is not the same as having a chance to: the leader can take
+something the instant a board appears, while the other player is still reading it. So a board's **first pick
+cannot land for `LOOK_SECONDS` (10)** — refused as `board_opening`. The turn clock is untouched and runs its
+full length from the same start, so the window costs the leader thinking time, not their turn.
+
+It exists **only when it could be used**: the board's opening pick, not already swapped, and the player picking
+second still holding theirs (`lookWindow`). Every other board opens at once, so a match never waits for a chance
+nobody has. Both players are told what is happening — "the board opens in 6s" against "6s to take the first
+pick on this board" — because a board that silently refuses every pick for ten seconds reads as broken.
 
 ## 8. A board has to serve both players
 
@@ -396,8 +436,16 @@ server re-spins that board itself, charged to no one.
   takeaways, sacks; made/attempted, long, 50-yarders.
 - **Never a grade on the board.** Single player shows stats and lets a player judge them, and a grade would hand
   the pick over. The result screen may grade; the board may not.
-- **The result** — both rosters, each side's offense, what their kicker added and what their defense took off the
-  other, the two final scores, the winner, and a share card.
+- **What just happened, in one line** — "alex stole Christian McCaffrey", "sam doubled up", each with its
+  powerup's icon. Derived from the match's rows rather than remembered as it goes, so a client that reconnects
+  mid-board sees the same event as one that never left, and there is no running log to keep in step.
+- **A powerup track under each roster** — five icons a side, struck through as they are spent. Tracking a match
+  by reading the other player's picks is hard enough without also having to remember what they still hold. It
+  reads without colour: a spent one is struck through and says "used" for a screen reader.
+- **The result** — the football final, the two scores, both rosters, and a share card. Deliberately *not* a
+  breakdown: offense, kicker and defense as three more lines made the screen a spreadsheet at the moment it
+  should be a scoreboard. One sentence survives, about what each defense took off the other, because that is the
+  one number a player cannot work out from their own roster.
 - **`/vs/<code>`** — the invite address; `vercel.json` rewrites it to the page with `X-Robots-Tag: noindex`, as
   the challenge links already are.
 

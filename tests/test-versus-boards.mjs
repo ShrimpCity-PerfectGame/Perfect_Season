@@ -12,7 +12,7 @@ import { initGameData, BOARDS, SLOTS, WINDOWS, QB_WEIGHT, effectiveRating } from
 import {
   initVersusData, VERSUS_SLOTS, MATCH_BOARDS, MATCH_PICKS, SLOT_WORTH, AVERAGE_RATING,
   optionsOn, unitsOn, optionId, optionFits, optionValue, turnAt, firstPickerOn,
-  boardServesBoth, replayMatch, autoPick, openSlots, matchResult, footballFinal, offenseScore,
+  boardServesBoth, replayMatch, autoPick, openSlots, matchResult, footballFinal, rosterScore, SCORED_SLOTS,
   respinBoard, respinsLeft, MATCH_RESPINS, firstPickerOn as leadOn,
   stealableSlots, stealsLeft, MATCH_STEALS, canDoubleDip, dipsLeft, MATCH_DIPS, MATCH_BOARDS as BOARDS_N,
 } from "../versus-logic.mjs";
@@ -441,8 +441,8 @@ await runTest("the result is the raw numbers, and the same every time", async ()
   assert(JSON.stringify(a) === JSON.stringify(b), "the same two rosters always give the same result");
   assert(a.winner === (a.host.score > a.guest.score ? "host" : a.host.score < a.guest.score ? "guest" : null),
     `the higher score won: ${JSON.stringify({ h: a.host.score, g: a.guest.score, winner: a.winner })}`);
-  assert(Math.abs(a.host.score - (a.host.offense + a.host.kicker - a.host.against)) < 0.11,
-    `the parts add up to the score: ${JSON.stringify(a.host)}`);
+  assert(Math.abs(a.host.score - (a.host.roster - a.host.against)) < 0.11,
+    `the two parts add up to the score: ${JSON.stringify(a.host)}`);
 
   // Their defense is subtracted from your score - the thing the owner asked for.
   const stronger = { ...state.roster.guest, DST: { ...state.roster.guest.DST, rating: 120 } };
@@ -452,7 +452,7 @@ await runTest("the result is the raw numbers, and the same every time", async ()
   assert(vsStrong.host.score < vsWeak.host.score, "a better defense lowers the other roster's score");
   assert(Math.abs((vsWeak.host.score - vsStrong.host.score) - 80 * SLOT_WORTH) < 0.15,
     `by exactly what it is worth: ${(vsWeak.host.score - vsStrong.host.score).toFixed(2)} for 80 rating points`);
-  assert(vsStrong.host.offense === vsWeak.host.offense, "and never touches the offense itself");
+  assert(vsStrong.host.roster === vsWeak.host.roster, "and never touches your own seven picks");
 });
 
 await runTest("the football final dresses the margin and never contradicts it", async () => {
@@ -471,23 +471,32 @@ await runTest("the football final dresses the margin and never contradicts it", 
   assert(codes.size > 1, "and different matches don't all end 20-13");
 });
 
-await runTest("an offense means the same thing it means everywhere else in the game", async () => {
+await runTest("a roster's score is its seven picks, and the kicker is one of them", async () => {
   const { state } = playMatch("OFFENSE1", bestValue);
-  const six = Object.fromEntries(SLOTS.map((s) => [s, state.roster.host[s]]));
-  // The same weighted mean single player grades a team score with, written out here from game-logic's own
-  // pieces - so if either side of it ever moves, this fails rather than 1v1 quietly meaning something else.
+  const roster = state.roster.host;
+  // The same weighted mean single player grades with, plus the kicker as one more ordinary slot - written out
+  // here from game-logic's own pieces, so if either side moves this fails rather than quietly meaning
+  // something else.
   let total = 0, weight = 0;
-  for (const slot of SLOTS) {
+  for (const slot of SCORED_SLOTS) {
     const w = slot === "QB" ? QB_WEIGHT : 1;
-    total += effectiveRating(slot, six[slot], "fantasy") * w;
+    total += (slot === "K" ? roster[slot].rating : effectiveRating(slot, roster[slot], "fantasy")) * w;
     weight += w;
   }
-  const mine = offenseScore(six, "fantasy");
-  assert(Math.abs(mine - total / weight) < 1e-9, `an offense is that mean exactly, got ${mine} against ${total / weight}`);
+  const mine = rosterScore(roster, "fantasy");
+  assert(weight === QB_WEIGHT + 6, `seven slots carry the weight, got ${weight}`);
+  assert(Math.abs(mine - total / weight) < 1e-9, `the score is that mean exactly, got ${mine} against ${total / weight}`);
   assert(mine > 40 && mine < 131, `and sits on the players' scale, got ${mine.toFixed(1)}`);
-  assert(offenseScore({ ...six, QB: null }, "fantasy") === null, "an unfinished roster has no score at all");
-  // The defense and the kicker are NOT in it: an offense is six players, here as everywhere.
-  assert(offenseScore(state.roster.host, "fantasy") === mine, "the defense and kicker don't touch the offense");
+  assert(rosterScore({ ...roster, QB: null }, "fantasy") === null, "an unfinished roster has no score at all");
+
+  // The kicker is IN it, which is the point: a weak kicker lowers the score the way a weak tight end does,
+  // rather than showing up as a line of negative points for having drafted one at all.
+  const weak = { ...roster, K: { ...roster.K, rating: 30 } };
+  const strong = { ...roster, K: { ...roster.K, rating: 110 } };
+  assert(rosterScore(weak, "fantasy") < mine && rosterScore(strong, "fantasy") > mine, "the kicker moves it both ways");
+  assert(rosterScore(weak, "fantasy") > 0, "and a bad one never makes a score negative");
+  // The defense is not in it - it is the one pick that acts on the other roster.
+  assert(rosterScore({ ...roster, DST: { ...roster.DST, rating: 1 } }, "fantasy") === mine, "the defense doesn't touch your own score");
 });
 
 console.log("test-versus-boards.mjs done");

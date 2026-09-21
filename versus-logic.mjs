@@ -22,13 +22,29 @@ export const MATCH_PICKS = MATCH_BOARDS * 2;
 // 1v1's own budget, deliberately not game-logic.mjs's REROLL_BUDGET: single player's re-spins are its own.
 export const MATCH_RESPINS = { team: 1, era: 1 };
 export const TURN_SECONDS = 45;
+// The first seconds of a board, in which its opening pick cannot land yet. Steal the pick has to be spent
+// before that pick, so without a window it could not really be spent at all: the leader can take something the
+// instant the board appears, and the other player is reading the board, not watching for a chance to act.
+//
+// It exists only when it could be used - the board's first pick, not yet swapped, and the player picking second
+// still holding theirs. Any other board opens immediately, so a match never waits for a window nobody wants.
+// The clock is deliberately NOT extended by it: a board stays 45 seconds end to end, so the window is ten
+// seconds of reading and thirty-five of acting rather than a longer turn. Confirmed as the right trade by the
+// owner after playing it.
+export const LOOK_SECONDS = 10;
 
 // Where an average season sits on the 0-130 scale, which is the middle tools/data/build-versus-pool.mjs rates
 // against. A defense or a kicker is worth what it is ABOVE or BELOW this, never its raw rating.
 export const AVERAGE_RATING = 65;
-// What one ordinary roster slot is worth in the six-player weighted mean: 1 / (QB_WEIGHT + 5). A defense and a
-// kicker are each exactly one of the eight picks, so that is exactly what each is worth. Not a tuned number.
-export const SLOT_WEIGHT_TOTAL = QB_WEIGHT + SLOTS.length - 1;
+// The seven picks that make your own score. The kicker is averaged in with the six players rather than added
+// on top, and that is a correction: as a separate term a below-average kicker read as "your kicker: -2.1", a
+// line of negative points for having drafted a kicker at all. Averaged, he behaves like every other pick - a
+// weak one lowers your score the way a weak tight end does, and nothing on the screen calls it a penalty.
+// The defense is the eighth and is not here, because it is the one pick that acts on the OTHER roster.
+export const SCORED_SLOTS = [...SLOTS, "K"];
+// What one ordinary slot is worth in that mean: 1 / (QB_WEIGHT + 6). The defense is worth exactly that, since
+// it is exactly one of the eight picks. Not a tuned number.
+export const SLOT_WEIGHT_TOTAL = QB_WEIGHT + SCORED_SLOTS.length - 1;
 export const SLOT_WORTH = 1 / SLOT_WEIGHT_TOTAL;
 // The gap at which one roster is simply better, borrowed from the season sim's SPREAD so the two modes agree
 // about what a decisive margin looks like. Only the SIZE of the football final scales with it - never the winner.
@@ -102,6 +118,9 @@ export function optionValue(o, slot, format) {
   const weight = slot === "QB" ? QB_WEIGHT : 1;
   return (effectiveRating(slot, o, format) - AVERAGE_RATING) * (weight / SLOT_WEIGHT_TOTAL);
 }
+// A pick's rating, whichever pool it came from: a player's depends on the slot and the format, a defense's and
+// a kicker's is the one the pool gave it.
+const ratingIn = (slot, o, format) => (o.kind === "player" ? effectiveRating(slot, o, format) : o.rating);
 
 // ---------- Whose turn, and on which board ----------
 
@@ -276,14 +295,15 @@ export function autoPick(key, taken, roster, format) {
 
 // ---------- The result ----------
 
-// The six players, weighted exactly as single player weights them. Identical arithmetic, deliberately: an
-// offense in 1v1 has to mean the same thing as a team score anywhere else in the game.
-export function offenseScore(roster, format) {
+// Your seven own picks, weighted as single player weights its six - the quarterback carries the same extra
+// weight, and the kicker joins them as one more ordinary slot. It is deliberately NOT comparable to a
+// single-player team score: a 1v1 has eight picks and its own board, and the two never rank against each other.
+export function rosterScore(roster, format) {
   let total = 0, weight = 0;
-  for (const slot of SLOTS) {
+  for (const slot of SCORED_SLOTS) {
     if (!roster[slot]) return null;
     const w = slot === "QB" ? QB_WEIGHT : 1;
-    total += effectiveRating(slot, roster[slot], format) * w;
+    total += ratingIn(slot, roster[slot], format) * w;
     weight += w;
   }
   return total / weight;
@@ -291,17 +311,13 @@ export function offenseScore(roster, format) {
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
-// One side's score, and the three parts a player should be shown it came from.
+// One side's score: their own seven picks, less what the other roster's defense takes off them.
 export function sideScore(mine, theirs, format) {
-  const offense = offenseScore(mine, format);
-  if (offense == null) return null;
-  const kicker = mine.K ? (mine.K.rating - AVERAGE_RATING) * SLOT_WORTH : 0;
+  const own = rosterScore(mine, format);
+  if (own == null) return null;
   // Their defense is subtracted from YOUR score, because that is what a defense does (VERSUS.md 6).
   const against = theirs.DST ? (theirs.DST.rating - AVERAGE_RATING) * SLOT_WORTH : 0;
-  return {
-    offense: round1(offense), kicker: round1(kicker), against: round1(against),
-    score: round1(offense + kicker - against),
-  };
+  return { roster: round1(own), against: round1(against), score: round1(own - against) };
 }
 
 // The football final. Drawn FROM the result, never the other way round: the margin rises with the points gap,
@@ -467,6 +483,16 @@ export function pickStealsLeft(swaps, side) {
 //   move  { claim: "clock" } | { respin } | { stealPick } | { dip } | { steal, slot } | { boardIdx, kind, ... }
 const refuse = (reason, status = 409) => ({ ok: false, reason, status });
 
+// Whether a board is still in its opening window, and until when. `deadline` is the turn's, always set
+// TURN_SECONDS out, so the turn's start is known without storing it.
+export function lookWindow({ state, swaps = [], picks = [], deadline = 0 }) {
+  if (!state || state.done || !state.turn.first || !deadline) return null;
+  if (swaps.some((w) => w.boardIdx === state.boardIdx)) return null; // already swapped: nothing left to wait for
+  const follower = state.turn.side === "host" ? "guest" : "host";
+  if (pickStealsLeft(swaps, follower) < 1) return null; // they have none to spend
+  return { until: deadline - TURN_SECONDS * 1000 + LOOK_SECONDS * 1000, follower };
+}
+
 export function decideMove({ code, format, picks = [], respins = [], dips = [], swaps = [], side, move = {}, now = Date.now(), deadline = 0 }) {
   const state = replayMatch({ code, picks, respins, dips, swaps });
   if (state.done) return refuse("already_finished");
@@ -489,6 +515,22 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     return asPick(auto.option, auto.slot, true);
   }
 
+  // Steal the pick is the one powerup spent while it is NOT your turn, and it has to be: it belongs to the
+  // player picking second, before the first pick lands - which is exactly when the other player is on the
+  // clock. Decided above the turn check for that reason. Behind it, it could never be spent at all.
+  if (move.stealPick) {
+    if (pickStealsLeft(swaps, side) < 1) return refuse("no_steals_left");
+    if (side === onClock || !state.turn.first) return refuse("already_leading");
+    // Once per board, whoever spends it. Both players have one, so without this the second could simply flip
+    // the board back - the order ends where it started and two powerups are gone, which is a worse game than
+    // either of them not having spent one.
+    if (swaps.some((w) => w.boardIdx === state.boardIdx)) return refuse("already_swapped");
+    const myRoster = state.roster[side];
+    const theirRoster = state.roster[side === "host" ? "guest" : "host"];
+    if (!canStealPick({ key, taken: state.taken, moverRoster: myRoster, otherRoster: theirRoster })) return refuse("would_strand");
+    return { ok: true, action: "swap", boardIdx: state.boardIdx, side, state };
+  }
+
   if (side !== onClock) return refuse("not_your_turn");
 
   if (move.respin === "team" || move.respin === "era") {
@@ -499,14 +541,6 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     });
     if (!board) return refuse("no_candidate");
     return { ok: true, action: "respin", kind: move.respin, key: board, pickNo: state.pickNo, side, state };
-  }
-
-  if (move.stealPick) {
-    if (pickStealsLeft(swaps, side) < 1) return refuse("no_steals_left");
-    // Only the player who would pick second, and only before the board has been touched.
-    if (state.turn.first) return refuse("already_leading");
-    if (!canStealPick({ key, taken: state.taken, moverRoster: mine, otherRoster: theirs })) return refuse("would_strand");
-    return { ok: true, action: "swap", boardIdx: state.boardIdx, side, state };
   }
 
   if (move.dip) {
@@ -538,6 +572,11 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
 
   // An ordinary pick.
   if (move.boardIdx !== state.boardIdx) return refuse("wrong_board");
+  // ...but not yet, if the board has only just opened and the other player could still take the first pick off
+  // them. The clock is unaffected: it runs its full length from the same start, so this costs the leader
+  // thinking time, not their turn.
+  const look = lookWindow({ state, swaps, picks, deadline });
+  if (look && now < look.until) return refuse("board_opening");
   const wanted = optionsOn(key).find((o) => (move.kind === "player"
     ? o.kind === "player" && o.id === Number(move.playerId) && o.season === Number(move.season)
     : o.kind === move.kind && o.team === move.team && o.season === Number(move.season)));

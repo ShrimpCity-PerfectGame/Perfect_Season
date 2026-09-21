@@ -6,7 +6,7 @@
 // once the last pick lands. The rules are the same `decideMove` both this mock and the real Edge Function call.
 import { assert, runTest, makeMockAuth, setupDom, loadModule } from "./helpers.mjs";
 import {
-  replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS,
+  replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, LOOK_SECONDS,
 } from "../versus-logic.mjs";
 
 // Two accounts, and a way to be either of them.
@@ -23,7 +23,17 @@ async function twoPlayers() {
 }
 
 const call = async (sb, name, args) => (await sb.rpc(name, args)).data;
-const move = async (sb, body, now) => (await sb.functions.invoke("match-pick", { body, now })).data;
+// A refusal arrives as supabase-js delivers one - an `error` with the body behind it - so this reads it the
+// way storage-versus.js's playMove has to.
+// A clock that always steps past a board's opening window (VERSUS.md 7), so these tests are about the flow
+// rather than about waiting. The window has a test of its own in test-versus-rules.mjs.
+let clock = Date.now();
+const tick = () => (clock += (LOOK_SECONDS + 1) * 1000);
+const move = async (sb, body, now = tick()) => {
+  const { data, error } = await sb.functions.invoke("match-pick", { body, now });
+  if (error) return error.context ? await error.context.json() : { reason: "network" };
+  return data;
+};
 
 await runTest("a lobby, a link, and the first one through it is the opponent", async () => {
   const { sb, as, A, B } = await twoPlayers();
@@ -65,8 +75,13 @@ async function playOut(sb, as, A, B, code, spend = () => null) {
     await as(sides[side]);
     const powerup = spend(state);
     if (powerup) {
-      const res = await move(sb, { code, ...powerup });
-      if (!res.error) continue;
+      // Steal the pick is spent by the player who is NOT on the clock, so a powerup can say whose turn it
+      // belongs to. Everything else is the current player's.
+      const asSide = powerup.as === "other" ? (side === "host" ? "guest" : "host") : side;
+      await as(sides[asSide]);
+      const res = await move(sb, { code, ...powerup, as: undefined });
+      await as(sides[side]);
+      if (!res.error && !res.reason) continue;
     }
     const open = openSlots(state.roster[side]);
     const o = optionsOn(state.boardKey).find((x) => !state.taken.has(optionId(x)) && open.some((s) => optionFits(x, s)));
@@ -139,8 +154,11 @@ await runTest("a match survives an opponent who walks away", async () => {
   const before = replayMatch(await asReplay(sb, code));
   const waiting = before.turn.side === "host" ? B : A; // the one NOT on the clock calls it
   await as(waiting);
-  assert((await move(sb, { code, claim: "clock" })).reason === "too_early", "not before the clock is up");
-  const late = Date.now() + (TURN_SECONDS + 1) * 1000;
+  // Read the deadline rather than trusting the shared clock: these two assertions are about the deadline
+  // itself, so they name the instants either side of it.
+  const deadline = Date.parse((await call(sb, "match_state", { p_code: code })).turnDeadline);
+  assert((await move(sb, { code, claim: "clock" }, deadline - 1000)).reason === "too_early", "not before the clock is up");
+  const late = deadline + 1000;
   const done = await move(sb, { code, claim: "clock" }, late);
   assert(!done.error, `once it is, the waiting player can call it: ${JSON.stringify(done)}`);
 
@@ -159,7 +177,7 @@ await runTest("powerups spent through the client land in the match", async () =>
   const spent = { respin: false, dip: false, steal: false, stealPick: false };
   const end = await playOut(sb, as, A, B, code, (state) => {
     if (!spent.respin) { spent.respin = true; return { respin: "team" }; }
-    if (!spent.stealPick && !state.turn.first) { spent.stealPick = true; return { stealPick: true }; }
+    if (!spent.stealPick && state.turn.first) { spent.stealPick = true; return { stealPick: true, as: "other" }; }
     if (!spent.dip) { spent.dip = true; return { dip: true }; }
     if (!spent.steal && !state.turn.first) { spent.steal = true; return { steal: true }; }
     return null;

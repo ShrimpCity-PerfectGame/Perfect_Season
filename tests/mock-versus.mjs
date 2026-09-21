@@ -12,6 +12,13 @@ import * as V from "../versus-logic.mjs";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+// What supabase-js hands a caller for a non-2xx from an Edge Function: an error carrying the Response, which
+// the body has to be read out of.
+const httpError = (reason, status) => ({
+  data: null,
+  error: { name: "FunctionsHttpError", message: "Edge Function returned a non-2xx status code", context: { status, json: async () => ({ error: reason, reason }) } },
+});
+
 // state: tests/mock-supabase.mjs's shared state ({ profiles, currentUserId, ... })
 // onMatchChange(matchId): what Realtime does for free in production - tell both screens to read again.
 export function makeVersus(state, { onMatchChange = () => {} } = {}) {
@@ -123,7 +130,10 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       picks: asPicks(m), respins: m.respins, dips: m.dips, swaps: m.swaps,
       deadline: m.turn_deadline ? Date.parse(m.turn_deadline) : 0,
     });
-    if (!decided.ok) return { data: { error: decided.reason, reason: decided.reason } };
+    // A refusal comes back the way the real one does: supabase-js reports any non-2xx as an `error` and puts
+    // the body behind error.context. Returning a tidy { data } here instead is what let every refusal reach a
+    // player as "couldn't reach the server" while every test passed.
+    if (!decided.ok) return httpError(decided.reason, decided.status || 409);
 
     const restartClock = () => { m.turn_deadline = new Date(now + V.TURN_SECONDS * 1000).toISOString(); };
     const changed = (payload) => { onMatchChange(m.id); return payload; };

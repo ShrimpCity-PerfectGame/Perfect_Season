@@ -75,7 +75,15 @@ export async function fetchMatch(code) {
 export async function playMove(move) {
   try {
     const { data, error } = await getClient().functions.invoke("match-pick", { body: move });
-    if (error) return failed("network");
+    if (error) {
+      // supabase-js turns any non-2xx into an `error` and hands the body over separately, so a refusal the
+      // function answered carefully - not your turn, already taken, none left - arrives here looking exactly
+      // like the network being down. Read it, the way submitRun does; without this every rule in VERSUS.md 4
+      // and 7 reaches the player as "couldn't reach the server".
+      let body = null;
+      try { body = await error.context?.json?.(); } catch (e2) { /* no readable body: a real failure */ }
+      return failed(body?.reason || body?.error || "network");
+    }
     if (data?.reason || data?.error) return failed(data.reason || data.error);
     return { ok: true, ...data };
   } catch (e) {
