@@ -669,6 +669,21 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
 
   const result = match.result || (state?.done ? matchResult({ code: match.code, format: match.format, host: state.roster.host, guest: state.roster.guest }) : null);
 
+  // The rows can say the draft is over a moment before the match row does. The Edge Function writes the
+  // sixteenth pick, then reads back, grades, and sets the status in separate calls - and match_picks is in the
+  // Realtime publication, so the other player's screen is told about that insert while the rest is still in
+  // flight. Rendering the board here read a turn that no longer exists; with no error boundary anywhere, that
+  // took the whole app down, and it landed on whoever didn't make the last pick. The poll is still running, so
+  // this is a beat, not a state anyone sits in.
+  if (state?.done && match.status !== "done") {
+    return (
+      <section className="versus" data-view="grading" data-code={match.code}>
+        <h2 className="h">That's sixteen</h2>
+        <p className="vs-note">Working out the result…</p>
+      </section>
+    );
+  }
+
   if (match.status === "done" && result) {
     const mine = side || "host";
     const theirs = mine === "host" ? "guest" : "host";

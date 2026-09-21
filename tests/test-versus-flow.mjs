@@ -81,7 +81,11 @@ async function playOut(sb, as, A, B, code, spend = () => null) {
       await as(sides[asSide]);
       const res = await move(sb, { code, ...powerup, as: undefined });
       await as(sides[side]);
-      if (!res.error && !res.reason) continue;
+      // A powerup the caller asked for has to land. Falling through to an ordinary pick instead turned a
+      // refusal into a baffling failure much later - the flag said "spent" while the match said otherwise.
+      assert(!res.error && !res.reason,
+        `powerup ${JSON.stringify(powerup)} at pick ${state.pickNo} (${asSide}): ${JSON.stringify(res.reason || res.error)}`);
+      continue;
     }
     const open = openSlots(state.roster[side]);
     const o = optionsOn(state.boardKey).find((x) => !state.taken.has(optionId(x)) && open.some((s) => optionFits(x, s)));
@@ -208,8 +212,10 @@ await runTest("powerups spent through the client land in the match", async () =>
   const end = await playOut(sb, as, A, B, code, (state) => {
     if (!spent.respin) { spent.respin = true; return { respin: "team" }; }
     if (!spent.stealPick && state.turn.first) { spent.stealPick = true; return { stealPick: true, as: "other" }; }
-    if (!spent.dip) { spent.dip = true; return { dip: true }; }
+    // The steal before the dip, and the dip waits for it: a dip gives the dipper two turns back to back, and on
+    // the second of them the pick just made is their own, which is not a thing anyone may steal.
     if (!spent.steal && !state.turn.first) { spent.steal = true; return { steal: true }; }
+    if (spent.steal && !spent.dip) { spent.dip = true; return { dip: true }; }
     return null;
   });
 

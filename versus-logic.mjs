@@ -259,9 +259,19 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], swaps =
       }
       // A stolen pick is on the thief's roster, in the slot they chose. Stealing was their whole turn, so the
       // turn that was theirs becomes another one for the player they robbed.
+      //
+      // It has to be the thief's OWN next turn, found by looking for them, not whatever sits at i + 1. On a
+      // board somebody has also double dipped, i + 1 is the dip's extra turn - belonging to the victim - and
+      // overwriting it swallowed the dip: the victim picked once where they had paid for twice, and still
+      // forfeited the next board. That left both rosters short and the match ended at fourteen picks with no
+      // result, unfinishable and ungradeable (VERSUS.md 7).
       const thief = pick.stolenBy;
       take(pick, keyFor(side), roster[thief || side], taken);
-      if (thief) order[i + 1] = side;
+      if (thief) {
+        const theirs = order.indexOf(thief, i + 1);
+        if (theirs >= 0) order[theirs] = side;
+        else order.splice(i + 1, 0, side); // no turn of theirs left to take: give the replacement back here
+      }
     }
   }
   return {
@@ -534,6 +544,12 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     // the board back - the order ends where it started and two powerups are gone, which is a worse game than
     // either of them not having spent one.
     if (swaps.some((w) => w.boardIdx === state.boardIdx)) return refuse("already_swapped");
+    // One powerup may reorder a board, not two. A double dip is cleared against a board that has to serve the
+    // dipper twice and the other player once, in that order; reversing it afterwards makes the dipper the one
+    // who needs two picks from what is left, which is a stronger requirement than the board was ever checked
+    // against - and on a thin board it strands them with no legal pick at all (VERSUS.md 7). Dipping after a
+    // swap is fine and stays allowed: canDoubleDip checks the order as it actually stands.
+    if (dips.some((d) => d.boardIdx === state.boardIdx)) return refuse("already_dipped");
     const myRoster = state.roster[side];
     const theirRoster = state.roster[side === "host" ? "guest" : "host"];
     if (!canStealPick({ key, taken: state.taken, moverRoster: myRoster, otherRoster: theirRoster })) return refuse("would_strand");
@@ -568,6 +584,10 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     const last = picks[picks.length - 1];
     // Nothing to steal until they have taken something, and only ever the pick just made.
     if (!last || state.turn.first || last.stolenBy) return refuse("nothing_to_steal");
+    // ...and never your own. On a board you double dipped, the pick before yours is your first one, and
+    // everything below reads it as the other player's: it would move your own player between your own slots,
+    // spend the steal, and grade `would_strand` against the wrong roster entirely.
+    if (mine[last.slot] && optionId(mine[last.slot]) === pickId(last)) return refuse("nothing_to_steal");
     const option = optionsOn(key).find((o) => optionId(o) === pickId(last));
     if (!option) return refuse("nothing_to_steal");
     const slots = stealableSlots({

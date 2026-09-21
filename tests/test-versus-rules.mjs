@@ -11,7 +11,7 @@ import { assert, runTest } from "./helpers.mjs";
 import { initGameData, SLOTS } from "../game-logic.mjs";
 import {
   initVersusData, decideMove, replayMatch, optionsOn, optionId, optionFits, openSlots,
-  VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, LOOK_SECONDS, lookWindow, matchResult,
+  VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, LOOK_SECONDS, lookWindow, matchResult, pickStealsLeft,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -141,10 +141,7 @@ await runTest("a powerup can't be spent twice, or out of turn", async () => {
   assert(m.move(on, { respin: "era" }).reason === "no_respins_left", "also only one");
   assert(m.respins.length === 2, "two spent in all");
 
-  assert(m.move(on, { dip: true }).ok, "a dip on top of that is allowed");
-  assert(m.move(on, { dip: true }).reason === "no_dips_left", "but only one");
-
-  // Steal the pick last, because spending it reverses who leads this board - which is the whole point of it,
+  // Steal the pick before the dip, because it reverses who leads this board - which is the whole point of it,
   // and the reason it is the one powerup spent while it is NOT your turn. Behind the turn check, as it was
   // until now, it could never be spent at all: it belongs to the player picking second, and it has to be
   // spent before the first pick, which is exactly when the other player is on the clock.
@@ -153,6 +150,29 @@ await runTest("a powerup can't be spent twice, or out of turn", async () => {
   assert(m.move(off, { stealPick: true }).reason === "no_steals_left", "only the once");
   assert(m.move(on, { stealPick: true }).reason === "already_swapped",
     "and the other player cannot simply flip it back - one swap a board, or the order ends where it started with both powerups gone");
+
+  // A dip on top of a swap is fine, and stays allowed: canDoubleDip is checked against the order as it now
+  // stands, so the board still has to serve the dipper twice and the other player once. It is the other
+  // ordering that is refused - see the test below.
+  assert(m.move(off, { dip: true }).ok, "a dip on top of that is allowed");
+  assert(m.move(off, { dip: true }).reason === "no_dips_left", "but only one");
+});
+
+// The pair that used to end a match at fourteen picks with no result. A double dip is cleared against a board
+// that must serve the dipper twice and the other player once, in that order; reversing it afterwards makes the
+// dipper the one needing two picks out of what is left, which is a harder thing than the board was ever checked
+// against. On a thin board it left them with no legal pick, and the match could neither be finished nor graded.
+await runTest("a board takes one reordering powerup, not two", async () => {
+  const m = newMatch("RULES4B");
+  const st = m.state();
+  const on = st.turn.side, off = otherSide(on);
+
+  assert(m.move(on, { dip: true }).ok, "the leader doubles up on the board");
+  assert(m.move(off, { stealPick: true }).reason === "already_dipped",
+    "so the follower cannot then reverse it and leave the dipper needing two picks off a board checked for one");
+  assert(m.move(off, { stealPick: true }).reason === "already_dipped", "still refused on a second ask");
+  assert(m.swaps.length === 0, "and nothing was spent finding that out");
+  assert(pickStealsLeft(m.swaps, off) === 1, "the follower keeps their steal for a board they can use it on");
 });
 
 await runTest("a steal takes the pick just made, and only that one", async () => {
