@@ -27,19 +27,46 @@ const countPos = (key, pos) => (BOARDS[key] || []).filter((p) => p.pos === pos).
 const ONE_QB = Object.keys(BOARDS).find((k) => countPos(k, "QB") === 1);
 
 await runTest("the snake: sixteen picks, eight each, the lead alternating by board", async () => {
-  const mine = { host: 0, guest: 0 };
-  const leads = [];
-  for (let pickNo = 1; pickNo <= MATCH_PICKS; pickNo++) {
-    const t = turnAt(pickNo);
-    mine[t.side]++;
-    if (t.first) leads.push(t.side);
-    assert(t.boardIdx === Math.floor((pickNo - 1) / 2), `pick ${pickNo} is on board ${t.boardIdx}`);
-    assert(t.side === (t.first ? firstPickerOn(t.boardIdx) : firstPickerOn(t.boardIdx) === "host" ? "guest" : "host"),
-      `pick ${pickNo}: ${t.side} ${t.first ? "leads" : "follows"} board ${t.boardIdx}`);
+  for (const code of [undefined, "SNAKE1", "SNAKE2", "ZZZZ99", "AB12CD"]) {
+    const mine = { host: 0, guest: 0 };
+    const leads = [];
+    for (let pickNo = 1; pickNo <= MATCH_PICKS; pickNo++) {
+      const t = turnAt(pickNo, code);
+      mine[t.side]++;
+      if (t.first) leads.push(t.side);
+      assert(t.boardIdx === Math.floor((pickNo - 1) / 2), `pick ${pickNo} is on board ${t.boardIdx}`);
+      assert(t.side === (t.first ? firstPickerOn(t.boardIdx, code) : firstPickerOn(t.boardIdx, code) === "host" ? "guest" : "host"),
+        `pick ${pickNo}: ${t.side} ${t.first ? "leads" : "follows"} board ${t.boardIdx}`);
+    }
+    assert(mine.host === 8 && mine.guest === 8, `eight picks each on ${code}, got ${JSON.stringify(mine)}`);
+    const alternates = leads.every((s, i) => i === 0 || s !== leads[i - 1]);
+    assert(alternates && leads.length === 8, `the lead alternates every board on ${code}, got ${leads.join(",")}`);
   }
-  assert(mine.host === 8 && mine.guest === 8, `eight picks each, got ${JSON.stringify(mine)}`);
-  assert(JSON.stringify(leads) === JSON.stringify(["host", "guest", "host", "guest", "host", "guest", "host", "guest"]),
-    `the lead alternates every board, got ${leads.join(",")}`);
+});
+
+// Whoever leads board 0 leads 2, 4 and 6 as well, and leading is worth more the earlier it comes - measured,
+// 1.97 points of final score on board 0 against 0.57 on board 7. That is a real edge, and it used to belong to
+// the host every single time, because create_match makes the caller the host: anyone who always sent the invite
+// rather than clicking one won 53-54% of matches for nothing. It is a coin flip on the code now, so no player
+// can choose the good seat, and Steal the pick is what a follower spends to take the lead back.
+await runTest("who leads board 0 is a coin flip on the code, not the seat", async () => {
+  const lead = (code) => firstPickerOn(0, code);
+  assert(lead("SEATAA") === lead("SEATAA"), "the same code always deals the same seat");
+
+  let host = 0;
+  const N = 4000;
+  for (let i = 0; i < N; i++) if (lead(`SEAT${i}`) === "host") host++;
+  const pct = (100 * host) / N;
+  assert(pct > 46 && pct < 54, `both sides lead board 0 about half the time, got ${pct.toFixed(1)}% host`);
+
+  // And the whole match follows from it: the board-0 leader leads every even board, the other every odd one.
+  for (const code of ["SEATX1", "SEATX2", "SEATX3"]) {
+    const first = lead(code);
+    const other = first === "host" ? "guest" : "host";
+    for (let b = 0; b < MATCH_BOARDS; b++) {
+      assert(firstPickerOn(b, code) === (b % 2 === 0 ? first : other), `board ${b} of ${code}`);
+    }
+  }
 });
 
 await runTest("a board offers players, a defense per year and a kicker per year", async () => {
