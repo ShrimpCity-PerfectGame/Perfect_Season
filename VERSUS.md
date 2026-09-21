@@ -106,38 +106,46 @@ Everything that decides a pick lives in the Edge Function below, not here, becau
 
 ## 4. The Edge Function (`supabase/functions/match-pick`)
 
-Deno, service-role, imports `game-logic.mjs` and `versus-logic.mjs` — the same modules the browser uses, so a
-board is dealt and a roster is graded by one set of rules, never two.
+Deno, service-role, and **it decides nothing**. It says who is asking, hands the match's rows to
+`versus-logic.mjs`'s `decideMove`, and writes down whatever comes back. Every rule lives in that module, the
+same one the browser draws the board with, for the reason `game-logic.mjs` exists: a rule enforced on one side
+and not the other is a rule that will drift, and this one would drift into "the pick I made didn't happen". It
+also means the rules are tested without a Deno runtime or a mock that mirrors them — `tests/test-versus-rules.mjs`
+drives the real thing.
 
-`POST { code, boardIdx, kind, playerId | team, season, slot }` from a signed-in player. It refuses, in this order:
+`decideMove` reads nothing but the rows. Whose turn it is, what is on the board, what is gone and what a roster
+is worth are all derived by `replayMatch`, so a client that reconnects, a client that lies and the server all
+compute from the same place. It returns either `{ ok: false, reason, status }` or an action to write.
+
+`POST { code, boardIdx, kind, playerId | team, season, slot }` is a pick. It refuses, in this order:
 
 1. the match isn't `drafting`, or the caller is neither player → `not_your_match`;
-2. it isn't the caller's turn (turn = snake order over `match_picks.length`) → `not_your_turn`;
+2. it isn't the caller's turn → `not_your_turn`;
 3. `boardIdx` isn't the current board → `wrong_board`;
-4. the option isn't on that board — `boardAt(seed, idx)` for a player, that board's team and era for a defense or
-   a kicker → `not_on_board`;
+4. the option isn't on that board → `not_on_board`;
 5. it is already taken in this match, by either side → `already_taken`;
-6. the slot is filled, or the option doesn't fit it (`fits` for a player; `DST` and `K` take only their own
-   kind, and neither fits a Flex) → `bad_slot`.
+6. the slot is filled, or the option doesn't fit it (`DST` and `K` take only their own kind, and neither fits a
+   Flex) → `bad_slot`.
 
-Otherwise it writes the pick, sets the next `turn_deadline`, and — on the sixteenth — **computes the result**
-(section 6), writes `matches.result`, `winner_id`, `status = 'done'`, and `pvp_wins` / `pvp_losses` on both
-profiles. The clients are told by Realtime; they render, they don't decide.
+`POST { code, claim: "clock" }` is how a client says the clock has run out, and is the one move **either**
+player may make — that is how a match survives an opponent who has closed the tab. The deadline on the row
+decides, never the client (`too_early`), and the pick the clock owes is the available option worth the most to
+that roster by section 6's own arithmetic, over every open slot, marked `auto`. Worth the most, not
+highest-rated: a 112 defense and a 112 quarterback are not the same number of points.
 
-`POST { code, steal: true, slot }` is the steal (section 7), from the player picking second on a board, before
-their own pick: it refuses with `not_your_turn`, `no_steals_left`, `bad_slot` (it fits nothing they have open) or
-`would_strand` (the leader would have nothing left on that board), then updates the leader's pick row to the
-thief and puts the leader back on the clock for the board's second pick.
+`POST { code, respin }`, `{ code, steal: true, slot }`, `{ code, dip: true }` and `{ code, stealPick: true }`
+are the powerups, with the rules and refusals in section 7. All of them restart the clock — spending one is a
+turn's worth of thinking too.
 
-`POST { code, respin: "team" | "era" }`, `POST { code, dip: true }` and `POST { code, stealPick: true }` are the
-others, with the rules in section 7. A dip answers `no_dips_left`, `last_board`, `no_room` (fewer than two slots
-open, or the board can't fill two of them) or `would_strand`.
+On the last pick the function **computes the result** (section 6) and writes `matches.result`, `winner_id`,
+`status = 'done'` and, through `record_versus`, `pvp_wins` / `pvp_losses` on both profiles — together or not at
+all, because a win that didn't record the loss would be a board nobody could explain. Which pick is the last one
+is asked of `replayMatch`, never counted to sixteen here: a double dip and a steal both move where the end is.
+The clients are told by Realtime; they render, they don't decide.
 
-`POST { code, claim: "clock" }` is how a client says the clock has run out. The function checks
-`turn_deadline` **itself** — a client that lies is refused — and, if it really has passed, makes the pick the
-clock owes, marked `auto`: the available option worth the most to the roster by section 6's own arithmetic, over
-every open slot. Worth the most, not highest-rated — a 112 defense and a 112 quarterback are not the same number
-of points, and the clock shouldn't pretend otherwise.
+**Deploying:** `node deploy-function.mjs <env>` now deploys both functions, because `submit-run` and
+`match-pick` share `game-logic.mjs` and `data/players.json` — deploying one of a pair is exactly the drift the
+release notes warn about. Pass a name to deploy just one.
 
 ## 5. Who may play
 
@@ -384,11 +392,11 @@ gets a versus variant: the two scores, the result, and a link to play the winner
   two defenses and two kickers.
 - `tests/test-versus-sql.mjs` — the migration in PGlite: the tables' RLS (nobody writes them), `create_match`,
   `join_match` and their codes, and `match_state`'s shape. Mock parity, as the other SQL tests do.
-- `tests/test-versus-rules.mjs` — the Edge Function's refusals, one per rule in 4, against the real
-  `game-logic.mjs`: wrong turn, wrong board, an option already taken by the *other* player, a slot that doesn't
-  fit, a defense into a Flex, a clock claimed early, and the auto-pick the clock really owes. Plus the result:
-  the same two rosters always score the same (no randomness anywhere in it), a better defense lowers the other
-  side's score, and the football final never disagrees with the points.
+- `tests/test-versus-rules.mjs` — every refusal in 4 and 7, driving `decideMove` itself rather than a mirror of
+  it: wrong turn, wrong board, an option already taken by the *other* player, a slot that doesn't fit, a defense
+  into a Flex, a clock claimed early by either player and then honoured, a powerup spent twice, a steal with
+  nothing to steal. Then a whole match played to the end with all four powerups spent, finishing at sixteen
+  picks with two full legal rosters and a result the server computed.
 - `tests/test-versus-boards.mjs` — section 8, which is where a 1v1 draft would go wrong quietly: the one-QB
   board is skipped when both players still need a quarterback and dealt when only one does; the second picker
   always has a legal option, over every ordering of every slot; and a match played out sixteen picks deep from
@@ -406,12 +414,10 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 
 1. The migration and its SQL tests. ✅
 2. The defense and kicker data, and its test. ✅ (`data/versus-pool.json`, 861 of each)
-3. `versus-logic.mjs`: the board's three pools, what fits where, the auto-pick's arithmetic and the result —
-   shared by the browser and the function.
-4. The Edge Function and its rule tests.
-5. The mock (so the jsdom tests can drive a match without a network).
+3. `versus-logic.mjs`: the board's three pools, what fits where, the auto-pick's arithmetic, the powerups, the
+   result, and `decideMove` — shared by the browser and the function. ✅
+4. The Edge Function and its rule tests. ✅ (all four powerups included)
+5. The mock, so the jsdom tests can drive a match without a network.
 6. The screens, then the flow test.
-7. Steal the pick (section 7), once there is a draft screen to spend it from. The re-spins, the steal and the
-   double dip are built.
-8. Records, the board, the share card.
-9. Staging, then production, as a version.
+7. Records, the board, the share card.
+8. Staging, then production, as a version.

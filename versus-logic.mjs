@@ -162,7 +162,7 @@ export const openSlots = (roster) => VERSUS_SLOTS.filter((s) => !roster[s]);
 // anything a client said - only the picks and re-spins the database holds.
 //
 // `picks` are match_picks rows in pick_no order; `respins` are matches.respins entries.
-export function replayMatch({ code, picks = [], respins = [], dips = [] }) {
+export function replayMatch({ code, picks = [], respins = [], dips = [], swaps = [] }) {
   const seq = seededSequence(code);
   const roster = { host: emptyRoster(), guest: emptyRoster() };
   const taken = new Set();
@@ -187,14 +187,16 @@ export function replayMatch({ code, picks = [], respins = [], dips = [] }) {
     if (!key) break;
     used.add(key);
 
-    // A dip inserts a second turn for whoever spent it, back to back with their first.
+    // Steal the pick reverses who leads - after the board is dealt, because it is spent on a board already on
+    // the table. A dip then inserts a second turn for whoever spent it, back to back with their first.
     const order = [...base];
+    if (swaps.some((w) => w.boardIdx === boardIdx) && order.length > 1) order.reverse();
     const dip = dips.find((d) => d.boardIdx === boardIdx);
     if (dip && order.includes(dip.by)) order.splice(order.indexOf(dip.by) + 1, 0, dip.by);
 
     const board = { key, followKey: key, order: [...order] };
     boards.push(board);
-    const keyFor = (side) => (side === base[0] ? board.key : board.followKey);
+    const keyFor = (side) => (side === order[0] ? board.key : board.followKey);
 
     for (let i = 0; i < order.length; i++) {
       const side = order[i];
@@ -418,4 +420,116 @@ export function canDoubleDip({ key, taken, boardIdx, dipperRoster, otherRoster, 
 
 export function dipsLeft(dips, side) {
   return MATCH_DIPS - dips.filter((d) => d.by === side).length;
+}
+
+// ---------- Steal the pick (VERSUS.md 7) ----------
+
+export const MATCH_PICK_STEALS = 1; // one each per match
+
+// Spent by the player who WOULD pick second on a board, before its first pick lands: the order is reversed and
+// they lead it instead. Nothing else moves - the board is still dealt to both and still has to serve both.
+//
+// Which is the catch, and the reason this isn't just a flag: the serve-both rule is not symmetric. The board was
+// chosen knowing who picked first, so reversing them can strand the player who now picks second. Checked with
+// the same rule, the other way round.
+export function canStealPick({ key, taken, moverRoster, otherRoster }) {
+  return boardServes(key, taken, openSlots(moverRoster), openSlots(otherRoster), 1);
+}
+
+export function pickStealsLeft(swaps, side) {
+  return MATCH_PICK_STEALS - swaps.filter((w) => w.by === side).length;
+}
+
+// ---------- Every move, decided in one place (VERSUS.md 4) ----------
+
+// The match-pick Edge Function is I/O and nothing else: it says who is asking, hands the match's rows to this,
+// and writes down whatever comes back. Every rule that decides a move lives here instead, for the same reason
+// game-logic.mjs exists - a rule the browser enforces and the server doesn't (or the other way round) is a rule
+// that will drift, and this one would drift into "the pick I made didn't happen".
+//
+// It reads nothing but the rows: `side` is who the caller turned out to be, and everything else - whose turn it
+// is, what is on the board, what is gone - is derived. Returns either { ok: false, reason, status } or an action
+// for the caller to write.
+//
+//   move  { claim: "clock" } | { respin } | { stealPick } | { dip } | { steal, slot } | { boardIdx, kind, ... }
+const refuse = (reason, status = 409) => ({ ok: false, reason, status });
+
+export function decideMove({ code, format, picks = [], respins = [], dips = [], swaps = [], side, move = {}, now = Date.now(), deadline = 0 }) {
+  const state = replayMatch({ code, picks, respins, dips, swaps });
+  if (state.done) return refuse("already_finished");
+  const onClock = state.turn.side;
+  const key = state.boardKey;
+  const mine = state.roster[onClock];
+  const theirs = state.roster[onClock === "host" ? "guest" : "host"];
+  const asPick = (option, slot, auto) => ({
+    ok: true, action: "pick", side: onClock, option, slot, auto,
+    pickNo: state.pickNo, boardIdx: state.boardIdx, state,
+  });
+
+  // The clock is the one move either player may make, because it is how a match survives an opponent who has
+  // closed the tab. A client saying time is up is a claim: the deadline decides.
+  if (move.claim === "clock") {
+    if (!deadline || now < deadline) return refuse("too_early");
+    const auto = autoPick(key, state.taken, mine, format);
+    // VERSUS.md 8 guarantees the board can serve them, so this is a broken invariant rather than a bad request.
+    if (!auto) return { ...refuse("no_option", 500) };
+    return asPick(auto.option, auto.slot, true);
+  }
+
+  if (side !== onClock) return refuse("not_your_turn");
+
+  if (move.respin === "team" || move.respin === "era") {
+    if (respinsLeft(respins, side)[move.respin] < 1) return refuse("no_respins_left");
+    const board = respinBoard({
+      code, kind: move.respin, pickNo: state.pickNo, key,
+      seq: state.seq, used: state.used, taken: state.taken, roster: mine, otherRoster: theirs,
+    });
+    if (!board) return refuse("no_candidate");
+    return { ok: true, action: "respin", kind: move.respin, key: board, pickNo: state.pickNo, side, state };
+  }
+
+  if (move.stealPick) {
+    if (pickStealsLeft(swaps, side) < 1) return refuse("no_steals_left");
+    // Only the player who would pick second, and only before the board has been touched.
+    if (state.turn.first) return refuse("already_leading");
+    if (!canStealPick({ key, taken: state.taken, moverRoster: mine, otherRoster: theirs })) return refuse("would_strand");
+    return { ok: true, action: "swap", boardIdx: state.boardIdx, side, state };
+  }
+
+  if (move.dip) {
+    if (dipsLeft(dips, side) < 1) return refuse("no_dips_left");
+    if (state.boardIdx >= MATCH_BOARDS - 1) return refuse("last_board");
+    const order = state.boards[state.boardIdx].order;
+    const picksAfter = order.slice(order.indexOf(side) + 1).some((s) => s !== side);
+    if (!canDoubleDip({ key, taken: state.taken, boardIdx: state.boardIdx, dipperRoster: mine, otherRoster: theirs, picksAfter })) {
+      return refuse("no_room");
+    }
+    return { ok: true, action: "dip", boardIdx: state.boardIdx, side, state };
+  }
+
+  if (move.steal) {
+    if (stealsLeft(picks, side) < 1) return refuse("no_steals_left");
+    const last = picks[picks.length - 1];
+    // Nothing to steal until they have taken something, and only ever the pick just made.
+    if (!last || state.turn.first || last.stolenBy) return refuse("nothing_to_steal");
+    const option = optionsOn(key).find((o) => optionId(o) === pickId(last));
+    if (!option) return refuse("nothing_to_steal");
+    const slots = stealableSlots({
+      key, taken: state.taken, option, stealerRoster: mine,
+      leaderRoster: state.roster[side === "host" ? "guest" : "host"], leaderSlot: last.slot,
+    });
+    if (!slots) return refuse("would_strand");
+    const slot = slots.includes(move.slot) ? move.slot : slots[0];
+    return { ok: true, action: "steal", pickNo: last.pickNo, slot, side, state };
+  }
+
+  // An ordinary pick.
+  if (move.boardIdx !== state.boardIdx) return refuse("wrong_board");
+  const wanted = optionsOn(key).find((o) => (move.kind === "player"
+    ? o.kind === "player" && o.id === Number(move.playerId) && o.season === Number(move.season)
+    : o.kind === move.kind && o.team === move.team && o.season === Number(move.season)));
+  if (!wanted) return refuse("not_on_board");
+  if (state.taken.has(optionId(wanted))) return refuse("already_taken");
+  if (!optionFits(wanted, move.slot) || mine[move.slot]) return refuse("bad_slot");
+  return asPick(wanted, move.slot, false);
 }

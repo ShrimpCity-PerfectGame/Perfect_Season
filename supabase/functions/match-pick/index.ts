@@ -1,0 +1,159 @@
+// Every move in a 1v1 match. Contract: VERSUS.md 4 and 7.
+//
+// Unlike submit-run, which checks a finished draft afterwards, this function IS the draft: a 1v1 board is picked
+// from twice and the second player's legal choices depend on the first player's pick, so no browser can hold the
+// truth (VERSUS.md 2). The picks live in the database and only this function's service role writes them -
+// matches and match_picks have public select and no client write policy at all.
+//
+// **This file decides nothing.** It says who is asking, hands the match's rows to versus-logic.mjs's decideMove,
+// and writes down whatever comes back. Every rule lives there, in the same module the browser draws the board
+// with, for the reason game-logic.mjs exists: a rule enforced on one side and not the other is a rule that will
+// drift, and this one would drift into "the pick I made didn't happen". It also means the rules are tested
+// without a Deno runtime or a mock that mirrors them - tests/test-versus-rules.mjs drives the real thing.
+//
+//   POST { code, boardIdx, kind, playerId | team, season, slot }   make a pick
+//   POST { code, claim: "clock" }                                  the clock ran out; checked against the row
+//   POST { code, respin: "team" | "era" }                          a re-spin (VERSUS.md 7)
+//   POST { code, steal: true, slot }                               take the pick just made
+//   POST { code, dip: true }                                       take two off this board, give up the next
+//   POST { code, stealPick: true }                                 lead a board you would have followed
+import { createClient } from "npm:@supabase/supabase-js@2";
+import * as GL from "../../../game-logic.mjs";
+import * as V from "../../../versus-logic.mjs";
+import gameData from "../../../data/players.json" with { type: "json" };
+import versusPool from "../../../data/versus-pool.json" with { type: "json" };
+
+GL.initGameData(gameData.players, gameData.opponents);
+V.initVersusData(versusPool);
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+// Same reasoning as submit-run's: the browser calls this cross-origin, so every response - the preflight
+// included - carries these or the fetch is blocked before this code runs.
+function corsHeaders(req: Request) {
+  return {
+    "Access-Control-Allow-Origin": req.headers.get("origin") || "*",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
+}
+
+const sideOf = (match: any, userId: string) =>
+  (match.host_id === userId ? "host" : match.guest_id === userId ? "guest" : null);
+const idOf = (match: any, side: string) => (side === "host" ? match.host_id : match.guest_id);
+const nextDeadline = () => new Date(Date.now() + V.TURN_SECONDS * 1000).toISOString();
+
+// The picks as versus-logic wants them, in pick order. The database spells them in snake_case, and a steal is
+// stored as the user who made it - which side that is only this match knows - so the translation lives here.
+const rowsToPicks = (match: any, rows: any[]) => (rows || []).map((r: any) => ({
+  pickNo: r.pick_no, kind: r.kind, playerId: r.player_id, team: r.team,
+  season: r.season, slot: r.slot, auto: r.auto,
+  stolenBy: r.stolen_by ? sideOf(match, r.stolen_by) : null,
+}));
+
+const readPicks = async (service: any, match: any) => {
+  const { data } = await service.from("match_picks").select("*").eq("match_id", match.id).order("pick_no");
+  return rowsToPicks(match, data);
+};
+
+Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors } });
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+  if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return json({ error: "unauthorized" }, 401);
+  const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: authHeader } } });
+  const { data: { user }, error: authError } = await authClient.auth.getUser();
+  if (authError || !user) return json({ error: "unauthorized" }, 401);
+
+  let move: any;
+  try { move = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+  const code = typeof move?.code === "string" ? move.code.toUpperCase() : "";
+  if (!code) return json({ error: "no match", reason: "not_found" }, 400);
+
+  const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+  const { data: match } = await service.from("matches").select("*").eq("code", code).single();
+  if (!match) return json({ error: "no match", reason: "not_found" }, 404);
+  if (match.status !== "drafting") return json({ error: "not playing", reason: "not_your_match" }, 409);
+  const side = sideOf(match, user.id);
+  if (!side) return json({ error: "not your match", reason: "not_your_match" }, 403);
+
+  const decided = V.decideMove({
+    code, format: match.format, side, move,
+    picks: await readPicks(service, match),
+    respins: match.respins || [], dips: match.dips || [], swaps: match.swaps || [],
+    deadline: match.turn_deadline ? Date.parse(match.turn_deadline) : 0,
+  });
+  if (!decided.ok) return json({ error: decided.reason, reason: decided.reason }, decided.status);
+
+  // Each of these writes exactly what decideMove said to, and nothing else. The clock restarts on every one of
+  // them: a powerup is a turn's worth of thinking too.
+  if (decided.action === "respin") {
+    const respins = [...(match.respins || []), { pickNo: decided.pickNo, kind: decided.kind, by: decided.side, key: decided.key }];
+    const { error } = await service.from("matches").update({ respins, turn_deadline: nextDeadline() }).eq("id", match.id);
+    return error ? json({ error: "failed to save" }, 500) : json({ ok: true, board: decided.key });
+  }
+  if (decided.action === "dip") {
+    const dips = [...(match.dips || []), { boardIdx: decided.boardIdx, by: decided.side }];
+    const { error } = await service.from("matches").update({ dips, turn_deadline: nextDeadline() }).eq("id", match.id);
+    return error ? json({ error: "failed to save" }, 500) : json({ ok: true });
+  }
+  if (decided.action === "swap") {
+    const swaps = [...(match.swaps || []), { boardIdx: decided.boardIdx, by: decided.side }];
+    const { error } = await service.from("matches").update({ swaps, turn_deadline: nextDeadline() }).eq("id", match.id);
+    return error ? json({ error: "failed to save" }, 500) : json({ ok: true });
+  }
+  if (decided.action === "steal") {
+    // The pick's row changes hands rather than a second row being written, which is what keeps match_picks'
+    // "drafted exactly once" constraints meaning what they say (VERSUS.md 3).
+    const { error } = await service.from("match_picks")
+      .update({ user_id: user.id, slot: decided.slot, stolen_by: user.id })
+      .eq("match_id", match.id).eq("pick_no", decided.pickNo);
+    if (error) return json({ error: "failed to save" }, 500);
+    await service.from("matches").update({ turn_deadline: nextDeadline() }).eq("id", match.id);
+    return json({ ok: true, slot: decided.slot });
+  }
+
+  const option = decided.option;
+  const { error: writeError } = await service.from("match_picks").insert({
+    match_id: match.id, pick_no: decided.pickNo, user_id: idOf(match, decided.side), board_idx: decided.boardIdx,
+    kind: option.kind, player_id: option.kind === "player" ? option.id : null,
+    team: option.kind === "player" ? null : option.team, season: option.season,
+    slot: decided.slot, auto: decided.auto,
+  });
+  // A taken pick_no means the other client got there first - a client that is behind, not a failure worth a 500.
+  // It re-reads the match and sees the pick it missed.
+  if (writeError) return json({ error: "already picked", reason: "conflict" }, 409);
+
+  // Re-read rather than assume, and let versus-logic say whether that was the last pick: a double dip and a
+  // steal both move where the end of a match is, so counting to sixteen here would be wrong.
+  const after = V.replayMatch({
+    code, picks: await readPicks(service, match),
+    respins: match.respins || [], dips: match.dips || [], swaps: match.swaps || [],
+  });
+  if (!after.done) {
+    await service.from("matches").update({ turn_deadline: nextDeadline() }).eq("id", match.id);
+    return json({ ok: true });
+  }
+
+  const result = V.matchResult({ code, format: match.format, host: after.roster.host, guest: after.roster.guest });
+  if (!result) return json({ error: "failed to grade" }, 500);
+  const winnerId = result.winner ? idOf(match, result.winner) : null;
+  await service.from("matches").update({
+    status: "done", result, winner_id: winnerId, ended_at: new Date().toISOString(), turn_deadline: null,
+  }).eq("id", match.id);
+  // The records move together or not at all (record_versus), and are kept apart from wins and championships on
+  // purpose - VERSUS.md 1. A draw moves neither.
+  if (result.winner) {
+    await service.rpc("record_versus", {
+      p_winner: winnerId, p_loser: idOf(match, result.winner === "host" ? "guest" : "host"),
+    });
+  }
+  return json({ ok: true, result });
+});

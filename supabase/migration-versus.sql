@@ -36,6 +36,9 @@ create table if not exists public.matches (
   -- Every double dip spent: { boardIdx, by } (VERSUS.md 7). Whoever took two off a board gives up the next one,
   -- so this is what tells a replay that a board is drafted three times and the one after it once.
   dips          jsonb not null default '[]'::jsonb,
+  -- Every "steal the pick" spent: { boardIdx, by } (VERSUS.md 7) - the boards whose order was reversed after
+  -- they were dealt. Kept apart from dips because they are different powerups with different budgets.
+  swaps         jsonb not null default '[]'::jsonb,
   -- Both sides' scores, the parts they were built from, and the football final (VERSUS.md 6) - written once, by
   -- the server, when the sixteenth pick lands. The higher score always wins; nothing here is a coin toss.
   result        jsonb,
@@ -80,7 +83,8 @@ create table if not exists public.match_picks (
 
 -- Added after the fact for a table that may already exist, since this file is re-run rather than replaced.
 alter table public.match_picks add column if not exists stolen_by uuid references auth.users(id) on delete set null;
-alter table public.matches add column if not exists dips jsonb not null default '[]'::jsonb;
+alter table public.matches add column if not exists dips  jsonb not null default '[]'::jsonb;
+alter table public.matches add column if not exists swaps jsonb not null default '[]'::jsonb;
 
 alter table public.matches enable row level security;
 alter table public.match_picks enable row level security;
@@ -140,7 +144,7 @@ returns jsonb language sql stable security definer set search_path = public, pg_
     'hostName', (select username from public.profiles where id = m.host_id),
     'guestName', (select username from public.profiles where id = m.guest_id),
     'format', m.format, 'status', m.status, 'turnDeadline', m.turn_deadline,
-    'respins', m.respins, 'dips', m.dips,
+    'respins', m.respins, 'dips', m.dips, 'swaps', m.swaps,
     'result', m.result, 'winnerId', m.winner_id, 'createdAt', m.created_at,
     'picks', coalesce((
       select jsonb_agg(jsonb_build_object(
@@ -211,6 +215,18 @@ end;
 $$;
 revoke execute on function public.join_match(text) from public, anon;
 grant execute on function public.join_match(text) to authenticated;
+
+-- ---------- Recording a result ----------
+
+-- The two record columns move together or not at all, which is why this is a function rather than two updates
+-- from the Edge Function: a win that didn't record the loss would be a board nobody could explain. Service role
+-- only - no client may call it, the same as every other writer of profiles.
+create or replace function public.record_versus(p_winner uuid, p_loser uuid)
+returns void language sql security definer set search_path = public, pg_temp as $$
+  with w as (update public.profiles set pvp_wins = pvp_wins + 1 where id = p_winner returning 1)
+  update public.profiles set pvp_losses = pvp_losses + 1 where id = p_loser and exists (select 1 from w);
+$$;
+revoke execute on function public.record_versus(uuid, uuid) from public, anon, authenticated;
 
 -- Realtime carries every change on these two tables to both screens (VERSUS.md 2). Adding them to the
 -- publication is what makes that happen; it is idempotent, and a table already in it is left alone.

@@ -141,6 +141,7 @@ await runTest("every function this migration adds is definer, searches pg_temp l
     "join_match(p_code text)": [true, "public, pg_temp", false, true],
     "match_state(p_code text)": [true, "public, pg_temp", true, true],
     "new_match_code()": [true, "public, pg_temp", false, false],
+    "record_versus(p_winner uuid, p_loser uuid)": [true, "public, pg_temp", false, false],
   };
   const rows = await owner(`select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig,
       p.prosecdef as definer,
@@ -148,7 +149,7 @@ await runTest("every function this migration adds is definer, searches pg_temp l
       has_function_privilege('anon', p.oid, 'execute') as anon,
       has_function_privilege('authenticated', p.oid, 'execute') as authenticated
     from pg_proc p where p.pronamespace = 'public'::regnamespace
-      and p.proname in ('can_play_versus', 'create_match', 'join_match', 'match_state', 'new_match_code') order by 1`);
+      and p.proname in ('can_play_versus', 'create_match', 'join_match', 'match_state', 'new_match_code', 'record_versus') order by 1`);
   const actual = Object.fromEntries(rows.map((r) => [r.sig, [r.definer, r.search_path, r.anon, r.authenticated]]));
   assert(JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(Object.keys(expected).sort()),
     `a new function needs a deliberate entry here, got ${JSON.stringify(Object.keys(actual))}`);
