@@ -61,9 +61,11 @@ export const VERSUS_CSS = `
    white on whatever those happened to be - 1.96:1 over the Jets' white stripe and 2.79:1 over the Rams' yellow,
    both under the 3:1 large text needs, and a text-shadow counts for nothing in WCAG. The pill makes it the same
    readable clock on all 32 teams. The number is what says time is short; .low only colours what it already says. */
-.vs-reelclock{position:absolute;top:12px;right:16px;font-family:var(--display);font-size:34px;line-height:1;
+.vs-pnr{display:flex;align-items:center;gap:10px;min-width:0}
+.vs-pnr .vs-left{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vs-reelclock{font-family:var(--display);font-size:30px;line-height:1;flex:none;
   color:#fff;font-variant-numeric:tabular-nums;background:rgba(6,10,22,.88);border-radius:10px;padding:2px 9px}
-.vs-reelclock .vs-s{font-size:18px;opacity:.75;margin-left:1px}
+.vs-reelclock .vs-s{font-size:16px;opacity:.75;margin-left:1px}
 .vs-reelclock.low{color:var(--loss)}
 .vs-clockbox{display:flex;gap:10px;align-items:baseline}
 .vs-turn{font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:13px;margin:0}
@@ -129,7 +131,7 @@ export const VERSUS_CSS = `
   .versus{gap:10px}
   .vs-score{font-size:42px}
   .vs-clock{font-size:22px}
-  .vs-reelclock{font-size:28px;top:10px;right:12px}
+  .vs-reelclock{font-size:24px;padding:2px 7px}
   .vs-rosters{gap:6px}
   .vs-rosters .roster{gap:4px}
   .vs-rosters .slot{min-height:38px;padding:4px 6px}
@@ -422,19 +424,25 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
     <>
       <div className="reel" aria-live="polite" style={teamVars(team)}>
         <div className="stripe" style={{ background: TEAMS[team][2] }} />
-        <div className="pickno"><span>{turnLabel}</span><span>{left} left on the board</span></div>
-        {/* The clock lives on the team card rather than in a bar of its own: it was the only thing in that bar
-            not already said by the roster headings and the line beside it. */}
-        {/* role="timer" rather than a bare aria-label on a div, which isn't reliably exposed - and it carries
+        {/* The clock sits IN this row, not floated over the card. Absolutely positioned it had no idea what was
+            underneath it, and what was underneath it was "N left on the board" - so the two overlapped and the
+            line was clipped. A flex item cannot collide with its own siblings at any width.
+            role="timer" rather than a bare aria-label on a div, which isn't reliably exposed - and it carries
             aria-live="off", which is the point: the reel around it is a polite live region, so a per-second
             countdown inside it had a screen reader re-reading the whole board every second, for forty-five
             seconds a turn and sixteen turns a match. Read on demand, not announced. */}
-        {seconds != null ? (
-          <div className={`vs-reelclock ${seconds <= 10 ? "low" : ""}`}
-               role="timer" aria-live="off" aria-label={`${seconds} seconds left in this turn`}>
-            {seconds}<span className="vs-s">s</span>
-          </div>
-        ) : null}
+        <div className="pickno">
+          <span>{turnLabel}</span>
+          <span className="vs-pnr">
+            <span className="vs-left">{left} left on the board</span>
+            {seconds != null ? (
+              <span className={`vs-reelclock ${seconds <= 10 ? "low" : ""}`}
+                    role="timer" aria-live="off" aria-label={`${seconds} seconds left in this turn`}>
+                {seconds}<span className="vs-s">s</span>
+              </span>
+            ) : null}
+          </span>
+        </div>
         <div className="team">{TEAMS[team][0]}</div>
         <div>
           <span className="years led-wrap"><span className="led">{WINDOWS[Number(w)][0]}–{WINDOWS[Number(w)][1]}</span></span>
