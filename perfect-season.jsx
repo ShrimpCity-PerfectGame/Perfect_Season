@@ -8,7 +8,7 @@ import {
   fetchProfile, submitRun, submitDnf,
   fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
-  versusPath, parseVersusPath,
+  versusPath, parseVersusPath, fetchVersusTop,
 } from "./storage.js";
 import gameData from "./data/players.json";
 import versusPool from "./data/versus-pool.json";
@@ -2122,6 +2122,9 @@ export default function PerfectSeason() {
   // The points ladder currently being viewed, and its rows. Paired the same way lb/lbFormat are,
   // so the rows and the column that reads them can never describe different ladders.
   const [ladder, setLadder] = useState({ loading: false, rows: [], mode: "unlimited" });
+  // The 1v1 board (VERSUS.md 10). Its own fetch, and deliberately not per scoring format: a head-to-head is one
+  // game between two people, and both formats grade it the same way.
+  const [versusBoard, setVersusBoard] = useState({ loading: false, rows: [] });
   const [ladderMode, setLadderMode] = useState("unlimited");
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: 0, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
@@ -2345,7 +2348,7 @@ export default function PerfectSeason() {
     if (k === "profile") setProfileOf(null);
     setView(k);
     if (k === "home") refreshWip();
-    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); }
+    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }
     if (k === "stats" && !siteStats.loaded) loadSiteStats();
   }
   function openProfile(name) {
@@ -3391,6 +3394,11 @@ export default function PerfectSeason() {
     startDraft({ kind: "free", code: c.code, format: c.format, gm: c.gm, genius: c.genius });
   }
 
+  async function loadVersusBoard() {
+    setVersusBoard((v) => ({ ...v, loading: true }));
+    const rows = await fetchVersusTop(10);
+    setVersusBoard({ loading: false, rows });
+  }
   async function loadLadder(m) {
     const mk = LADDERS.includes(m) ? m : ladderMode;
     setLadder((l) => ({ loading: true, rows: l.mode === mk ? l.rows : [], mode: mk }));
@@ -4319,7 +4327,38 @@ export default function PerfectSeason() {
                   </table>
                 )}
 
-                <button className="btn" style={{ marginTop: 8 }} onClick={() => { loadLeaderboard(); loadDailyBoard(); loadLadder(); }} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
+                {/* 1v1 (VERSUS.md 10). Kept apart from every board above it on purpose: a head-to-head result
+                    and a 20-0 season are different things, and mixing them would move boards that already
+                    mean something. */}
+                <div className="dayhead" style={{ marginTop: 24 }}>
+                  <h2 className="h">1v1</h2>
+                  <button className="linkbtn" onClick={loadVersusBoard} disabled={versusBoard.loading}>{versusBoard.loading ? "Loading…" : "Refresh"}</button>
+                </div>
+                {versusBoard.rows.length === 0 ? (
+                  <p className="note" style={{ marginTop: 0 }}>
+                    {versusBoard.loading ? "Loading the 1v1 board…" : "Nobody has played a 1v1 yet."}{" "}
+                    {user && !isGuest && <button className="linkbtn" onClick={openVersus}>Open a lobby</button>}
+                  </p>
+                ) : (
+                  <table className="lb">
+                    <thead><tr><th><span className="vh">Rank</span></th><th>Player</th><th className="r">Wins</th><th className="r lbrec">Record</th><th className="r hide">Win rate</th></tr></thead>
+                    <tbody>
+                      {versusBoard.rows.map((q, i) => {
+                        const mine = !!user && q.username === user;
+                        return (
+                          <tr key={q.username} className={rankRowClass(i, mine)}>
+                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} /><span className="subrec">{q.wins}–{q.losses}</span></td>
+                            <td className="r v">{q.wins}</td>
+                            <td className="r lbrec">{q.wins}–{q.losses}</td>
+                            <td className="r hide">{q.pct == null ? "–" : `${q.pct}%`}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+
+                <button className="btn" style={{ marginTop: 8 }} onClick={() => { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }} disabled={lb.loading}>{lb.loading ? "Refreshing…" : "Refresh"}</button>
               </>
             )}
           </>

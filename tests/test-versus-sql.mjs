@@ -151,6 +151,7 @@ await runTest("every function this migration adds is definer, searches pg_temp l
     "match_state(p_code text)": [true, "public, pg_temp", true, true],
     "new_match_code()": [true, "public, pg_temp", false, false],
     "record_versus(p_winner uuid, p_loser uuid)": [true, "public, pg_temp", false, false],
+    "versus_top(p_limit integer)": [true, "public, pg_temp", true, true],
   };
   const rows = await owner(`select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig,
       p.prosecdef as definer,
@@ -158,13 +159,36 @@ await runTest("every function this migration adds is definer, searches pg_temp l
       has_function_privilege('anon', p.oid, 'execute') as anon,
       has_function_privilege('authenticated', p.oid, 'execute') as authenticated
     from pg_proc p where p.pronamespace = 'public'::regnamespace
-      and p.proname in ('can_play_versus', 'create_match', 'join_match', 'match_state', 'new_match_code', 'record_versus') order by 1`);
+      and p.proname in ('can_play_versus', 'create_match', 'join_match', 'match_state', 'new_match_code', 'record_versus', 'versus_top') order by 1`);
   const actual = Object.fromEntries(rows.map((r) => [r.sig, [r.definer, r.search_path, r.anon, r.authenticated]]));
   assert(JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(Object.keys(expected).sort()),
     `a new function needs a deliberate entry here, got ${JSON.stringify(Object.keys(actual))}`);
   for (const [sig, want] of Object.entries(expected)) {
     assert(JSON.stringify(actual[sig]) === JSON.stringify(want), `${sig}: expected ${JSON.stringify(want)}, got ${JSON.stringify(actual[sig])}`);
   }
+});
+
+await runTest("the 1v1 board ranks by wins, fully tiebroken, and only counts people who played", async () => {
+  await owner("update profiles set pvp_wins = 0, pvp_losses = 0");
+  await owner("update profiles set pvp_wins = 3, pvp_losses = 1 where username = 'host'");
+  await owner("update profiles set pvp_wins = 3, pvp_losses = 4 where username = 'opponent'");
+  await owner("update profiles set pvp_wins = 0, pvp_losses = 2 where username = 'third'");
+
+  const board = (await call(null, "versus_top", { p_limit: 10 })).data;
+  assert(board.length === 3, `only the three who played one: ${JSON.stringify(board.map((r) => r.username))}`);
+  assert(board[0].username === "host" && board[1].username === "opponent",
+    `three wins and one loss beats three and four: ${JSON.stringify(board.map((r) => [r.username, r.wins, r.losses]))}`);
+  assert(board[2].username === "third" && board[2].wins === 0, "and someone who has only lost is still on it");
+  assert(board[0].pct === 75 && board[2].pct === 0, `with a win rate: ${JSON.stringify(board.map((r) => r.pct))}`);
+
+  // record_versus moves the pair together, and is the only thing that may.
+  const before = (await owner("select pvp_wins, pvp_losses from profiles where username = 'host'"))[0];
+  await owner("select record_versus($1, $2)", [HOST, GUEST]);
+  const after = (await owner("select pvp_wins from profiles where username = 'host'"))[0];
+  const loser = (await owner("select pvp_losses from profiles where username = 'opponent'"))[0];
+  assert(after.pvp_wins === before.pvp_wins + 1 && loser.pvp_losses === 5, `one win, one loss: ${after.pvp_wins}/${loser.pvp_losses}`);
+  const direct = await attempt(HOST, "update profiles set pvp_wins = 99 where id = $1", [HOST]);
+  assert(!!direct.error || direct.affected === 0, `and a client can't write its own record: ${JSON.stringify(direct)}`);
 });
 
 await runTest("running the migration again changes nothing", async () => {

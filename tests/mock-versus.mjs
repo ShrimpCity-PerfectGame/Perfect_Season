@@ -176,9 +176,27 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     return changed({ data: { ok: true, result } });
   }
 
+  // versus_top: wins, then fewest losses, then name - fully tiebroken, like every other board.
+  function versusTop({ p_limit } = {}) {
+    const limit = Math.max(1, Math.min(Number(p_limit) || 20, 100));
+    return [...state.profiles.values()]
+      .filter((p) => !p.guest && (p.pvp_wins || 0) + (p.pvp_losses || 0) > 0)
+      .sort((a, b) => (b.pvp_wins || 0) - (a.pvp_wins || 0)
+        || (a.pvp_losses || 0) - (b.pvp_losses || 0)
+        || a.username.localeCompare(b.username))
+      .slice(0, limit)
+      .map((p) => {
+        const games = (p.pvp_wins || 0) + (p.pvp_losses || 0);
+        return {
+          username: p.username, wins: p.pvp_wins || 0, losses: p.pvp_losses || 0,
+          pct: games ? Math.round((100 * (p.pvp_wins || 0)) / games) : null,
+        };
+      });
+  }
+
   return {
     tables: { matches, match_picks: matchPicks },
-    rpcs: { create_match: createMatch, join_match: joinMatch, match_state: matchState },
+    rpcs: { create_match: createMatch, join_match: joinMatch, match_state: matchState, versus_top: versusTop },
     invokeMatchPick,
     // Test-only: the state of a match as versus-logic sees it, for setting one up or asserting on it.
     _replay: (code) => {

@@ -100,6 +100,20 @@ export function subscribeMatch(matchId, onChange) {
   return { unsubscribe: () => client.removeChannel(channel) };
 }
 
+// The 1v1 board (VERSUS.md 10), for the Leaderboard screen: [{ username, wins, losses, pct }], best first.
+export async function fetchVersusTop(limit = 20) {
+  try {
+    const { data, error } = await getClient().rpc("versus_top", { p_limit: limit }, READ);
+    if (error || !Array.isArray(data)) return [];
+    return data.filter((r) => r && typeof r === "object").map((r) => ({
+      username: r.username, wins: Number(r.wins) || 0, losses: Number(r.losses) || 0,
+      pct: r.pct == null ? null : Number(r.pct),
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
 // gridspin.app/vs/ABC123 - the whole matchmaking system (VERSUS.md 1). Built from the site's own address, the
 // same way challengeLink is, so a staging build links to staging.
 export const versusPath = (code) => `/vs/${encodeURIComponent(String(code || "").toUpperCase())}`;

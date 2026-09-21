@@ -231,6 +231,28 @@ returns void language sql security definer set search_path = public, pg_temp as 
 $$;
 revoke execute on function public.record_versus(uuid, uuid) from public, anon, authenticated;
 
+-- The 1v1 board (VERSUS.md 10): ranked by wins, then by how few losses they took getting them, then by name so
+-- the order is fully tiebroken - the rule every other board here follows. Only accounts that have played one
+-- appear. Stable, so the client asks for it as a GET and gets supabase-js's retry for free.
+--
+-- 1v1's own function rather than a column in site_stats(): that one is mirrored by tests/helpers.mjs and held
+-- to the SQL by tests/test-runs-sql.mjs, and a head-to-head board has nothing to do with the runs log.
+create or replace function public.versus_top(p_limit integer default 20)
+returns jsonb language sql stable security definer set search_path = public, pg_temp as $$
+  select coalesce(jsonb_agg(row), '[]'::jsonb) from (
+    select jsonb_build_object(
+      'username', p.username, 'wins', p.pvp_wins, 'losses', p.pvp_losses,
+      'pct', case when p.pvp_wins + p.pvp_losses > 0
+                  then round((100.0 * p.pvp_wins / (p.pvp_wins + p.pvp_losses))::numeric, 0)::int end
+    ) as row
+    from public.profiles p
+    where p.pvp_wins + p.pvp_losses > 0 and not p.guest
+    order by p.pvp_wins desc, p.pvp_losses asc, p.username asc
+    limit greatest(1, least(coalesce(p_limit, 20), 100))
+  ) top;
+$$;
+grant execute on function public.versus_top(integer) to anon, authenticated;
+
 -- Realtime carries every change on these two tables to both screens (VERSUS.md 2). Adding them to the
 -- publication is what makes that happen; it is idempotent, and a table already in it is left alone.
 do $$

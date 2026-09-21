@@ -181,6 +181,28 @@ await runTest("the follower spends a re-spin, and walks away to a board of their
   assert(findButtonByText(container, "Re-spin era").disabled, "with none of that kind left");
 });
 
+await runTest("the 1v1 board shows the records, apart from every other board", async () => {
+  // Records as a finished match leaves them.
+  const rows = [...auth._profiles.values()];
+  const beta = rows.find((p) => p.username === "beta");
+  const gamma = rows.find((p) => p.username === "gamma");
+  beta.pvp_wins = 2; beta.pvp_losses = 0;
+  gamma.pvp_wins = 0; gamma.pvp_losses = 2;
+
+  await click(findButtonByText(container, "Leaderboard"));
+  await flush();
+  await flush();
+  const heads = [...container.querySelectorAll("h2")].map((h) => h.textContent);
+  assert(heads.includes("1v1"), `the 1v1 board is on the Leaderboard: ${JSON.stringify(heads)}`);
+
+  const board = [...container.querySelectorAll("table.lb")].find((t) => t.textContent.includes("2–0"));
+  assert(board, `with the records on it: ${text(container).slice(0, 200)}`);
+  const first = board.querySelector("tbody tr");
+  assert(first.textContent.includes("beta") && first.textContent.includes("2"), `best record first: ${first.textContent}`);
+  // And nothing about it moved the career record, which is the line VERSUS.md 1 draws.
+  assert(!beta.wins && !beta.champs, "a 1v1 win is not a season win");
+});
+
 // The draft keeps a clock ticking and a Realtime channel open, both of which would hold the process open
 // after the last assertion - so the screen comes down the way a player leaving it would take it down.
 reactRoot.unmount();
