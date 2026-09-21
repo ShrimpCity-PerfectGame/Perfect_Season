@@ -45,7 +45,7 @@ await runTest("a client can read matches and picks, and write neither", async ()
       ["insert a match", "insert into matches (code, host_id) values ('ZZZZZZ', $1)", [GUEST]],
       ["change one", "update matches set status = 'done' where code = $1", [match.code]],
       ["delete one", "delete from matches where code = $1", [match.code]],
-      ["insert a pick", "insert into match_picks (match_id, pick_no, user_id, board_idx, player_id, season, slot) values ($1, 1, $2, 0, 5, 2007, 'QB')", [match.id, GUEST]],
+      ["insert a pick", "insert into match_picks (match_id, pick_no, user_id, board_idx, kind, player_id, season, slot) values ($1, 1, $2, 0, 'player', 5, 2007, 'QB')", [match.id, GUEST]],
     ]) {
       const res = await attempt(who, statement, params);
       const blocked = !!res.error || res.affected === 0;
@@ -85,32 +85,49 @@ await runTest("taking an invite: the first one through the link is the opponent"
   assert((await call(HOST, "join_match", { p_code: code })).data?.error === "own_match", "and the host can't join their own started match");
 });
 
-await runTest("a player taken in a match is gone, for both sides", async () => {
+await runTest("anything taken in a match is gone, for both sides", async () => {
   const code = (await call(HOST, "create_match", {})).data.code;
   await call(GUEST, "join_match", { p_code: code });
   const id = (await owner("select id from matches where code = $1", [code]))[0].id;
-  const pick = (no, who, board, player, slot) => owner(
-    "insert into match_picks (match_id, pick_no, user_id, board_idx, player_id, season, slot) values ($1, $2, $3, $4, $5, 2007, $6)",
-    [id, no, who, board, player, slot]);
+  const pick = (no, who, board, { player = null, team = null, kind = "player", season = 2007, slot }) => owner(
+    "insert into match_picks (match_id, pick_no, user_id, board_idx, kind, player_id, team, season, slot) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    [id, no, who, board, kind, player, team, season, slot]);
+  const refusal = async (fn) => { try { await fn(); return null; } catch (e) { return String(e.message || e); } };
 
-  await pick(1, HOST, 0, 42, "QB");
-  let refused = null;
-  try { await pick(2, GUEST, 0, 42, "QB"); } catch (e) { refused = String(e.message || e); }
-  assert(/duplicate|unique/i.test(refused || ""), `the other player can't take him too, got ${refused}`);
-  await pick(2, GUEST, 0, 43, "QB"); // someone else from the same board is fine
-  assert((await owner("select count(*)::int as n from match_picks where match_id = $1", [id]))[0].n === 2, "both picks are recorded");
+  await pick(1, HOST, 0, { player: 42, slot: "QB" });
+  assert(/duplicate|unique/i.test(await refusal(() => pick(2, GUEST, 0, { player: 42, slot: "QB" })) || ""),
+    "the other player can't take the same player");
+  await pick(2, GUEST, 0, { player: 43, slot: "QB" }); // someone else from the same board is fine
+
+  // A defense and a kicker are drafted off the same board as the players (VERSUS.md 6), and the same rule holds.
+  await pick(3, GUEST, 1, { kind: "dst", team: "BAL", season: 2006, slot: "DST" });
+  assert(/duplicate|unique/i.test(await refusal(() => pick(4, HOST, 1, { kind: "dst", team: "BAL", season: 2006, slot: "DST" })) || ""),
+    "nor the same defense");
+  // ...but a team's kicker is not its defense, even in the same year, and neither is another year's defense.
+  await pick(4, HOST, 1, { kind: "k", team: "BAL", season: 2006, slot: "K" });
+  await pick(5, HOST, 2, { kind: "dst", team: "BAL", season: 2007, slot: "DST" });
+
+  // The identity has to match the kind, so a defense can never be read as player 0 or a player as some team's.
+  assert(await refusal(() => pick(6, GUEST, 2, { kind: "dst", player: 9, slot: "DST" })), "a defense with a player id is refused");
+  assert(await refusal(() => pick(6, GUEST, 2, { kind: "player", team: "BAL", slot: "RB" })), "and a player with a team");
+  assert((await owner("select count(*)::int as n from match_picks where match_id = $1", [id]))[0].n === 5, "the five good picks are recorded");
 });
 
 await runTest("match_state reads the whole thing back, for a reload or a stranger", async () => {
   const code = (await call(HOST, "create_match", {})).data.code;
   await call(GUEST, "join_match", { p_code: code });
   const id = (await owner("select id from matches where code = $1", [code]))[0].id;
-  await owner("insert into match_picks (match_id, pick_no, user_id, board_idx, player_id, season, slot) values ($1, 1, $2, 0, 7, 2011, 'RB')", [id, HOST]);
+  await owner("insert into match_picks (match_id, pick_no, user_id, board_idx, kind, player_id, season, slot) values ($1, 1, $2, 0, 'player', 7, 2011, 'RB')", [id, HOST]);
+  await owner("insert into match_picks (match_id, pick_no, user_id, board_idx, kind, team, season, slot) values ($1, 2, $2, 0, 'dst', 'CHI', 2006, 'DST')", [id, GUEST]);
 
   for (const who of [null, HOST, OTHER]) {
     const state = (await call(who, "match_state", { p_code: code })).data;
-    assert(state?.code === code && state.picks.length === 1, `${who || "anyone"} can read it: ${JSON.stringify(state).slice(0, 120)}`);
-    assert(state.picks[0].slot === "RB" && state.picks[0].playerId === 7, "with the picks in it");
+    assert(state?.code === code && state.picks.length === 2, `${who || "anyone"} can read it: ${JSON.stringify(state).slice(0, 120)}`);
+    assert(state.picks[0].slot === "RB" && state.picks[0].playerId === 7 && state.picks[0].kind === "player", "with the picks in it");
+    assert(state.picks[1].kind === "dst" && state.picks[1].team === "CHI" && state.picks[1].playerId === null,
+      `and a defense reads back as one: ${JSON.stringify(state.picks[1])}`);
+    // A reconnecting client rebuilds the boards from these two (VERSUS.md 7), so they can never be missing.
+    assert(Array.isArray(state.respins) && state.respins.length === 0, `re-spins come back as a list: ${JSON.stringify(state.respins)}`);
   }
   assert((await call(HOST, "match_state", { p_code: "nosuch" })).data === null, "and nothing for a code nobody has");
 });

@@ -19,7 +19,7 @@
 
 create table if not exists public.matches (
   id            uuid primary key default gen_random_uuid(),
-  -- The shareable half of gridspin.app/vs/<code>, and the seed the six boards are dealt from - the same way a
+  -- The shareable half of gridspin.app/vs/<code>, and the seed the eight boards are dealt from - the same way a
   -- challenge code seeds a single-player draft, so one string is the whole match's identity.
   code          text not null unique,
   host_id       uuid not null references auth.users(id) on delete cascade,
@@ -29,7 +29,12 @@ create table if not exists public.matches (
   -- When the player on the clock loses the pick. The Edge Function reads it; a client that says time is up is
   -- checked against it, never believed.
   turn_deadline timestamptz,
-  -- { hostScore, guestScore, winner, margin } - written once, by the server, when the twelfth pick lands.
+  -- Every re-spin spent: { boardIdx, kind, by, key } (VERSUS.md 7). A re-spin belongs to whoever picks first on
+  -- a board and only before either pick lands, so the two players always draft the same board; this list is
+  -- what lets a client that reconnects rebuild the same eight.
+  respins       jsonb not null default '[]'::jsonb,
+  -- Both sides' scores, the parts they were built from, and the football final (VERSUS.md 6) - written once, by
+  -- the server, when the sixteenth pick lands. The higher score always wins; nothing here is a coin toss.
   result        jsonb,
   winner_id     uuid references auth.users(id) on delete set null,
   created_at    timestamptz not null default now(),
@@ -40,19 +45,30 @@ create index if not exists matches_guest_idx on public.matches (guest_id, status
 
 create table if not exists public.match_picks (
   match_id   uuid not null references public.matches(id) on delete cascade,
-  -- 1 to 12: six boards, two picks each. The number alone says whose turn it was (VERSUS.md 1's snake order).
-  pick_no    integer not null check (pick_no between 1 and 12),
+  -- 1 to 16: eight boards, two picks each. The number alone says whose turn it was (VERSUS.md 1's snake order).
+  pick_no    integer not null check (pick_no between 1 and 16),
   user_id    uuid not null references auth.users(id) on delete cascade,
-  board_idx  integer not null check (board_idx between 0 and 5),
-  player_id  integer not null,
+  board_idx  integer not null check (board_idx between 0 and 7),
+  -- Which of the board's three pools it came from (VERSUS.md 6). Every board carries all three, so a player may
+  -- take a defense fifth or a kicker first; the column is what keeps the three from being read as each other.
+  kind       text not null default 'player' check (kind in ('player', 'dst', 'k')),
+  player_id  integer,  -- a player: his id in data/players.json. Null for a defense or a kicker.
+  team       text,     -- a defense or a kicker: whose. Null for a player.
   season     integer not null,
-  slot       text not null check (slot in ('QB', 'RB', 'WR', 'TE', 'FLEX1', 'FLEX2')),
+  slot       text not null check (slot in ('QB', 'RB', 'WR', 'TE', 'FLEX1', 'FLEX2', 'DST', 'K')),
   -- The clock made this one, not the player.
   auto       boolean not null default false,
   created_at timestamptz not null default now(),
   primary key (match_id, pick_no),
-  -- The rule that makes a 1v1 draft a 1v1 draft: a player taken from a board is gone, for both sides.
-  unique (match_id, player_id, season)
+  -- One identity or the other, never both and never neither.
+  constraint match_picks_identity check ((kind = 'player') = (player_id is not null)
+                                     and (kind in ('dst', 'k')) = (team is not null)),
+  -- The rule that makes a 1v1 draft a 1v1 draft: what one player takes from a board is gone, for both sides.
+  -- Two constraints because the two identities are different columns; each ignores the other's rows, since a
+  -- null never conflicts in a unique index. `kind` is in the second so a team's defense and its kicker from the
+  -- same year are not read as the same thing.
+  unique (match_id, kind, player_id, season),
+  unique (match_id, kind, team, season)
 );
 
 alter table public.matches enable row level security;
@@ -113,11 +129,11 @@ returns jsonb language sql stable security definer set search_path = public, pg_
     'hostName', (select username from public.profiles where id = m.host_id),
     'guestName', (select username from public.profiles where id = m.guest_id),
     'format', m.format, 'status', m.status, 'turnDeadline', m.turn_deadline,
-    'result', m.result, 'winnerId', m.winner_id, 'createdAt', m.created_at,
+    'respins', m.respins, 'result', m.result, 'winnerId', m.winner_id, 'createdAt', m.created_at,
     'picks', coalesce((
       select jsonb_agg(jsonb_build_object(
-        'pickNo', p.pick_no, 'userId', p.user_id, 'boardIdx', p.board_idx,
-        'playerId', p.player_id, 'season', p.season, 'slot', p.slot, 'auto', p.auto
+        'pickNo', p.pick_no, 'userId', p.user_id, 'boardIdx', p.board_idx, 'kind', p.kind,
+        'playerId', p.player_id, 'team', p.team, 'season', p.season, 'slot', p.slot, 'auto', p.auto
       ) order by p.pick_no)
       from public.match_picks p where p.match_id = m.id), '[]'::jsonb)
   ) end
