@@ -63,21 +63,34 @@ export const VERSUS_CSS = `
 .vs-wait{display:flex;gap:10px;align-items:center;font-weight:700}
 .vs-dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
 .vs-powers{margin-top:18px}
-.vs-rosters{display:grid;gap:16px;grid-template-columns:1fr 1fr;margin-top:22px}
+/* Both rosters above the board, each the draft's own strip - one row of eight rather than the six single
+   player fills, so the pair costs about 130px at the top instead of pushing the board off the screen. */
+.vs-rosters{display:grid;gap:10px;grid-template-columns:1fr;margin:2px 0 10px}
 .vs-side-hd{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800;margin:0 0 8px;opacity:.85}
 .vs-side-hd .vs-sub{font-family:var(--display);font-size:16px;letter-spacing:0;margin-left:6px}
-/* The two rosters stack their slots rather than sitting in one wide row, so both fit side by side. */
-.vs-rosters .roster{grid-template-columns:1fr 1fr;gap:6px}
+.vs-rosters .roster{grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin-bottom:0}
+.vs-rosters .slot{min-height:52px;padding:6px 8px}
+.vs-rosters .slot .v{font-size:13px}
 .vs-final{display:grid;gap:6px;justify-items:center;text-align:center;padding:18px 0}
 .vs-score{font-family:var(--display);font-size:56px;line-height:1;font-variant-numeric:tabular-nums}
 .vs-lines{display:grid;gap:3px;font-size:13px;margin-top:8px;max-width:420px}
 .vs-lines .vs-ln{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding:4px 0}
 .vs-note{font-size:13px;opacity:.85}
 .vs-err{color:var(--loss);font-weight:700;font-size:13px}
+@media (max-width:900px){.vs-rosters .roster{grid-template-columns:repeat(4,minmax(0,1fr))}}
+/* On a phone the pair has to stay out of the board's way, so the strips lose the season line and shrink to
+   two rows of four. The season is still one tap away on the card, and the sticky bar carries your slots as
+   chips anyway. */
 @media (max-width:640px){
-  .vs-rosters{grid-template-columns:1fr}
   .vs-score{font-size:42px}
   .vs-clock{font-size:22px}
+  .vs-rosters{gap:8px}
+  .vs-rosters .roster{gap:4px}
+  .vs-rosters .slot{min-height:38px;padding:4px 6px}
+  .vs-rosters .slot .sub{display:none}
+  .vs-rosters .slot .v{font-size:12px;margin-top:1px}
+  .vs-rosters .slot .k{font-size:10.5px}
+  .vs-side-hd{margin-bottom:4px;font-size:11px}
 }
 `;
 
@@ -93,6 +106,25 @@ function useCountdown(deadline) {
   }, [deadline]);
   return left;
 }
+// The bar appears once the reel has scrolled away, exactly as it does in the single-player draft - pinned at
+// rest it would sit over the nav, which is the one thing a player needs to leave the screen with.
+function useStuck() {
+  const sentinel = useRef(null);
+  const [stuck, setStuck] = useState(false);
+  const [live, setLive] = useState(false); // whether the sentinel is on screen yet to observe
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || typeof IntersectionObserver === "undefined") { setStuck(false); return undefined; }
+    const io = new IntersectionObserver(([e]) => setStuck(!e.isIntersecting && e.boundingClientRect.top < 0), { rootMargin: "0px 0px 100000px 0px" });
+    io.observe(el);
+    return () => { io.disconnect(); setStuck(false); };
+  }, [live]);
+  // The sentinel only exists once the draft is on screen, so the observer is armed when it appears rather than
+  // on every render - an effect with no deps would tear the observer down and rebuild it each time.
+  const attach = useCallback((el) => { sentinel.current = el; setLive(!!el); }, []);
+  return [stuck, attach];
+}
+
 const secondsTo = (deadline) => {
   if (!deadline) return null;
   return Math.max(0, Math.ceil((Date.parse(deadline) - Date.now()) / 1000));
@@ -226,6 +258,9 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const [copied, setCopied] = useState(false);
   // The option a player has tapped but not locked in, exactly as the single-player draft holds one.
   const [selected, setSelected] = useState(null);
+  // Every hook here runs on every render of this screen, lobby or draft - one that only ran on the draft would
+  // be React error #310 the moment a lobby turned into one.
+  const [stuck, sentinel] = useStuck();
   const joined = useRef(false);
 
   const refresh = useCallback(async (c) => {
@@ -402,7 +437,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     <section className="versus vs-draft" data-view="draft" data-code={match.code}>
       {/* The bar the single-player draft floats once you scroll past the reel, carrying what a 1v1 needs
           instead: who is on the clock, the seconds left, and both rosters as chips. */}
-      <div className="sticky show" style={teamVars(boardTeam)}>
+      <div className={`sticky ${stuck ? "show" : ""}`} aria-hidden={!stuck} style={teamVars(boardTeam)}>
         <div className="in">
           <div className="stripe" style={{ background: TEAMS[boardTeam][2] }} />
           <span className="tm">{myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`}</span>
@@ -433,6 +468,16 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
       </div>
 
       {error ? <p className="vs-err">{errorText(error)}</p> : null}
+
+      {/* Above the board, where the single-player draft keeps its roster strip: what you still have open is
+          the thing you are reading the board against, so it has to be on screen while you choose - not eight
+          sections further down. */}
+      <div className="vs-rosters">
+        <RosterStrip roster={state.roster[side || "host"]} label="Your roster" />
+        <RosterStrip roster={state.roster[side === "host" ? "guest" : "host"]} label={`${name(match, side === "host" ? "guest" : "host")}'s roster`} />
+      </div>
+
+      <div ref={sentinel} aria-hidden="true" />
 
       {state.boardKey ? (
         <Board
@@ -473,10 +518,6 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
         </div>
       ) : null}
 
-      <div className="vs-rosters">
-        <RosterStrip roster={state.roster[side || "host"]} label="Your roster" />
-        <RosterStrip roster={state.roster[side === "host" ? "guest" : "host"]} label={`${name(match, side === "host" ? "guest" : "host")}'s roster`} />
-      </div>
     </section>
   );
 }

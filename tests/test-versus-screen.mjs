@@ -129,6 +129,11 @@ await runTest("the opponent's screen shows the same board, and a pick lands on i
   assert(container.querySelector(".reel .led")?.textContent === `${WINDOWS[Number(w)][0]}–${WINDOWS[Number(w)][1]}`,
     `and its era: ${container.querySelector(".reel .led")?.textContent}`);
 
+  // Both rosters are ABOVE the board, not under it: what you still have open is what you read the board
+  // against, so scrolling eight sections to check it is the wrong way round.
+  const rosterTop = container.querySelector(".vs-rosters")?.compareDocumentPosition(container.querySelector(".reel"));
+  assert(rosterTop & 4, "the rosters come before the reel in the document");
+
   // Both rosters are on screen, empty, and the slots are named in letters rather than by colour alone.
   const slots = [...container.querySelectorAll(".vs-rosters .roster")[0].querySelectorAll(".slot")].map((el) => el.dataset.slot);
   assert(JSON.stringify(slots) === JSON.stringify(VERSUS_SLOTS), `eight slots in order, got ${slots.join(",")}`);
