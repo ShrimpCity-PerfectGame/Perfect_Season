@@ -177,7 +177,7 @@ function Board({ boardKey, taken, roster, myTurn, format, onPick }) {
   );
 }
 
-export function VersusScreen({ userId, username, code: codeFromAddress, format = "fantasy", onBack, onCode }) {
+export function VersusScreen({ userId, username, code: codeFromAddress, format = "fantasy", onBack, onCode, onShare, siteUrl }) {
   const [match, setMatch] = useState(null);
   const [code, setCode] = useState(codeFromAddress || null);
   const [busy, setBusy] = useState(false);
@@ -329,7 +329,10 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           <RosterList roster={state.roster[mine]} side={mine} label={name(match, mine)} format={match.format} />
           <RosterList roster={state.roster[theirs]} side={theirs} label={name(match, theirs)} format={match.format} />
         </div>
-        <button className="btn" onClick={onBack}>Back</button>
+        <div className="vs-powers">
+          <button className="btn" onClick={() => onShare?.(versusShareText(match, result, mine, siteUrl))}>Share</button>
+          <button className="btn" onClick={onBack}>Back</button>
+        </div>
       </section>
     );
   }
@@ -386,6 +389,27 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
       </div>
     </section>
   );
+}
+
+// The share card for a match (VERSUS.md 10). Like the season card it names no players - a match that is still
+// being drafted must not be spoiled by the loser posting the board - and like it the link goes last, where a
+// chat app turns it into a preview. The link is an invitation, not a replay: /vs/<code> is that match, which is
+// over, so it points at the game rather than at the draft.
+export function versusShareText(match, result, side, siteUrl) {
+  if (!result) return "";
+  const mine = side === "guest" ? "guest" : "host";
+  const theirs = mine === "host" ? "guest" : "host";
+  const them = name(match, theirs);
+  const head = result.winner === null ? "Tied" : result.winner === mine ? `Beat ${them}` : `Lost to ${them}`;
+  const lines = [
+    `Gridspin 1v1 ${result.winner === null ? "🤝" : result.winner === mine ? "🏆" : "💀"} ${head} ${result[mine].points}–${result[theirs].points}`,
+    `${result[mine].score} to ${result[theirs].score} on the boards`,
+  ];
+  // The two things a 1v1 has that a season doesn't, and the only two worth a line.
+  if (result[mine].kicker) lines.push(`My kicker ${signed(result[mine].kicker)}`);
+  if (result[mine].against) lines.push(`Their defense ${signed(-result[mine].against)}`);
+  if (siteUrl) lines.push(`Play me: ${siteUrl}`);
+  return lines.join("\n");
 }
 
 const name = (match, side) => (side === "host" ? match.hostName || "Host" : side === "guest" ? match.guestName || "Opponent" : "");

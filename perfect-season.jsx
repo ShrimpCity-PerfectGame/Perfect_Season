@@ -3450,10 +3450,11 @@ export default function PerfectSeason() {
     return false;
   }
 
-  async function doShare() {
-    // result.rank is this season's rank from the runs log ({rank,total}), or null/undefined when
-    // there isn't one yet. (This read an undefined `place` after 1.7.0, so Share threw and did nothing.)
-    const text = shareText(result, mode, result.rank || null);
+  // Handing a card to the phone's share sheet, or to the clipboard when there isn't one. The card itself is
+  // built by whoever is sharing - a season (shareText) or a match (versusShareText) - since this half is the
+  // same either way, and the one place that knows an abandoned share sheet must say nothing at all.
+  async function shareOut(text) {
+    if (!text) return;
     try {
       if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
         await navigator.share({ text });
@@ -3467,6 +3468,11 @@ export default function PerfectSeason() {
     } catch (e) {
       setShare({ state: "manual", text }); // clipboard blocked: show the text to copy by hand
     }
+  }
+  async function doShare() {
+    // result.rank is this season's rank from the runs log ({rank,total}), or null/undefined when
+    // there isn't one yet. (This read an undefined `place` after 1.7.0, so Share threw and did nothing.)
+    await shareOut(shareText(result, mode, result.rank || null));
   }
 
   // ---------- Derived ----------
@@ -4191,6 +4197,7 @@ export default function PerfectSeason() {
           <VersusScreen
             key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
             format={format} onBack={leaveVersus} onCode={setVersusCode}
+            onShare={shareOut} siteUrl={APP_SITE_URL}
           />
         )}
 

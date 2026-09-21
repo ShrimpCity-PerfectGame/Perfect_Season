@@ -4,7 +4,7 @@
 // This is the layer test-versus-rules.mjs doesn't cover - not the rules themselves but everything around them:
 // create_match and join_match, whose session is whose, the picks landing in the table, and the records moving
 // once the last pick lands. The rules are the same `decideMove` both this mock and the real Edge Function call.
-import { assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { assert, runTest, makeMockAuth, setupDom, loadModule } from "./helpers.mjs";
 import {
   replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS,
 } from "../versus-logic.mjs";
@@ -175,6 +175,35 @@ await runTest("powerups spent through the client land in the match", async () =>
     for (const slot of VERSUS_SLOTS) assert(end.roster[side][slot], `${side} still filled ${slot}`);
   }
   assert(m.status === "done" && m.result, "and the match still finished with a result");
+});
+
+await runTest("the share card says who won and never names a player", async () => {
+  // The card lives in the screen's own file, so it is bundled the way the app bundles it rather than
+  // imported raw - node has no idea what a .jsx is.
+  setupDom();
+  const { versusShareText } = await loadModule("versus.jsx");
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+  const end = await playOut(sb, as, A, B, code);
+  const m = await call(sb, "match_state", { p_code: code });
+  const card = versusShareText(m, m.result, "host", "https://gridspin.test");
+
+  const firstLine = (t) => t.split("\n")[0];
+  assert(card.startsWith("Gridspin 1v1"), `it says what it is: ${firstLine(card)}`);
+  assert(card.includes(`${m.result.host.points}–${m.result.guest.points}`), `with the final on it: ${card}`);
+  assert(card.includes("https://gridspin.test"), "and a link, last");
+  // Never the players - the same rule the season card follows, for the same reason.
+  const names = [...VERSUS_SLOTS.map((s) => end.roster.host[s]), ...VERSUS_SLOTS.map((s) => end.roster.guest[s])]
+    .filter((o) => o.kind === "player").map((o) => o.name);
+  const leaked = names.filter((n) => card.includes(n));
+  assert(leaked.length === 0, `no player is named on it, found ${JSON.stringify(leaked)}`);
+  // The opponent's own card is the same match from the other side.
+  const theirs = versusShareText(m, m.result, "guest", "https://gridspin.test");
+  assert(theirs !== card && theirs.includes(`${m.result.guest.points}–${m.result.host.points}`),
+    `and reads from their side: ${firstLine(theirs)}`);
 });
 
 console.log("test-versus-flow.mjs done");

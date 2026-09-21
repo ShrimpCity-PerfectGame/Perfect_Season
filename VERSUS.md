@@ -379,7 +379,9 @@ server re-spins that board itself, charged to no one.
 
 ## 10. Records
 
-`profiles.pvp_wins` and `pvp_losses` (integers, default 0), written only by the Edge Function. The Leaderboard
+`profiles.pvp_wins` and `pvp_losses` (integers, default 0), written only by the Edge Function, through
+`record_versus` — which moves the win and the loss together or not at all, because a win that didn't record the
+loss would be a board nobody could explain. The Leaderboard
 screen gains a **1v1** board ranking by wins, and a profile shows the pair as a line of its own. The share text
 gets a versus variant: the two scores, the result, and a link to play the winner.
 
@@ -425,5 +427,5 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 4. The Edge Function and its rule tests. ✅ (all four powerups included)
 5. The mock, so the tests can drive a match without a network. ✅ (`tests/mock-versus.mjs`)
 6. The screens, then the flow test. ✅ (`versus.jsx`, `storage-versus.js`, the Modes tile, `/vs/<code>`)
-7. Records, the board, the share card.
+7. Records, the board, the share card. ✅
 8. Staging, then production, as a version.
