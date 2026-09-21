@@ -29,9 +29,9 @@ create table if not exists public.matches (
   -- When the player on the clock loses the pick. The Edge Function reads it; a client that says time is up is
   -- checked against it, never believed.
   turn_deadline timestamptz,
-  -- Every re-spin spent: { boardIdx, kind, by, key } (VERSUS.md 7). A re-spin belongs to whoever picks first on
-  -- a board and only before either pick lands, so the two players always draft the same board; this list is
-  -- what lets a client that reconnects rebuild the same eight.
+  -- Every re-spin spent: { pickNo, kind, by, key } (VERSUS.md 7). Keyed by the pick it changes the board for -
+  -- an odd pickNo is the leader's and moves the board for both players, an even one is the follower's and moves
+  -- only their own. This list is what lets a client that reconnects rebuild the boards as they were played.
   respins       jsonb not null default '[]'::jsonb,
   -- Both sides' scores, the parts they were built from, and the football final (VERSUS.md 6) - written once, by
   -- the server, when the sixteenth pick lands. The higher score always wins; nothing here is a coin toss.

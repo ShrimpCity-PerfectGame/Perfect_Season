@@ -21,8 +21,8 @@ prefixed class names, and nothing reaches production without going through stagi
   and its kicker in each year. Any board can fill any open slot, so a defense can go fifth and a kicker first -
   the order is the player's to choose. A board that cannot serve *both* players is skipped before it is dealt
   (section 8), so no draft order can strand either of them.
-- Each player carries **two re-spins**, the same team and era ones single player has, usable only on a board they
-  pick first on (section 7).
+- Each player carries **two re-spins**, the same team and era ones single player has, spent on their own turn.
+  The leader's re-spin deals a board to *both* of them; the follower's is a board of their own (section 7).
 - Each pick has a **clock**. When it runs out the pick is made for you: the most valuable available option that
   fits an open slot. A dropped connection loses you a pick, not the match.
 - When both rosters are full the server grades them, and **the higher score wins — always**. There is no
@@ -62,7 +62,7 @@ browsers cannot each hold the truth. So a match is the first thing in Gridspin w
 | `format` | text not null default `'fantasy'` | `fantasy` \| `standard`, the host's choice at creation |
 | `status` | text not null | `open` \| `drafting` \| `done` \| `abandoned` |
 | `turn_deadline` | timestamptz null | when the player on the clock loses the pick |
-| `respins` | jsonb not null default `[]` | every re-spin spent, `{ boardIdx, kind, by, key }` (section 7) — enough for a reconnecting client to rebuild the same eight boards |
+| `respins` | jsonb not null default `[]` | every re-spin spent, `{ pickNo, kind, by, key }` (section 7) — enough for a reconnecting client to rebuild the same boards |
 | `result` | jsonb null | both sides' scores and the three parts each was built from (section 6), written once, by the server |
 | `winner_id` | uuid null | set with `result`; null for a draw |
 | `created_at` / `ended_at` | timestamptz | |
@@ -200,7 +200,9 @@ it to a dice roll would make those decisions pointless. An exact tie is shown as
 `["QB", "RB", "WR", "TE"]`, `SLOTS` stays six, and no existing score, board or leaderboard moves. A
 defense/kicker position in the main game would be a different project with its own contract.
 
-## 7. Re-spins
+## 7. Powerups
+
+### Re-spins
 
 Single player gives a draft **two** re-spins (`REROLL_BUDGET`, one of each kind): *team* keeps the era and deals
 another team, *era* keeps the team and deals another era. `rerollCandidate` in `game-logic.mjs` picks the
@@ -209,38 +211,64 @@ from `mulberry32(hashStr(seed + "-reroll-" + kind + "-" + seqIdx))`, so two scre
 the same replacement, and the server can check a re-spin without trusting either of them. Nothing in
 `game-logic.mjs` has to change for 1v1 to use it; 1v1 passes its own arguments and keeps its own budget.
 
-What does not carry over is *when*. A 1v1 board is drafted twice, and the whole mode rests on the second pick
-coming from **the same board, minus what was just taken**. A board that changed in between would break that, and
-would hand the player who re-spun a board chosen after seeing the other's pick.
+**Both players get both re-spins, spent on their own turn, before their own pick.** What the re-spin does depends
+on which of them spends it, and the difference is the whole character of it:
 
-**So a re-spin belongs to whoever picks first on that board, and only before either pick lands.** The snake makes
-this fair by itself: each player picks first on exactly four of the eight boards, so each has four chances to
-spend two re-spins. It is also a real decision rather than a free reroll, because the new board is dealt to
-**both** of you — spinning away from a board that is wrong for your open slots can easily deal one that is right
-for theirs.
+| who | when | what they get |
+|---|---|---|
+| the **leader** | before anyone has picked off the board | a board for **both of them** — the follower drafts it too |
+| the **follower** | after the leader has already taken something | a board of **their own**, which they pick from alone |
 
-The rules, all enforced by the Edge Function (`POST { code, boardIdx, respin: "team" | "era" }`):
+So a leader's re-spin is a decision with a cost: spinning away from a board that is wrong for your open slots
+deals one that might be right for the other player's, and you have handed it to them. A follower's is private,
+which is a fair trade for picking second — they walk away from a board that has just been picked over rather
+than take its leftovers. Neither can see the other's pick before spending it, because a re-spin always comes
+before its own pick.
 
-1. it is your turn **and** you are the first picker on this board (`pick_no` is odd for the host on an even
-   board, and so on) → otherwise `not_your_respin`;
-2. no pick has landed on this board yet → `board_started`;
-3. you have that kind left → `no_respins_left`;
-4. `rerollCandidate` returns a board → otherwise the spin is refused, exactly as a no-op re-spin is in single
-   player.
+The rules, all enforced by the Edge Function (`POST { code, respin: "team" | "era" }`):
+
+1. it is your turn, and your pick hasn't landed → otherwise `not_your_turn`;
+2. you have that kind left → `no_respins_left`;
+3. `rerollCandidate` returns a board → otherwise the spin is refused, exactly as a no-op re-spin is in single
+   player, and **costs nothing**;
+4. if you are the leader, that board must also serve both (section 8) — `rerollCandidate` can only ask about one
+   roster, so this is checked separately, and a candidate that fails is refused and costs nothing too.
 
 `shown` must be **the whole match sequence**, not just the boards already reached — all eight plus anything
 already spun in. That is CLAUDE.md's reroll-pool invariant, and it exists because a replacement drawn from a
-board still waiting later in the sequence would simply turn up again, with nothing to remove the original.
+board still waiting later in the sequence would simply turn up again, with nothing to remove the original. The
+candidate is salted by the **pick number** rather than the board, so two re-spins on one board can never land on
+the same replacement.
 
-The new board replaces the current one for both players, the clock restarts, and the match records it. Re-spins
-live in `matches.respins` (jsonb, default `[]`): `{ boardIdx, kind, by, key }` per entry, appended by the
-function and returned by `match_state`, which is all a reconnecting client needs to rebuild the same eight
-boards. `MATCH_RESPINS = { team: 1, era: 1 }` lives in `versus-logic.mjs` — 1v1's own number, so single player's
-`REROLL_BUDGET` is never touched.
+Re-spins live in `matches.respins` (jsonb, default `[]`): `{ pickNo, kind, by, key }` per entry, appended by the
+function and returned by `match_state`. Keyed by the pick rather than the board because that is exactly what a
+re-spin changes the board for — an odd `pickNo` is a leader's and moves both, an even one is a follower's and
+moves only theirs. `replayMatch` rebuilds every board from them, so each of the eight is really a pair:
+`{ key, followKey }`, the same board twice unless the follower walked away. `MATCH_RESPINS = { team: 1, era: 1 }`
+lives in `versus-logic.mjs` — 1v1's own number, so single player's `REROLL_BUDGET` is never touched.
 
-**Not in v1:** any other powerup. Re-spins are already in the game and need no new rule explained; a freeze, a
-steal or an extra pick would each add one, and each would need its own answer to "what does it do to the shared
-board". They belong in their own pass, if they are wanted at all.
+### Steal, and Steal the pick — designed, not built
+
+Two powerups that exist only here, because only 1v1 has someone to take them from. Both are **once per match**,
+both are spent on your own turn, and both are recorded beside the re-spins.
+
+**Steal the pick.** Spent by the player who would pick *second* on a board, before the board's first pick lands:
+the order on that board is swapped, and you pick first. Nothing else changes — the board is still dealt to both,
+still has to serve both, and the snake resumes as normal on the next board. It is the simplest of the three to
+reason about, because it moves nothing but who goes first.
+
+**Steal.** Spent as your pick for a board: instead of taking an option from it, take a **player already on the
+other roster** into the same slot on yours. Their slot is then refilled from the board in play by the same
+arithmetic the clock uses (`autoPick`), so both rosters stay full and the count stays at sixteen picks over eight
+boards — which is what makes this work at all. A steal that emptied a slot without refilling it would leave the
+victim needing more picks than there are boards left, and the draft would have to grow a ninth board for one
+player.
+
+So the cost of being stolen from is real but bounded: you lose the player, and you get the best thing still on
+the board instead. A defense or a kicker can be stolen like anything else — they are roster slots like the rest.
+
+Neither is built yet, and the order of work puts them after the screens: the draft has to work before it grows
+powerups, and both need a place on screen to be spent from.
 
 ## 8. A board has to serve both players
 
@@ -315,8 +343,9 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 - `tests/test-versus-boards.mjs` — section 8, which is where a 1v1 draft would go wrong quietly: the one-QB
   board is skipped when both players still need a quarterback and dealt when only one does; the second picker
   always has a legal option, over every ordering of every slot; and a match played out sixteen picks deep from
-  many seeds always ends with two full, legal rosters. Re-spins too: only the first picker on a board, only
-  before a pick lands, never a board already in the sequence.
+  many seeds always ends with two full, legal rosters. Re-spins too: a leader's moves the board for both, a
+  follower's moves only their own, neither lands on a board still waiting in the sequence, and two on one board
+  can't land on each other.
 - `tests/test-versus-flow.mjs` — the whole thing in jsdom on the mock: create, join, sixteen picks alternating
   correctly, a defense taken fifth and a kicker first, a timeout auto-picking, the result and the records.
 - `tests/test-a11y.mjs` gains the new screens.
@@ -330,5 +359,6 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 4. The Edge Function and its rule tests.
 5. The mock (so the jsdom tests can drive a match without a network).
 6. The screens, then the flow test.
-7. Records, the board, the share card.
-8. Staging, then production, as a version.
+7. Steal and Steal the pick (section 7), once there is a draft screen to spend them from.
+8. Records, the board, the share card.
+9. Staging, then production, as a version.

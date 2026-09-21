@@ -13,6 +13,7 @@ import {
   initVersusData, VERSUS_SLOTS, MATCH_BOARDS, MATCH_PICKS, SLOT_WORTH, AVERAGE_RATING,
   optionsOn, unitsOn, optionId, optionFits, optionValue, turnAt, firstPickerOn,
   boardServesBoth, replayMatch, autoPick, openSlots, matchResult, footballFinal, offenseScore,
+  respinBoard, respinsLeft, MATCH_RESPINS, firstPickerOn as leadOn,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -118,12 +119,12 @@ await runTest("a one-quarterback board can't serve two players who both need one
 
 // Plays a whole match. `choose` picks for a side; the point is to drive orderings a real player might use,
 // including the ones that look like they should strand somebody.
-function playMatch(code, choose, format = "fantasy") {
+function playMatch(code, choose, format = "fantasy", respins = []) {
   const picks = [];
   for (let pickNo = 1; pickNo <= MATCH_PICKS; pickNo++) {
-    const state = replayMatch({ code, picks });
+    const state = replayMatch({ code, picks, respins });
     assert(!state.done, `pick ${pickNo}: the match is still going`);
-    const key = state.boards[state.turn.boardIdx];
+    const key = state.boardKey;
     assert(key, `pick ${pickNo}: a board was dealt`);
     const me = state.roster[state.turn.side];
     const open = openSlots(me);
@@ -137,7 +138,7 @@ function playMatch(code, choose, format = "fantasy") {
       season: option.season,
     });
   }
-  return { picks, state: replayMatch({ code, picks }) };
+  return { picks, respins, state: replayMatch({ code, picks, respins }) };
 }
 
 const bestValue = (available, open, _state, format) => {
@@ -187,7 +188,8 @@ await runTest("both players draft the same board, and the follower picks from wh
   const { picks, state } = playMatch("SHARED1", bestValue);
   for (let boardIdx = 0; boardIdx < MATCH_BOARDS; boardIdx++) {
     const [a, b] = [picks[boardIdx * 2], picks[boardIdx * 2 + 1]];
-    const key = state.boards[boardIdx];
+    const { key, followKey } = state.boards[boardIdx];
+    assert(key === followKey, `board ${boardIdx}: nobody re-spun, so both drafted the same board`);
     const ids = new Set(optionsOn(key).map(optionId));
     for (const p of [a, b]) {
       const id = p.kind === "player" ? `player|${p.playerId}|${p.season}` : `${p.kind}|${p.team}|${p.season}`;
@@ -202,7 +204,7 @@ await runTest("the clock always has something to take", async () => {
     const picks = [];
     for (let pickNo = 1; pickNo <= MATCH_PICKS; pickNo++) {
       const state = replayMatch({ code, picks });
-      const key = state.boards[state.turn.boardIdx];
+      const key = state.boardKey;
       const taken = autoPick(key, state.taken, state.roster[state.turn.side], "fantasy");
       assert(taken, `${code} pick ${pickNo}: the clock found an option`);
       assert(optionFits(taken.option, taken.slot), `${code} pick ${pickNo}: and it fits the slot it chose`);
@@ -217,6 +219,56 @@ await runTest("the clock always has something to take", async () => {
     assert(end.done && VERSUS_SLOTS.every((s) => end.roster.host[s] && end.roster.guest[s]),
       `${code}: a match of nothing but timeouts still ends with two full rosters`);
   }
+});
+
+await runTest("a leader's re-spin is a board they hand over too; a follower's is their own", async () => {
+  const code = "RESPIN1";
+  // The leader re-spins before anyone has picked, so the follower drafts the new board with them.
+  const opening = replayMatch({ code, picks: [] });
+  const dealt = opening.boardKey;
+  const lead = leadOn(0), follow = lead === "host" ? "guest" : "host";
+  const swap = respinBoard({
+    code, kind: "team", pickNo: 1, key: dealt, seq: opening.seq, used: opening.used,
+    taken: opening.taken, roster: opening.roster[lead], otherRoster: opening.roster[follow],
+  });
+  assert(swap && swap !== dealt, `a re-spin found another board, got ${swap} against ${dealt}`);
+  assert(swap.split("|")[1] === dealt.split("|")[1], "a team re-spin keeps the era");
+
+  const shared = [{ pickNo: 1, kind: "team", by: lead, key: swap }];
+  const after = replayMatch({ code, picks: [], respins: shared });
+  assert(after.boardKey === swap, "the leader now picks from the board they spun");
+  const lead1 = autoPick(swap, after.taken, after.roster[lead], "fantasy");
+  const picks = [{
+    pickNo: 1, kind: lead1.option.kind, slot: lead1.slot,
+    playerId: lead1.option.kind === "player" ? lead1.option.id : null,
+    team: lead1.option.kind === "player" ? null : lead1.option.team, season: lead1.option.season,
+  }];
+  const follower = replayMatch({ code, picks, respins: shared });
+  assert(follower.boardKey === swap, "and so does the follower - the board was handed to them as well");
+  assert(follower.boards[0].key === swap && follower.boards[0].followKey === swap, "one board, both players");
+
+  // Now the follower re-spins too. The leader has already taken something off that board, so this one is theirs.
+  const mine = respinBoard({
+    code, kind: "era", pickNo: 2, key: swap, seq: follower.seq, used: follower.used,
+    taken: follower.taken, roster: follower.roster[follow], otherRoster: follower.roster[lead],
+  });
+  assert(mine && mine !== swap, `the follower found a board of their own, got ${mine}`);
+  assert(mine.split("|")[0] === swap.split("|")[0], "an era re-spin keeps the team");
+  const both = [...shared, { pickNo: 2, kind: "era", by: follow, key: mine }];
+  const split = replayMatch({ code, picks, respins: both });
+  assert(split.boardKey === mine, "the follower drafts the board they spun");
+  assert(split.boards[0].key === swap && split.boards[0].followKey === mine,
+    `and only theirs changed: ${JSON.stringify(split.boards[0])}`);
+  assert(split.roster[lead][picks[0].slot], "the leader keeps the pick they already made");
+
+  // A re-spin never deals a board the match is going to reach anyway (CLAUDE.md's reroll-pool invariant).
+  assert(!opening.seq.slice(1).includes(swap) || opening.used.has(swap), "the new board isn't one still waiting in the sequence");
+  assert(swap !== mine, "the two players' re-spins on one board can't land on the same one");
+
+  const left = respinsLeft(both, lead);
+  assert(left.team === MATCH_RESPINS.team - 1 && left.era === MATCH_RESPINS.era, `the leader spent one team re-spin, got ${JSON.stringify(left)}`);
+  assert(JSON.stringify(respinsLeft(both, follow)) === JSON.stringify({ team: MATCH_RESPINS.team, era: MATCH_RESPINS.era - 1 }),
+    "and the follower one era re-spin");
 });
 
 await runTest("the result is the raw numbers, and the same every time", async () => {

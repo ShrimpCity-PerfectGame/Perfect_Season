@@ -152,8 +152,10 @@ export function replayMatch({ code, picks = [], respins = [] }) {
   const roster = { host: emptyRoster(), guest: emptyRoster() };
   const taken = new Set();
   const used = new Set();
-  const boards = [];
-  const spins = new Map(respins.map((r) => [`${r.boardIdx}|${r.kind}`, r]));
+  const boards = []; // one { key, followKey } per board: the two are the same unless the follower re-spun
+  const spins = new Map(respins.map((r) => [`${r.pickNo}|${r.kind}`, r]));
+  const pending = (pickNo, boardIdx, key) =>
+    ({ seq, boards, roster, taken, used, boardIdx, pickNo, boardKey: key, turn: turnAt(pickNo), done: false });
 
   for (let boardIdx = 0; boardIdx < MATCH_BOARDS; boardIdx++) {
     const lead = firstPickerOn(boardIdx);
@@ -161,28 +163,45 @@ export function replayMatch({ code, picks = [], respins = [] }) {
     let key = nextBoard(code, seq, used, taken, openSlots(roster[lead]), openSlots(roster[follow]));
     if (!key) break;
     used.add(key);
-    // A re-spin replaces the board for both players, before either has picked (VERSUS.md 7). Replayed here in
-    // the same order it happened, so the boards a reconnecting client rebuilds are the ones that were played.
+    // A re-spin is attached to the pick it changes the board for. The leader's lands before either has picked,
+    // so it replaces the board for BOTH of them - the follower still drafts the same board the leader did.
     for (const kind of ["team", "era"]) {
-      const spin = spins.get(`${boardIdx}|${kind}`);
+      const spin = spins.get(`${boardIdx * 2 + 1}|${kind}`);
       if (!spin) continue;
       used.add(spin.key);
       key = spin.key;
     }
-    boards.push(key);
+    const board = { key, followKey: key };
+    boards.push(board);
 
-    for (const nth of [0, 1]) {
-      const pickNo = boardIdx * 2 + nth + 1;
-      const pick = picks.find((p) => p.pickNo === pickNo);
-      if (!pick) return { seq, boards, roster, taken, used, boardIdx, pickNo, turn: turnAt(pickNo), done: false };
-      const option = optionsOn(key).find((o) => optionId(o) === pickId(pick));
-      if (option) {
-        roster[nth === 0 ? lead : follow][pick.slot] = option;
-        taken.add(optionId(option));
-      }
+    const leadPick = picks.find((p) => p.pickNo === boardIdx * 2 + 1);
+    if (!leadPick) return pending(boardIdx * 2 + 1, boardIdx, key);
+    take(leadPick, key, roster[lead], taken);
+
+    // The follower's re-spin lands after the leader has already taken something off this board, so it can only
+    // be their own: they walk away to a board of their own and pick there (VERSUS.md 7). That asymmetry is the
+    // point of it - the leader's re-spin is a board they hand the other player too.
+    for (const kind of ["team", "era"]) {
+      const spin = spins.get(`${boardIdx * 2 + 2}|${kind}`);
+      if (!spin) continue;
+      used.add(spin.key);
+      board.followKey = spin.key;
     }
+    const followPick = picks.find((p) => p.pickNo === boardIdx * 2 + 2);
+    if (!followPick) return pending(boardIdx * 2 + 2, boardIdx, board.followKey);
+    take(followPick, board.followKey, roster[follow], taken);
   }
-  return { seq, boards, roster, taken, used, boardIdx: MATCH_BOARDS, pickNo: MATCH_PICKS + 1, turn: null, done: true };
+  return {
+    seq, boards, roster, taken, used,
+    boardIdx: MATCH_BOARDS, pickNo: MATCH_PICKS + 1, boardKey: null, turn: null, done: true,
+  };
+}
+
+function take(pick, key, roster, taken) {
+  const option = optionsOn(key).find((o) => optionId(o) === pickId(pick));
+  if (!option) return;
+  roster[pick.slot] = option;
+  taken.add(optionId(option));
 }
 
 // A stored pick's identity, in the same spelling optionId gives an option.
@@ -269,21 +288,31 @@ export function matchResult({ code, format, host, guest }) {
 
 // ---------- Re-spins ----------
 
-// A re-spin belongs to whoever picks first on a board, and only before either pick has landed (VERSUS.md 7).
+// Either player may re-spin, on their own turn, before their own pick (VERSUS.md 7). What differs is who ends up
+// on the new board:
+//
+//   the leader's re-spin  lands before anyone has picked, so it is the board BOTH of them draft - and it has to
+//                         serve both (section 8), which rerollCandidate can't tell on its own: it only knows how
+//                         to ask about one roster;
+//   the follower's        lands after the leader has already taken something off this board, so it is theirs
+//                         alone. It only has to serve them, which is exactly what rerollCandidate checks.
+//
 // `shown` is the WHOLE sequence, not just what has been reached: a replacement drawn from a board still waiting
 // later would simply turn up again, since nothing removes the original (CLAUDE.md's reroll-pool invariant).
-// Refused - costing nothing - when there is no candidate, exactly as a no-op re-spin is in single player, and
-// also when the candidate couldn't serve both players: rerollCandidate only knows how to ask about one roster
-// (boardHasOption), and section 8's rule is absolute. A refused re-spin is not spent.
-export function respinBoard({ code, kind, boardIdx, key, seq, used, taken, leadRoster, followRoster }) {
+// Refused - costing nothing, as a no-op re-spin does in single player - when there is no candidate at all, or
+// when a leader's candidate couldn't serve both. A refused re-spin is not spent.
+export function respinBoard({ code, kind, pickNo, key, seq, used, taken, roster, otherRoster }) {
+  const { first } = turnAt(pickNo);
   const shown = new Set([...seq, ...used]);
   const candidate = rerollCandidate({
-    seed: code, kind: kind === "era" ? "years" : "team", seqIdx: boardIdx,
-    spinTeam: key.split("|")[0], spinW: Number(key.split("|")[1]),
-    shown, drafted: taken, open: openSlots(leadRoster),
+    seed: code, kind: kind === "era" ? "years" : "team",
+    // Salted by the pick rather than the board, so two re-spins on the same board can't land on each other.
+    seqIdx: pickNo, spinTeam: key.split("|")[0], spinW: Number(key.split("|")[1]),
+    shown, drafted: taken, open: openSlots(roster),
   });
   if (!candidate) return null;
-  return boardServesBoth(candidate, taken, openSlots(leadRoster), openSlots(followRoster)) ? candidate : null;
+  if (!first) return candidate; // theirs alone
+  return boardServesBoth(candidate, taken, openSlots(roster), openSlots(otherRoster)) ? candidate : null;
 }
 
 export function respinsLeft(respins, side) {
