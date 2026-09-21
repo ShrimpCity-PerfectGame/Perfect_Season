@@ -24,6 +24,7 @@ import {
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
+  POS_NAME, cityRange, statCells,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -46,7 +47,7 @@ initVersusData(versusPool);
 // Baked in by build.mjs's esbuild `define` (same mechanism as SUPABASE_URL - see storage.js).
 const IS_STAGING = APP_ENV === "staging";
 
-const POS_NAME = { QB: "Quarterbacks", RB: "Running backs", WR: "Wide receivers", TE: "Tight ends" };
+
 // Stats O/U: the one headline counting stat each position gets quizzed on.
 const SOU_STAT = {
   QB: ["py", "passing yards"],
@@ -124,11 +125,6 @@ const BAP_CATS = ["Physical", "Mental", "Skill"];
 
 const TEAM_CODES = Object.keys(TEAMS);
 
-function cityRange(code, w) {
-  const [a, b] = WINDOWS[w];
-  const c1 = cityFor(code, a), c2 = cityFor(code, b);
-  return c1 === c2 ? c1 : `${c1} & ${c2}`;
-}
 
 // Every player id that actually appears on a board, for Stats O/U's random pick - the id->name
 // lookup in data/players.json may include ids that never qualified for any board, so sampling
@@ -194,31 +190,6 @@ const prettyDate = (key) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "long", day: "numeric" });
 };
-
-// Every player at a position shows the same stat columns, in the same order.
-// Same shape at every position: main-role yards, TDs, per-attempt average, then volume,
-// then the secondary role, then fumbles.
-function statCells(p) {
-  const n = (v) => v.toLocaleString();
-  const ypc = p.car ? (p.ry / p.car).toFixed(1) : "–";
-  const ypr = p.rec ? (p.rcy / p.rec).toFixed(1) : "–";
-  if (p.pos === "QB") return [
-    [n(p.py), "Pass yds"], [p.ptd, "Pass TD"], [p.int, "INT"],
-    [p.att ? ((100 * p.cmp) / p.att).toFixed(1) + "%" : "–", "Comp %"], [p.att ? passerRating(p).toFixed(1) : "–", "QB rating"],
-    [n(p.ry), "Rush yds"], [p.rtd, "Rush TD"],
-  ];
-  if (p.pos === "TE") return [
-    [n(p.rcy), "Rec yds"], [p.rctd, "Rec TD"], [ypr, "Yds/rec"], [p.rec, "Rec"], [p.fl, "Fum lost"],
-  ];
-  if (p.pos === "WR") return [
-    [n(p.rcy), "Rec yds"], [p.rctd, "Rec TD"], [ypr, "Yds/rec"], [p.rec, "Rec"],
-    [n(p.ry), "Rush yds"], [p.rtd, "Rush TD"], [p.fl, "Fum lost"],
-  ];
-  return [
-    [n(p.ry), "Rush yds"], [p.rtd, "Rush TD"], [ypc, "Yds/carry"], [p.rec, "Rec"],
-    [n(p.rcy), "Rec yds"], [p.rctd, "Rec TD"], [p.fl, "Fum lost"],
-  ];
-}
 
 const bapOverallScore = (filled) => {
   const scores = Object.values(filled).map((f) => f.score);
@@ -3487,7 +3458,9 @@ export default function PerfectSeason() {
   // An account made for a visitor who finished a season (v1.17.0): on the boards like anyone else, but with
   // no profile screen, no shop and never the daily, until it keeps its seasons under a name of its own.
   const isGuest = !!stats?.guest;
-  const scope = view === "play" ? "dark" : view === "board" ? "night" : "light";
+  // 1v1 is a draft, so it wears the draft's scope: the stadium-dark one the play screen uses (Design system,
+  // CLAUDE.md). It is the single biggest reason the two screens read as the same game rather than two.
+  const scope = view === "play" || view === "versus" ? "dark" : view === "board" ? "night" : "light";
 
   // The colour a browser paints around the page: the address bar on a phone, and the status bar when the site
   // has been installed to a home screen. Following the screen means an installed Gridspin is cream on Modes and

@@ -8,6 +8,7 @@ import {
   assert, runTest, waitForCrypto, makeMockAuth,
 } from "./helpers.mjs";
 import { replayMatch, optionId, VERSUS_SLOTS } from "../versus-logic.mjs";
+import { TEAMS, WINDOWS } from "../game-logic.mjs";
 
 setupDom();
 // This screen is driven by a Realtime subscription: a change to the match arrives, the screen re-reads, and
@@ -121,37 +122,47 @@ await runTest("the opponent's screen shows the same board, and a pick lands on i
 
   assert(versus()?.dataset.view === "draft", `the draft is on screen, got ${versus()?.dataset.view}`);
   const state = replayMatch({ code, picks: [], respins: [], dips: [], swaps: [] });
-  assert(container.querySelector(".vs-board")?.dataset.board === state.boardKey,
-    `showing the board the server dealt (${state.boardKey}), got ${container.querySelector(".vs-board")?.dataset.board}`);
+  // It draws the single-player draft's own reel, so the team and era come from the board the server dealt.
+  const [team, w] = state.boardKey.split("|");
+  assert(container.querySelector(".reel .team")?.textContent === TEAMS[team][0],
+    `the reel names the team the server dealt (${TEAMS[team][0]}), got ${container.querySelector(".reel .team")?.textContent}`);
+  assert(container.querySelector(".reel .led")?.textContent === `${WINDOWS[Number(w)][0]}–${WINDOWS[Number(w)][1]}`,
+    `and its era: ${container.querySelector(".reel .led")?.textContent}`);
 
   // Both rosters are on screen, empty, and the slots are named in letters rather than by colour alone.
-  const slots = [...container.querySelectorAll('.vs-roster[data-side="host"] li')].map((li) => li.dataset.slot);
+  const slots = [...container.querySelectorAll(".vs-rosters .roster")[0].querySelectorAll(".slot")].map((el) => el.dataset.slot);
   assert(JSON.stringify(slots) === JSON.stringify(VERSUS_SLOTS), `eight slots in order, got ${slots.join(",")}`);
-  assert([...container.querySelectorAll('.vs-roster[data-side="host"] li')].every((li) => li.dataset.filled === "0"), "nothing filled yet");
+  assert(slots.every((_, i) => [...container.querySelectorAll(".vs-rosters .roster")[0].querySelectorAll(".slot")][i].dataset.filled === "0"),
+    "nothing filled yet");
 
   // beta is the host, and the host leads board one - so this screen is the one on the clock.
   assert(state.turn.side === "host", "the host leads the first board");
-  const options = [...container.querySelectorAll(".vs-opt")];
-  assert(options.length > 10, `the board's options are on screen, got ${options.length}`);
-  const first = options.find((b) => !b.disabled);
-  assert(first, "an option is takeable");
-  const took = first.dataset.opt;
-  await click(first);
+  const cards = [...container.querySelectorAll(".sec .card")];
+  assert(cards.length > 10, `the board's cards are on screen, got ${cards.length}`);
+  // The board shows a defense and a kicker beside the players (VERSUS.md 6) - and no grades on any of them,
+  // because a grade would hand the pick over.
+  assert(cards.some((c) => c.dataset.opt.startsWith("dst|")) && cards.some((c) => c.dataset.opt.startsWith("k|")),
+    "a defense and a kicker are on the board with the players");
+  assert(!container.querySelector(".sec .card .vs-grade"), "and nothing on a card grades it");
+
+  // Picking is two steps, as it is in the single-player draft: choose, then lock in.
+  const pick = cards.find((c) => !c.classList.contains("off"));
+  const took = pick.dataset.opt;
+  await click(pick.querySelector(".hit"));
+  await flush();
+  const lock = [...pick.querySelectorAll(".drafts .btn")].find((b) => b.textContent.includes("Lock in"));
+  assert(lock, `tapping a card offers Lock in, got ${pick.textContent.slice(0, 80)}`);
+  await click(lock);
   await flush();
   await flush();
+
   const after = auth._versus._replay(code);
   assert(after.taken.has(took), `the pick reached the match: ${took}`);
-  assert(container.querySelector(`.vs-opt[data-opt="${CSS_escape(took)}"]`)?.dataset.taken === "1",
-    "and the board now shows it as taken");
   // And it landed in a slot on the host's side, not the opponent's.
-  const filled = [...container.querySelectorAll('.vs-roster[data-side="host"] li')].filter((li) => li.dataset.filled === "1");
-  assert(filled.length === 1, `one slot filled, got ${filled.length}`);
-  assert([...container.querySelectorAll('.vs-roster[data-side="guest"] li')].every((li) => li.dataset.filled === "0"),
-    "and nothing on the opponent's");
+  const rosters = [...container.querySelectorAll(".vs-rosters .roster")];
+  assert([...rosters[0].querySelectorAll(".slot")].filter((el) => el.dataset.filled === "1").length === 1, "one slot filled");
+  assert([...rosters[1].querySelectorAll(".slot")].every((el) => el.dataset.filled === "0"), "and nothing on the opponent's");
 });
-
-// jsdom has CSS.escape, but the attribute values here are simple enough to quote directly.
-function CSS_escape(v) { return String(v).replace(/"/g, '\\"'); }
 
 await runTest("the follower spends a re-spin, and walks away to a board of their own", async () => {
   // The host has picked, so it is the opponent's turn - and a re-spin spent now is theirs alone (VERSUS.md 7),
@@ -163,7 +174,8 @@ await runTest("the follower spends a re-spin, and walks away to a board of their
   const before = auth._versus._replay(code);
   assert(before.turn.side === "guest", `it is the opponent's turn, got ${before.turn.side}`);
   const shared = before.boards[0].key;
-  assert(container.querySelector(".vs-board").dataset.board === shared, "looking at the board the host picked from");
+  assert(container.querySelector(".reel .team").textContent === TEAMS[shared.split("|")[0]][0],
+    "looking at the board the host picked from");
 
   const respin = findButtonByText(container, "Re-spin era");
   assert(respin && !respin.disabled, "the re-spin is on screen and takeable");
@@ -174,7 +186,7 @@ await runTest("the follower spends a re-spin, and walks away to a board of their
   const after = auth._versus._replay(code);
   assert(after.boards[0].key === shared, "the host keeps the board he picked from");
   assert(after.boards[0].followKey !== shared, `and the opponent has one of their own: ${after.boards[0].followKey}`);
-  assert(container.querySelector(".vs-board").dataset.board === after.boards[0].followKey,
+  assert(container.querySelector(".reel .team").textContent === TEAMS[after.boards[0].followKey.split("|")[0]][0],
     "which is what their screen now shows");
   assert(auth._versus._matches.get(code).respins.length === 1, "the match recorded it");
   assert(before.pickNo === after.pickNo, "and it cost no pick");

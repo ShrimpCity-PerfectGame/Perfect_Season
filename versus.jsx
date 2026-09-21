@@ -12,10 +12,21 @@
 //   format             the scoring format the host opens a lobby in
 //   onBack()           leave 1v1
 //   onCode(code)       the match this screen is now showing, so the app can keep the address in step
-// Test hooks: the root is <section class="versus" data-view="lobby|draft|done" data-code=...>; the draft's
-// board is <div class="vs-board" data-board=...> with each option a <button class="vs-opt" data-opt=...
-// data-slot=...>; the powerups are buttons named "Re-spin team", "Re-spin era", "Double dip", "Steal" and
-// "Steal the pick"; each roster is <ol class="vs-roster" data-side="host|guest"> with an <li data-slot=...>.
+// **It draws the single-player draft's own markup**, not a version of it: the same .reel, .sticky, .sec and
+// .card classes, the same two-step pick ending in "Lock in", and the same dark scoreboard scope (the root takes
+// .dark for this view, set in perfect-season.jsx beside the play screen's). That is deliberate - 1v1 is a draft,
+// it should read as one, and anything that changes about the draft's look should change here for free rather
+// than be copied across. What this file adds is only what 1v1 has and single player doesn't: two rosters, a
+// clock, the powerups and the lobby.
+//
+// And never a grade on the board. The single-player draft shows stats and lets a player judge them; a grade
+// would hand the pick over.
+//
+// Test hooks: the root is <section class="versus" data-view="lobby|draft|done" data-code=...>; every option on
+// the board is a <div class="card" data-opt="player|<id>|<season>" | "dst|TEAM|<season>" | "k|TEAM|<season>">
+// whose .hit selects it and whose .drafts holds the Lock in buttons; the powerups are buttons named "Re-spin
+// team", "Re-spin era", "Double dip", "Steal" and "Steal the pick"; each roster is a .vs-rosters .roster with
+// a .slot per slot, carrying data-slot and data-filled.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMatch, joinMatch, fetchMatch, playMove, subscribeMatch, versusPath } from "./storage.js";
 import {
@@ -23,63 +34,53 @@ import {
   VERSUS_SLOTS, MATCH_BOARDS, respinsLeft, dipsLeft, stealsLeft, pickStealsLeft,
 } from "./versus-logic.mjs";
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
-import { SLOT_LABEL, teamVars, teamLabel, grade, gradeTier } from "./ui-common.jsx";
+import { SLOT_LABEL, teamVars, teamLabel, shortYr, POS_NAME, cityRange, statCells } from "./ui-common.jsx";
 
 // The two slots 1v1 adds, beside the six every other mode already labels. A chip says which slot a pick filled
 // in letters, never by colour alone - the accessibility floor tests/test-a11y.mjs keeps.
 const VS_SLOT_LABEL = { ...SLOT_LABEL, DST: "DEF", K: "K" };
 
 export const VERSUS_CSS = `
-/* ===== 1v1 ===== */
+/* ===== 1v1 =====
+   The draft screen deliberately owns very little: it draws the app's own .reel, .sticky, .sec, .card and
+   .roster, so it inherits the single-player draft's whole look and moves with it. What is here is only what
+   1v1 adds - two rosters side by side, the clock, and the lobby. */
 .versus{display:grid;gap:18px}
-.vs-head{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between}
+.vs-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
 .vs-vs{display:flex;gap:10px;align-items:center;font-weight:800}
 .vs-vs .vs-who{display:flex;flex-direction:column;line-height:1.1}
 .vs-vs .vs-nm{font-size:16px}
-.vs-vs .vs-tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.7}
-.vs-vs .vs-x{font-family:var(--display);font-size:20px;opacity:.5}
-.vs-turn{font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:13px}
+.vs-vs .vs-tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
+.vs-vs .vs-x{font-family:var(--display);font-size:20px;opacity:.6}
+.vs-clockbox{display:flex;gap:10px;align-items:baseline}
+.vs-turn{font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:13px;margin:0}
 .vs-turn.mine{color:var(--accent-ink)}
-.vs-clock{font-variant-numeric:tabular-nums;font-weight:800;font-size:22px;font-family:var(--display)}
-.vs-clock.low{color:var(--bad)}
+.vs-clock{font-variant-numeric:tabular-nums;font-weight:800;font-size:26px;font-family:var(--display);margin:0}
+.vs-clock.low,.vs-tick.low{color:var(--loss)}
+.vs-tick{font-variant-numeric:tabular-nums}
 .vs-link{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.vs-link code{font-size:15px;padding:8px 10px;border:2px solid var(--line);border-radius:10px;background:var(--card);word-break:break-all}
+.vs-link code{font-size:15px;padding:8px 10px;border:2px solid var(--line);border-radius:10px;background:var(--surface);word-break:break-all}
 .vs-wait{display:flex;gap:10px;align-items:center;font-weight:700}
 .vs-dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
-.vs-dot.on{background:var(--accent)}
-.vs-powers{display:flex;flex-wrap:wrap;gap:8px}
-.vs-powers .btn{font-size:13px;padding:8px 10px}
-.vs-boardhd{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;border-top:3px solid var(--ink);padding-top:10px}
-.vs-boardhd h3{font-family:var(--display);font-size:24px;margin:0}
-.vs-boardhd .vs-era{font-weight:700;opacity:.7}
-.vs-group{margin-top:14px}
-.vs-group h4{font-size:12px;letter-spacing:.08em;text-transform:uppercase;margin:0 0 8px;opacity:.75}
-.vs-opts{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
-.vs-opt{display:block;width:100%;text-align:left;border:2px solid var(--line);border-radius:12px;background:var(--card);padding:10px 12px;cursor:pointer}
-.vs-opt:disabled{opacity:.45;cursor:default}
-.vs-opt .vs-on{display:flex;gap:8px;align-items:center;font-weight:800}
-.vs-opt .vs-om{font-size:12px;opacity:.75;margin-top:2px}
-.vs-opt .vs-grade{margin-left:auto;font-family:var(--display);font-size:16px}
-.vs-opt[data-taken="1"]{text-decoration:line-through}
-.vs-rosters{display:grid;gap:14px;grid-template-columns:1fr 1fr}
-.vs-roster{list-style:none;margin:0;padding:0;display:grid;gap:4px}
-.vs-roster li{display:flex;gap:8px;align-items:baseline;border-bottom:1px solid var(--line);padding:5px 0;font-size:14px}
-.vs-roster .vs-sl{font-size:11px;font-weight:800;letter-spacing:.06em;min-width:34px;opacity:.7}
-.vs-roster .vs-empty{opacity:.45}
-.vs-side-hd{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800;margin:0 0 6px}
+.vs-powers{margin-top:18px}
+.vs-rosters{display:grid;gap:16px;grid-template-columns:1fr 1fr;margin-top:22px}
+.vs-side-hd{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800;margin:0 0 8px;opacity:.85}
+.vs-side-hd .vs-sub{font-family:var(--display);font-size:16px;letter-spacing:0;margin-left:6px}
+/* The two rosters stack their slots rather than sitting in one wide row, so both fit side by side. */
+.vs-rosters .roster{grid-template-columns:1fr 1fr;gap:6px}
 .vs-final{display:grid;gap:6px;justify-items:center;text-align:center;padding:18px 0}
-.vs-score{font-family:var(--display);font-size:52px;line-height:1;font-variant-numeric:tabular-nums}
-.vs-lines{display:grid;gap:3px;font-size:13px;margin-top:8px}
-.vs-lines .vs-ln{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding:3px 0}
-.vs-note{font-size:13px;opacity:.8}
-.vs-err{color:var(--bad);font-weight:700;font-size:13px}
-@media (max-width:560px){
+.vs-score{font-family:var(--display);font-size:56px;line-height:1;font-variant-numeric:tabular-nums}
+.vs-lines{display:grid;gap:3px;font-size:13px;margin-top:8px;max-width:420px}
+.vs-lines .vs-ln{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding:4px 0}
+.vs-note{font-size:13px;opacity:.85}
+.vs-err{color:var(--loss);font-weight:700;font-size:13px}
+@media (max-width:640px){
   .vs-rosters{grid-template-columns:1fr}
-  .vs-opts{grid-template-columns:1fr}
-  .vs-score{font-size:40px}
+  .vs-score{font-size:42px}
+  .vs-clock{font-size:22px}
 }
-@media (prefers-reduced-motion:reduce){.vs-dot{transition:none}}
 `;
+
 
 // Seconds left on the clock, never below zero. The deadline is the server's; this only counts it down.
 function useCountdown(deadline) {
@@ -97,83 +98,123 @@ const secondsTo = (deadline) => {
   return Math.max(0, Math.ceil((Date.parse(deadline) - Date.now()) / 1000));
 };
 
-const statLine = (o) => {
-  if (o.kind === "dst") return `${o.pa} allowed a game · ${o.ints} int · ${o.sacks} sacks · ${o.fum} fum`;
-  if (o.kind === "k") return `${o.made}/${o.att} · long ${o.long} · ${o.from50} from 50+`;
-  return `${o.season} ${teamLabel(o.team, o.season)} · ${o.g} games`;
-};
-const optionName = (o) => (o.kind === "dst" ? `${o.season} ${TEAMS[o.team][0]} defense` : o.kind === "k" ? o.name : o.name);
+// A defense's and a kicker's stat cells, in the same shape statCells gives a player: the numbers that justify
+// the rating, never the rating. Showing a grade on the board would hand the pick over - the single-player draft
+// shows stats and nothing else for exactly that reason.
+const unitCells = (o) => (o.kind === "dst"
+  ? [[o.pa, "Pts/game"], [o.ints, "INT"], [o.fum, "Fum rec"], [o.sacks, "Sacks"], [o.tds, "Def TD"]]
+  : [[`${o.made}/${o.att}`, "FG"], [o.att ? `${Math.round((100 * o.made) / o.att)}%` : "–", "FG %"],
+     [o.long, "Long"], [o.from50, "From 50+"], [o.xp, "XP"]]);
+const cellsFor = (o) => (o.kind === "player" ? statCells(o) : unitCells(o));
 
-export function RosterList({ roster, side, label, format }) {
+// What a card calls an option. A defense is a team-season, a kicker and a player are people.
+const optionName = (o) => (o.kind === "dst" ? `${TEAMS[o.team][0]} defense` : o.name);
+const optionTag = (o) => (o.kind === "dst" ? "DEF" : o.kind === "k" ? "K" : o.pos);
+const optionMeta = (o) => (o.kind === "player"
+  ? `${o.season} ${teamLabel(o.team, o.season)}, ${o.g} games`
+  : `${o.season} ${teamLabel(o.team, o.season)}`);
+
+// The groups the board is laid out in: the four positions the single-player draft uses, then the two 1v1 adds.
+const GROUPS = [
+  ["QB", POS_NAME.QB, (o) => o.kind === "player" && o.pos === "QB"],
+  ["RB", POS_NAME.RB, (o) => o.kind === "player" && o.pos === "RB"],
+  ["WR", POS_NAME.WR, (o) => o.kind === "player" && o.pos === "WR"],
+  ["TE", POS_NAME.TE, (o) => o.kind === "player" && o.pos === "TE"],
+  ["DST", "Defenses", (o) => o.kind === "dst"],
+  ["K", "Kickers", (o) => o.kind === "k"],
+];
+
+// Your roster, as the draft screen shows one: a strip of slots with who is in them.
+function RosterStrip({ roster, label, sub }) {
   return (
-    <div>
-      <p className="vs-side-hd">{label}</p>
-      <ol className="vs-roster" data-side={side}>
+    <div className="vs-side">
+      <p className="vs-side-hd">{label}{sub ? <span className="vs-sub"> {sub}</span> : null}</p>
+      <div className="roster" data-side={label}>
         {VERSUS_SLOTS.map((slot) => {
           const o = roster[slot];
           return (
-            <li key={slot} data-slot={slot} data-filled={o ? "1" : "0"}>
-              <b className="vs-sl">{VS_SLOT_LABEL[slot]}</b>
-              {o ? (
-                <>
-                  <span>{optionName(o)}</span>
-                  <span className="vs-grade" style={{ marginLeft: "auto" }}>{grade(o.rating)}</span>
-                </>
-              ) : <span className="vs-empty">—</span>}
-            </li>
+            <div key={slot} className={`slot ${o ? "on" : ""}`} data-slot={slot} data-filled={o ? "1" : "0"}>
+              <div className="k">{VS_SLOT_LABEL[slot]}</div>
+              <div className="v">{o ? optionName(o) : <span style={{ color: "var(--muted)", fontWeight: 400 }}>Open</span>}</div>
+              {o && <div className="sub">{shortYr(o.season)} {TEAMS[o.team][0]}{slot.startsWith("FLEX") ? `, ${o.pos}` : ""}</div>}
+            </div>
           );
         })}
-      </ol>
+      </div>
     </div>
   );
 }
 
-// The board both players are looking at. A pick that can't be made is never offered: an option already taken, or
-// one that fits no slot this player still has open, is disabled rather than hidden - seeing what went is half of
-// knowing what the other player is doing.
-function Board({ boardKey, taken, roster, myTurn, format, onPick }) {
+// The board, drawn the way the single-player draft draws one - the same reel, the same cards, the same
+// "Lock in" (VERSUS.md 9). The classes are the app's own, so this inherits the whole look rather than
+// approximating it, and anything that changes there changes here.
+function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected, busy }) {
   const [team, w] = boardKey.split("|");
   const options = optionsOn(boardKey);
   const open = openSlots(roster);
-  const groups = [
-    ["Players", options.filter((o) => o.kind === "player")],
-    ["Defense", options.filter((o) => o.kind === "dst")],
-    ["Kicker", options.filter((o) => o.kind === "k")],
-  ];
+  const left = options.filter((o) => !taken.has(optionId(o))).length;
   return (
-    <div className="vs-board" data-board={boardKey}>
-      <div className="vs-boardhd" style={teamVars(team)}>
-        <h3>{TEAMS[team][1]} {TEAMS[team][0]}</h3>
-        <span className="vs-era">{WINDOWS[Number(w)][0]}–{WINDOWS[Number(w)][1]}</span>
+    <>
+      <div className="reel" aria-live="polite" style={teamVars(team)}>
+        <div className="stripe" style={{ background: TEAMS[team][2] }} />
+        <div className="pickno"><span>{myTurn ? "Your pick" : "Their pick"}</span><span>{left} left on the board</span></div>
+        <div className="team">{TEAMS[team][0]}</div>
+        <div>
+          <span className="years led-wrap"><span className="led">{WINDOWS[Number(w)][0]}–{WINDOWS[Number(w)][1]}</span></span>
+          {cityRange(team, Number(w)) && <span className="city">{cityRange(team, Number(w))}</span>}
+        </div>
       </div>
-      {groups.map(([label, list]) => (list.length === 0 ? null : (
-        <section className="vs-group" key={label}>
-          <h4>{label}</h4>
-          <div className="vs-opts">
+
+      {GROUPS.map(([key, heading, belongs]) => {
+        const list = options.filter(belongs);
+        if (!list.length) return null;
+        const anyOpen = open.some((sl) => list.some((o) => optionFits(o, sl)));
+        return (
+          <section className={`sec pos-${key === "DST" || key === "K" ? "FLEX" : key} ${anyOpen ? "" : "done"}`} key={key}>
+            <div className="hd">
+              <h3>{heading}</h3>
+              {!anyOpen && <span className="nt">No open slot for these.</span>}
+            </div>
             {list.map((o) => {
               const id = optionId(o);
               const gone = taken.has(id);
-              const slot = open.find((s) => optionFits(o, s));
-              const can = myTurn && !gone && !!slot;
+              const slotsFor = open.filter((sl) => optionFits(o, sl));
+              const off = gone || !slotsFor.length || !myTurn;
+              const isSel = selected === id;
               return (
-                <button
-                  key={id} type="button" className="vs-opt" data-opt={id} data-slot={slot || ""}
-                  data-taken={gone ? "1" : "0"} disabled={!can}
-                  onClick={() => onPick(o, slot)}
-                >
-                  <span className="vs-on">
-                    <span className="tdot" style={teamVars(o.kind === "player" ? o.team : team)} />
-                    {optionName(o)}
-                    <span className={`vs-grade ${gradeTier(o.rating)}`}>{grade(o.rating)}</span>
-                  </span>
-                  <span className="vs-om">{gone ? "Taken" : statLine(o)}</span>
-                </button>
+                <div key={id} className={`card ${isSel ? "sel" : ""} ${off ? "off" : ""}`} data-opt={id}>
+                  <button className="hit" disabled={off || busy} onClick={() => setSelected(isSel ? null : id)} aria-expanded={isSel}>
+                    <div className="row">
+                      <div>
+                        <div className="nm-row"><span className="pp">{optionTag(o)}</span><span className="nm">{optionName(o)}</span></div>
+                        <div className="meta">
+                          <span className="tdot" style={teamVars(o.kind === "player" ? o.team : team)} />
+                          {optionMeta(o)}{gone ? ", taken" : !slotsFor.length ? ", no open slot" : ""}
+                        </div>
+                      </div>
+                      <div className="cells">
+                        {cellsFor(o).map(([n, l]) => (<div className="cell" key={l}><div className="n">{n}</div><div className="l">{l}</div></div>))}
+                      </div>
+                    </div>
+                  </button>
+                  {isSel && (
+                    <div className="drafts">
+                      {/* Both Flex slots are the same choice, so one Flex button rather than two identical ones. */}
+                      {slotsFor.filter((sl) => !sl.startsWith("FLEX") || sl === slotsFor.find((x) => x.startsWith("FLEX"))).map((sl) => (
+                        <button key={sl} className="btn solid" disabled={busy} onClick={() => onPick(o, sl)}>
+                          🔒 Lock in · {VS_SLOT_LABEL[sl]}
+                        </button>
+                      ))}
+                      <button className="btn" onClick={() => setSelected(null)}>Cancel</button>
+                    </div>
+                  )}
+                </div>
               );
             })}
-          </div>
-        </section>
-      )))}
-    </div>
+          </section>
+        );
+      })}
+    </>
   );
 }
 
@@ -183,6 +224,8 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  // The option a player has tapped but not locked in, exactly as the single-player draft holds one.
+  const [selected, setSelected] = useState(null);
   const joined = useRef(false);
 
   const refresh = useCallback(async (c) => {
@@ -221,6 +264,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     return () => sub.unsubscribe();
   }, [match?.id, match?.code, refresh]);
 
+
   const open = async () => {
     setBusy(true);
     setError(null);
@@ -239,6 +283,15 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const side = match ? (match.hostId === userId ? "host" : match.guestId === userId ? "guest" : null) : null;
   const myTurn = !!state && !state.done && state.turn.side === side;
   const left = useCountdown(match?.status === "drafting" && !state?.done ? match.turnDeadline : null);
+  // ...and a slow read behind it, because a draft that only moves when a socket delivers is a draft that
+  // stops. Realtime can be off in a project, blocked by a network, or simply drop, and the first time anyone
+  // notices is a player sitting on a finished turn waiting out a clock they cannot affect. Every two seconds
+  // while it is not your move, and never while it is: your own moves refresh the screen themselves.
+  useEffect(() => {
+    if (!match?.code || match.status === "done" || myTurn) return undefined;
+    const t = setInterval(() => refresh(match.code), 2000);
+    return () => clearInterval(t);
+  }, [match?.code, match?.status, myTurn, refresh]);
 
   // When the clock runs out somebody has to say so, and it may be either of them - that is what keeps a match
   // alive when the other player has closed the tab. Asked once, a beat after zero, so the two screens don't
@@ -326,8 +379,8 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           <div className="vs-ln"><span>Their defense</span><b>{signed(-result[mine].against)}</b></div>
         </div>
         <div className="vs-rosters">
-          <RosterList roster={state.roster[mine]} side={mine} label={name(match, mine)} format={match.format} />
-          <RosterList roster={state.roster[theirs]} side={theirs} label={name(match, theirs)} format={match.format} />
+          <RosterStrip roster={state.roster[mine]} label={name(match, mine)} sub={`${result[mine].score}`} />
+          <RosterStrip roster={state.roster[theirs]} label={name(match, theirs)} sub={`${result[theirs].score}`} />
         </div>
         <div className="vs-powers">
           <button className="btn" onClick={() => onShare?.(versusShareText(match, result, mine, siteUrl))}>Share</button>
@@ -337,6 +390,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     );
   }
 
+  const boardTeam = state?.boardKey ? state.boardKey.split("|")[0] : "ARI";
   const powers = state ? {
     respin: respinsLeft(match.respins, side),
     dip: dipsLeft(match.dips, side),
@@ -345,47 +399,83 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   } : null;
 
   return (
-    <section className="versus" data-view="draft" data-code={match.code}>
+    <section className="versus vs-draft" data-view="draft" data-code={match.code}>
+      {/* The bar the single-player draft floats once you scroll past the reel, carrying what a 1v1 needs
+          instead: who is on the clock, the seconds left, and both rosters as chips. */}
+      <div className="sticky show" style={teamVars(boardTeam)}>
+        <div className="in">
+          <div className="stripe" style={{ background: TEAMS[boardTeam][2] }} />
+          <span className="tm">{myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`}</span>
+          {left != null ? <span className={`yr vs-tick ${left <= 10 ? "low" : ""}`}>{left}s</span> : null}
+          <span className="pk">Board {Math.min(state.boardIdx + 1, MATCH_BOARDS)} of {MATCH_BOARDS}</span>
+          <span className="brk" />
+          <div className="chips">
+            {VERSUS_SLOTS.map((sl) => (
+              <span key={sl} className={`chip pos-${sl.startsWith("FLEX") ? "FLEX" : sl} ${state.roster[side || "host"][sl] ? "on" : ""}`}
+                title={state.roster[side || "host"][sl] ? optionName(state.roster[side || "host"][sl]) : `${VS_SLOT_LABEL[sl]} open`}>
+                {sl.startsWith("FLEX") ? "FX" : VS_SLOT_LABEL[sl]}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="vs-head">
         <div className="vs-vs">
           <span className="vs-who"><span className="vs-nm">{hostName}</span><span className="vs-tag">{side === "host" ? "You" : "Host"}</span></span>
           <span className="vs-x">vs</span>
           <span className="vs-who"><span className="vs-nm">{guestName}</span><span className="vs-tag">{side === "guest" ? "You" : "Opponent"}</span></span>
         </div>
-        <div>
-          <p className={`vs-turn ${myTurn ? "mine" : ""}`}>{myTurn ? "Your pick" : `${name(match, state?.turn?.side)} is picking`}</p>
+        <div className="vs-clockbox">
+          <p className={`vs-turn ${myTurn ? "mine" : ""}`}>{myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`}</p>
           {left != null ? <p className={`vs-clock ${left <= 10 ? "low" : ""}`} aria-label={`${left} seconds left`}>{left}s</p> : null}
         </div>
       </div>
 
-      <p className="vs-note">Board {Math.min(state.boardIdx + 1, MATCH_BOARDS)} of {MATCH_BOARDS}</p>
       {error ? <p className="vs-err">{errorText(error)}</p> : null}
-
-      {myTurn && powers ? (
-        <div className="vs-powers">
-          <button className="btn sm" disabled={busy || powers.respin.team < 1} onClick={() => send({ respin: "team" })}>Re-spin team ({powers.respin.team})</button>
-          <button className="btn sm" disabled={busy || powers.respin.era < 1} onClick={() => send({ respin: "era" })}>Re-spin era ({powers.respin.era})</button>
-          <button className="btn sm" disabled={busy || powers.dip < 1 || state.boardIdx >= MATCH_BOARDS - 1} onClick={() => send({ dip: true })}>Double dip ({powers.dip})</button>
-          <button className="btn sm" disabled={busy || powers.steal < 1 || state.turn.first} onClick={() => send({ steal: true })}>Steal ({powers.steal})</button>
-          <button className="btn sm" disabled={busy || powers.stealPick < 1 || state.turn.first} onClick={() => send({ stealPick: true })}>Steal the pick ({powers.stealPick})</button>
-        </div>
-      ) : null}
 
       {state.boardKey ? (
         <Board
           boardKey={state.boardKey} taken={state.taken} roster={state.roster[side || "host"]}
-          myTurn={myTurn && !busy} format={match.format}
-          onPick={(o, slot) => send({
+          myTurn={myTurn} busy={busy} selected={selected} setSelected={setSelected}
+          onPick={(o, slot) => { setSelected(null); send({
             boardIdx: state.boardIdx, kind: o.kind, slot,
             playerId: o.kind === "player" ? o.id : undefined,
             team: o.kind === "player" ? undefined : o.team, season: o.season,
-          })}
+          }); }}
         />
       ) : null}
 
+      {/* The powerups sit where the re-spins sit in the single-player draft, under the board, and are only
+          offered on your own turn - the rules refuse them otherwise anyway. */}
+      {myTurn && powers ? (
+        <div className="rerolls vs-powers">
+          <button className="btn" disabled={busy || powers.respin.team < 1} onClick={() => send({ respin: "team" })}>
+            <span className="rs-long">Re-spin team <span className="left">({powers.respin.team} left)</span></span>
+            <span className="rs-short" aria-hidden="true">↻ Team <b>{powers.respin.team}</b></span>
+          </button>
+          <button className="btn" disabled={busy || powers.respin.era < 1} onClick={() => send({ respin: "era" })}>
+            <span className="rs-long">Re-spin era <span className="left">({powers.respin.era} left)</span></span>
+            <span className="rs-short" aria-hidden="true">↻ Era <b>{powers.respin.era}</b></span>
+          </button>
+          <button className="btn" disabled={busy || powers.dip < 1 || state.boardIdx >= MATCH_BOARDS - 1}
+            title="Take two off this board, and give up your pick on the next one" onClick={() => send({ dip: true })}>
+            Double dip <span className="left">({powers.dip})</span>
+          </button>
+          <button className="btn" disabled={busy || powers.steal < 1 || state.turn.first}
+            title="Take the pick they just made" onClick={() => send({ steal: true })}>
+            Steal <span className="left">({powers.steal})</span>
+          </button>
+          <button className="btn" disabled={busy || powers.stealPick < 1 || state.turn.first}
+            title="Pick first on this board instead" onClick={() => send({ stealPick: true })}>
+            Steal the pick <span className="left">({powers.stealPick})</span>
+          </button>
+        </div>
+      ) : null}
+
       <div className="vs-rosters">
-        <RosterList roster={state.roster.host} side="host" label={hostName} format={match.format} />
-        <RosterList roster={state.roster.guest} side="guest" label={guestName} format={match.format} />
+        <RosterStrip roster={state.roster[side || "host"]} label="Your roster" />
+        <RosterStrip roster={state.roster[side === "host" ? "guest" : "host"]} label={`${name(match, side === "host" ? "guest" : "host")}'s roster`} />
       </div>
     </section>
   );

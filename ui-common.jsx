@@ -3,7 +3,7 @@
 // have to import the main component module back - everything below is a plain function, constant or
 // stateless component, with no app state, apart from the register of open dialogs at the bottom.
 import { useEffect, useRef } from "react";
-import { TEAMS, BEST_FIELDS, normFormat } from "./game-logic.mjs";
+import { TEAMS, BEST_FIELDS, normFormat, WINDOWS, passerRating } from "./game-logic.mjs";
 
 export const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
 export const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };
@@ -39,6 +39,42 @@ export const draftsOf = (s) => (s.runs || 0) + (s.dnf || 0);
 // Scores from the two formats live in different profile fields and never rank against each other.
 export const scoreOf = (p, format) => (p ? p[BEST_FIELDS[normFormat(format)].score] ?? null : null);
 export const runOf = (p, format) => (p ? p[BEST_FIELDS[normFormat(format)].run] ?? null : null);
+
+// A player's stat columns, and the two headings the draft board is built from. These live here rather than in
+// perfect-season.jsx because 1v1 draws the same board (VERSUS.md 9) and a screen never imports the main
+// component back - a second copy of these would be a second answer to "what does a card show".
+//
+// Every player at a position shows the same stat columns, in the same order: main-role yards, TDs, per-attempt
+// average, then volume, then the secondary role, then fumbles.
+export const POS_NAME = { QB: "Quarterbacks", RB: "Running backs", WR: "Wide receivers", TE: "Tight ends" };
+
+export function cityRange(code, w) {
+  const [a, b] = WINDOWS[w];
+  const c1 = cityFor(code, a), c2 = cityFor(code, b);
+  return c1 === c2 ? c1 : `${c1} & ${c2}`;
+}
+
+export function statCells(p) {
+  const n = (v) => v.toLocaleString();
+  const ypc = p.car ? (p.ry / p.car).toFixed(1) : "–";
+  const ypr = p.rec ? (p.rcy / p.rec).toFixed(1) : "–";
+  if (p.pos === "QB") return [
+    [n(p.py), "Pass yds"], [p.ptd, "Pass TD"], [p.int, "INT"],
+    [p.att ? ((100 * p.cmp) / p.att).toFixed(1) + "%" : "–", "Comp %"], [p.att ? passerRating(p).toFixed(1) : "–", "QB rating"],
+    [n(p.ry), "Rush yds"], [p.rtd, "Rush TD"],
+  ];
+  if (p.pos === "TE") return [
+    [n(p.rcy), "Rec yds"], [p.rctd, "Rec TD"], [ypr, "Yds/rec"], [p.rec, "Rec"], [p.fl, "Fum lost"],
+  ];
+  if (p.pos === "WR") return [
+    [n(p.rcy), "Rec yds"], [p.rctd, "Rec TD"], [ypr, "Yds/rec"], [p.rec, "Rec"],
+    [n(p.ry), "Rush yds"], [p.rtd, "Rush TD"], [p.fl, "Fum lost"],
+  ];
+  return [
+    [n(p.ry), "Rush yds"], [p.rtd, "Rush TD"], [ypc, "Yds/carry"], [p.rec, "Rec"],
+    [n(p.rcy), "Rec yds"], [p.rctd, "Rec TD"], [p.fl, "Fum lost"],
+  ];
+}
 
 export function RosterRows({ roster }) {
   return (

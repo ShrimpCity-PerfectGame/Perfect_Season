@@ -376,10 +376,15 @@ server re-spins that board itself, charged to no one.
 - **The Modes tile** — "1v1" beside the others: create a lobby, or the link to the one you already have open.
 - **The lobby** — your link with a copy button, and the state of the other side ("waiting for an opponent" /
   "they're here"). Realtime; no polling.
-- **The draft** — the board both players are looking at, whose turn it is, the clock, both rosters filling up
-  side by side, and everything already taken shown as taken. A pick you can't make is never offered. Players,
-  defenses and kickers sit on the one board, each group with the stats that justify its rating: points allowed,
-  takeaways, sacks for a defense; made/attempted, long, 50-yarders for a kicker.
+- **The draft** — and it is the **single-player draft's own screen**, not a version of it. The same dark
+  scoreboard scope, the same reel in the team's colours, the same `.sec` / `.card` markup with stat cells, the
+  same two-step pick ending in **🔒 Lock in**, the same floating bar once you scroll. 1v1 adds only what it has
+  and single player doesn't: the other player's roster beside yours, the clock, and the powerups where the
+  re-spins sit. Drawing the app's own classes rather than copying them means the two move together.
+  Defenses and kickers are two more sections on that board, with the stats that justify them — points allowed,
+  takeaways, sacks; made/attempted, long, 50-yarders.
+- **Never a grade on the board.** Single player shows stats and lets a player judge them, and a grade would hand
+  the pick over. The result screen may grade; the board may not.
 - **The result** — both rosters, each side's offense, what their kicker added and what their defense took off the
   other, the two final scores, the winner, and a share card.
 - **`/vs/<code>`** — the invite address; `vercel.json` rewrites it to the page with `X-Robots-Tag: noindex`, as
