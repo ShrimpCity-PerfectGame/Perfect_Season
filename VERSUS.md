@@ -21,8 +21,9 @@ prefixed class names, and nothing reaches production without going through stagi
   and its kicker in each year. Any board can fill any open slot, so a defense can go fifth and a kicker first -
   the order is the player's to choose. A board that cannot serve *both* players is skipped before it is dealt
   (section 8), so no draft order can strand either of them.
-- Each player carries **two re-spins**, the same team and era ones single player has, spent on their own turn.
-  The leader's re-spin deals a board to *both* of them; the follower's is a board of their own (section 7).
+- Each player carries the same **powerups** (section 7): two re-spins, a **steal**, and a **steal the pick**.
+  A leader's re-spin deals a board to *both* of them; a follower's is a board of their own. A steal takes the
+  pick the other player has just made, and sends them back to the board for another.
 - Each pick has a **clock**. When it runs out the pick is made for you: the most valuable available option that
   fits an open slot. A dropped connection loses you a pick, not the match.
 - When both rosters are full the server grades them, and **the higher score wins — always**. There is no
@@ -83,6 +84,7 @@ there is **no client insert, update or delete policy at all**.
 | `season` | the season drafted, for all three kinds |
 | `slot` | `QB` \| `RB` \| `WR` \| `TE` \| `FLEX1` \| `FLEX2` \| `DST` \| `K` |
 | `auto` | the clock made this one, not the player |
+| `stolen_by` | who stole this pick (section 7); `user_id` and `slot` are then theirs. Normally null |
 
 RLS on, public select, no client write policy. Two unique constraints carry the rule that makes a 1v1 draft a 1v1
 draft — **what one player takes is gone for the other**: `(match_id, kind, player_id, season)` for players and
@@ -119,6 +121,14 @@ board is dealt and a roster is graded by one set of rules, never two.
 Otherwise it writes the pick, sets the next `turn_deadline`, and — on the sixteenth — **computes the result**
 (section 6), writes `matches.result`, `winner_id`, `status = 'done'`, and `pvp_wins` / `pvp_losses` on both
 profiles. The clients are told by Realtime; they render, they don't decide.
+
+`POST { code, steal: true, slot }` is the steal (section 7), from the player picking second on a board, before
+their own pick: it refuses with `not_your_turn`, `no_steals_left`, `bad_slot` (it fits nothing they have open) or
+`would_strand` (the leader would have nothing left on that board), then updates the leader's pick row to the
+thief and puts the leader back on the clock for the board's second pick.
+
+`POST { code, respin: "team" | "era" }` and `POST { code, stealPick: true }` are the other two, with the rules in
+section 7.
 
 `POST { code, claim: "clock" }` is how a client says the clock has run out. The function checks
 `turn_deadline` **itself** — a client that lies is refused — and, if it really has passed, makes the pick the
@@ -247,28 +257,40 @@ moves only theirs. `replayMatch` rebuilds every board from them, so each of the 
 `{ key, followKey }`, the same board twice unless the follower walked away. `MATCH_RESPINS = { team: 1, era: 1 }`
 lives in `versus-logic.mjs` — 1v1's own number, so single player's `REROLL_BUDGET` is never touched.
 
-### Steal, and Steal the pick — designed, not built
+### Steal
 
-Two powerups that exist only here, because only 1v1 has someone to take them from. Both are **once per match**,
-both are spent on your own turn, and both are recorded beside the re-spins.
+Take the pick the other player has just made. Spent by the **follower**, in place of their own pick: the leader
+takes someone off the board, you take him instead of drafting, and the leader goes straight back to the same
+board and picks again. One per match, each.
 
-**Steal the pick.** Spent by the player who would pick *second* on a board, before the board's first pick lands:
-the order on that board is swapped, and you pick first. Nothing else changes — the board is still dealt to both,
-still has to serve both, and the snake resumes as normal on the next board. It is the simplest of the three to
-reason about, because it moves nothing but who goes first.
+That shape is chosen over the alternatives because it keeps the draft's arithmetic exactly as it was — the board
+still yields one pick each, sixteen picks over eight boards — and because the victim chooses their own
+replacement rather than being handed one. It also means a steal is only available on the four boards where you
+pick second, and only for the pick just made: there is nothing to steal before the leader has picked, and a
+roster raided three boards later would be a different game.
 
-**Steal.** Spent as your pick for a board: instead of taking an option from it, take a **player already on the
-other roster** into the same slot on yours. Their slot is then refilled from the board in play by the same
-arithmetic the clock uses (`autoPick`), so both rosters stay full and the count stays at sixteen picks over eight
-boards — which is what makes this work at all. A steal that emptied a slot without refilling it would leave the
-victim needing more picks than there are boards left, and the draft would have to grow a ninth board for one
-player.
+Two things refuse a steal, both costing nothing:
 
-So the cost of being stolen from is real but bounded: you lose the player, and you get the best thing still on
-the board instead. A defense or a kicker can be stolen like anything else — they are roster slots like the rest.
+1. the player fits nothing you still have open — you have to have somewhere to put him;
+2. **it would strand the leader.** A steal empties their slot and sends them back to the board, and the board
+   may have nothing left they can use. Section 8's rule does not cover this: it guarantees the *follower* an
+   option after the leader picks, not the leader an option after being robbed. A one-quarterback board dealt to
+   a leader who needs only a quarterback is exactly that case, so `stealableSlots` checks it directly.
 
-Neither is built yet, and the order of work puts them after the screens: the draft has to work before it grows
-powerups, and both need a place on screen to be spent from.
+In the database a steal **updates the pick's row** rather than writing a second one: `user_id` and `slot` become
+the thief's and `stolen_by` records who did it. That is what keeps the two unique constraints in section 3
+honest — the option is still drafted exactly once, by exactly one player. `replayMatch` reads `stolen_by` and
+knows the board's second pick belongs to the leader, re-picking, rather than to the follower.
+
+### Steal the pick
+
+Spent by the player who would pick *second* on a board, before the board's first pick lands: the order on that
+board is swapped and you pick first. Nothing else changes — the board is still dealt to both, still has to serve
+both, and the snake resumes as normal on the next one. One per match, each. It is the simplest of the three
+powerups, because it moves nothing but who goes first.
+
+Not built yet: it needs a draft screen to be spent from, and unlike Steal it changes no state that isn't already
+derivable, so it waits for the screens.
 
 ## 8. A board has to serve both players
 
@@ -345,7 +367,8 @@ gets a versus variant: the two scores, the result, and a link to play the winner
   always has a legal option, over every ordering of every slot; and a match played out sixteen picks deep from
   many seeds always ends with two full, legal rosters. Re-spins too: a leader's moves the board for both, a
   follower's moves only their own, neither lands on a board still waiting in the sequence, and two on one board
-  can't land on each other.
+  can't land on each other. And the steal: it lands on the thief's roster, leaves the leader's empty, puts him
+  back on the same board for the board's second pick, and is refused when it would leave him nothing there.
 - `tests/test-versus-flow.mjs` — the whole thing in jsdom on the mock: create, join, sixteen picks alternating
   correctly, a defense taken fifth and a kicker first, a timeout auto-picking, the result and the records.
 - `tests/test-a11y.mjs` gains the new screens.
@@ -359,6 +382,6 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 4. The Edge Function and its rule tests.
 5. The mock (so the jsdom tests can drive a match without a network).
 6. The screens, then the flow test.
-7. Steal and Steal the pick (section 7), once there is a draft screen to spend them from.
+7. Steal the pick (section 7), once there is a draft screen to spend it from. Steal itself is built.
 8. Records, the board, the share card.
 9. Staging, then production, as a version.

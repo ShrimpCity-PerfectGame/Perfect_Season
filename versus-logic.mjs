@@ -154,8 +154,10 @@ export function replayMatch({ code, picks = [], respins = [] }) {
   const used = new Set();
   const boards = []; // one { key, followKey } per board: the two are the same unless the follower re-spun
   const spins = new Map(respins.map((r) => [`${r.pickNo}|${r.kind}`, r]));
-  const pending = (pickNo, boardIdx, key) =>
-    ({ seq, boards, roster, taken, used, boardIdx, pickNo, boardKey: key, turn: turnAt(pickNo), done: false });
+  const pending = (pickNo, boardIdx, key, side) => ({
+    seq, boards, roster, taken, used, boardIdx, pickNo, boardKey: key,
+    turn: { ...turnAt(pickNo), side }, done: false,
+  });
 
   for (let boardIdx = 0; boardIdx < MATCH_BOARDS; boardIdx++) {
     const lead = firstPickerOn(boardIdx);
@@ -174,22 +176,29 @@ export function replayMatch({ code, picks = [], respins = [] }) {
     const board = { key, followKey: key };
     boards.push(board);
 
-    const leadPick = picks.find((p) => p.pickNo === boardIdx * 2 + 1);
-    if (!leadPick) return pending(boardIdx * 2 + 1, boardIdx, key);
-    take(leadPick, key, roster[lead], taken);
+    const first = picks.find((p) => p.pickNo === boardIdx * 2 + 1);
+    if (!first) return pending(boardIdx * 2 + 1, boardIdx, key, lead);
+    // A stolen first pick is on the follower's roster, in the slot THEY chose, and stealing was their whole turn
+    // (VERSUS.md 7) - so the second pick of this board is the leader, taking again from the same board.
+    const stolen = !!first.stolenBy;
+    take(first, key, roster[stolen ? follow : lead], taken);
+    const secondSide = stolen ? lead : follow;
 
     // The follower's re-spin lands after the leader has already taken something off this board, so it can only
-    // be their own: they walk away to a board of their own and pick there (VERSUS.md 7). That asymmetry is the
-    // point of it - the leader's re-spin is a board they hand the other player too.
-    for (const kind of ["team", "era"]) {
-      const spin = spins.get(`${boardIdx * 2 + 2}|${kind}`);
-      if (!spin) continue;
-      used.add(spin.key);
-      board.followKey = spin.key;
+    // be their own: they walk away to a board of their own and pick there. A follower who stole never picks
+    // from a board at all, so there is nothing for a re-spin of theirs to move.
+    if (!stolen) {
+      for (const kind of ["team", "era"]) {
+        const spin = spins.get(`${boardIdx * 2 + 2}|${kind}`);
+        if (!spin) continue;
+        used.add(spin.key);
+        board.followKey = spin.key;
+      }
     }
-    const followPick = picks.find((p) => p.pickNo === boardIdx * 2 + 2);
-    if (!followPick) return pending(boardIdx * 2 + 2, boardIdx, board.followKey);
-    take(followPick, board.followKey, roster[follow], taken);
+    const secondKey = stolen ? key : board.followKey;
+    const second = picks.find((p) => p.pickNo === boardIdx * 2 + 2);
+    if (!second) return pending(boardIdx * 2 + 2, boardIdx, secondKey, secondSide);
+    take(second, secondKey, roster[secondSide], taken);
   }
   return {
     seq, boards, roster, taken, used,
@@ -321,4 +330,29 @@ export function respinsLeft(respins, side) {
     team: MATCH_RESPINS.team - spent.filter((r) => r.kind === "team").length,
     era: MATCH_RESPINS.era - spent.filter((r) => r.kind === "era").length,
   };
+}
+
+// ---------- Steal (VERSUS.md 7) ----------
+
+export const MATCH_STEALS = 1; // one each per match
+
+// Whether the follower may take the pick the leader has just made, and which of their slots it could fill.
+// Returns the open slots it fits, or null if it can't be stolen.
+//
+// Two ways it can't. The obvious one is that it fits nothing they still have open. The other is the reason this
+// function exists at all: a steal empties the leader's slot and sends them back to the same board, and the board
+// might have nothing left they can use. A board with one quarterback, dealt to a leader who needs only a
+// quarterback, is exactly that - the serve-both rule (section 8) guaranteed the FOLLOWER an option after the
+// leader picked, not the leader an option after being robbed. So it is checked here, and a steal that would
+// strand them is refused and costs nothing.
+export function stealableSlots({ key, taken, option, stealerRoster, leaderRoster, leaderSlot }) {
+  const slots = openSlots(stealerRoster).filter((s) => optionFits(option, s));
+  if (!slots.length) return null;
+  const leaderOpen = [...openSlots(leaderRoster), leaderSlot];
+  const left = optionsOn(key).some((o) => !taken.has(optionId(o)) && leaderOpen.some((s) => optionFits(o, s)));
+  return left ? slots : null;
+}
+
+export function stealsLeft(picks, side) {
+  return MATCH_STEALS - picks.filter((p) => p.stolenBy === side).length;
 }

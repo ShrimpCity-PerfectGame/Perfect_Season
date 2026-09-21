@@ -58,6 +58,10 @@ create table if not exists public.match_picks (
   slot       text not null check (slot in ('QB', 'RB', 'WR', 'TE', 'FLEX1', 'FLEX2', 'DST', 'K')),
   -- The clock made this one, not the player.
   auto       boolean not null default false,
+  -- Set when the other player STOLE this pick (VERSUS.md 7): user_id and slot are then the thief's, and this
+  -- says who did it. The row is updated rather than a second one written, which is deliberate - the option is
+  -- still drafted exactly once, so the two unique constraints below go on meaning what they say.
+  stolen_by  uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   primary key (match_id, pick_no),
   -- One identity or the other, never both and never neither.
@@ -70,6 +74,9 @@ create table if not exists public.match_picks (
   unique (match_id, kind, player_id, season),
   unique (match_id, kind, team, season)
 );
+
+-- Added after the fact for a table that may already exist, since this file is re-run rather than replaced.
+alter table public.match_picks add column if not exists stolen_by uuid references auth.users(id) on delete set null;
 
 alter table public.matches enable row level security;
 alter table public.match_picks enable row level security;
@@ -133,7 +140,8 @@ returns jsonb language sql stable security definer set search_path = public, pg_
     'picks', coalesce((
       select jsonb_agg(jsonb_build_object(
         'pickNo', p.pick_no, 'userId', p.user_id, 'boardIdx', p.board_idx, 'kind', p.kind,
-        'playerId', p.player_id, 'team', p.team, 'season', p.season, 'slot', p.slot, 'auto', p.auto
+        'playerId', p.player_id, 'team', p.team, 'season', p.season, 'slot', p.slot,
+        'auto', p.auto, 'stolenBy', p.stolen_by
       ) order by p.pick_no)
       from public.match_picks p where p.match_id = m.id), '[]'::jsonb)
   ) end

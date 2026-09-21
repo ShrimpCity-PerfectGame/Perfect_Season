@@ -14,6 +14,7 @@ import {
   optionsOn, unitsOn, optionId, optionFits, optionValue, turnAt, firstPickerOn,
   boardServesBoth, replayMatch, autoPick, openSlots, matchResult, footballFinal, offenseScore,
   respinBoard, respinsLeft, MATCH_RESPINS, firstPickerOn as leadOn,
+  stealableSlots, stealsLeft, MATCH_STEALS, optionValue as worth,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -269,6 +270,77 @@ await runTest("a leader's re-spin is a board they hand over too; a follower's is
   assert(left.team === MATCH_RESPINS.team - 1 && left.era === MATCH_RESPINS.era, `the leader spent one team re-spin, got ${JSON.stringify(left)}`);
   assert(JSON.stringify(respinsLeft(both, follow)) === JSON.stringify({ team: MATCH_RESPINS.team, era: MATCH_RESPINS.era - 1 }),
     "and the follower one era re-spin");
+});
+
+await runTest("a steal takes the pick just made, and sends the leader back to the board", async () => {
+  const code = "STEAL1";
+  const lead = leadOn(0), follow = lead === "host" ? "guest" : "host";
+  const opening = replayMatch({ code, picks: [] });
+  const key = opening.boardKey;
+
+  // The leader takes the best thing on the board.
+  const leadTook = autoPick(key, opening.taken, opening.roster[lead], "fantasy");
+  const row = (pickNo, taken, slot, stolenBy = null) => ({
+    pickNo, slot, stolenBy, kind: taken.kind,
+    playerId: taken.kind === "player" ? taken.id : null,
+    team: taken.kind === "player" ? null : taken.team, season: taken.season,
+  });
+  const honest = [row(1, leadTook.option, leadTook.slot)];
+  const afterLead = replayMatch({ code, picks: honest });
+  assert(afterLead.roster[lead][leadTook.slot], "the leader has his pick");
+  assert(afterLead.turn.side === follow, "and it is the follower's turn");
+
+  // The follower steals it instead of picking.
+  const slots = stealableSlots({
+    key, taken: afterLead.taken, option: leadTook.option,
+    stealerRoster: afterLead.roster[follow], leaderRoster: afterLead.roster[lead], leaderSlot: leadTook.slot,
+  });
+  assert(slots && slots.length, `the follower can take it, into ${JSON.stringify(slots)}`);
+  const theft = [row(1, leadTook.option, slots[0], follow)];
+  const stolen = replayMatch({ code, picks: theft });
+
+  assert(stolen.roster[follow][slots[0]], "the stolen pick is on the follower's roster");
+  assert(!VERSUS_SLOTS.some((sl) => stolen.roster[lead][sl]), "and off the leader's entirely");
+  assert(optionId(stolen.roster[follow][slots[0]]) === optionId(leadTook.option), "it is the same player, not a copy");
+  assert(stolen.turn.side === lead, "the leader is back on the clock");
+  assert(stolen.boardKey === key, "on the same board he just picked from");
+  assert(stolen.pickNo === 2, "using the board's second pick, so the count is still sixteen");
+  assert(stolen.taken.has(optionId(leadTook.option)), "and the player is still gone for everyone");
+
+  // The leader takes again; the board moves on normally.
+  const again = autoPick(key, stolen.taken, stolen.roster[lead], "fantasy");
+  assert(optionId(again.option) !== optionId(leadTook.option), "he can't take back what was taken");
+  const done = replayMatch({ code, picks: [...theft, row(2, again.option, again.slot)] });
+  assert(done.roster[lead][again.slot] && done.boardIdx === 1, "the board is finished and the match moves on");
+  assert(done.turn.side === leadOn(1), "with the next board's leader on the clock");
+
+  assert(stealsLeft(theft, follow) === MATCH_STEALS - 1 && stealsLeft(theft, lead) === MATCH_STEALS,
+    "one steal spent, and only by the one who spent it");
+});
+
+await runTest("a steal that would leave the leader nothing is refused", async () => {
+  // The case the serve-both rule does NOT cover: it guarantees the follower an option after the leader picks,
+  // not the leader an option after being robbed. A board one deep at the only position he needs is exactly that.
+  const key = ONE_QB;
+  const qb = optionsOn(key).find((o) => o.kind === "player" && o.pos === "QB");
+  // Everything gone but the quarterback, whom the leader has just taken.
+  const taken = new Set(optionsOn(key).map(optionId));
+  const leaderRoster = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, sl === "QB" ? qb : { kind: "player" }]));
+  const stealer = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, sl === "QB" ? null : { kind: "player" }]));
+  assert(stealableSlots({ key, taken, option: qb, stealerRoster: stealer, leaderRoster, leaderSlot: "QB" }) === null,
+    "it would send the leader back to a board with nothing on it for him, so it is refused");
+
+  // With something left he can use, the same steal is fine.
+  const spare = optionsOn(key).find((o) => o.kind === "player" && o.pos === "RB");
+  const roomy = new Set(taken); roomy.delete(optionId(spare));
+  const openLeader = { ...leaderRoster, FLEX1: null };
+  assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: stealer, leaderRoster: openLeader, leaderSlot: "QB" }),
+    "with a running back still on the board for his flex, the steal goes through");
+
+  // And it is refused outright when the stealer has nowhere to put him.
+  const noRoom = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, { kind: "player" }]));
+  assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: noRoom, leaderRoster: openLeader, leaderSlot: "QB" }) === null,
+    "a full roster can't steal anything");
 });
 
 await runTest("the result is the raw numbers, and the same every time", async () => {
