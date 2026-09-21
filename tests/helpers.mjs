@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import * as GL from "../game-logic.mjs";
+import * as V from "../versus-logic.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const root = path.resolve(__dirname, "..");
@@ -19,6 +20,10 @@ export const root = path.resolve(__dirname, "..");
 // client bundle and the real submit-run Edge Function are two separate processes in production.
 const gameData = JSON.parse(readFileSync(path.join(root, "data", "players.json"), "utf8"));
 GL.initGameData(gameData.players, gameData.opponents);
+// 1v1's defenses and kickers, the same way (VERSUS.md 6). Read here rather than imported by versus-logic.mjs
+// so that module stays free of Node - tests/mock-supabase.mjs runs in a browser page too (tools/ui-harness).
+const versusPool = JSON.parse(readFileSync(path.join(root, "data", "versus-pool.json"), "utf8"));
+V.initVersusData(versusPool);
 
 export { makeMockAuth } from "./mock-supabase.mjs";
 

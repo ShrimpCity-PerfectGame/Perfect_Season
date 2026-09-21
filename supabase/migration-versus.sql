@@ -149,8 +149,11 @@ returns jsonb language sql stable security definer set search_path = public, pg_
     'picks', coalesce((
       select jsonb_agg(jsonb_build_object(
         'pickNo', p.pick_no, 'userId', p.user_id, 'boardIdx', p.board_idx, 'kind', p.kind,
-        'playerId', p.player_id, 'team', p.team, 'season', p.season, 'slot', p.slot,
-        'auto', p.auto, 'stolenBy', p.stolen_by
+        'playerId', p.player_id, 'team', p.team, 'season', p.season, 'slot', p.slot, 'auto', p.auto,
+        -- As a SIDE, not an id: this is what a client replays the match from (versus-logic.mjs's replayMatch),
+        -- and it thinks in host/guest. Everything else about who is who it can read off the match row.
+        'stolenBy', case when p.stolen_by = m.host_id then 'host'
+                         when p.stolen_by = m.guest_id then 'guest' end
       ) order by p.pick_no)
       from public.match_picks p where p.match_id = m.id), '[]'::jsonb)
   ) end

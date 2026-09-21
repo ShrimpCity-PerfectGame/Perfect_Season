@@ -126,10 +126,19 @@ await runTest("match_state reads the whole thing back, for a reload or a strange
     assert(state.picks[0].slot === "RB" && state.picks[0].playerId === 7 && state.picks[0].kind === "player", "with the picks in it");
     assert(state.picks[1].kind === "dst" && state.picks[1].team === "CHI" && state.picks[1].playerId === null,
       `and a defense reads back as one: ${JSON.stringify(state.picks[1])}`);
+    assert(state.picks[0].stolenBy === null && state.picks[1].stolenBy === null, "nothing was stolen here");
     // A reconnecting client rebuilds the boards from these two (VERSUS.md 7), so they can never be missing.
     assert(Array.isArray(state.respins) && state.respins.length === 0, `re-spins come back as a list: ${JSON.stringify(state.respins)}`);
   }
   assert((await call(HOST, "match_state", { p_code: "nosuch" })).data === null, "and nothing for a code nobody has");
+
+  // A stolen pick reads back as a SIDE, not an id: it is what a client rebuilds the match from, and
+  // versus-logic.mjs's replayMatch thinks in host/guest. Read back as an id it silently filled nobody's roster.
+  await owner("update match_picks set user_id = $1, stolen_by = $1 where match_id = $2 and pick_no = 1", [GUEST, id]);
+  const stolen = (await call(null, "match_state", { p_code: code })).data;
+  assert(stolen.picks[0].stolenBy === "guest", `the thief is a side, got ${JSON.stringify(stolen.picks[0].stolenBy)}`);
+  await owner("update match_picks set stolen_by = $1 where match_id = $2 and pick_no = 1", [HOST, id]);
+  assert((await call(null, "match_state", { p_code: code })).data.picks[0].stolenBy === "host", "and the host reads back as the host");
 });
 
 await runTest("every function this migration adds is definer, searches pg_temp last, and is granted deliberately", async () => {

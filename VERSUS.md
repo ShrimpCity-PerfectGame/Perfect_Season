@@ -406,8 +406,10 @@ gets a versus variant: the two scores, the result, and a link to play the winner
   on the same board for the board's second pick, and is refused when it would leave him nothing there. And the
   double dip, played out over whole matches from both sides of the snake: two picks on the board, none on the
   next, the other player alone on it, sixteen picks and two full rosters all the same.
-- `tests/test-versus-flow.mjs` — the whole thing in jsdom on the mock: create, join, sixteen picks alternating
-  correctly, a defense taken fifth and a kicker first, a timeout auto-picking, the result and the records.
+- `tests/test-versus-flow.mjs` — a whole match through the mock Supabase client, which is the layer the rules
+  test doesn't cover: `create_match` and `join_match`, a guest refused on both sides of the link, whose session
+  is whose, sixteen picks landing in the table, the clock called by the player who is *not* on it, every powerup
+  spent through the client, and the records moving when the last pick lands — PvP only, never career wins.
 - `tests/test-a11y.mjs` gains the new screens.
 
 ## 12. Order of work
@@ -417,7 +419,7 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 3. `versus-logic.mjs`: the board's three pools, what fits where, the auto-pick's arithmetic, the powerups, the
    result, and `decideMove` — shared by the browser and the function. ✅
 4. The Edge Function and its rule tests. ✅ (all four powerups included)
-5. The mock, so the jsdom tests can drive a match without a network.
+5. The mock, so the tests can drive a match without a network. ✅ (`tests/mock-versus.mjs`)
 6. The screens, then the flow test.
 7. Records, the board, the share card.
 8. Staging, then production, as a version.

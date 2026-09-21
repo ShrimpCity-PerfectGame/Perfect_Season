@@ -7,6 +7,7 @@ import { makeProfileData, newGuestName } from "./mock-profile-data.mjs";
 import { makeModeration } from "./mock-moderation.mjs";
 import { makeWallet } from "./mock-wallet.mjs";
 import { makeShop } from "./mock-shop.mjs";
+import { makeVersus } from "./mock-versus.mjs";
 import { seasonReward, badgeRewards, coinsSummary } from "../rewards.mjs";
 import { badgeProgress } from "../badges.mjs";
 import { mapPlayerStats } from "../profile-rules.mjs";
@@ -67,6 +68,8 @@ export function makeMockAuth() {
   const wallet = makeWallet(state);
   const shop = makeShop(state, { wallet, profileData });
   state.ownsAvatarPack = shop.ownsAvatarPack;
+  // 1v1 (VERSUS.md), the same way: its two tables, its three database functions and the match-pick function.
+  const versus = makeVersus(state);
   const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables };
   // These have no client write policy at all - the app changes them only through database functions -
   // so a direct write gets the error RLS would give.
@@ -468,13 +471,19 @@ export function makeMockAuth() {
   const rpcs = {
     site_totals: siteTotals, site_stats: siteStats,
     player_stats: ({ p_user_id } = {}) => playerStats(state, p_user_id),
-    ...profileData.rpcs, ...moderation.rpcs, ...wallet.rpcs, ...shop.rpcs,
+    ...profileData.rpcs, ...moderation.rpcs, ...wallet.rpcs, ...shop.rpcs, ...versus.rpcs,
   };
 
   return {
     from,
     channel,
-    functions: { invoke: (name, opts) => (name === "submit-run" ? invokeSubmitRun(opts?.body) : Promise.resolve({ error: { message: "unknown function" } })) },
+    functions: {
+      invoke: (name, opts) => {
+        if (name === "submit-run") return invokeSubmitRun(opts?.body);
+        if (name === "match-pick") return versus.invokeMatchPick(opts?.body, { now: opts?.now });
+        return Promise.resolve({ error: { message: "unknown function" } });
+      },
+    },
     removeChannel() {},
     rpc: (name, args) => {
       if (!rpcs[name]) return Promise.resolve({ data: null, error: { message: `unknown function ${name}` } });
@@ -503,6 +512,7 @@ export function makeMockAuth() {
     _inventory: shop.tables.inventory,
     _wallet: wallet, // its server functions (credit_coins, award_badges) and helpers, for setting up a test
     _failWrites: failWrites, // test-only: tables whose writes inside submit-run fail (see invokeSubmitRun)
+    _versus: versus, // test-only: 1v1's matches, and the state of one as versus-logic sees it
     _googleSignIn: googleSignIn, // test-only: the session Google's return leaves behind, with no browser
     _profiles: profiles, // test-only escape hatch for setup/assertions
     _runs: runs, // test-only escape hatch for setup/assertions

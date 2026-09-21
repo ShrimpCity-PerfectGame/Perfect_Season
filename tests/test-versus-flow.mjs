@@ -1,0 +1,180 @@
+// A whole 1v1 match through the mock Supabase client, the way the app will run one: two signed-in accounts,
+// a lobby, a link taken, sixteen picks alternating, powerups spent, and a result neither client decided.
+//
+// This is the layer test-versus-rules.mjs doesn't cover - not the rules themselves but everything around them:
+// create_match and join_match, whose session is whose, the picks landing in the table, and the records moving
+// once the last pick lands. The rules are the same `decideMove` both this mock and the real Edge Function call.
+import { assert, runTest, makeMockAuth } from "./helpers.mjs";
+import {
+  replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS,
+} from "../versus-logic.mjs";
+
+// Two accounts, and a way to be either of them.
+async function twoPlayers() {
+  const sb = makeMockAuth();
+  await sb.auth.signUp({ email: "one@x.test", password: "password1", options: { data: { username: "alpha" } } });
+  const alpha = sb.auth.getUser ? null : null;
+  await sb.auth.signOut();
+  await sb.auth.signUp({ email: "two@x.test", password: "password1", options: { data: { username: "beta" } } });
+  await sb.auth.signOut();
+  const as = async (email) => { await sb.auth.signInWithPassword({ email, password: "password1" }); };
+  void alpha;
+  return { sb, as, A: "one@x.test", B: "two@x.test" };
+}
+
+const call = async (sb, name, args) => (await sb.rpc(name, args)).data;
+const move = async (sb, body, now) => (await sb.functions.invoke("match-pick", { body, now })).data;
+
+await runTest("a lobby, a link, and the first one through it is the opponent", async () => {
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const lobby = await call(sb, "create_match", { p_format: "fantasy" });
+  assert(/^[A-HJ-NP-Z2-9]{6}$/.test(lobby.code), `a code you can read aloud, got ${lobby.code}`);
+  assert(lobby.status === "open" && lobby.guestId === null && lobby.hostName === "alpha", `an open lobby: ${JSON.stringify(lobby)}`);
+  assert((await call(sb, "create_match", {})).code === lobby.code, "asking twice gives back the same one");
+
+  await as(B);
+  const joined = await call(sb, "join_match", { p_code: lobby.code.toLowerCase() });
+  assert(joined.status === "drafting" && joined.guestName === "beta", `joining starts the draft: ${JSON.stringify(joined)}`);
+  assert(joined.turnDeadline, "with a clock on the first pick");
+
+  // Anyone can read it, signed in or not - a match is public the moment it exists.
+  await sb.auth.signOut();
+  const seen = await call(sb, "match_state", { p_code: lobby.code });
+  assert(seen.code === lobby.code && seen.picks.length === 0, "a stranger reads the same match back");
+  assert(await call(sb, "match_state", { p_code: "NOSUCH" }) === null, "and nothing for a code nobody has");
+});
+
+await runTest("a guest may not play, on either side of the link", async () => {
+  const { sb, as, A } = await twoPlayers();
+  await as(A);
+  const lobby = await call(sb, "create_match", {});
+  await sb.auth.signOut();
+  await sb.auth.signInAnonymously();
+  assert((await call(sb, "create_match", {})).error === "guest_not_allowed", "a guest can't open a lobby");
+  assert((await call(sb, "join_match", { p_code: lobby.code })).error === "guest_not_allowed", "nor take one");
+});
+
+// Plays the match out, taking the first legal option each turn, and lets a caller spend powerups along the way.
+async function playOut(sb, as, A, B, code, spend = () => null) {
+  const sides = { host: A, guest: B };
+  for (let guard = 0; guard < 60; guard++) {
+    const state = replayMatch(await asReplay(sb, code));
+    if (state.done) return state;
+    const side = state.turn.side;
+    await as(sides[side]);
+    const powerup = spend(state);
+    if (powerup) {
+      const res = await move(sb, { code, ...powerup });
+      if (!res.error) continue;
+    }
+    const open = openSlots(state.roster[side]);
+    const o = optionsOn(state.boardKey).find((x) => !state.taken.has(optionId(x)) && open.some((s) => optionFits(x, s)));
+    const slot = open.find((s) => optionFits(o, s));
+    const res = await move(sb, {
+      code, boardIdx: state.boardIdx, kind: o.kind, slot,
+      playerId: o.kind === "player" ? o.id : undefined,
+      team: o.kind === "player" ? undefined : o.team, season: o.season,
+    });
+    assert(!res.error, `pick ${state.pickNo} (${side}): ${JSON.stringify(res)}`);
+  }
+  throw new Error("a match that never finished");
+}
+// The match as versus-logic sees it, rebuilt from what match_state returns - which is all a real client has.
+async function asReplay(sb, code) {
+  const m = await call(sb, "match_state", { p_code: code });
+  return { code: m.code, picks: m.picks, respins: m.respins, dips: m.dips, swaps: m.swaps };
+}
+
+await runTest("sixteen picks, two full rosters, and a winner the server chose", async () => {
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+
+  const end = await playOut(sb, as, A, B, code);
+  assert(end.done, "the match finished");
+  const m = await call(sb, "match_state", { p_code: code });
+  assert(m.status === "done", `and is marked done, got ${m.status}`);
+  assert(m.picks.length === MATCH_PICKS, `sixteen picks recorded, got ${m.picks.length}`);
+  assert(m.turnDeadline === null, "with no clock left running");
+
+  for (const side of ["host", "guest"]) {
+    for (const slot of VERSUS_SLOTS) assert(end.roster[side][slot], `${side} filled ${slot}`);
+  }
+  // Every pick belongs to one of the two players, and each made eight.
+  const mine = { [m.hostId]: 0, [m.guestId]: 0 };
+  for (const p of m.picks) mine[p.userId]++;
+  assert(mine[m.hostId] === 8 && mine[m.guestId] === 8, `eight each, got ${JSON.stringify(mine)}`);
+
+  // The result: the higher score won, and the football final agrees with it.
+  const r = m.result;
+  assert(r && typeof r.host.score === "number", `a result was written: ${JSON.stringify(r)}`);
+  assert(r.winner === (r.host.score > r.guest.score ? "host" : r.host.score < r.guest.score ? "guest" : null),
+    `the higher score won: ${JSON.stringify({ host: r.host.score, guest: r.guest.score, winner: r.winner })}`);
+  if (r.winner) {
+    assert(r[r.winner].points > r[r.winner === "host" ? "guest" : "host"].points, "and won on the scoreboard too");
+    assert(m.winnerId === (r.winner === "host" ? m.hostId : m.guestId), "the winner is recorded by id");
+  }
+
+  // And the records moved - PvP only, never career wins.
+  const winner = sb._profiles.get(m.winnerId);
+  const loser = sb._profiles.get(m.winnerId === m.hostId ? m.guestId : m.hostId);
+  assert((winner.pvp_wins || 0) === 1 && (loser.pvp_losses || 0) === 1, `one win, one loss: ${winner.pvp_wins}/${loser.pvp_losses}`);
+  assert(!winner.wins && !winner.champs, "and nothing of the single-player record was touched");
+
+  // A finished match takes no more moves, from either of them.
+  await as(A);
+  assert((await move(sb, { code, claim: "clock" })).reason === "not_your_match", "the match is closed");
+});
+
+await runTest("a match survives an opponent who walks away", async () => {
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+
+  const before = replayMatch(await asReplay(sb, code));
+  const waiting = before.turn.side === "host" ? B : A; // the one NOT on the clock calls it
+  await as(waiting);
+  assert((await move(sb, { code, claim: "clock" })).reason === "too_early", "not before the clock is up");
+  const late = Date.now() + (TURN_SECONDS + 1) * 1000;
+  const done = await move(sb, { code, claim: "clock" }, late);
+  assert(!done.error, `once it is, the waiting player can call it: ${JSON.stringify(done)}`);
+
+  const m = await call(sb, "match_state", { p_code: code });
+  assert(m.picks.length === 1 && m.picks[0].auto === true, "the clock made the pick, and says so");
+  assert(m.picks[0].userId === (before.turn.side === "host" ? m.hostId : m.guestId), "for the player who was on it");
+});
+
+await runTest("powerups spent through the client land in the match", async () => {
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+
+  const spent = { respin: false, dip: false, steal: false, stealPick: false };
+  const end = await playOut(sb, as, A, B, code, (state) => {
+    if (!spent.respin) { spent.respin = true; return { respin: "team" }; }
+    if (!spent.stealPick && !state.turn.first) { spent.stealPick = true; return { stealPick: true }; }
+    if (!spent.dip) { spent.dip = true; return { dip: true }; }
+    if (!spent.steal && !state.turn.first) { spent.steal = true; return { steal: true }; }
+    return null;
+  });
+
+  const m = await call(sb, "match_state", { p_code: code });
+  assert(m.respins.length === 1 && m.respins[0].kind === "team", `the re-spin is on the match: ${JSON.stringify(m.respins)}`);
+  assert(m.dips.length === 1, `and the dip: ${JSON.stringify(m.dips)}`);
+  assert(m.swaps.length === 1, `and the stolen first pick: ${JSON.stringify(m.swaps)}`);
+  assert(m.picks.some((p) => p.stolenBy), "and a pick that changed hands");
+  assert(m.picks.length === MATCH_PICKS, `still sixteen picks, got ${m.picks.length}`);
+  for (const side of ["host", "guest"]) {
+    for (const slot of VERSUS_SLOTS) assert(end.roster[side][slot], `${side} still filled ${slot}`);
+  }
+  assert(m.status === "done" && m.result, "and the match still finished with a result");
+});
+
+console.log("test-versus-flow.mjs done");
