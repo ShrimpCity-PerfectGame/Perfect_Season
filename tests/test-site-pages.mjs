@@ -4,7 +4,7 @@
 // crawler can follow; and the rules the dialog shows are word for word the rules the built page carries, so the
 // two can never drift apart. tests/test-build-seo.mjs checks the built HTML itself.
 import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { HOWTO_STEPS, HOWTO_NOTE, SITE_PAGES, parseSitePath, HOWTO_PATH, BOARD_PATH } from "../site-pages.mjs";
+import { HOWTO_STEPS, HOWTO_NOTE, SITE_PAGES, parseSitePath, HOWTO_PATH, BOARD_PATH, PRIVACY_CONTACT } from "../site-pages.mjs";
 
 let app = null;
 async function close() {
@@ -123,6 +123,25 @@ await runTest("Modes ends with the brand and real links to both pages, which ope
   await until(() => onTab(c, "Leaderboard"), "the Leaderboard from the footer");
   assert(window.location.pathname === BOARD_PATH, `the Leaderboard's own address, got ${window.location.pathname}`);
   assert(!footer(c), "the footer belongs to Modes, not every screen");
+});
+
+await runTest("the privacy page is a page, not a screen: the app lets the browser go there", async () => {
+  const c = await open("http://localhost/");
+  await until(() => footer(c), () => `the footer, got: ${text(c).slice(-150)}`);
+  const link = [...footer(c).querySelectorAll("a")].find((a) => a.getAttribute("href") === "/privacy");
+  assert(link && link.textContent === "Privacy", `the footer links it, got ${link && link.textContent}`);
+
+  // Nothing in the app answers that address, so the click is the browser's to follow - unlike the rules and
+  // the Leaderboard, which the app takes and opens in place.
+  const clicked = new window.MouseEvent("click", { bubbles: true, cancelable: true });
+  link.dispatchEvent(clicked);
+  assert(!clicked.defaultPrevented, "the app doesn't take the click");
+  assert(parseSitePath("/privacy") === null, "and no screen claims the address");
+
+  const page = SITE_PAGES.find((p) => p.id === "privacy");
+  assert(page.standalone === true, "which is why it is built without the bundle");
+  // The one thing on the page that has to be true of the site itself: somewhere to write to.
+  assert(page.sections.some(([, ps]) => ps.some((t) => t.includes(PRIVACY_CONTACT))), "it says where to write about your data");
 });
 
 await close();

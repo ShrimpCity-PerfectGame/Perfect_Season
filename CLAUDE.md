@@ -36,8 +36,15 @@ production addresses never compete with gridspin.app. Keep staging's robots.txt 
 has to fetch a page to see its noindex. The bundle is minified. The owner holds Google Search Console
 for the domain; `tests/test-build-seo.mjs` checks all of the above.
 
-**Pages of their own (v1.14.0).** Two screens also answer at their own addresses, so a search result can send
-someone straight to them: `/how-to-play` and `/leaderboard`. `site-pages.mjs` holds both addresses and all their
+**Pages of their own (v1.14.0, a third in v1.17.0).** Two screens also answer at their own addresses, so a search
+result can send someone straight to them: `/how-to-play` and `/leaderboard`. The third, `/privacy`, is words only -
+no screen answers it, so `site-pages.mjs` marks it `standalone` and `build.mjs` leaves the bundle off that page
+(asserted, like every other swap). React therefore never mounts to replace its text, and it reads with JavaScript
+off, which is what a policy should do; the Modes footer links it like the others, and since `parseSitePath` doesn't
+claim the address the click is the browser's to follow. **Google's consent screen requires it**: publishing an
+External OAuth app needs a homepage and a privacy policy URL, which is what gates Google sign-in for anyone who
+isn't a listed test user. The address to write to is `PRIVACY_CONTACT` in site-pages.mjs; keep the page true to
+what the code actually does. `site-pages.mjs` holds both addresses and all their
 copy - including the How to play steps the dialog renders as JSX - so the rules can never exist in two versions;
 `build.mjs` writes `public/how-to-play.html` and `public/leaderboard.html` from the same shell as the app, swapping
 in each page's title, description, canonical, link preview and structured data (every swap asserted, so renaming a

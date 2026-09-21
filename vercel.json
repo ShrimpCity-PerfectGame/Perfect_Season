@@ -7,6 +7,8 @@
     { "source": "/how-to-play/", "destination": "/how-to-play.html" },
     { "source": "/leaderboard", "destination": "/leaderboard.html" },
     { "source": "/leaderboard/", "destination": "/leaderboard.html" },
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/privacy/", "destination": "/privacy.html" },
     { "source": "/c/:code", "destination": "/page.html" },
     { "source": "/c/:code/", "destination": "/page.html" },
     { "source": "/u/:name", "destination": "/page.html" },

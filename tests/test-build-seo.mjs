@@ -25,9 +25,10 @@ function build(env) {
     pages: Object.fromEntries(SITE_PAGES.map((p) => [p.id, read(p.file)])),
   };
 }
-// The words a crawler must find in a page's own HTML, with the tags taken out.
+// The words a crawler must find in a page's own HTML, with the tags taken out. A page with a bundle ends at
+// the script that replaces them; a standalone one (the privacy policy) has no script, so it ends at the body.
 const staticText = (html) => {
-  const body = (html || "").match(/<div id="root">([\s\S]*?)<\/div>\s*<script/);
+  const body = (html || "").match(/<div id="root">([\s\S]*?)<\/div>\s*(?:<script|<\/body>)/);
   return body ? body[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "";
 };
 const attr = (html, re) => (html.match(re) || [])[1];
@@ -90,10 +91,15 @@ for (const page of SITE_PAGES) {
     (html.match(/<a[^>]*href="[^"]*"/g) || []).join(" "));
   // Its own words replace the shell's <noscript> stand-in, so the page has one heading, not two.
   check(`${at} has one heading and no leftover stand-in`, !/<noscript>/.test(html) && (html.match(/<h1[ >]/g) || []).length === 1, (html.match(/<h1[^>]*>[^<]*/g) || []).join(" | "));
-  // Same shell as the app: one head to maintain, and the app takes over the moment it loads.
-  check(`${at} loads the app and the icons like the home page does`,
-    html.includes('<script src="/page.js">') && html.includes('href="/icon.svg"') && html.includes('href="/site.webmanifest"')
+  // Same shell as the app: one head to maintain. A page the app has a screen for also loads the bundle, so the
+  // game takes over the moment it arrives; a standalone one (the privacy policy) deliberately doesn't, so its
+  // words survive and it reads with JavaScript off.
+  check(`${at} uses the same head as the home page`,
+    html.includes('href="/icon.svg"') && html.includes('href="/site.webmanifest"')
     && html.includes('<meta name="theme-color" content="#F7F4EA" />'));
+  check(`${at} ${page.standalone ? "carries no bundle, so its words stay" : "loads the app, which takes over its words"}`,
+    html.includes('<script src="/page.js">') === !page.standalone,
+    (html.match(/<script[^>]*>/g) || []).join(" "));
 }
 check("the sitemap lists every page of its own", SITE_PAGES.every((p) => (prod.sitemap || "").includes(`<loc>https://www.gridspin.app${p.path}</loc>`)), prod.sitemap);
 

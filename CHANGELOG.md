@@ -34,6 +34,9 @@ CLAUDE.md.
   account, so every season, coin and streak you earned as a guest comes with you, and your name on the boards
   changes to the one you picked.
 
+- **A privacy page**, at gridspin.app/privacy and linked from the footer: what the game keeps, what other players
+  can see, where it lives, and how to have an account and its data deleted.
+
 ### Notes
 
 - A guest can't play the daily — it's one draft a day per account, and a guest account can be made again and

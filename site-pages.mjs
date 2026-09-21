@@ -1,5 +1,6 @@
-// The two pages search engines can read on their own, and the copy they share with the app: /how-to-play
-// (the same rules the How to play dialog shows) and /leaderboard (what each board ranks). Pure and
+// The pages search engines can read on their own, and the copy they share with the app: /how-to-play (the same
+// rules the How to play dialog shows), /leaderboard (what each board ranks), and /privacy, which is words only -
+// no screen in the app answers it, so its built page carries no bundle at all. Pure and
 // framework-free, so perfect-season.jsx renders it as JSX and build.mjs writes it as HTML - one source of
 // truth, since two copies of the rules would drift apart.
 //
@@ -50,6 +51,56 @@ const BOARDS = [
   ["Career records", "Wins, championships, playoff trips, the longest Daily streak and the best win percentage, on the Stats screen."],
 ];
 
+// Where someone writes to about their account or their data. A role address on the site's own domain rather
+// than a person's mailbox: it can be forwarded anywhere, and it doesn't put a personal address in front of
+// every crawler that reads this page.
+export const PRIVACY_CONTACT = "privacy@gridspin.app";
+export const PRIVACY_UPDATED = "21 September 2026";
+
+// What Gridspin keeps, said plainly and accurately - every line below is something the code actually does.
+// If the code changes, this changes with it.
+const PRIVACY_SECTIONS = [
+  ["Playing without an account", [
+    "You can play Gridspin without signing up, and nothing is asked of you to do it. A draft in progress is kept in your own browser so you can come back to it, and it never leaves your device until a season is finished.",
+    "When you finish a season, the site makes a guest account for you so the score can go on the leaderboard. A guest account holds no personal information at all: no email address, no name you gave it - just a name the site generates, like Guest_4F2A1, and the seasons played under it. You can turn it into a real account later, and everything carries over.",
+  ]],
+  ["Accounts", [
+    "An account is an email address, a password and the username you pick. The password is handled by Supabase, the service that runs the database and sign-ins, and is stored only as a hash - nobody at Gridspin can read it.",
+    "If you sign in with Google instead, Google sends the site your email address, your name and a link to your profile picture. The email address is what identifies the account; the name and picture link sit unused in the account record, and the game shows only the username you choose.",
+    "Account emails are sent for one reason: running the account - confirming an address, resetting a password. There is no mailing list and no marketing.",
+  ]],
+  ["What other people can see", [
+    "Your username, your scores, your records, your best lineups and your badges are public: that is what a leaderboard is. So are anything you write in your bio, the picture you choose and the team you pick as your favourite.",
+    "Your email address is never shown to anyone, whether you signed up with it or arrived through Google.",
+  ]],
+  ["What the game records as you play", [
+    "Every finished season and every abandoned one: the boards you were dealt, the players you drafted, the score, the result and when it happened. The same for the daily, for Over/Under and for Build-a-player.",
+    "The coins a season earns, the badges it unlocks and anything bought in the shop. Coins are a game score - there is no real money anywhere in Gridspin and nothing to buy with real money.",
+  ]],
+  ["Pictures", [
+    "A profile picture is cropped to 256 by 256 in your own browser before it is uploaded, and every piece of metadata the file carried - where and when it was taken, what took it - is removed in the process. What reaches the server is the picture and nothing else.",
+    "Pictures are stored in a public bucket, which means anyone with the address of the file can open it, the same as any image on any website. A moderator can remove a picture or a bio that breaks the site's rules.",
+  ]],
+  ["Where it all lives, and who else sees it", [
+    "The database, the sign-ins and the pictures are held by Supabase. The site itself is served by Vercel. Both keep ordinary server logs to run the service, which include IP addresses and the times requests were made.",
+    "The typefaces come from Google Fonts, so Google's servers receive the request for them when a page loads. Nothing else on the site is loaded from anywhere else: there are no adverts, no analytics, no tracking pixels and no third-party scripts.",
+    "Nothing is sold, rented or handed to anyone else.",
+  ]],
+  ["What is kept on your device", [
+    "A draft in progress, the scoring format you last chose, whether you have seen the rules, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
+  ]],
+  ["Your choices", [
+    `You can change or clear your bio, your picture and your favourite team whenever you like, from your profile. To have your account and everything recorded under it deleted, write to ${PRIVACY_CONTACT} from the address the account uses, and it will be removed.`,
+    "A guest account identifies nobody, so there is nothing to delete - stopping playing is enough. If you would rather its scores came off the leaderboard, write in and say which name it was.",
+  ]],
+  ["Children", [
+    "Gridspin is not aimed at children under 13, and no data is knowingly kept from them. If you believe a child has made an account, write in and it will be removed.",
+  ]],
+  ["Changes to this page", [
+    `This page says what the site does today, and it is updated when the site changes. It was last updated on ${PRIVACY_UPDATED}.`,
+  ]],
+];
+
 export const SITE_PAGES = [
   {
     id: "howto",
@@ -78,6 +129,25 @@ export const SITE_PAGES = [
       "Every finished season on Gridspin is graded, and the best of them land on a leaderboard. The standings change as people play, so this page says what each board ranks; open it to see today's names and scores.",
     ],
     boards: BOARDS,
+  },
+  {
+    id: "privacy",
+    path: "/privacy",
+    file: "privacy.html",
+    nav: "Privacy",
+    title: "Gridspin privacy policy - what the game keeps",
+    description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no analytics, nothing sold.",
+    h1: "Privacy policy",
+    // A page of words with nothing behind it: no screen in the app answers this address, so the built page is
+    // the whole thing and build.mjs leaves the game's bundle off it. That also means it reads with JavaScript
+    // off, which is what a policy should do.
+    standalone: true,
+    intro: [
+      "Gridspin is a free football game. It keeps as little about you as it can: an email address if you want an account, the name you pick, and the seasons you play. There are no adverts, no analytics and no trackers, and nothing is sold or handed to anyone else.",
+      `Anything below can be undone by writing to ${PRIVACY_CONTACT}.`,
+    ],
+    sections: PRIVACY_SECTIONS,
+    contact: PRIVACY_CONTACT,
   },
 ];
 export const SITE_PAGE_BY_ID = Object.fromEntries(SITE_PAGES.map((p) => [p.id, p]));
@@ -110,6 +180,12 @@ export function sitePageBody(page) {
     parts.push(`<ol class="spg-steps">${page.steps.map((s) => `<li>${segmentsHtml(s)}</li>`).join("")}</ol>`);
     parts.push(`<p class="spg-note">${esc(page.note)}</p>`);
   }
+  if (page.sections) {
+    for (const [heading, paragraphs] of page.sections) {
+      parts.push(`<h2 class="spg-h2">${esc(heading)}</h2>`);
+      parts.push(...paragraphs.map((t) => `<p>${esc(t)}</p>`));
+    }
+  }
   if (page.boards) {
     parts.push(`<dl class="spg-boards">${page.boards.map(([name, text]) => `<dt>${esc(name)}</dt><dd>${esc(text)}</dd>`).join("")}</dl>`);
   }
@@ -133,6 +209,8 @@ export const SITE_PAGE_CSS = `.spg{max-width:46rem;margin:0 auto;padding:26px 20
 .spg-lede{font-size:18px}
 .spg-steps{margin:0 0 16px;padding-left:1.3em}
 .spg-steps li{margin-bottom:10px}
+.spg-h2{margin:26px 0 10px;font-family:Anton,Impact,sans-serif;font-weight:400;font-size:24px;line-height:1.05;
+  text-transform:uppercase;letter-spacing:.01em}
 .spg-boards{margin:0}
 .spg-boards dt{margin-top:16px;font-family:Anton,Impact,sans-serif;font-weight:400;font-size:19px;text-transform:uppercase;letter-spacing:.01em}
 .spg-boards dd{margin:4px 0 0}

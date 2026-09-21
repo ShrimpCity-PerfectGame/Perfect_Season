@@ -118,6 +118,10 @@ for (const page of SITE_PAGES) {
   // and leaving both would give the page a second heading saying something else.
   out = swap(out, "noscript block", /<noscript>[\s\S]*?<\/noscript>\n?/, "");
   out = swap(out, "app root", /<div id="root"><\/div>/, `<div id="root">\n${sitePageBody(page)}\n</div>`);
+  // A page the app has no screen for (the privacy policy) keeps its words instead of handing over: with no
+  // bundle, React never mounts to replace them, and the page reads with JavaScript off - which is what a
+  // policy should do. Asserted like every other swap, so renaming the script tag can't quietly strip nothing.
+  if (page.standalone) out = swap(out, "app bundle", /\s*<script src="\/page\.js"><\/script>/, "");
   writeFileSync(`public/${page.file}`, out);
 }
 
