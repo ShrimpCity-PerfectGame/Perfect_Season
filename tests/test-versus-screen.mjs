@@ -7,7 +7,7 @@ import {
   setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, clickMode,
   assert, runTest, waitForCrypto, makeMockAuth,
 } from "./helpers.mjs";
-import { replayMatch, optionId, VERSUS_SLOTS, LOOK_SECONDS } from "../versus-logic.mjs";
+import { replayMatch, optionId, autoPick, VERSUS_SLOTS, MATCH_PICKS, LOOK_SECONDS } from "../versus-logic.mjs";
 import { TEAMS, WINDOWS } from "../game-logic.mjs";
 
 setupDom();
@@ -285,6 +285,62 @@ await runTest("the 1v1 board shows the records, apart from every other board", a
   assert(first.textContent.includes("beta") && first.textContent.includes("2"), `best record first: ${first.textContent}`);
   // And nothing about it moved the career record, which is the line VERSUS.md 1 draws.
   assert(!beta.wins && !beta.champs, "a 1v1 win is not a season win");
+});
+
+// The moment a match ends, on the screen of whoever did NOT make the last pick.
+//
+// The Edge Function writes the sixteenth pick, then reads back, grades, and sets the status - three calls, not
+// one transaction. match_picks is in the Realtime publication, so the other player's screen is told about that
+// insert while the rest is still in flight, and for that beat the rows say the draft is over while the match
+// row still says `drafting`. replayMatch returns turn: null there. The draft view read state.turn.side straight
+// through, and with no error boundary anywhere in the app that unmounted the whole root - a blank page, landing
+// on the loser, at the exact moment they were owed a result.
+await runTest("the last pick lands on the other screen before the result does", async () => {
+  // Two accounts of its own: the ones above are already in a match, and create_match now hands a player back
+  // the match they are in rather than opening a second one.
+  await signUp("delta@x.test", "delta");
+  await signUp("epsilon@x.test", "epsilon");
+  await signIn("delta@x.test");
+  const code = (await auth.rpc("create_match", {})).data.code;
+  await signIn("epsilon@x.test");
+  await auth.rpc("join_match", { p_code: code });
+
+  // Play it to the end the way the clock would, taking the best available option every turn.
+  for (let i = 0; i < MATCH_PICKS; i++) {
+    const st = auth._versus._replay(code);
+    if (!st || st.done || !st.turn) break;
+    await signIn(st.turn.side === "host" ? "delta@x.test" : "epsilon@x.test");
+    const best = autoPick(st.boardKey, st.taken, st.roster[st.turn.side], "fantasy");
+    const o = best.option;
+    pastOpeningWindow(code); // a board's first pick waits ten seconds; these tests are not about waiting
+    const res = await auth._versus.invokeMatchPick({
+      code, boardIdx: st.boardIdx, kind: o.kind, slot: best.slot,
+      playerId: o.kind === "player" ? o.id : undefined,
+      team: o.kind === "player" ? undefined : o.team, season: o.season,
+    });
+    assert(!res.error, `pick ${st.pickNo}: ${JSON.stringify(await res.error?.context?.json?.() ?? res.error)}`);
+  }
+  const done = auth._versus._matches.get(code);
+  assert(done.status === "done" && done.result, `the match finished: ${JSON.stringify(done.status)}`);
+
+  // Rewind to the window between the sixteenth pick landing and the status catching up - which is a state the
+  // server really does publish, not a hypothetical.
+  done.status = "drafting";
+  done.result = null;
+  assert(auth._versus._replay(code).done === true, "the rows say the draft is over");
+
+  await openMatch("delta@x.test", code);
+  const screen = versus();
+  assert(screen, "the screen is still mounted - it used to take the whole app down here");
+  assert(screen.dataset.view === "grading", `and says what is happening: ${screen.dataset.view}`);
+  assert(text(screen).includes("Working out the result"), `in words: ${text(screen).slice(0, 120)}`);
+
+  // Then the status catches up, the way the poll finds it two seconds later, and the result is there.
+  done.status = "done";
+  done.result = auth._versus._matches.get(code).result
+    || { winner: "host", margin: 1, host: { score: 1, against: 0, points: 7 }, guest: { score: 0, against: 0, points: 3 } };
+  await openMatch("delta@x.test", code);
+  assert(versus().dataset.view === "done", `and then the result: ${versus().dataset.view}`);
 });
 
 // The draft keeps a clock ticking and a Realtime channel open, both of which would hold the process open

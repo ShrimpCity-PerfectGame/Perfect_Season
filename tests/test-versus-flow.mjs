@@ -275,6 +275,43 @@ await runTest("powerups spent through the client land in the match", async () =>
   assert(m.status === "done" && m.result, "and the match still finished with a result");
 });
 
+// The exact three moves that used to end a match at fourteen picks with no result, in the order two people
+// would actually make them: somebody takes the board's first pick, the other player steals it, and the robbed
+// player - back on the clock with a board they now have nothing on - doubles up on it.
+//
+// The steal wrote the victim's replacement turn at order[i + 1] without looking at what was there, and on a
+// dipped board that index is the dip's extra turn. So the dip was swallowed: the victim picked once where they
+// had paid for two AND still forfeited the next board, both rosters finished short, matchResult returned null,
+// and the match could not be finished, graded or left. Seven of four hundred fuzzed matches broke this way.
+await runTest("robbed, then doubling up on the same board, still finishes a match", async () => {
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+
+  const seq = { stolen: false, dipped: false };
+  const end = await playOut(sb, as, A, B, code, (state) => {
+    // The follower is on the clock the moment the board's first pick has landed.
+    if (!seq.stolen && !state.turn.first) { seq.stolen = true; return { steal: true }; }
+    // ...which sends the robbed player straight back to the same board. That is where they double up.
+    if (seq.stolen && !seq.dipped) { seq.dipped = true; return { dip: true }; }
+    return null;
+  });
+  assert(seq.stolen && seq.dipped, "both moves were actually made");
+
+  const m = await call(sb, "match_state", { p_code: code });
+  assert(m.picks.length === MATCH_PICKS, `sixteen picks, not fourteen: got ${m.picks.length}`);
+  assert(m.picks.some((p) => p.stolenBy), "with one that changed hands");
+  assert(m.dips.length === 1, "and the dip on the match");
+  for (const side of ["host", "guest"]) {
+    for (const slot of VERSUS_SLOTS) assert(end.roster[side][slot], `${side} filled ${slot}`);
+  }
+  assert(m.status === "done" && m.result, `and a result the server wrote: ${JSON.stringify(m.status)}`);
+  assert(m.result.winner === "host" || m.result.winner === "guest" || m.result.winner === null,
+    `which says who won: ${JSON.stringify(m.result.winner)}`);
+});
+
 await runTest("the share card says who won and never names a player", async () => {
   // The card lives in the screen's own file, so it is bundled the way the app bundles it rather than
   // imported raw - node has no idea what a .jsx is.
