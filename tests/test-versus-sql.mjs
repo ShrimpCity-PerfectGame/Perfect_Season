@@ -36,9 +36,25 @@ await runTest("a client can read matches and picks, and write neither", async ()
   const match = (await call(HOST, "create_match", { p_format: "fantasy" })).data;
   assert(match?.code, `a lobby, got ${JSON.stringify(match)}`);
 
+  // An open lobby is not listable: its code is the whole invite, so anyone who could read it could walk into
+  // somebody else's match ahead of the friend it was sent to. The host still sees their own.
+  for (const who of [null, GUEST]) {
+    const open = await attempt(who, "select code from matches where status = 'open'");
+    assert(!open.error && open.rows.length === 0,
+      `${who ? "another player" : "anyone signed out"} cannot list open lobbies: ${JSON.stringify(open)}`);
+  }
+  const own = await attempt(HOST, "select code from matches where status = 'open'");
+  assert(!own.error && own.rows.length === 1, `the host reads their own lobby: ${JSON.stringify(own)}`);
+  // ...and the code still opens it for whoever was sent it, because every client reads through match_state,
+  // which is security definer and does not go through this policy at all.
+  const seen = (await call(GUEST, "match_state", { p_code: match.code })).data;
+  assert(seen?.code === match.code, `the invite still works for a stranger holding it: ${JSON.stringify(seen)}`);
+
+  // Once it is a real match it is public, the way its result on the board is.
+  await owner("update matches set status = 'drafting' where code = $1", [match.code]);
   for (const who of [null, GUEST]) {
     const read = await attempt(who, "select code from matches");
-    assert(!read.error && read.rows.length > 0, `${who ? "a player" : "anyone"} can read matches: ${JSON.stringify(read)}`);
+    assert(!read.error && read.rows.length > 0, `${who ? "a player" : "anyone"} can read a live match: ${JSON.stringify(read)}`);
     const picks = await attempt(who, "select * from match_picks");
     assert(!picks.error, `and the picks: ${JSON.stringify(picks)}`);
 

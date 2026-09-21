@@ -46,6 +46,16 @@ for (const name of only ? [only] : FUNCTIONS) {
     stdio: "inherit",
     shell: process.platform === "win32",
   });
-  if (r.status) process.exit(r.status);
+  // Anything but a clean zero stops here. `status` is null when the CLI is killed by a signal or never starts
+  // at all, which is falsy - so testing it alone reported success for a function that was never deployed, and
+  // this is the one script a release trusts to tell the truth about whether match-pick is current.
+  if (r.error) {
+    console.error(`Could not run the Supabase CLI: ${r.error.message}`);
+    process.exit(1);
+  }
+  if (r.status !== 0) {
+    console.error(`Deploying ${name} failed${r.signal ? ` (killed by ${r.signal})` : ""}.`);
+    process.exit(r.status ?? 1);
+  }
 }
 process.exit(0);

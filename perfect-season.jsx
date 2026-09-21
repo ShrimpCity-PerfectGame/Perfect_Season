@@ -1445,6 +1445,12 @@ const sameScreen = (a, b) => a.ps === b.ps
 // Screens with a history entry of their own, so Back from one returns to the screen it was opened from: a
 // profile, and the shop (SHOP.md 8), which opens from a profile card or a season's result but stays at "/".
 const ownsEntry = (s) => s.ps === "profile" || s.view === "shop" || s.view === "versus";
+
+// A 1v1 invite held across the trip to Google and back, which lands at the site root and would otherwise lose
+// it. Read once and thrown away, and ignored when stale: it is a way back from a sign-in happening now, never
+// somewhere to send a visitor who came back tomorrow.
+const VS_RETURN_KEY = "ps-versus-return";
+const VS_RETURN_GOOD_FOR = 10 * 60 * 1000;
 // A profile's sitewide rank in each format before it's known, or when the player has no score in it.
 const NO_RANK = Object.fromEntries(FORMATS.map((f) => [f, null]));
 // History writes are best effort. A page opened from a file (the UI harness) can't change its path, so the
@@ -1640,9 +1646,19 @@ function AuthPanel({ onAuthed, title, blurb }) {
   async function google() {
     setErr("");
     setBusy(true);
+    // Google takes the whole page away and brings it back at the site root, so a deep link is lost - and this
+    // panel is rendered ON the 1v1 screen precisely so that signing in doesn't lose the match you were invited
+    // to (VERSUS.md 9). The email path never leaves the page; this one does, so the code is put aside first and
+    // picked up once on the way back. Not done with redirectTo, which only works if the address is on the
+    // project's allowlist - a per-environment setting this repo doesn't hold.
+    const invite = parseVersusPath(window.location.pathname);
+    if (invite) await sset(VS_RETURN_KEY, { code: invite, at: Date.now() });
     const { error } = await authSignInWithGoogle(`${window.location.origin}/`);
     setBusy(false);
-    if (error) setErr("Google sign-in isn't available right now. Use an email address instead.");
+    if (error) {
+      if (invite) await sdel(VS_RETURN_KEY);
+      setErr("Google sign-in isn't available right now. Use an email address instead.");
+    }
   }
 
   return (
@@ -2317,13 +2333,17 @@ export default function PerfectSeason() {
 
   // Android's Back button, asked before the app shell acts on it (app-shell.mjs; the website never sends
   // this). The rules or a report sheet close first, then any screen other than Modes goes back to Modes -
-  // except the two that pushed an entry of their own, a profile and the shop, which Back walks normally so
+  // except the ones that pushed an entry of their own (ownsEntry: a profile, the shop, 1v1), which Back walks normally so
   // it returns to the screen they were opened from, at the spot it was left. Nothing left to close or leave
   // means Back leaves the app.
   const onAppBack = useRef(null);
   onAppBack.current = (e) => {
     if (closeTopDialog()) { e.preventDefault(); return; }
-    if (shownProfile || view === "shop") return;
+    // Read from ownsEntry rather than listing the screens again. Listed twice, they drifted: 1v1 was added to
+    // ownsEntry and not here, so opening it pushed an entry that Back then refused to walk. Back went to Modes,
+    // the history effect pushed `home` on top, and the next Back walked into 1v1 again - round and round, with
+    // exitApp unreachable and the app needing a force close.
+    if (shownProfile || ownsEntry({ view })) return;
     if (view !== "home") { openTab("home"); e.preventDefault(); }
   };
   useEffect(() => {
@@ -3473,6 +3493,25 @@ export default function PerfectSeason() {
   // An account made for a visitor who finished a season (v1.17.0): on the boards like anyone else, but with
   // no profile screen, no shop and never the daily, until it keeps its seasons under a name of its own.
   const isGuest = !!stats?.guest;
+
+  // Back from Google, at the site root, with the 1v1 invite that was put aside before leaving. Taken once -
+  // read and cleared together, whatever happens next - and only while it is fresh, so a code left behind by a
+  // sign-in somebody abandoned can never hijack a later visit. Sits below isGuest because it reads it.
+  useEffect(() => {
+    if (!userId || isGuest || versusCode) return undefined;
+    if (typeof window === "undefined" || window.location.pathname !== "/") return undefined;
+    let stop = false;
+    (async () => {
+      const saved = await sget(VS_RETURN_KEY);
+      if (saved) await sdel(VS_RETURN_KEY);
+      if (stop || !saved?.code) return;
+      if (!(Date.now() - (saved.at || 0) < VS_RETURN_GOOD_FOR)) return;
+      setVersusCode(saved.code);
+      openTab("versus");
+    })();
+    return () => { stop = true; };
+  }, [userId, isGuest]);
+
   // 1v1 is a draft, so it wears the draft's scope: the stadium-dark one the play screen uses (Design system,
   // CLAUDE.md). It is the single biggest reason the two screens read as the same game rather than two.
   const scope = view === "play" || view === "versus" ? "dark" : view === "board" ? "night" : "light";

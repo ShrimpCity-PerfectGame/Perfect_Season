@@ -89,11 +89,20 @@ alter table public.matches add column if not exists swaps jsonb not null default
 alter table public.matches enable row level security;
 alter table public.match_picks enable row level security;
 
--- A match is public the moment it exists: its result goes on a board, and both players' screens read it
--- constantly. Nothing about it is private - and there is no insert, update or delete policy at all, for
--- anyone, so the Edge Function's service role is the only writer.
+-- A match in progress or finished is public: its result goes on a board, and both players' screens read it
+-- constantly. There is no insert, update or delete policy at all, for anyone, so the Edge Function's service
+-- role is the only writer.
+--
+-- An OPEN lobby is the exception, and has to be. Its code IS the invite - the only thing standing between a
+-- match and whoever turns up - so a readable `matches` meant anyone could `select code from matches where
+-- status = 'open'` and walk into a lobby meant for somebody's friend, as often as they liked. That locks the
+-- invited player out, and hands the host a match they did not ask for against a stranger.
+--
+-- Nothing legitimate is lost: every client reads through match_state, which is security definer and bypasses
+-- this, so a player holding the code still sees their lobby whether or not they are in it yet.
 drop policy if exists matches_read on public.matches;
-create policy matches_read on public.matches for select using (true);
+create policy matches_read on public.matches for select
+  using (status <> 'open' or auth.uid() in (host_id, guest_id));
 drop policy if exists match_picks_read on public.match_picks;
 create policy match_picks_read on public.match_picks for select using (true);
 

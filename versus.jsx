@@ -491,6 +491,10 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const [copied, setCopied] = useState(false);
   // The option a player has tapped but not locked in, exactly as the single-player draft holds one.
   const [selected, setSelected] = useState(null);
+  // Which pick the clock has already been claimed for, and how many times - so a refusal backs off instead of
+  // asking again every 300ms. `claimAgain` is what re-arms the effect, since `match` is deliberately not a dep.
+  const claim = useRef({ at: null, tries: 0 });
+  const [claimAgain, setClaimAgain] = useState(0);
   // Every hook here runs on every render of this screen, lobby or draft - one that only ran on the draft would
   // be React error #310 the moment a lobby turned into one.
   const [stuck, sentinel] = useStuck();
@@ -603,11 +607,28 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // When the clock runs out somebody has to say so, and it may be either of them - that is what keeps a match
   // alive when the other player has closed the tab. Asked once, a beat after zero, so the two screens don't
   // race each other for it.
+  // Keyed on the pick it is claiming and on primitives, never on `match`: refresh builds a new object every two
+  // seconds, so with `match` in the deps this tore down and re-armed on every poll, and its own .then's refresh
+  // re-armed it again. A device whose clock runs fast reaches zero before the row's deadline does, gets
+  // `too_early`, and used to ask again 300ms later for the rest of the turn - the answer to which is to wait
+  // longer, not to ask harder. Each refusal now buys one more attempt, three seconds apart.
   useEffect(() => {
-    if (left !== 0 || !match || match.status !== "drafting" || !side) return undefined;
-    const t = setTimeout(() => { playMove({ code: match.code, claim: "clock" }).then(() => refresh(match.code)); }, myTurn ? 300 : 1500);
+    if (left !== 0 || !match?.code || match.status !== "drafting" || !side) return undefined;
+    const at = state?.pickNo ?? null;
+    if (at == null) return undefined;
+    if (claim.current.at !== at) claim.current = { at, tries: 0 };
+    const wait = claim.current.tries === 0 ? (myTurn ? 300 : 1500) : 3000;
+    const code = match.code;
+    const t = setTimeout(async () => {
+      claim.current = { at, tries: claim.current.tries + 1 };
+      const res = await playMove({ code, claim: "clock" });
+      await refresh(code);
+      // A claim that landed - or that lost the race to the other screen - moves the pick on, and the effect
+      // resets itself on the new pickNo. Only "not yet" leaves everything where it was, so only that asks again.
+      if (res && !res.ok && res.reason === "too_early") setClaimAgain((n) => n + 1);
+    }, wait);
     return () => clearTimeout(t);
-  }, [left, match, side, myTurn, refresh]);
+  }, [left, match?.code, match?.status, side, myTurn, refresh, state?.pickNo, claimAgain]);
 
   const send = async (move) => {
     if (busy) return;
