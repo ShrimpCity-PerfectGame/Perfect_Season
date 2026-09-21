@@ -7,7 +7,7 @@
 import { assert, runTest, makeMockAuth, setupDom, loadModule } from "./helpers.mjs";
 import { playMove } from "../storage.js";
 import {
-  replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, LOOK_SECONDS,
+  replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS,
 } from "../versus-logic.mjs";
 
 // Two accounts, and a way to be either of them.
@@ -26,10 +26,9 @@ async function twoPlayers() {
 const call = async (sb, name, args) => (await sb.rpc(name, args)).data;
 // A refusal arrives as supabase-js delivers one - an `error` with the body behind it - so this reads it the
 // way storage-versus.js's playMove has to.
-// A clock that always steps past a board's opening window (VERSUS.md 7), so these tests are about the flow
-// rather than about waiting. The window has a test of its own in test-versus-rules.mjs.
+// A clock that moves on with each move, so a turn never runs out mid-test.
 let clock = Date.now();
-const tick = () => (clock += (LOOK_SECONDS + 1) * 1000);
+const tick = () => (clock += 5000);
 const move = async (sb, body, now = tick()) => {
   const { data, error } = await sb.functions.invoke("match-pick", { body, now });
   if (error) return error.context ? await error.context.json() : { reason: "network" };
@@ -119,8 +118,7 @@ async function playOut(sb, as, A, B, code, spend = () => null) {
     await as(sides[side]);
     const powerup = spend(state);
     if (powerup) {
-      // Steal the pick is spent by the player who is NOT on the clock, so a powerup can say whose turn it
-      // belongs to. Everything else is the current player's.
+      // A powerup may say whose turn it belongs to; everything else is the current player's.
       const asSide = powerup.as === "other" ? (side === "host" ? "guest" : "host") : side;
       await as(sides[asSide]);
       const res = await move(sb, { code, ...powerup, as: undefined });
@@ -146,7 +144,7 @@ async function playOut(sb, as, A, B, code, spend = () => null) {
 // The match as versus-logic sees it, rebuilt from what match_state returns - which is all a real client has.
 async function asReplay(sb, code) {
   const m = await call(sb, "match_state", { p_code: code });
-  return { code: m.code, picks: m.picks, respins: m.respins, dips: m.dips, swaps: m.swaps };
+  return { code: m.code, picks: m.picks, respins: m.respins, dips: m.dips };
 }
 
 await runTest("sixteen picks, two full rosters, and a winner the server chose", async () => {
@@ -252,10 +250,9 @@ await runTest("powerups spent through the client land in the match", async () =>
   await as(B);
   await call(sb, "join_match", { p_code: code });
 
-  const spent = { respin: false, dip: false, steal: false, stealPick: false };
+  const spent = { respin: false, dip: false, steal: false };
   const end = await playOut(sb, as, A, B, code, (state) => {
     if (!spent.respin) { spent.respin = true; return { respin: "team" }; }
-    if (!spent.stealPick && state.turn.first) { spent.stealPick = true; return { stealPick: true, as: "other" }; }
     // The steal before the dip, and the dip waits for it: a dip gives the dipper two turns back to back, and on
     // the second of them the pick just made is their own, which is not a thing anyone may steal.
     if (!spent.steal && !state.turn.first) { spent.steal = true; return { steal: true }; }
@@ -266,7 +263,6 @@ await runTest("powerups spent through the client land in the match", async () =>
   const m = await call(sb, "match_state", { p_code: code });
   assert(m.respins.length === 1 && m.respins[0].kind === "team", `the re-spin is on the match: ${JSON.stringify(m.respins)}`);
   assert(m.dips.length === 1, `and the dip: ${JSON.stringify(m.dips)}`);
-  assert(m.swaps.length === 1, `and the stolen first pick: ${JSON.stringify(m.swaps)}`);
   assert(m.picks.some((p) => p.stolenBy), "and a pick that changed hands");
   assert(m.picks.length === MATCH_PICKS, `still sixteen picks, got ${m.picks.length}`);
   for (const side of ["host", "guest"]) {
@@ -327,7 +323,7 @@ await runTest("the share card says who won and never names a player", async () =
   const card = versusShareText(m, m.result, "host", "https://gridspin.test");
 
   const firstLine = (t) => t.split("\n")[0];
-  assert(card.startsWith("Gridspin 1v1"), `it says what it is: ${firstLine(card)}`);
+  assert(card.startsWith("Gridspin Duel"), `it says what it is: ${firstLine(card)}`);
   assert(card.includes(`${m.result.host.points}–${m.result.guest.points}`), `with the final on it: ${card}`);
   assert(card.includes("https://gridspin.test"), "and a link, last");
   // Never the players - the same rule the season card follows, for the same reason.

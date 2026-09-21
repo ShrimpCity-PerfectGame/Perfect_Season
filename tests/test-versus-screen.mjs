@@ -7,7 +7,7 @@ import {
   setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, clickMode,
   assert, runTest, waitForCrypto, makeMockAuth,
 } from "./helpers.mjs";
-import { replayMatch, optionId, autoPick, VERSUS_SLOTS, MATCH_PICKS, LOOK_SECONDS } from "../versus-logic.mjs";
+import { replayMatch, optionId, autoPick, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS } from "../versus-logic.mjs";
 import { TEAMS, WINDOWS } from "../game-logic.mjs";
 
 setupDom();
@@ -44,12 +44,11 @@ async function signUp(email, username) {
 }
 const versus = () => container.querySelector(".versus");
 let matchCode = null; // the match tests three and four share
-// A board opens with a window in which its first pick cannot land, so the other player can take it (VERSUS.md
-// 7). These tests are about the screen, not about waiting ten seconds, so the turn is aged past it - by moving
-// its deadline back, which is exactly what the passing of time would do.
+// A board opens the moment it is dealt now, so there is nothing to wait out - but a turn still has a clock,
+// and these helpers keep it from running out mid-test.
 function pastOpeningWindow(code) {
   const m = auth._versus._matches.get(code);
-  if (m?.turn_deadline) m.turn_deadline = new Date(Date.parse(m.turn_deadline) - (LOOK_SECONDS + 1) * 1000).toISOString();
+  if (m?.turn_deadline) m.turn_deadline = new Date(Date.now() + TURN_SECONDS * 1000).toISOString();
 }
 async function openMatch(email, code) {
   await signIn(email);
@@ -76,7 +75,7 @@ async function openAccount() {
 await runTest("the Modes tile opens a lobby with a link to send", async () => {
   await signUp("alpha@x.test", "alpha");
   await goHome();
-  await clickMode(container, "1v1");
+  await clickMode(container, "Duel");
   await flush();
   assert(versus(), "the 1v1 screen is on");
   assert(versus().dataset.view === "lobby", `starting at the lobby, got ${versus().dataset.view}`);
@@ -99,7 +98,7 @@ await runTest("a guest is told to sign in rather than shown a lobby", async () =
   await auth.auth.signInAnonymously();
   await flush();
   await goHome();
-  const tile = [...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "1v1")?.closest("button");
+  const tile = [...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Duel")?.closest("button");
   assert(tile, "the tile is still there for a guest");
   assert(tile.textContent.includes("Sign in to play"), `and says so: ${tile.textContent.slice(0, 120)}`);
   await click(tile);
@@ -131,7 +130,7 @@ await runTest("the opponent's screen shows the same board, and a pick lands on i
   // is exactly what happens on two machines, minus the machines.
   await signUp("beta@x.test", "beta");
   await goHome();
-  await clickMode(container, "1v1");
+  await clickMode(container, "Duel");
   await flush();
   await click(findButtonByText(container, "Open a lobby"));
   await flush();
@@ -148,7 +147,7 @@ await runTest("the opponent's screen shows the same board, and a pick lands on i
   await openMatch("beta@x.test", code);
 
   assert(versus()?.dataset.view === "draft", `the draft is on screen, got ${versus()?.dataset.view}`);
-  const state = replayMatch({ code, picks: [], respins: [], dips: [], swaps: [] });
+  const state = replayMatch({ code, picks: [], respins: [], dips: [] });
   // It draws the single-player draft's own reel, so the team and era come from the board the server dealt.
   const [team, w] = state.boardKey.split("|");
   assert(container.querySelector(".reel .team")?.textContent === TEAMS[team][0],
@@ -228,11 +227,9 @@ await runTest("the follower spends a re-spin, and walks away to a board of their
 await runTest("the powerups show for both players, and say who has spent what", async () => {
   const code = matchCode;
   await openMatch("beta@x.test", code);
-  // The bar is on screen for whoever is looking, not only the player on the clock: Steal the pick is spent
-  // off your own turn, so a bar that appeared only on your turn could never offer it.
   // Named here rather than imported: node cannot load a .jsx, and naming them makes the test fail loudly if
   // one is ever quietly dropped from the bar.
-  const EXPECTED = ["Team", "Era", "Double", "Steal", "First"];
+  const EXPECTED = ["Team", "Era", "Double", "Steal"];
   const labels = [...container.querySelectorAll(".vs-powers .btn")].map((b) => b.textContent.replace(/\s+/g, " ").trim());
   assert(labels.length === EXPECTED.length + 1, `every powerup plus the rules button: ${JSON.stringify(labels)}`);
   for (const short of EXPECTED) assert(labels.some((l) => l.includes(short)), `${short} is on the bar`);
@@ -240,21 +237,21 @@ await runTest("the powerups show for both players, and say who has spent what", 
   // And a track under each roster, so a player can see what the other still holds without remembering it.
   const tracks = [...container.querySelectorAll(".vs-track")];
   assert(tracks.length === 2, `one track per player, got ${tracks.length}`);
-  assert(tracks.every((t) => t.querySelectorAll("li").length === 5), "each showing all five");
+  assert(tracks.every((t) => t.querySelectorAll("li").length === EXPECTED.length), "each showing all four");
   // A spent one reads as spent without colour - struck through, and said in words for a screen reader.
   const spent = [...container.querySelectorAll(".vs-track .vs-tk")].filter((li) => li.classList.contains("spent"));
   assert(spent.every((li) => li.textContent.includes("used")), "a spent powerup says so in words");
 });
 
 await runTest("the screen keeps reading even while it is your own turn", async () => {
-  // The other player can act DURING your turn - Steal the pick is spent while you are on the clock, and takes
-  // the board's opening pick off you. A screen that stopped reading whenever it believed it was its turn would
-  // never learn it had stopped being, and Realtime is not something to bet the draft on.
+  // The other player can act DURING your turn - a steal takes the pick you just made. A screen that stopped
+  // reading whenever it believed it was its turn would never learn it had stopped being, and Realtime is not
+  // something to bet the draft on.
   const code = matchCode;
   await openMatch("beta@x.test", code);
   assert(container.querySelector(".versus").dataset.view === "draft", "the draft is on screen");
 
-  // Flip the sides behind the screen's back, the way the server would after a swap, and touch nothing else.
+  // Flip the sides behind the screen's back, and touch nothing else.
   const m = auth._versus._matches.get(code);
   const wasHost = m.host_id;
   m.host_id = m.guest_id;
@@ -277,7 +274,7 @@ await runTest("the 1v1 board shows the records, apart from every other board", a
   await flush();
   await flush();
   const heads = [...container.querySelectorAll("h2")].map((h) => h.textContent);
-  assert(heads.includes("1v1"), `the 1v1 board is on the Leaderboard: ${JSON.stringify(heads)}`);
+  assert(heads.includes("Duels"), `the duel board is on the Leaderboard: ${JSON.stringify(heads)}`);
 
   const board = [...container.querySelectorAll("table.lb")].find((t) => t.textContent.includes("2–0"));
   assert(board, `with the records on it: ${text(container).slice(0, 200)}`);

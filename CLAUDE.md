@@ -111,9 +111,10 @@ each Supabase project before this is busy, and remember anonymous users count to
 `tests/test-guest-accounts.mjs` covers the game's side; the naming and the trade-up are held to the real SQL in
 `tests/test-profile-data.mjs`.
 
-**1v1 (v1.19.0).** Two players draft against each other from the same boards and the better roster wins.
-**`VERSUS.md` is the reference** - read it before touching anything below. The short version, and the parts that
-are unlike every other mode:
+**Duels (v1.19.0).** Two players draft against each other from the same boards and the better roster wins.
+Players see **Duel**; everything internal stays `versus` / `vs-` / `/vs/`, the same split the Gridspin rename
+made. **`VERSUS.md` is the reference** - read it before touching anything below. The short version, and the
+parts that are unlike every other mode:
 
 - **The server holds the draft.** Every other mode is drafted in the browser and checked afterwards, because one
   player's draft can be replayed from its seed. A 1v1 cannot: the second picker's legal choices depend on the
@@ -133,9 +134,18 @@ are unlike every other mode:
 - **No probability anywhere.** The higher score wins, every time. `winProb` and `gameResult` are not called: an
   upset is the best part of a 17-game season and the worst possible end to one game between two people. The
   football final is drawn from the result and can never contradict it.
-- **Defenses and kickers are 1v1's alone.** `data/versus-pool.json` (861 of each, 1999-2025, built by
+- **Defenses and kickers are a duel's alone.** `data/versus-pool.json` (859 of each, 1999-2025, built by
   `tools/data/build-versus-pool.mjs` from nflverse) is read by `versus.jsx` and the Edge Function and nothing
   else; `POS` and `SLOTS` are untouched, and no existing score or board moves.
+- **Three powerups, all spent on your own turn**: two re-spins, a steal and a double dip. A fourth, Steal the
+  pick, was cut after playtesting along with the ten-second window that existed to make it spendable - see
+  VERSUS.md 7 for what went with them and what it cost. A board opens the moment it is dealt.
+- **The football final is a table of real scorelines**, not a loser's total plus a margin drawn separately -
+  that produced finals like 31-23, which is real but has happened 22 times in 7,307 games. game-logic.mjs's
+  `LOSER_PTS` and `MARGINS` are untouched, because the season sim is seeded and its outcomes are stored.
+- **Who leads board 1 is a coin flip on the match code**, not whoever opened the lobby. Leading the early
+  boards is worth about 54% of decided matches, and with Steal the pick gone nothing in the game answers it -
+  so the seeding is the whole of the fairness. Do not make it parity again.
 - **Guests may not play** (VERSUS.md 5), for the reason they may not play the daily: a guest account costs
   nothing to make, so two tabs would farm the board. **Known gap:** two *real* accounts in two tabs still can.
   It costs an email each and moves nothing but the PvP board; the answer if it is abused is a rate limit on

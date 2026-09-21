@@ -438,7 +438,7 @@ function VersusPreview({ userId, username, code }) {
       <style>{APP_CSS}</style>
       <main id="content">
         <div className="wrap">
-          <h1 className="vh">1v1</h1>
+          <h1 className="vh">Duel</h1>
           <VersusScreen userId={userId} username={username} code={code} format="fantasy"
             onBack={() => console.log("back")} onCode={(c) => console.log("code", c)}
             onShare={(t) => console.log("share", t)} siteUrl="https://gridspin.test" />
@@ -480,13 +480,11 @@ async function setUpVersus() {
     const best = V.autoPick(st.boardKey, st.taken, st.roster[st.turn.side], "fantasy");
     if (!best) break;
     const o = best.option;
-    // Past the board's opening window, or every one of these is refused as board_opening and the fixture is a
-    // freshly dealt board pretending to be a match in progress.
     await vs.invokeMatchPick({
       code, boardIdx: st.boardIdx, kind: o.kind, slot: best.slot,
       playerId: o.kind === "player" ? o.id : undefined,
       team: o.kind === "player" ? undefined : o.team, season: o.season,
-    }, { now: Date.now() + (V.LOOK_SECONDS + 2) * 1000 });
+    });
   }
   // Signed in as whoever is on the clock, so the board renders in the state it is picked from. ?waiting=1 shows
   // it from the other side instead - the half of a match where the board is read and not touched.

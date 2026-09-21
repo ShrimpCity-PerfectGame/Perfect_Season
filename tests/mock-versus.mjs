@@ -58,7 +58,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       id: m.id, code: m.code, hostId: m.host_id, guestId: m.guest_id,
       hostName: nameOf(m.host_id), guestName: nameOf(m.guest_id),
       format: m.format, status: m.status, turnDeadline: m.turn_deadline,
-      respins: m.respins, dips: m.dips, swaps: m.swaps,
+      respins: m.respins, dips: m.dips,
       result: m.result, winnerId: m.winner_id, createdAt: m.created_at,
       picks: picksOf(m.id).map((p) => ({
         pickNo: p.pick_no, userId: p.user_id, boardIdx: p.board_idx, kind: p.kind,
@@ -85,7 +85,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     matches.set(code, {
       id: `match-${nextId++}`, code, host_id: uid, guest_id: null,
       format: p_format === "standard" ? "standard" : "fantasy", status: "open",
-      turn_deadline: null, respins: [], dips: [], swaps: [],
+      turn_deadline: null, respins: [], dips: [],
       result: null, winner_id: null, created_at: new Date().toISOString(), ended_at: null,
     });
     return matchState({ p_code: code });
@@ -148,7 +148,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
 
     const decided = V.decideMove({
       code, format: m.format, side, move: body, now,
-      picks: asPicks(m), respins: m.respins, dips: m.dips, swaps: m.swaps,
+      picks: asPicks(m), respins: m.respins, dips: m.dips,
       deadline: m.turn_deadline ? Date.parse(m.turn_deadline) : 0,
     });
     // A refusal comes back the way the real one does: supabase-js reports any non-2xx as an `error` and puts
@@ -165,11 +165,6 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     }
     if (decided.action === "dip") {
       m.dips = [...m.dips, { boardIdx: decided.boardIdx, by: side }];
-      restartClock();
-      return changed({ data: { ok: true } });
-    }
-    if (decided.action === "swap") {
-      m.swaps = [...m.swaps, { boardIdx: decided.boardIdx, by: side }];
       restartClock();
       return changed({ data: { ok: true } });
     }
@@ -194,7 +189,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     });
 
     // Asked, never counted to sixteen: a double dip and a steal both move where the end of a match is.
-    const after = V.replayMatch({ code, picks: asPicks(m), respins: m.respins, dips: m.dips, swaps: m.swaps });
+    const after = V.replayMatch({ code, picks: asPicks(m), respins: m.respins, dips: m.dips });
     if (!after.done) { restartClock(); return changed({ data: { ok: true } }); }
 
     const result = V.matchResult({ code, format: m.format, host: after.roster.host, guest: after.roster.guest });
@@ -228,7 +223,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     // Test-only: the state of a match as versus-logic sees it, for setting one up or asserting on it.
     _replay: (code) => {
       const m = matches.get(String(code || "").toUpperCase());
-      return m ? V.replayMatch({ code: m.code, picks: asPicks(m), respins: m.respins, dips: m.dips, swaps: m.swaps }) : null;
+      return m ? V.replayMatch({ code: m.code, picks: asPicks(m), respins: m.respins, dips: m.dips }) : null;
     },
     _matches: matches,
   };

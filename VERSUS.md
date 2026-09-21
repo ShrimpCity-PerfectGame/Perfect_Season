@@ -21,19 +21,20 @@ prefixed class names, and nothing reaches production without going through stagi
   worth 1.97 points of final score on board 0 against 0.57 on board 7. Whoever leads 0, 2, 4 and 6 therefore
   wins about 54% of decided matches. That used to be the host every time, because `create_match` makes the
   caller the host, so anyone who always sent the invite rather than clicking one won more for nothing. Seeded on
-  the code it is the same answer on both screens and the server, and neither player can choose it. The board-0
-  leader still has the edge; **Steal the pick is what a follower spends to take it** (worth 3.70 points on
-  board 0, against a 1.97 lead premium), which is the powerup earning its place.
+  the code it is the same answer on both screens and the server, and neither player can choose it. Nothing in
+  the game answers that edge any more - Steal the pick did, and was cut for being more confusing than it was
+  worth - so the coin flip is the whole of the fairness here, like a toss. That makes it load-bearing: if the
+  seat ever stops being seeded, the host silently wins 54% of matches again.
 - A roster is the six single player already uses — **QB, RB, WR, TE, Flex, Flex** — plus a **defense** and a
   **kicker** (section 6).
 - **Every board offers all eight**: that team's players in that era, that team's defense in each year of the era,
   and its kicker in each year. Any board can fill any open slot, so a defense can go fifth and a kicker first -
   the order is the player's to choose. A board that cannot serve *both* players is skipped before it is dealt
   (section 8), so no draft order can strand either of them.
-- Each player carries the same **powerups** (section 7): two re-spins, a **steal**, a **double dip** and a
-  **steal the pick**. A leader's re-spin deals a board to *both* of them; a follower's is a board of their own.
-  A steal takes the pick the other player just made and sends them back to the board for another. A double dip
-  takes two off one board and gives up the next, which the other player then has to themselves.
+- Each player carries the same **powerups** (section 7): two re-spins, a **steal** and a **double dip**, all
+  spent on your own turn. A leader's re-spin deals a board to *both* of them; a follower's is a board of their
+  own. A steal takes the pick the other player just made and sends them back to the board for another. A double
+  dip takes two off one board and gives up the next, which the other player then has to themselves.
 - Each pick has a **clock**. When it runs out the pick is made for you: the most valuable available option that
   fits an open slot. A dropped connection loses you a pick, not the match.
 - When both rosters are full the server grades them, and **the higher score wins — always**. There is no
@@ -64,8 +65,8 @@ browsers cannot each hold the truth. So a match is the first thing in Gridspin w
 two seconds, for the whole match — the lobby included, and **including your own turn**. Both of those were
 learned the hard way. A lobby that doesn't read never learns anybody joined. And a screen that stops reading
 whenever it believes it is its turn never learns it has stopped being: the other player can act *during* your
-turn, because Steal the pick is spent while you are on the clock and takes the board's opening pick off you. A
-draft that only moves when a socket delivers is a draft that stops.
+turn, because a steal takes the pick you just made. A draft that only moves when a socket delivers is a draft
+that stops.
 
 ## 3. Database (`supabase/migration-versus.sql`)
 
@@ -82,7 +83,6 @@ draft that only moves when a socket delivers is a draft that stops.
 | `turn_deadline` | timestamptz null | when the player on the clock loses the pick |
 | `respins` | jsonb not null default `[]` | every re-spin spent, `{ pickNo, kind, by, key }` (section 7) — enough for a reconnecting client to rebuild the same boards |
 | `dips` | jsonb not null default `[]` | every double dip spent, `{ boardIdx, by }` (section 7) — which board was drafted three times, and which one after it only once |
-| `swaps` | jsonb not null default `[]` | every Steal the pick spent, `{ boardIdx, by }` (section 7) — which boards had their order reversed before the first pick landed |
 | `result` | jsonb null | both sides' scores and the three parts each was built from (section 6), written once, by the server |
 | `winner_id` | uuid null | set with `result`; null for a draw |
 | `created_at` / `ended_at` | timestamptz | |
@@ -165,10 +165,9 @@ the blast radius would be timeouts alone. It has been left as it is on purpose: 
 something, a mild and explainable penalty is the right size for that cost, and an optimal autopilot would make
 walking away from the clock nearly free. Revisit it as a balance question, not as a bug.
 
-`POST { code, respin }`, `{ code, steal: true, slot }`, `{ code, dip: true }` and `{ code, stealPick: true }`
-are the powerups, with the rules and refusals in section 7. All of them restart the clock — spending one is a
-turn's worth of thinking too. `stealPick` is decided **above** the turn check, because it is spent when it is
-not your turn.
+`POST { code, respin }`, `{ code, steal: true, slot }` and `{ code, dip: true }` are the powerups, with the
+rules and refusals in section 7. All of them restart the clock — spending one is a turn's worth of thinking
+too, and all of them are spent on your own turn.
 
 **Every refusal here is an HTTP status, and supabase-js turns any non-2xx into an `error` with the body behind
 `error.context`.** So `storage-versus.js`'s `playMove` has to read that body, exactly as `submitRun` does —
@@ -280,10 +279,21 @@ is the same either way, but the numbers a player reads afterwards should say wha
 
 **The scoreboard.** A match still ends on a football score — 27–17, not 104.3–99.8 — because that is what winning
 a game looks like. But it is drawn from the result, never the other way round: the winner is whoever scored
-higher, full stop, and the margin is a **monotone** map from the points gap onto the game's own `MARGINS` table,
-so a bigger gap is always a bigger scoreline. The losing side's points are the only part left to chance, seeded
-from the match code so both screens and a reload all read the same final, and they cannot move the margin or the
-winner. **The upset rate in 1v1 is zero by construction** — `winProb` and `gameResult` are not called at all, and
+higher, full stop, and the margin is a **monotone** map from the points gap, so a bigger gap is always a bigger
+scoreline. Which of that margin's scorelines you get is the only part left to the seed, taken from the match
+code so both screens and a reload all read the same final, and it cannot move the margin or the winner.
+
+**It is a table of real finals, not arithmetic** (`FINALS` in versus-logic.mjs): the four commonest scorelines
+at each of twelve margins, counted from every NFL game since 1999 in `nfldata/games.csv`, and picked in
+proportion to how often they actually happen. This started as the season sim's approach — draw a loser's total
+from `LOSER_PTS` and a margin from `MARGINS`, independently — and that is exactly the bug. Drawn independently
+they pair freely, and freely means rarely: it produced **31–23**, a real score that has happened 22 times in
+7,307 games, rank 79 of 879 distinct scorelines. 23–20 has happened 139 times. Every line in the table is one
+people see constantly, so a result never reads as arithmetic wearing a jersey. Ties come from the scores real
+games have actually tied at.
+
+`LOSER_PTS` and `MARGINS` in game-logic.mjs are deliberately **not** touched: the season sim is seeded and its
+outcomes are stored, so changing them would replay every challenge code differently (CLAUDE.md). **The upset rate in 1v1 is zero by construction** — `winProb` and `gameResult` are not called at all, and
 their randomness is exactly what 1v1 must not have: in single player a 17-game season is a story and an upset is
 the best part of it, but a head-to-head is one game between two people who each made eight decisions, and losing
 it to a dice roll would make those decisions pointless. An exact tie is shown as a tied score, which football has.
@@ -400,31 +410,20 @@ when:
    same rule as section 8 with the first player taking two instead of one. A dip by the player picking second is
    free of that check: nobody is left to be stranded.
 
-### Steal the pick
+### Cut: Steal the pick, and the opening window with it
 
-Spent by the player who would pick *second* on a board, before the board's first pick lands: the order on that
-board is swapped and you pick first. Nothing else changes — the board is still dealt to both, still has to serve
-both, and the snake resumes as normal on the next one. One per match, each. It is the simplest of the three
-powerups, because it moves nothing but who goes first.
+A fourth powerup let the player picking *second* on a board reverse the order and lead it instead. It is gone,
+and so is the ten-second window that existed only to make it spendable - a board's first pick could not land
+until the other player had had a real chance to take it, which meant every board began by refusing picks.
 
-**It is the one move besides the clock made while it is NOT your turn**, and that is forced: it belongs to the
-player picking second and must be spent before the first pick, which is exactly when the other player is on the
-clock. Behind `decideMove`'s turn check — where it sat until it was played by hand — it could never be spent
-at all, and the powerup bar shows for **both** players for the same reason.
+Two playtests said the same thing: together they cost more in confusion than they were worth. The window in
+particular reads as the game being broken, because a board that refuses every pick for ten seconds looks
+broken whatever the banner says. What went with them: the `swaps` column, `lookWindow`, `canStealPick`,
+`LOOK_SECONDS`, and the `board_opening`, `already_swapped` and `already_leading` refusals. **A board now opens
+the moment it is dealt.**
 
-**One swap per board**, whoever spends it. Both players hold one, so without that rule the second could simply
-flip the board back: the order ends where it started and two powerups are gone, which is a worse game than
-neither of them spending one. Refused as `already_swapped`.
-
-**The opening window.** Being allowed to spend it is not the same as having a chance to: the leader can take
-something the instant a board appears, while the other player is still reading it. So a board's **first pick
-cannot land for `LOOK_SECONDS` (10)** — refused as `board_opening`. The turn clock is untouched and runs its
-full length from the same start, so the window costs the leader thinking time, not their turn.
-
-It exists **only when it could be used**: the board's opening pick, not already swapped, and the player picking
-second still holding theirs (`lookWindow`). Every other board opens at once, so a match never waits for a chance
-nobody has. Both players are told what is happening — "the board opens in 6s" against "6s to take the first
-pick on this board" — because a board that silently refuses every pick for ten seconds reads as broken.
+The cost, recorded so nobody re-derives it: the board-0 leader's ~54% edge (section 1) no longer has an answer
+inside the game. The coin flip on the match code is what keeps that fair, and is now the only thing that does.
 
 ## 8. A board has to serve both players
 

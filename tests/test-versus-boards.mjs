@@ -48,7 +48,7 @@ await runTest("the snake: sixteen picks, eight each, the lead alternating by boa
 // 1.97 points of final score on board 0 against 0.57 on board 7. That is a real edge, and it used to belong to
 // the host every single time, because create_match makes the caller the host: anyone who always sent the invite
 // rather than clicking one won 53-54% of matches for nothing. It is a coin flip on the code now, so no player
-// can choose the good seat, and Steal the pick is what a follower spends to take the lead back.
+// can choose the good seat.
 await runTest("who leads board 0 is a coin flip on the code, not the seat", async () => {
   const lead = (code) => firstPickerOn(0, code);
   assert(lead("SEATAA") === lead("SEATAA"), "the same code always deals the same seat");

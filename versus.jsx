@@ -25,13 +25,13 @@
 // Test hooks: the root is <section class="versus" data-view="lobby|draft|done" data-code=...>; every option on
 // the board is a <div class="card" data-opt="player|<id>|<season>" | "dst|TEAM|<season>" | "k|TEAM|<season>">
 // whose .hit selects it and whose .drafts holds the Lock in buttons; the powerups are buttons named "Re-spin
-// team", "Re-spin era", "Double dip", "Steal" and "Steal the pick"; each roster is a .vs-rosters .roster with
+// team", "Re-spin era", "Double dip" and "Steal"; each roster is a .vs-rosters .roster with
 // a .slot per slot, carrying data-slot and data-filled.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMatch, joinMatch, fetchMatch, playMove, subscribeMatch, versusPath, sget, sset } from "./storage.js";
 import {
   replayMatch, optionsOn, optionId, optionFits, openSlots, matchResult,
-  VERSUS_SLOTS, MATCH_BOARDS, TURN_SECONDS, LOOK_SECONDS, lookWindow, respinsLeft, dipsLeft, stealsLeft, pickStealsLeft,
+  VERSUS_SLOTS, MATCH_BOARDS, TURN_SECONDS, respinsLeft, dipsLeft, stealsLeft,
 } from "./versus-logic.mjs";
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
 import {
@@ -104,10 +104,6 @@ export const VERSUS_CSS = `
 .vs-flashrow{min-height:30px}
 .vs-flash{margin:0;padding:6px 10px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--line2);
   font-weight:700;font-size:13.5px;display:inline-flex;gap:8px;align-items:center;animation:vs-in .28s ease-out}
-/* After .vs-flash, not before it: same specificity, and .vs-flash sets the border SHORTHAND, which resets
-   border-color. Declared first, the opening window's lime edge never drew at all and its banner was
-   indistinguishable from an ordinary event line. (CLAUDE.md: base rules before the rules that override them.) */
-.vs-open{border-color:var(--accent);font-variant-numeric:tabular-nums}
 @keyframes vs-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 /* Who still holds what. Struck through rather than merely dimmed: a spent one has to read without colour. */
 .vs-track{list-style:none;display:flex;gap:8px;margin:6px 0 0;padding:0}
@@ -229,11 +225,6 @@ export const POWERUPS = [
     blurb: "Take the pick they just made.",
     detail: "Only when you pick second, and only the pick just made. It becomes yours, and they go straight back to this board and pick again - so they lose the player, not the turn.",
   },
-  {
-    id: "stealPick", icon: "🔀", label: "Steal the pick", short: "First",
-    blurb: "Pick first on a board you would have picked second on.",
-    detail: "Spend it before either of you has taken anything. The order on that board flips, and the snake carries on as normal from the next board.",
-  },
 ];
 
 // The groups the board is laid out in: the four positions the single-player draft uses, then the two 1v1 adds.
@@ -264,7 +255,7 @@ export function VersusHowTo({ onClose }) {
       <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="vs-howto-title" tabIndex={-1}
         onKeyDown={(e) => keepFocusInside(e, dialog.current)} onClick={(e) => e.stopPropagation()}>
         <button type="button" className="modal-x" aria-label="Close" onClick={onClose}>×</button>
-        <h2 id="vs-howto-title">How 1v1 works</h2>
+        <h2 id="vs-howto-title">How duels work</h2>
         <ol>
           <li>You and your opponent watch the <b>same eight boards</b>, one team and era at a time.</li>
           <li>You take turns, and the order <b>snakes</b>: whoever picks first on one board picks second on the next.</li>
@@ -293,14 +284,13 @@ export function VersusHowTo({ onClose }) {
 }
 
 // What each player still holds. Derived from the match's own rows, like everything else here - there is no
-// "powerups used" to keep in step with anything, only the respins, dips and swaps that already exist.
+// "powerups used" to keep in step with anything, only the respins and dips that already exist.
 export function powerupsFor(match, side) {
   const respins = respinsLeft(match.respins || [], side);
   return {
     team: respins.team, era: respins.era,
     dip: dipsLeft(match.dips || [], side),
     steal: stealsLeft(match.picks || [], side),
-    stealPick: pickStealsLeft(match.swaps || [], side),
   };
 }
 
@@ -336,10 +326,6 @@ export function latestEvent(match, state, nameOf) {
   for (const d of match.dips || []) {
     out.push({ at: (d.boardIdx * 2 + 1) * 4 + 1, key: `dip:${d.boardIdx}:${d.by}`, icon: "⚡",
       text: `${nameOf(d.by)} doubled up — two off this board, and no pick on the next` });
-  }
-  for (const w of match.swaps || []) {
-    out.push({ at: (w.boardIdx * 2 + 1) * 4 - 1, key: `swap:${w.boardIdx}:${w.by}`, icon: "🔀",
-      text: `${nameOf(w.by)} took the first pick on this board` });
   }
   for (const p of match.picks || []) {
     if (!p.stolenBy) continue;
@@ -600,7 +586,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   };
 
   const state = useMemo(() => (match && match.status !== "open" ? replayMatch({
-    code: match.code, picks: match.picks, respins: match.respins, dips: match.dips, swaps: match.swaps,
+    code: match.code, picks: match.picks, respins: match.respins, dips: match.dips,
   }) : null), [match]);
 
   const side = match ? (match.hostId === userId ? "host" : match.guestId === userId ? "guest" : null) : null;
@@ -612,7 +598,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   //
   // Every two seconds for the whole match, including your own turn. It skipped your turn at first, on the
   // reasoning that your own moves refresh the screen themselves - but the other player can act DURING your
-  // turn: Steal the pick is spent while you are on the clock, and takes the board's first pick off you. A
+  // turn: the other player can steal the pick you just made, which happens while you are on the clock. A
   // client that stops reading whenever it believes it is their turn would never learn it had stopped being.
   // A lobby reads too, or a host whose Realtime is not delivering never learns that anybody joined - which is
   // the very first thing that has to work.
@@ -622,11 +608,10 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     return () => clearInterval(t);
   }, [match?.code, match?.status, refresh]);
 
-  // Every hook above every early return: what each player still holds, whether this board's order has already
-  // been flipped, and the one-line announcement of whatever just happened.
+  // Every hook above every early return: what each player still holds, and the one-line announcement of
+  // whatever just happened.
   const mine = state && side ? powerupsFor(match, side) : null;
   const theirs = state && side ? powerupsFor(match, side === "host" ? "guest" : "host") : null;
-  const alreadySwapped = !!state && (match.swaps || []).some((w) => w.boardIdx === state.boardIdx);
   const flash = useFlash(latestEvent(match, state, (s) => name(match, s)));
   // A refusal belongs to the moment it happened. It was only ever cleared by the next move, so one left over
   // from another board and another turn sat on screen reading as nonsense - "that would leave the other player
@@ -641,14 +626,6 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     // after the turn moved - pressing one only ever earned a refusal from the server.
     setSelected(null);
   }, [atPick]);
-  // The board's opening window (VERSUS.md 7): the seconds in which the first pick can't land yet, so the other
-  // player has a real chance to take it. Null whenever nobody could use one.
-  const look = state && match?.status === "drafting"
-    ? lookWindow({ state, swaps: match.swaps || [], dips: match.dips || [], picks: match.picks || [], deadline: match.turnDeadline ? Date.parse(match.turnDeadline) : 0 })
-    : null;
-  const lookLeft = useCountdown(look ? new Date(look.until).toISOString() : null);
-  const opening = !!look && lookLeft > 0;
-
   // When the clock runs out somebody has to say so, and it may be either of them - that is what keeps a match
   // alive when the other player has closed the tab. Asked once, a beat after zero, so the two screens don't
   // race each other for it.
@@ -688,8 +665,8 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   if (!userId) {
     return (
       <section className="versus" data-view="signedout">
-        <h2 className="h">1v1</h2>
-        <p className="note">Sign in to play someone. A 1v1 result goes on its own board, so it needs an account on both sides.</p>
+        <h2 className="h">Duel</h2>
+        <p className="note">Sign in to duel someone. A duel goes on its own board, so it needs an account on both sides.</p>
         <button className="btn" onClick={onBack}>Back</button>
       </section>
     );
@@ -699,7 +676,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     return (
       <section className="versus" data-view="lobby">
         {showRules ? <VersusHowTo onClose={closeRules} /> : null}
-        <h2 className="h">1v1</h2>
+        <h2 className="h">Duel</h2>
         <p className="note">
           Open a lobby and send the link. You and whoever takes it draft from the same eight boards — six players,
           a defense and a kicker each — and the better roster wins. No dice.
@@ -808,7 +785,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           on went straight from the page's h1 to the board's position headings, which is a heading-order
           failure and left both rosters unreachable by heading navigation. Visually hidden: the board says
           what this is far better than a title would. */}
-      <h2 className="vh">1v1 draft — board {Math.min(state.boardIdx + 1, MATCH_BOARDS)} of {MATCH_BOARDS}</h2>
+      <h2 className="vh">Duel — board {Math.min(state.boardIdx + 1, MATCH_BOARDS)} of {MATCH_BOARDS}</h2>
       {showRules ? <VersusHowTo onClose={closeRules} /> : null}
       {/* The bar the single-player draft floats once you scroll past the reel, carrying what a 1v1 needs
           instead: who is on the clock, the seconds left, and both rosters as chips. */}
@@ -835,24 +812,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
       {/* What just happened, for a few seconds. Derived from the match's rows, so a client that reconnects
           mid-board sees the same thing as one that never left. */}
       <div className="vs-flashrow" aria-live="polite">
-        {/* Seen and announced separately, because this row is a polite live region and the seen version ticks
-            every second - which had a screen reader re-reading the sentence ten times over. The spoken one says
-            the same thing once, without a number in it. */}
-        {opening ? (
-          <p className="vs-flash vs-open">
-            <span aria-hidden="true">🔀</span>
-            <span aria-hidden="true">
-              {myTurn
-                ? ` The board opens in ${lookLeft}s — ${name(match, look.follower)} can take the first pick.`
-                : ` ${lookLeft}s to take the first pick on this board.`}
-            </span>
-            <span className="vh">
-              {myTurn
-                ? `The board waits a few seconds before it opens — ${name(match, look.follower)} can take the first pick.`
-                : "You have a few seconds to take the first pick on this board."}
-            </span>
-          </p>
-        ) : flash ? (
+        {flash ? (
           <p className="vs-flash" key={flash.key}><span aria-hidden="true">{flash.icon}</span> {flash.text}</p>
         ) : null}
       </div>
@@ -877,16 +837,13 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
         <Board
           key={state.boardKey}
           boardKey={state.boardKey} taken={state.taken} roster={state.roster[side || "host"]}
-          myTurn={myTurn && !opening} busy={busy} selected={selected} setSelected={setSelected}
+          myTurn={myTurn} busy={busy} selected={selected} setSelected={setSelected}
           turnLabel={myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`} seconds={left}
           controls={side ? (
             <div className="rerolls vs-powers">
               {POWERUPS.map((pu) => {
                 const n = mine[pu.id];
-                // Steal the pick is the one spent off your own turn (VERSUS.md 7), so the bar shows for both
-                // players - which also means each can see what the other still holds.
-                const offTurn = pu.id === "stealPick";
-                const wrongTurn = offTurn ? (myTurn || !state.turn.first || alreadySwapped) : (!myTurn || opening);
+                const wrongTurn = !myTurn;
                 const illegal = (pu.id === "dip" && state.boardIdx >= MATCH_BOARDS - 1)
                   || (pu.id === "steal" && state.turn.first);
                 return (
@@ -903,9 +860,9 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
               {/* Named here because every span inside is either aria-hidden or display:none on a phone, which
                   left the button with no accessible name at all below 480px - the same pattern the draft's
                   re-spin buttons already carry an aria-label for. */}
-              <button className="btn linkish vs-pu-help" aria-label="How 1v1 works" onClick={() => setShowRules(true)}>
+              <button className="btn linkish vs-pu-help" aria-label="How duels work" onClick={() => setShowRules(true)}>
                 <span className="vs-pi" aria-hidden="true">?</span>
-                <span className="rs-long">How 1v1 works</span>
+                <span className="rs-long">How duels work</span>
                 <span className="rs-short" aria-hidden="true">Rules</span>
               </button>
             </div>
@@ -933,7 +890,7 @@ export function versusShareText(match, result, side, siteUrl) {
   const them = name(match, theirs);
   const head = result.winner === null ? "Tied" : result.winner === mine ? `Beat ${them}` : `Lost to ${them}`;
   const lines = [
-    `Gridspin 1v1 ${result.winner === null ? "🤝" : result.winner === mine ? "🏆" : "💀"} ${head} ${result[mine].points}–${result[theirs].points}`,
+    `Gridspin Duel ${result.winner === null ? "🤝" : result.winner === mine ? "🏆" : "💀"} ${head} ${result[mine].points}–${result[theirs].points}`,
     `${result[mine].score} to ${result[theirs].score} on the boards`,
   ];
   // The two things a 1v1 has that a season doesn't, and the only two worth a line.
@@ -962,7 +919,7 @@ async function copy(text) {
 
 // A refusal in words. Every one of these is a reason from VERSUS.md 4 and 7 - the screen never invents one.
 const ERRORS = {
-  guest_not_allowed: "A 1v1 needs an account on both sides — a guest can't play one.",
+  guest_not_allowed: "A duel needs an account on both sides — a guest can't play one.",
   not_found: "That match doesn't exist.",
   already_full: "That match already has two players.",
   own_match: "That's your own link.",
@@ -979,10 +936,7 @@ const ERRORS = {
   no_room: "You can't double here — you need two open slots and two picks on the board to fill them.",
   last_board: "There's no next pick to give up.",
   would_strand: "That would leave the other player with nothing to pick.",
-  board_opening: "The board has just opened — give the other player a moment.",
   nothing_to_steal: "There's nothing to steal yet.",
-  already_leading: "You already pick first on this board.",
-  already_swapped: "The order on this board has already been swapped.",
   already_dipped: "Somebody has already doubled up on this board.",
   respin_too_late: "A re-spin goes before your first pick on a board.",
   conflict: "That pick just went — try again.",

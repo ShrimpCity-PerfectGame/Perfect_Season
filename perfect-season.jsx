@@ -3631,7 +3631,7 @@ export default function PerfectSeason() {
           ))}
           <div className="hdr-links">
             {/* Not on the 1v1 screen: the rules that matter there are 1v1's, and they are a button under its
-                board ("How 1v1 works"). */}
+                board ("How duels work"). */}
             {view !== "versus" && <button className="pill hdrchip help" onClick={() => setHowTo(true)}>How to play</button>}
             {!user && authReady && <button className="pill hdrchip login" onClick={() => openTab("profile")}>Log in</button>}
             {user && (
@@ -3781,7 +3781,7 @@ export default function PerfectSeason() {
               <button className="mode m-versus" onClick={openVersus}>
                 <div className="mt">
                   <span className="icon" aria-hidden="true">⚔️</span>
-                  <span className="mn">1v1</span>{isGuest && <span className="pill">Account needed</span>}
+                  <span className="mn">Duel</span>{isGuest && <span className="pill">Account needed</span>}
                 </div>
                 <p>Send someone a link and draft against them off the same eight boards - six players, a defense and a kicker each. The better roster wins, and it goes on its own board.</p>
                 <span className="go">{user && !isGuest ? "Open a lobby" : "Sign in to play"}</span>
@@ -4231,7 +4231,7 @@ export default function PerfectSeason() {
           <>
             {/* The screen names itself for a screen reader, as every other one does (v1.18.0's pass); the
                 headings inside it are the lobby's, the draft's and the result's, which change as it goes. */}
-            <h1 className="vh">1v1</h1>
+            <h1 className="vh">Duel</h1>
             {/* Signing in happens HERE, not on the Account tab. Somebody who clicked a friend's invite while
                 signed out was being sent away to log in, and came back to a screen that had forgotten which
                 match they were invited to - the code lives in this view, so leaving it loses the match. */}
@@ -4239,7 +4239,7 @@ export default function PerfectSeason() {
               <div className="versus" data-view="signedout" data-code={versusCode || ""}>
                 <p className="note">
                   {versusCode
-                    ? "You've been invited to a 1v1. Sign in here and you'll go straight into it — a match needs an account on both sides, so a result has somewhere to go."
+                    ? "You've been invited to a duel. Sign in here and you'll go straight into it — a match needs an account on both sides, so a result has somewhere to go."
                     : "A 1v1 needs an account on both sides, so its result has somewhere to go. Sign in and the lobby is one tap away."}
                 </p>
                 <AuthPanel onAuthed={onAuthed} title={versusCode ? "Sign in to take the invite" : "Sign in to play 1v1"}
@@ -4393,12 +4393,12 @@ export default function PerfectSeason() {
                     and a 20-0 season are different things, and mixing them would move boards that already
                     mean something. */}
                 <div className="dayhead" style={{ marginTop: 24 }}>
-                  <h2 className="h">1v1</h2>
+                  <h2 className="h">Duels</h2>
                   <button className="linkbtn" onClick={loadVersusBoard} disabled={versusBoard.loading}>{versusBoard.loading ? "Loading…" : "Refresh"}</button>
                 </div>
                 {versusBoard.rows.length === 0 ? (
                   <p className="note" style={{ marginTop: 0 }}>
-                    {versusBoard.loading ? "Loading the 1v1 board…" : "Nobody has played a 1v1 yet."}{" "}
+                    {versusBoard.loading ? "Loading the duel board…" : "Nobody has duelled yet."}{" "}
                     {user && !isGuest && <button className="linkbtn" onClick={openVersus}>Open a lobby</button>}
                   </p>
                 ) : (

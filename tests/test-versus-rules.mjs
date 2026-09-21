@@ -11,7 +11,7 @@ import { assert, runTest } from "./helpers.mjs";
 import { initGameData, SLOTS } from "../game-logic.mjs";
 import {
   initVersusData, decideMove, replayMatch, optionsOn, optionId, optionFits, openSlots,
-  VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, LOOK_SECONDS, lookWindow, matchResult, pickStealsLeft,
+  VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, matchResult,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,17 +22,15 @@ initVersusData(read("data/versus-pool.json"));
 
 // A match in memory, driven exactly as the Edge Function drives it: decide, then write down what came back.
 function newMatch(code, format = "fantasy") {
-  const m = { code, format, picks: [], respins: [], dips: [], swaps: [], deadline: Date.now() + TURN_SECONDS * 1000 };
+  const m = { code, format, picks: [], respins: [], dips: [], deadline: Date.now() + TURN_SECONDS * 1000 };
   m.state = () => replayMatch(m);
-  // Moves happen a beat after any opening window has passed, unless a test says otherwise - the window is its
-  // own test, and every other one would otherwise be about waiting rather than about rules.
-  m.past = () => m.deadline - TURN_SECONDS * 1000 + LOOK_SECONDS * 1000 + 1;
+  // A board opens the moment it is dealt, so a move needs no more than a clock that has not run out.
+  m.past = () => m.deadline - TURN_SECONDS * 1000 + 1000;
   m.move = (side, move, now = m.past()) => {
     const decided = decideMove({ ...m, side, move, now, deadline: m.deadline });
     if (!decided.ok) return decided;
     if (decided.action === "respin") m.respins.push({ pickNo: decided.pickNo, kind: decided.kind, by: side, key: decided.key });
     else if (decided.action === "dip") m.dips.push({ boardIdx: decided.boardIdx, by: side });
-    else if (decided.action === "swap") m.swaps.push({ boardIdx: decided.boardIdx, by: side });
     else if (decided.action === "steal") {
       const row = m.picks.find((p) => p.pickNo === decided.pickNo);
       row.slot = decided.slot;
@@ -133,7 +131,6 @@ await runTest("a powerup can't be spent twice, or out of turn", async () => {
   assert(m.move(off, { steal: true }).reason === "not_your_turn", "nor a steal");
 
   assert(m.move(on, { steal: true }).reason === "nothing_to_steal", "nothing to steal before they have picked");
-  assert(m.move(on, { stealPick: true }).reason === "already_leading", "and no first pick to take when you have it");
 
   assert(m.move(on, { respin: "team" }).ok, "a team re-spin is spent");
   assert(m.move(on, { respin: "team" }).reason === "no_respins_left", "and there is only one");
@@ -141,38 +138,8 @@ await runTest("a powerup can't be spent twice, or out of turn", async () => {
   assert(m.move(on, { respin: "era" }).reason === "no_respins_left", "also only one");
   assert(m.respins.length === 2, "two spent in all");
 
-  // Steal the pick before the dip, because it reverses who leads this board - which is the whole point of it,
-  // and the reason it is the one powerup spent while it is NOT your turn. Behind the turn check, as it was
-  // until now, it could never be spent at all: it belongs to the player picking second, and it has to be
-  // spent before the first pick, which is exactly when the other player is on the clock.
-  assert(m.move(off, { stealPick: true }).ok, "the follower takes the first pick, off their own turn");
-  assert(m.state().turn.side === off, `and now leads the board: ${m.state().turn.side}`);
-  assert(m.move(off, { stealPick: true }).reason === "no_steals_left", "only the once");
-  assert(m.move(on, { stealPick: true }).reason === "already_swapped",
-    "and the other player cannot simply flip it back - one swap a board, or the order ends where it started with both powerups gone");
-
-  // A dip on top of a swap is fine, and stays allowed: canDoubleDip is checked against the order as it now
-  // stands, so the board still has to serve the dipper twice and the other player once. It is the other
-  // ordering that is refused - see the test below.
-  assert(m.move(off, { dip: true }).ok, "a dip on top of that is allowed");
-  assert(m.move(off, { dip: true }).reason === "no_dips_left", "but only one");
-});
-
-// The pair that used to end a match at fourteen picks with no result. A double dip is cleared against a board
-// that must serve the dipper twice and the other player once, in that order; reversing it afterwards makes the
-// dipper the one needing two picks out of what is left, which is a harder thing than the board was ever checked
-// against. On a thin board it left them with no legal pick, and the match could neither be finished nor graded.
-await runTest("a board takes one reordering powerup, not two", async () => {
-  const m = newMatch("RULES4B");
-  const st = m.state();
-  const on = st.turn.side, off = otherSide(on);
-
-  assert(m.move(on, { dip: true }).ok, "the leader doubles up on the board");
-  assert(m.move(off, { stealPick: true }).reason === "already_dipped",
-    "so the follower cannot then reverse it and leave the dipper needing two picks off a board checked for one");
-  assert(m.move(off, { stealPick: true }).reason === "already_dipped", "still refused on a second ask");
-  assert(m.swaps.length === 0, "and nothing was spent finding that out");
-  assert(pickStealsLeft(m.swaps, off) === 1, "the follower keeps their steal for a board they can use it on");
+  assert(m.move(on, { dip: true }).ok, "a dip is spent");
+  assert(m.move(on, { dip: true }).reason === "no_dips_left", "but only one");
 });
 
 // Three powerups that used to be accepted, written, counted, and then never read - the counter went down and
@@ -199,14 +166,10 @@ await runTest("a powerup that would do nothing is refused, not spent", async () 
   assert(m.move(off, { dip: true }).reason === "already_dipped", "who cannot dip a board that is already dipped");
   assert(m.dips.length === 1, "one dip written, not two");
 
-  // The board AFTER a dip belongs to one player, because the dipper forfeited it - so there is no order on it
-  // to reverse, and Steal the pick spent there changed nothing while marking the board swapped for good.
+  // The board AFTER a dip belongs to one player alone, because the dipper forfeited it.
   assert(m.takeSomething().ok, "the other player finishes the dipped board");
   const solo = m.state();
   assert(solo.turn.turns === 1, `the forfeited board has one picker: ${JSON.stringify(solo.turn)}`);
-  assert(m.move(solo.turn.side === "host" ? "guest" : "host", { stealPick: true }).reason === "already_leading",
-    "so nobody can swap it");
-  assert(m.swaps.length === 0, "and no swap was written");
 });
 
 await runTest("a steal takes the pick just made, and only that one", async () => {
@@ -237,67 +200,20 @@ await runTest("a steal takes the pick just made, and only that one", async () =>
   assert(m.state().boardIdx === 1, "and the board moves on");
 });
 
-await runTest("a board's first pick waits, but only when somebody could take it", async () => {
-  // Steal the pick has to be spent before the board's opening pick, so without a window it cannot really be
-  // spent: the leader can take something the instant the board appears. The window exists exactly when it
-  // could be used, and never otherwise - a match should not wait for a chance nobody has.
-  const m = newMatch("LOOK1");
-  const st = m.state();
-  const on = st.turn.side, off = otherSide(on);
-  const open = openSlots(st.roster[on]);
-  const o = optionsOn(st.boardKey).find((x) => open.some((s) => optionFits(x, s)));
-  const pick = {
-    boardIdx: 0, kind: o.kind, slot: open.find((s) => optionFits(o, s)),
-    playerId: o.kind === "player" ? o.id : undefined, team: o.kind === "player" ? undefined : o.team, season: o.season,
-  };
-  const start = m.deadline - TURN_SECONDS * 1000;
-
-  assert(m.move(on, pick, start + 1000).reason === "board_opening", "the opening pick cannot land immediately");
-  assert(m.move(on, pick, start + (LOOK_SECONDS - 1) * 1000).reason === "board_opening", "nor a second before the window is up");
-  // The other player can act throughout it - that is what it is for.
-  const w = lookWindow({ state: m.state(), swaps: m.swaps, picks: m.picks, deadline: m.deadline });
-  assert(w && w.follower === off, `the window belongs to the player picking second: ${JSON.stringify(w)}`);
-  assert(m.move(on, pick, start + (LOOK_SECONDS + 1) * 1000).ok, "and once it is up, the pick goes through");
-  assert(m.picks.length === 1, "exactly one pick was recorded");
-
-  // Board two: the follower there has already... no, they still hold theirs, so there is still a window.
-  const m2 = newMatch("LOOK2");
-  const s2 = m2.state();
-  const lead2 = s2.turn.side, follow2 = otherSide(lead2);
-  m2.swaps.push({ boardIdx: 0, by: follow2 }); // they spent it on this very board
-  assert(lookWindow({ state: m2.state(), swaps: m2.swaps, picks: m2.picks, deadline: m2.deadline }) === null,
-    "a board already swapped has nothing to wait for");
-
-  // And a follower with none left never makes anybody wait.
-  const m3 = newMatch("LOOK3");
-  const s3 = m3.state();
-  m3.swaps.push({ boardIdx: 5, by: otherSide(s3.turn.side) }); // spent earlier, on another board
-  assert(lookWindow({ state: m3.state(), swaps: m3.swaps, picks: m3.picks, deadline: m3.deadline }) === null,
-    "nor does a player who has already spent theirs");
-  const o3 = optionsOn(s3.boardKey).find((x) => openSlots(s3.roster[s3.turn.side]).some((s) => optionFits(x, s)));
-  assert(m3.move(s3.turn.side, {
-    boardIdx: 0, kind: o3.kind, slot: openSlots(s3.roster[s3.turn.side]).find((s) => optionFits(o3, s)),
-    playerId: o3.kind === "player" ? o3.id : undefined, team: o3.kind === "player" ? undefined : o3.team, season: o3.season,
-  }, m3.deadline - TURN_SECONDS * 1000 + 500).ok, "so that board opens straight away");
-});
-
 await runTest("a match plays to the end, powerups and all, and the server grades it", async () => {
   const m = newMatch("FULL1");
-  let spentDip = false, spentSteal = false, spentSwap = false, spentRespin = false;
+  let spentDip = false, spentSteal = false, spentRespin = false;
   for (let guard = 0; guard < 60 && !m.state().done; guard++) {
     const st = m.state();
     const side = st.turn.side;
     // Spend each powerup once, the first time it is legal, so one match exercises all four.
     if (!spentRespin && m.move(side, { respin: "team" }).ok) { spentRespin = true; continue; }
-    // Steal the pick is spent by the player who is NOT on the clock, before the board's first pick - so it is
-    // sent as the other one, which is the only way it can ever be sent at all.
-    if (!spentSwap && st.turn.first && m.move(otherSide(side), { stealPick: true }).ok) { spentSwap = true; continue; }
     if (!spentDip && m.move(side, { dip: true }).ok) { spentDip = true; continue; }
     if (!spentSteal && !st.turn.first && m.move(side, { steal: true }).ok) { spentSteal = true; continue; }
     assert(m.takeSomething().ok, `pick ${st.pickNo} went through`);
   }
-  assert(spentRespin && spentSwap && spentDip && spentSteal,
-    `all four were spent: ${JSON.stringify({ spentRespin, spentSwap, spentDip, spentSteal })}`);
+  assert(spentRespin && spentDip && spentSteal,
+    `all three were spent: ${JSON.stringify({ spentRespin, spentDip, spentSteal })}`);
 
   const end = m.state();
   assert(end.done, "the match finished");

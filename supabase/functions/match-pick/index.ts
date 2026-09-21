@@ -16,7 +16,6 @@
 //   POST { code, respin: "team" | "era" }                          a re-spin (VERSUS.md 7)
 //   POST { code, steal: true, slot }                               take the pick just made
 //   POST { code, dip: true }                                       take two off this board, give up the next
-//   POST { code, stealPick: true }                                 lead a board you would have followed
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as GL from "../../../game-logic.mjs";
 import * as V from "../../../versus-logic.mjs";
@@ -92,7 +91,7 @@ Deno.serve(async (req) => {
   const decided = V.decideMove({
     code, format: match.format, side, move,
     picks: await readPicks(service, match),
-    respins: match.respins || [], dips: match.dips || [], swaps: match.swaps || [],
+    respins: match.respins || [], dips: match.dips || [],
     deadline: match.turn_deadline ? Date.parse(match.turn_deadline) : 0,
   });
   if (!decided.ok) return json({ error: decided.reason, reason: decided.reason }, decided.status);
@@ -107,11 +106,6 @@ Deno.serve(async (req) => {
   if (decided.action === "dip") {
     const dips = [...(match.dips || []), { boardIdx: decided.boardIdx, by: decided.side }];
     const { error } = await service.from("matches").update({ dips, turn_deadline: nextDeadline() }).eq("id", match.id);
-    return error ? json({ error: "failed to save" }, 500) : json({ ok: true });
-  }
-  if (decided.action === "swap") {
-    const swaps = [...(match.swaps || []), { boardIdx: decided.boardIdx, by: decided.side }];
-    const { error } = await service.from("matches").update({ swaps, turn_deadline: nextDeadline() }).eq("id", match.id);
     return error ? json({ error: "failed to save" }, 500) : json({ ok: true });
   }
   if (decided.action === "steal") {
@@ -146,7 +140,7 @@ Deno.serve(async (req) => {
   // steal both move where the end of a match is, so counting to sixteen here would be wrong.
   const after = V.replayMatch({
     code, picks: await readPicks(service, match),
-    respins: match.respins || [], dips: match.dips || [], swaps: match.swaps || [],
+    respins: match.respins || [], dips: match.dips || [],
   });
   if (!after.done) {
     await service.from("matches").update({ turn_deadline: nextDeadline() }).eq("id", match.id);

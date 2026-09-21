@@ -36,9 +36,6 @@ create table if not exists public.matches (
   -- Every double dip spent: { boardIdx, by } (VERSUS.md 7). Whoever took two off a board gives up the next one,
   -- so this is what tells a replay that a board is drafted three times and the one after it once.
   dips          jsonb not null default '[]'::jsonb,
-  -- Every "steal the pick" spent: { boardIdx, by } (VERSUS.md 7) - the boards whose order was reversed after
-  -- they were dealt. Kept apart from dips because they are different powerups with different budgets.
-  swaps         jsonb not null default '[]'::jsonb,
   -- Both sides' scores, the parts they were built from, and the football final (VERSUS.md 6) - written once, by
   -- the server, when the sixteenth pick lands. The higher score always wins; nothing here is a coin toss.
   result        jsonb,
@@ -91,7 +88,10 @@ create table if not exists public.match_picks (
 -- Added after the fact for a table that may already exist, since this file is re-run rather than replaced.
 alter table public.match_picks add column if not exists stolen_by uuid references auth.users(id) on delete set null;
 alter table public.matches add column if not exists dips  jsonb not null default '[]'::jsonb;
-alter table public.matches add column if not exists swaps jsonb not null default '[]'::jsonb;
+-- Steal the pick was cut, and its column goes with it. Dropped rather than left behind: 1v1 has never shipped,
+-- so no real match ever wrote to it, and an unexplained empty jsonb column is the kind of thing the next reader
+-- spends twenty minutes proving was never wired to anything.
+alter table public.matches drop column if exists swaps;
 -- The same for the one-slot-per-player constraint, which is in the create above and so would never reach a
 -- database that already has the table. Postgres has no `add constraint if not exists`, hence the block.
 do $$
@@ -168,7 +168,7 @@ returns jsonb language sql stable security definer set search_path = public, pg_
     'hostName', (select username from public.profiles where id = m.host_id),
     'guestName', (select username from public.profiles where id = m.guest_id),
     'format', m.format, 'status', m.status, 'turnDeadline', m.turn_deadline,
-    'respins', m.respins, 'dips', m.dips, 'swaps', m.swaps,
+    'respins', m.respins, 'dips', m.dips,
     'result', m.result, 'winnerId', m.winner_id, 'createdAt', m.created_at,
     'picks', coalesce((
       select jsonb_agg(jsonb_build_object(

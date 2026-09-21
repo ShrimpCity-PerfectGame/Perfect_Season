@@ -13,7 +13,7 @@
 // data/versus-pool.json (and initGameData first) before anything else here.
 import {
   BOARDS, WINDOWS, SLOTS, QB_WEIGHT, effectiveRating, fits,
-  hashStr, mulberry32, seededSequence, rerollCandidate, LOSER_PTS, MARGINS,
+  hashStr, mulberry32, seededSequence, rerollCandidate,
 } from "./game-logic.mjs";
 
 export const VERSUS_SLOTS = [...SLOTS, "DST", "K"]; // eight: the six of single player, plus the two 1v1 adds
@@ -22,17 +22,6 @@ export const MATCH_PICKS = MATCH_BOARDS * 2;
 // 1v1's own budget, deliberately not game-logic.mjs's REROLL_BUDGET: single player's re-spins are its own.
 export const MATCH_RESPINS = { team: 1, era: 1 };
 export const TURN_SECONDS = 45;
-// The first seconds of a board, in which its opening pick cannot land yet. Steal the pick has to be spent
-// before that pick, so without a window it could not really be spent at all: the leader can take something the
-// instant the board appears, and the other player is reading the board, not watching for a chance to act.
-//
-// It exists only when it could be used - the board's first pick, not yet swapped, and the player picking second
-// still holding theirs. Any other board opens immediately, so a match never waits for a window nobody wants.
-// The clock is deliberately NOT extended by it: a board stays 45 seconds end to end, so the window is ten
-// seconds of reading and thirty-five of acting rather than a longer turn. Confirmed as the right trade by the
-// owner after playing it.
-export const LOOK_SECONDS = 10;
-
 // Where an average season sits on the 0-130 scale, which is the middle tools/data/build-versus-pool.mjs rates
 // against. A defense or a kicker is worth what it is ABOVE or BELOW this, never its raw rating.
 export const AVERAGE_RATING = 65;
@@ -213,7 +202,7 @@ export const openSlots = (roster) => VERSUS_SLOTS.filter((s) => !roster[s]);
 // anything a client said - only the picks and re-spins the database holds.
 //
 // `picks` are match_picks rows in pick_no order; `respins` are matches.respins entries.
-export function replayMatch({ code, picks = [], respins = [], dips = [], swaps = [] }) {
+export function replayMatch({ code, picks = [], respins = [], dips = [] }) {
   const seq = seededSequence(code);
   const roster = { host: emptyRoster(), guest: emptyRoster() };
   const taken = new Set();
@@ -238,10 +227,8 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], swaps =
     if (!key) break;
     used.add(key);
 
-    // Steal the pick reverses who leads - after the board is dealt, because it is spent on a board already on
-    // the table. A dip then inserts a second turn for whoever spent it, back to back with their first.
+    // A dip inserts a second turn for whoever spent it, back to back with their first.
     const order = [...base];
-    if (swaps.some((w) => w.boardIdx === boardIdx) && order.length > 1) order.reverse();
     const dip = dips.find((d) => d.boardIdx === boardIdx);
     if (dip && order.includes(dip.by)) order.splice(order.indexOf(dip.by) + 1, 0, dip.by);
 
@@ -353,16 +340,53 @@ export function sideScore(mine, theirs, format) {
   return { roster: round1(own), against: round1(against), score: round1(own - against) };
 }
 
+// Real NFL finals, counted from every game since 1999 (nfldata/games.csv): the four most common scorelines at
+// each of twelve margins, with how many times each actually happened.
+//
+// This is a table rather than arithmetic because arithmetic got it wrong. The season sim's gameResult draws a
+// loser's total and a margin INDEPENDENTLY, which pairs them freely - and freely means rarely. Borrowing that
+// for 1v1 produced finals like 31-23: a real score, and one that has happened 22 times in 7,307 games, rank 79
+// of 879 distinct scorelines. Possible, but not what a football score looks like. 23-20 has happened 139 times.
+// Every line below is one people see constantly, so a result never reads as arithmetic wearing a jersey.
+//
+// game-logic.mjs's LOSER_PTS and MARGINS are deliberately left alone: the season sim is seeded and its outcomes
+// are stored, so changing them would replay every challenge code differently (CLAUDE.md).
+const FINALS = [
+  [1, [[17, 16, 36], [24, 23, 31], [20, 19, 25], [21, 20, 20]]],
+  [3, [[23, 20, 139], [20, 17, 134], [27, 24, 129], [13, 10, 67]]],
+  [4, [[24, 20, 57], [20, 16, 38], [17, 13, 37], [27, 23, 32]]],
+  [6, [[23, 17, 60], [30, 24, 36], [16, 10, 34], [26, 20, 34]]],
+  [7, [[24, 17, 92], [27, 20, 77], [20, 13, 65], [17, 10, 63]]],
+  [10, [[27, 17, 56], [20, 10, 54], [24, 14, 36], [31, 21, 32]]],
+  [13, [[23, 10, 28], [27, 14, 28], [20, 7, 28], [30, 17, 26]]],
+  [14, [[24, 10, 59], [27, 13, 50], [31, 17, 49], [34, 20, 31]]],
+  [17, [[27, 10, 41], [34, 17, 35], [20, 3, 32], [31, 14, 30]]],
+  [21, [[31, 10, 35], [38, 17, 22], [34, 13, 21], [24, 3, 19]]],
+  [24, [[34, 10, 28], [31, 7, 24], [27, 3, 20], [38, 14, 20]]],
+  [28, [[38, 10, 31], [31, 3, 18], [35, 7, 14], [45, 17, 14]]],
+];
+// Every score a real NFL game has actually been tied at since 1999, commonest first.
+const TIES = [27, 20, 13, 16, 21, 23, 24, 26, 29, 34, 37, 40, 6];
+
+// One of a margin's scorelines, chosen in proportion to how often it really happens - so the commonest finals
+// come up commonest, exactly as they do on a Sunday.
+function weighted(rows, r) {
+  const total = rows.reduce((s, row) => s + row[2], 0);
+  let n = r * total;
+  for (const row of rows) { n -= row[2]; if (n < 0) return row; }
+  return rows[rows.length - 1];
+}
+
 // The football final. Drawn FROM the result, never the other way round: the margin rises with the points gap,
-// and only the losing side's points are left to the seed - which cannot move the margin or the winner. This is
-// why 1v1 never calls winProb or gameResult (VERSUS.md 6).
+// and only WHICH of that margin's real scorelines is left to the seed - which cannot move the margin or the
+// winner. This is why 1v1 never calls winProb or gameResult (VERSUS.md 6).
 export function footballFinal(gap, code) {
   const rng = mulberry32(hashStr(`${code}-final`));
-  const low = LOSER_PTS[Math.floor(rng() * LOSER_PTS.length)];
-  if (gap <= 0) return { winner: low, loser: low }; // a tie, which football has
-  const idx = Math.min(MARGINS.length - 1, Math.max(0, Math.round((gap / DECISIVE_GAP) * (MARGINS.length - 1))));
-  const margin = low === 0 && MARGINS[idx] < 3 ? 3 : MARGINS[idx]; // no 1-0 finals
-  return { winner: low + margin, loser: low };
+  if (gap <= 0) { const t = TIES[Math.floor(rng() * TIES.length)]; return { winner: t, loser: t }; }
+  const idx = Math.min(FINALS.length - 1, Math.max(0, Math.round((gap / DECISIVE_GAP) * (FINALS.length - 1))));
+  const [, rows] = FINALS[idx];
+  const [winner, loser] = weighted(rows, rng());
+  return { winner, loser };
 }
 
 // The whole result, written once by the Edge Function when the sixteenth pick lands. Decided on the scores as
@@ -486,24 +510,6 @@ export function dipsLeft(dips, side) {
   return MATCH_DIPS - dips.filter((d) => d.by === side).length;
 }
 
-// ---------- Steal the pick (VERSUS.md 7) ----------
-
-export const MATCH_PICK_STEALS = 1; // one each per match
-
-// Spent by the player who WOULD pick second on a board, before its first pick lands: the order is reversed and
-// they lead it instead. Nothing else moves - the board is still dealt to both and still has to serve both.
-//
-// Which is the catch, and the reason this isn't just a flag: the serve-both rule is not symmetric. The board was
-// chosen knowing who picked first, so reversing them can strand the player who now picks second. Checked with
-// the same rule, the other way round.
-export function canStealPick({ key, taken, moverRoster, otherRoster }) {
-  return boardServes(key, taken, openSlots(moverRoster), openSlots(otherRoster), 1);
-}
-
-export function pickStealsLeft(swaps, side) {
-  return MATCH_PICK_STEALS - swaps.filter((w) => w.by === side).length;
-}
-
 // ---------- Every move, decided in one place (VERSUS.md 4) ----------
 
 // The match-pick Edge Function is I/O and nothing else: it says who is asking, hands the match's rows to this,
@@ -515,23 +521,11 @@ export function pickStealsLeft(swaps, side) {
 // is, what is on the board, what is gone - is derived. Returns either { ok: false, reason, status } or an action
 // for the caller to write.
 //
-//   move  { claim: "clock" } | { respin } | { stealPick } | { dip } | { steal, slot } | { boardIdx, kind, ... }
+//   move  { claim: "clock" } | { respin } | { dip } | { steal, slot } | { boardIdx, kind, ... }
 const refuse = (reason, status = 409) => ({ ok: false, reason, status });
 
-// Whether a board is still in its opening window, and until when. `deadline` is the turn's, always set
-// TURN_SECONDS out, so the turn's start is known without storing it.
-export function lookWindow({ state, swaps = [], dips = [], picks = [], deadline = 0 }) {
-  if (!state || state.done || !state.turn.first || !deadline) return null;
-  if (swaps.some((w) => w.boardIdx === state.boardIdx)) return null; // already swapped: nothing left to wait for
-  if (state.turn.turns < 2) return null; // a board only one player is on: nobody is waiting to take anything
-  if (dips.some((d) => d.boardIdx === state.boardIdx)) return null; // dipped, so the swap is refused anyway
-  const follower = state.turn.side === "host" ? "guest" : "host";
-  if (pickStealsLeft(swaps, follower) < 1) return null; // they have none to spend
-  return { until: deadline - TURN_SECONDS * 1000 + LOOK_SECONDS * 1000, follower };
-}
-
-export function decideMove({ code, format, picks = [], respins = [], dips = [], swaps = [], side, move = {}, now = Date.now(), deadline = 0 }) {
-  const state = replayMatch({ code, picks, respins, dips, swaps });
+export function decideMove({ code, format, picks = [], respins = [], dips = [], side, move = {}, now = Date.now(), deadline = 0 }) {
+  const state = replayMatch({ code, picks, respins, dips });
   if (state.done) return refuse("already_finished");
   const onClock = state.turn.side;
   const key = state.boardKey;
@@ -550,32 +544,6 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     // VERSUS.md 8 guarantees the board can serve them, so this is a broken invariant rather than a bad request.
     if (!auto) return { ...refuse("no_option", 500) };
     return asPick(auto.option, auto.slot, true);
-  }
-
-  // Steal the pick is the one powerup spent while it is NOT your turn, and it has to be: it belongs to the
-  // player picking second, before the first pick lands - which is exactly when the other player is on the
-  // clock. Decided above the turn check for that reason. Behind it, it could never be spent at all.
-  if (move.stealPick) {
-    if (pickStealsLeft(swaps, side) < 1) return refuse("no_steals_left");
-    if (side === onClock || !state.turn.first) return refuse("already_leading");
-    // Nothing to reverse on a board only one player is on - the one after a double dip, which its dipper
-    // forfeited. It was accepted there, spent the powerup, changed no order at all, and then marked the board
-    // already_swapped for the rest of the match.
-    if (state.turn.turns < 2) return refuse("already_leading");
-    // Once per board, whoever spends it. Both players have one, so without this the second could simply flip
-    // the board back - the order ends where it started and two powerups are gone, which is a worse game than
-    // either of them not having spent one.
-    if (swaps.some((w) => w.boardIdx === state.boardIdx)) return refuse("already_swapped");
-    // One powerup may reorder a board, not two. A double dip is cleared against a board that has to serve the
-    // dipper twice and the other player once, in that order; reversing it afterwards makes the dipper the one
-    // who needs two picks from what is left, which is a stronger requirement than the board was ever checked
-    // against - and on a thin board it strands them with no legal pick at all (VERSUS.md 7). Dipping after a
-    // swap is fine and stays allowed: canDoubleDip checks the order as it actually stands.
-    if (dips.some((d) => d.boardIdx === state.boardIdx)) return refuse("already_dipped");
-    const myRoster = state.roster[side];
-    const theirRoster = state.roster[side === "host" ? "guest" : "host"];
-    if (!canStealPick({ key, taken: state.taken, moverRoster: myRoster, otherRoster: theirRoster })) return refuse("would_strand");
-    return { ok: true, action: "swap", boardIdx: state.boardIdx, side, state };
   }
 
   if (side !== onClock) return refuse("not_your_turn");
@@ -628,13 +596,9 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     return { ok: true, action: "steal", pickNo: last.pickNo, slot, side, state };
   }
 
-  // An ordinary pick.
+  // An ordinary pick. A board opens the moment it is dealt: nothing can be spent in its first seconds any
+  // more, so there is nothing to hold its leader back for.
   if (move.boardIdx !== state.boardIdx) return refuse("wrong_board");
-  // ...but not yet, if the board has only just opened and the other player could still take the first pick off
-  // them. The clock is unaffected: it runs its full length from the same start, so this costs the leader
-  // thinking time, not their turn.
-  const look = lookWindow({ state, swaps, dips, picks, deadline });
-  if (look && now < look.until) return refuse("board_opening");
   const wanted = optionsOn(key).find((o) => (move.kind === "player"
     ? o.kind === "player" && o.id === Number(move.playerId) && o.season === Number(move.season)
     : o.kind === move.kind && o.team === move.team && o.season === Number(move.season)));

@@ -28,43 +28,54 @@ CLAUDE.md.
 
 ### Added
 
-- **1v1.** Send someone a link and draft against them. You both watch the same eight boards, pick in turn, and
+- **Duel.** Send someone a link and draft against them. You both watch the same eight boards, pick in turn, and
   the better roster wins — no dice, no upsets, just the sixteen picks. It goes on a board of its own, beside the
-  others on the Leaderboard; it never touches your season record.
-- **A defense and a kicker.** Every board in a 1v1 offers that team's players, its defense in each year of the
+  others on the Leaderboard; it never touches your season record. Whoever picks first on the opening board is
+  decided by the match code, not by who sent the invite.
+- **A defense and a kicker.** Every board in a duel offers that team's players, its defense in each year of the
   era, and its kicker — so you can take the 2006 Ravens defense fifth or a kicker first, whenever you want them.
-  Real seasons, rated against their own year: 861 defenses and 861 kickers from 1999 to 2025. Their defense comes
+  Real seasons, rated against their own year: 859 defenses and 859 kickers from 1999 to 2025. Their defense comes
   off your score, your kicker adds to it, and each is worth exactly what one roster slot is worth.
 - **Powerups, one set each.** Two re-spins — and when you pick first, the board you spin to is dealt to your
   opponent as well, so it is a real decision. A **steal**, which takes the pick they just made and sends them
-  back to the board for another. A **double dip**, two off one board in exchange for giving up your next pick,
-  which leaves them the board after to themselves. And **steal the pick**, to lead a board you would have
-  followed.
+  back to the board for another. And a **double dip**, two off one board in exchange for giving up your next
+  pick, which leaves them the board after to themselves.
 - **A clock on every pick**, and either player can call it — so an opponent who closes the tab costs you the wait,
   not the match. A pick the clock makes is the best thing still on the board for the slots you have open.
+
+### Changed
+
+- **Cut before launch: a fourth powerup and the pause that came with it.** "Steal the pick" let whoever picked
+  second on a board reverse the order and lead it instead — and for it to be spendable at all, a board's first
+  pick had to wait ten seconds. Two playtests said the same thing: between them they cost more in confusion
+  than they were worth, and a board that refuses every pick for ten seconds reads as broken. A board opens the
+  moment it is dealt now.
 
 ### Fixed
 
 Everything below was found by a review pass over the whole feature before it shipped, so none of it ever reached
 a player — but it is written down because the shapes are worth remembering.
 
-- **Three ways a match could end with no result**, all of which left it unfinishable, ungradeable and impossible
-  to leave: a steal spent on a board somebody had also double dipped (which swallowed the dip and ended the
-  match at fourteen picks), Steal the pick spent on a board already dipped (which stranded the dipper with no
-  legal pick), and stealing your own pick. Seven of four hundred fuzzed matches broke the first way; none do now.
+- **Two ways a match could end with no result**, both of which left it unfinishable, ungradeable and impossible
+  to leave: a steal spent on a board somebody had also double dipped, which swallowed the dip and ended the
+  match at fourteen picks, and stealing your own pick. Seven of four hundred fuzzed matches broke the first way;
+  none do now.
 - **Who leads the first board is a coin flip on the match code**, not whoever created the lobby. Leading a board
   is worth more the earlier it comes, so whoever led boards 0, 2, 4 and 6 won 53–54% of matches — and that was
   always the host, so anyone who habitually sent the invite rather than clicking one won more, permanently.
-- **The 1v1 board no longer greys out while you wait** for the other player to pick, which had put the player
+- **The duel board no longer greys out while you wait** for the other player to pick, which had put the player
   names at 3.43:1 for about half of every match. Its rules button has a name on a phone, its clock is readable
   on all 32 teams, and a screen reader no longer re-reads the whole board once a second.
 - **An open lobby can't be found by anyone but its host.** Its code is the whole invite, and `matches` was
   readable, so open lobbies could be listed and walked into ahead of the friend they were sent for.
-- **Tapping 1v1 during a match takes you back to it** instead of opening a second lobby while the first one
-  auto-picks your roster for you. On Android, Back leaves 1v1 rather than cycling between it and Modes forever.
+- **Tapping Duel during a match takes you back to it** instead of opening a second lobby while the first one
+  auto-picks your roster for you. On Android, Back leaves a duel rather than cycling between it and Modes forever.
   Signing in with Google from an invite keeps the invite.
 - **Powerups that would do nothing are refused rather than spent** — a re-spin after your first pick on a board,
-  a second double dip on one board, Steal the pick on a board only one player is on.
+  a second double dip on one board.
+- **The final score is a real one.** It used to draw a losing total and a margin separately, which paired them
+  into scorelines like 31–23 — possible, but something that has happened 22 times in 7,307 NFL games. Every
+  final now comes from a table of the commonest real scorelines at that margin.
 - **Two Jaguars seasons left out of the defense and kicker data.** nflverse only has eight weeks of 2001 and
   2002 for them, while points allowed is the full year, so both rated as defenses that gave up a season's points
   on half a season's sacks — and the 2002 board offered a three-game fill-in as the team's kicker. 859 of each
