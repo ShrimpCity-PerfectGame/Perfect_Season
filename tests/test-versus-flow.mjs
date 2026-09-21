@@ -167,6 +167,36 @@ await runTest("a match survives an opponent who walks away", async () => {
   assert(m.picks[0].userId === (before.turn.side === "host" ? m.hostId : m.guestId), "for the player who was on it");
 });
 
+await runTest("a pick the clock made can be stolen like any other", async () => {
+  // A pick is a pick, however it got made. Worth its own test because the clock's is the one nobody chose, so
+  // it is the one most likely to be treated as different by accident somewhere along the way.
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+
+  const before = replayMatch(await asReplay(sb, code));
+  const onClock = before.turn.side;
+  const waiting = onClock === "host" ? "guest" : "host";
+  const deadline = Date.parse((await call(sb, "match_state", { p_code: code })).turnDeadline);
+
+  // Let it run out. Either player may call it, so the one waiting does.
+  await as(waiting === "host" ? A : B);
+  assert(!(await move(sb, { code, claim: "clock" }, deadline + 1000)).error, "the clock made the pick");
+  const m1 = await call(sb, "match_state", { p_code: code });
+  assert(m1.picks.length === 1 && m1.picks[0].auto === true, `and it is marked as the clock's: ${JSON.stringify(m1.picks[0])}`);
+
+  // Now steal it.
+  const stolen = await move(sb, { code, steal: true }, deadline + 2000);
+  assert(!stolen.error && !stolen.reason, `the clock's pick can be stolen: ${JSON.stringify(stolen)}`);
+  const m2 = await call(sb, "match_state", { p_code: code });
+  assert(m2.picks[0].stolenBy === waiting, `it changed hands: ${JSON.stringify(m2.picks[0].stolenBy)}`);
+  assert(m2.picks[0].auto === true, "and still says the clock made it");
+  const after = replayMatch(await asReplay(sb, code));
+  assert(after.turn.side === onClock, "the robbed player is back on the clock");
+});
+
 await runTest("powerups spent through the client land in the match", async () => {
   const { sb, as, A, B } = await twoPlayers();
   await as(A);

@@ -48,8 +48,19 @@ await runTest("a board offers players, a defense per year and a kicker per year"
     const [from, to] = WINDOWS[Number(w)];
     const { defenses, kickers } = unitsOn(key);
     assert(defenses.length === to - from + 1, `${key}: one defense per year of ${from}-${to}, got ${defenses.length}`);
-    assert(kickers.length === to - from + 1, `${key}: one kicker per year, got ${kickers.length}`);
     assert(defenses.every((d, i) => d.season === from + i), `${key}: in order, got ${defenses.map((d) => d.season).join(",")}`);
+    // A kicker appears once, in his best season of the era - the rule the player boards follow. A defense is
+    // not a person and keeps a row per year, because two years of one team are two different defenses.
+    assert(kickers.length >= 1 && kickers.length <= to - from + 1, `${key}: at least one kicker, at most one a year, got ${kickers.length}`);
+    assert(new Set(kickers.map((k) => k.name)).size === kickers.length, `${key}: no kicker is offered twice, got ${kickers.map((k) => `${k.season} ${k.name}`).join(", ")}`);
+    for (const k of kickers) {
+      const allHis = [];
+      for (let s = from; s <= to; s++) {
+        const row = optionsOn(key).find((o) => o.kind === "k" && o.season === s && o.name === k.name);
+        if (row) allHis.push(row);
+      }
+      assert(allHis.every((o) => o.rating <= k.rating), `${key}: ${k.name} is offered in his best year of the era`);
+    }
     const all = optionsOn(key);
     assert(all.length === BOARDS[key].length + defenses.length + kickers.length, `${key}: everything is on the one board`);
     assert(new Set(all.map(optionId)).size === all.length, `${key}: nothing is on it twice`);
@@ -291,17 +302,17 @@ await runTest("a steal takes the pick just made, and sends the leader back to th
   assert(afterLead.turn.side === follow, "and it is the follower's turn");
 
   // The follower steals it instead of picking.
-  const slots = stealableSlots({
+  const can = stealableSlots({
     key, taken: afterLead.taken, option: leadTook.option,
     stealerRoster: afterLead.roster[follow], leaderRoster: afterLead.roster[lead], leaderSlot: leadTook.slot,
   });
-  assert(slots && slots.length, `the follower can take it, into ${JSON.stringify(slots)}`);
-  const theft = [row(1, leadTook.option, slots[0], follow)];
+  assert(can.slots && can.slots.length, `the follower can take it, into ${JSON.stringify(can)}`);
+  const theft = [row(1, leadTook.option, can.slots[0], follow)];
   const stolen = replayMatch({ code, picks: theft });
 
-  assert(stolen.roster[follow][slots[0]], "the stolen pick is on the follower's roster");
+  assert(stolen.roster[follow][can.slots[0]], "the stolen pick is on the follower's roster");
   assert(!VERSUS_SLOTS.some((sl) => stolen.roster[lead][sl]), "and off the leader's entirely");
-  assert(optionId(stolen.roster[follow][slots[0]]) === optionId(leadTook.option), "it is the same player, not a copy");
+  assert(optionId(stolen.roster[follow][can.slots[0]]) === optionId(leadTook.option), "it is the same player, not a copy");
   assert(stolen.turn.side === lead, "the leader is back on the clock");
   assert(stolen.boardKey === key, "on the same board he just picked from");
   assert(stolen.pickNo === 2, "using the board's second pick, so the count is still sixteen");
@@ -327,20 +338,21 @@ await runTest("a steal that would leave the leader nothing is refused", async ()
   const taken = new Set(optionsOn(key).map(optionId));
   const leaderRoster = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, sl === "QB" ? qb : { kind: "player" }]));
   const stealer = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, sl === "QB" ? null : { kind: "player" }]));
-  assert(stealableSlots({ key, taken, option: qb, stealerRoster: stealer, leaderRoster, leaderSlot: "QB" }) === null,
-    "it would send the leader back to a board with nothing on it for him, so it is refused");
+  assert(stealableSlots({ key, taken, option: qb, stealerRoster: stealer, leaderRoster, leaderSlot: "QB" }).reason === "would_strand",
+    "it would send the leader back to a board with nothing on it for him, so it is refused - and says which problem it is");
 
   // With something left he can use, the same steal is fine.
   const spare = optionsOn(key).find((o) => o.kind === "player" && o.pos === "RB");
   const roomy = new Set(taken); roomy.delete(optionId(spare));
   const openLeader = { ...leaderRoster, FLEX1: null };
-  assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: stealer, leaderRoster: openLeader, leaderSlot: "QB" }),
+  assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: stealer, leaderRoster: openLeader, leaderSlot: "QB" }).slots,
     "with a running back still on the board for his flex, the steal goes through");
 
   // And it is refused outright when the stealer has nowhere to put him.
   const noRoom = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, { kind: "player" }]));
-  assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: noRoom, leaderRoster: openLeader, leaderSlot: "QB" }) === null,
-    "a full roster can't steal anything");
+  // A different problem, and it now says so rather than claiming something untrue about the board.
+  assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: noRoom, leaderRoster: openLeader, leaderSlot: "QB" }).reason === "bad_slot",
+    "a full roster can't steal anything, and is told it has nowhere to put him");
 });
 
 // Plays a whole match with powerups in it, and returns the state at the end. `events` is called before each

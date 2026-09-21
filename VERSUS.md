@@ -157,9 +157,15 @@ all, because a win that didn't record the loss would be a board nobody could exp
 is asked of `replayMatch`, never counted to sixteen here: a double dip and a steal both move where the end is.
 The clients are told by Realtime; they render, they don't decide.
 
-**Deploying:** `node deploy-function.mjs <env>` now deploys both functions, because `submit-run` and
-`match-pick` share `game-logic.mjs` and `data/players.json` — deploying one of a pair is exactly the drift the
-release notes warn about. Pass a name to deploy just one.
+**Deploying:** `node deploy-function.mjs <env>` deploys both functions, because `submit-run` and `match-pick`
+share `game-logic.mjs` and `data/players.json` — deploying one of a pair is exactly the drift the release notes
+warn about. Pass a name to deploy just one.
+
+**`versus-logic.mjs` is bundled into this function, and the browser imports it too.** So a change to it is a
+change to both sides, and pushing the client without redeploying leaves them running different rulebooks. That
+is not hypothetical: it cost a staging session here, where the screen offered Steal the pick and the deployed
+function still refused it as `not_your_turn` because it was running the copy from before that rule moved.
+**Any change to `versus-logic.mjs` means redeploy, every time.**
 
 ## 5. Who may play
 
@@ -197,11 +203,17 @@ itself. A kicker is accuracy, distance and volume, with accuracy shrunk toward t
 went 3-for-3 in December isn't the best kicker of the year. The 2006 Ravens come out at 112.2, the 2005 Lions at
 64.0, Vanderjagt's perfect 2003 at 100.2.
 
-**On the board.** A board is a team and an era, as everywhere else. Its defenses and kickers are **that team's, in
-each year of the era** — a 2006–2010 board offers five of each, a 1999–2005 board seven (`WINDOWS` in
-game-logic.mjs). Every one of the 160 boards already carries a QB, RB, WR and TE, so with a defense and a kicker
-on every board too, **any board can fill any open slot**: that is what lets a player take a defense fifth or a
-kicker first without the draft ever reaching a slot it can't fill.
+**On the board.** A board is a team and an era, as everywhere else. Its **defenses** are that team's in each year
+of the era — two years of one team are two different defenses, which is the point of offering a year at a time.
+Its **kickers are one row per kicker**, in his best season of that era: the rule the player boards already
+follow, where a man shows his best year for that team rather than all of them. Offering Vinatieri five times was
+five rows of the same decision. It does make a kicker genuinely scarce on some boards — a team that kept one for
+five years offers exactly one — which is part of why section 8's serve-both rule has to cover the units too.
+
+A 2006–2010 board therefore offers five defenses and a 1999–2005 board seven (`WINDOWS` in game-logic.mjs).
+Every one of the 160 boards already carries a QB, RB, WR and TE, and a defense and at least one kicker, so
+**any board can fill any open slot**: that is what lets a player take a defense fifth or a kicker first without
+the draft ever reaching a slot it can't fill.
 
 **The result**, in `versus-logic.mjs`, shared by the browser and the Edge Function:
 

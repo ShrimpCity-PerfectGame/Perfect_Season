@@ -78,14 +78,21 @@ export function initVersusData(pool) {
 export function unitsOn(key) {
   const [team, w] = key.split("|");
   const [from, to] = WINDOWS[Number(w)] || [];
-  const defenses = [], kickers = [];
+  const defenses = [];
+  // A kicker appears ONCE, in his best season of the era - the same rule the player boards follow, where a man
+  // shows his best year for that team rather than all of them. A defense is not a person and does not get that
+  // treatment: the 2005 Bears and the 2006 Bears are two different defenses, which is the whole point of
+  // offering a year at a time.
+  const best = new Map();
   for (let season = from; season <= to; season++) {
     const d = DEFENSES.get(`${team}|${season}`);
-    const k = KICKERS.get(`${team}|${season}`);
     if (d) defenses.push(d);
-    if (k) kickers.push(k);
+    const k = KICKERS.get(`${team}|${season}`);
+    if (!k) continue;
+    const held = best.get(k.name);
+    if (!held || k.rating > held.rating) best.set(k.name, k);
   }
-  return { defenses, kickers };
+  return { defenses, kickers: [...best.values()].sort((a, b) => a.season - b.season) };
 }
 
 // Everything on a board, in one list, each tagged with the pool it came from. The players keep the shape
@@ -401,10 +408,12 @@ export const MATCH_STEALS = 1; // one each per match
 // strand them is refused and costs nothing.
 export function stealableSlots({ key, taken, option, stealerRoster, leaderRoster, leaderSlot }) {
   const slots = openSlots(stealerRoster).filter((s) => optionFits(option, s));
-  if (!slots.length) return null;
+  if (!slots.length) return { reason: "bad_slot" };
   const leaderOpen = [...openSlots(leaderRoster), leaderSlot];
   const left = optionsOn(key).some((o) => !taken.has(optionId(o)) && leaderOpen.some((s) => optionFits(o, s)));
-  return left ? slots : null;
+  // Told apart on purpose: "he fits nothing you have open" and "it would strand them" are different problems
+  // with different answers, and one message for both says something untrue about the board in half the cases.
+  return left ? { slots } : { reason: "would_strand" };
 }
 
 export function stealsLeft(picks, side) {
@@ -565,8 +574,8 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
       key, taken: state.taken, option, stealerRoster: mine,
       leaderRoster: state.roster[side === "host" ? "guest" : "host"], leaderSlot: last.slot,
     });
-    if (!slots) return refuse("would_strand");
-    const slot = slots.includes(move.slot) ? move.slot : slots[0];
+    if (slots.reason) return refuse(slots.reason);
+    const slot = slots.slots.includes(move.slot) ? move.slot : slots.slots[0];
     return { ok: true, action: "steal", pickNo: last.pickNo, slot, side, state };
   }
 

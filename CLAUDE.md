@@ -690,6 +690,12 @@ suite and still broke the live Leaderboard for every existing account.
     v1.12.0 `rewards.mjs`, `badges.mjs` and `profile-rules.mjs` (a badge or coin-rule change the browser shows but
     the function doesn't pay is the failure) → `npm run deploy:fn:staging`, then
     `npm run deploy:fn:prod` after promoting (needs `STAGING_PROJECT_REF` / `PROD_PROJECT_REF`).
+  - `supabase/functions/match-pick`, or any module it bundles - **`versus-logic.mjs`**, `game-logic.mjs`,
+    `data/versus-pool.json` and `data/players.json`. `versus-logic.mjs` is the one to watch, because it holds
+    every rule 1v1 has and the browser imports it too: change it, push the client, and forget the function, and
+    the two are running different rulebooks. That exact miss cost a staging session in v1.19.0 - the client
+    offered a powerup the deployed function still refused as "not your turn". `node deploy-function.mjs <env>`
+    deploys both functions by default for this reason; there is no good argument for deploying one.
   - A schema change → run its migration in that environment's SQL editor first.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the

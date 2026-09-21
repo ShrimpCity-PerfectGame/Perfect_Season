@@ -56,6 +56,11 @@ export const VERSUS_CSS = `
 .vs-vs .vs-nm{font-size:16px}
 .vs-vs .vs-tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
 .vs-vs .vs-x{font-family:var(--display);font-size:20px;opacity:.6}
+/* On the team card, top right, where the card already had room. Tabular so it doesn't jitter as it counts. */
+.vs-reelclock{position:absolute;top:12px;right:16px;font-family:var(--display);font-size:34px;line-height:1;
+  color:#fff;font-variant-numeric:tabular-nums;text-shadow:0 1px 3px rgba(0,0,0,.5)}
+.vs-reelclock .vs-s{font-size:18px;opacity:.75;margin-left:1px}
+.vs-reelclock.low{color:var(--loss)}
 .vs-clockbox{display:flex;gap:10px;align-items:baseline}
 .vs-turn{font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:13px;margin:0}
 .vs-turn.mine{color:var(--accent-ink)}
@@ -106,16 +111,33 @@ export const VERSUS_CSS = `
 /* On a phone the pair has to stay out of the board's way, so the strips lose the season line and shrink to
    two rows of four. The season is still one tap away on the card, and the sticky bar carries your slots as
    chips anyway. */
+/* On a phone everything above the board competes with the board, and the board was losing: measured at 375px
+   the first player card sat 977px down an 812px screen, so a player could not see a single player without
+   scrolling. What follows is the diet.
+
+   The other player's roster shrinks to a glance - which slots they have filled. WHO they took is already on the
+   board, struck through, and their names were the tallest thing on the screen. Yours stays legible, because
+   yours is what you read the board against. */
 @media (max-width:640px){
+  .versus{gap:10px}
   .vs-score{font-size:42px}
   .vs-clock{font-size:22px}
-  .vs-rosters{gap:8px}
+  .vs-reelclock{font-size:28px;top:10px;right:12px}
+  .vs-rosters{gap:6px}
   .vs-rosters .roster{gap:4px}
   .vs-rosters .slot{min-height:38px;padding:4px 6px}
   .vs-rosters .slot .sub{display:none}
   .vs-rosters .slot .v{font-size:12px;margin-top:1px}
   .vs-rosters .slot .k{font-size:10.5px}
-  .vs-side-hd{margin-bottom:4px;font-size:11px}
+  .vs-side-hd{margin-bottom:3px;font-size:11px}
+  .vs-them .roster{grid-template-columns:repeat(8,minmax(0,1fr));gap:3px}
+  .vs-them .slot{min-height:28px;padding:3px 1px;text-align:center}
+  .vs-them .slot .v{display:none}
+  .vs-them .slot .k{font-size:10px}
+  .vs-them .slot[data-filled="1"]{border-style:solid;background:var(--surface2)}
+  .vs-them .vs-track{margin-top:4px}
+  .vs-powers .btn{padding:7px 9px}
+  .vs-flashrow:empty{display:none;min-height:0}
 }
 `;
 
@@ -333,9 +355,9 @@ function useFlash(event) {
 }
 
 // Your roster, as the draft screen shows one: a strip of slots with who is in them.
-function RosterStrip({ roster, label, sub }) {
+function RosterStrip({ roster, label, sub, them }) {
   return (
-    <div className="vs-side">
+    <div className={`vs-side ${them ? "vs-them" : ""}`}>
       <p className="vs-side-hd">{label}{sub ? <span className="vs-sub"> {sub}</span> : null}</p>
       <div className="roster" data-side={label}>
         {VERSUS_SLOTS.map((slot) => {
@@ -356,16 +378,35 @@ function RosterStrip({ roster, label, sub }) {
 // The board, drawn the way the single-player draft draws one - the same reel, the same cards, the same
 // "Lock in" (VERSUS.md 9). The classes are the app's own, so this inherits the whole look rather than
 // approximating it, and anything that changes there changes here.
-function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected, busy, controls }) {
+// What the single-player draft's secState says about a position, asked of a group of options instead, so the
+// two 1v1 adds answer it too:
+//   0  its slot is open   1  its own slot is filled but these can still go to a Flex   2  done
+const groupState = (list, open) => {
+  if (!list.length) return 2;
+  if (list.some((o) => open.some((s) => optionFits(o, s) && !s.startsWith("FLEX")))) return 0;
+  if (list.some((o) => open.some((s) => optionFits(o, s)))) return 1;
+  return 2;
+};
+
+function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected, busy, controls, turnLabel, seconds }) {
   const [team, w] = boardKey.split("|");
   const options = optionsOn(boardKey);
   const open = openSlots(roster);
   const left = options.filter((o) => !taken.has(optionId(o))).length;
+  // Which finished sections a player has asked to see again, exactly as the single-player draft keeps it.
+  const [showDone, setShowDone] = useState({});
   return (
     <>
       <div className="reel" aria-live="polite" style={teamVars(team)}>
         <div className="stripe" style={{ background: TEAMS[team][2] }} />
-        <div className="pickno"><span>{myTurn ? "Your pick" : "Their pick"}</span><span>{left} left on the board</span></div>
+        <div className="pickno"><span>{turnLabel}</span><span>{left} left on the board</span></div>
+        {/* The clock lives on the team card rather than in a bar of its own: it was the only thing in that bar
+            not already said by the roster headings and the line beside it. */}
+        {seconds != null ? (
+          <div className={`vs-reelclock ${seconds <= 10 ? "low" : ""}`} aria-label={`${seconds} seconds left`}>
+            {seconds}<span className="vs-s">s</span>
+          </div>
+        ) : null}
         <div className="team">{TEAMS[team][0]}</div>
         <div>
           <span className="years led-wrap"><span className="led">{WINDOWS[Number(w)][0]}–{WINDOWS[Number(w)][1]}</span></span>
@@ -377,17 +418,29 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
           you are looking when you decide you do not want this board. */}
       {controls}
 
-      {GROUPS.map(([key, heading, belongs]) => {
-        const list = options.filter(belongs);
-        if (!list.length) return null;
-        const anyOpen = open.some((sl) => list.some((o) => optionFits(o, sl)));
+      {/* A finished section folds away and sinks to the bottom, the way the single-player draft does it: a
+          position whose slot is filled is no longer something you are choosing from, and leaving it open in
+          place pushes what you still need off the screen. One that is filled but can still go to a Flex stays
+          where it is, because it is still a choice. */}
+      {GROUPS
+        .map(([key, heading, belongs]) => ({ key, heading, list: options.filter(belongs) }))
+        .filter((g) => g.list.length)
+        .map((g) => ({ ...g, st: groupState(g.list, open) }))
+        .sort((a, b) => (a.st === 2 ? 1 : 0) - (b.st === 2 ? 1 : 0))
+        .map(({ key, heading, list, st }) => {
+        const collapsed = st === 2 && !showDone[key];
         return (
-          <section className={`sec pos-${key === "DST" || key === "K" ? "FLEX" : key} ${anyOpen ? "" : "done"}`} key={key}>
+          <section className={`sec pos-${key === "DST" || key === "K" ? "FLEX" : key} ${st === 2 ? "done" : ""}`} key={key}>
             <div className="hd">
               <h3>{heading}</h3>
-              {!anyOpen && <span className="nt">No open slot for these.</span>}
+              {st === 1 && <span className="nt">{VS_SLOT_LABEL[key] || key} spot filled. These can still go to Flex.</span>}
+              {st === 2 && (
+                <button className="linkbtn" onClick={() => setShowDone({ ...showDone, [key]: !showDone[key] })}>
+                  {collapsed ? `Spot filled. Show ${list.length} option${list.length > 1 ? "s" : ""}` : "Hide"}
+                </button>
+              )}
             </div>
-            {list.map((o) => {
+            {!collapsed && list.map((o) => {
               const id = optionId(o);
               const gone = taken.has(id);
               const slotsFor = open.filter((sl) => optionFits(o, sl));
@@ -529,6 +582,16 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const theirs = state && side ? powerupsFor(match, side === "host" ? "guest" : "host") : null;
   const alreadySwapped = !!state && (match.swaps || []).some((w) => w.boardIdx === state.boardIdx);
   const flash = useFlash(latestEvent(match, state, (s) => name(match, s)));
+  // A refusal belongs to the moment it happened. It was only ever cleared by the next move, so one left over
+  // from another board and another turn sat on screen reading as nonsense - "that would leave the other player
+  // with nothing to pick" over a board with thirty options on it. Any pick landing clears it.
+  const atPick = state ? `${state.boardIdx}:${state.pickNo}:${state.turn?.side || ""}` : "";
+  const lastAt = useRef(atPick);
+  useEffect(() => {
+    if (lastAt.current === atPick) return;
+    lastAt.current = atPick;
+    setError(null);
+  }, [atPick]);
   // The board's opening window (VERSUS.md 7): the seconds in which the first pick can't land yet, so the other
   // player has a real chance to take it. Null whenever nobody could use one.
   const look = state && match?.status === "drafting"
@@ -662,18 +725,6 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
         </div>
       </div>
 
-      <div className="vs-head">
-        <div className="vs-vs">
-          <span className="vs-who"><span className="vs-nm">{hostName}</span><span className="vs-tag">{side === "host" ? "You" : "Host"}</span></span>
-          <span className="vs-x">vs</span>
-          <span className="vs-who"><span className="vs-nm">{guestName}</span><span className="vs-tag">{side === "guest" ? "You" : "Opponent"}</span></span>
-        </div>
-        <div className="vs-clockbox">
-          <p className={`vs-turn ${myTurn ? "mine" : ""}`}>{myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`}</p>
-          {left != null ? <p className={`vs-clock ${left <= 10 ? "low" : ""}`} aria-label={`${left} seconds left`}>{left}s</p> : null}
-        </div>
-      </div>
-
       {error ? <p className="vs-err">{errorText(error)}</p> : null}
 
       {/* What just happened, for a few seconds. Derived from the match's rows, so a client that reconnects
@@ -700,7 +751,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           {mine ? <PowerupTrack left={mine} label="You" /> : null}
         </div>
         <div>
-          <RosterStrip roster={state.roster[side === "host" ? "guest" : "host"]} label={`${name(match, side === "host" ? "guest" : "host")}'s roster`} />
+          <RosterStrip them roster={state.roster[side === "host" ? "guest" : "host"]} label={`${name(match, side === "host" ? "guest" : "host")}'s roster`} />
           {theirs ? <PowerupTrack left={theirs} label={name(match, side === "host" ? "guest" : "host")} /> : null}
         </div>
       </div>
@@ -711,6 +762,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
         <Board
           boardKey={state.boardKey} taken={state.taken} roster={state.roster[side || "host"]}
           myTurn={myTurn && !opening} busy={busy} selected={selected} setSelected={setSelected}
+          turnLabel={myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`} seconds={left}
           controls={side ? (
             <div className="rerolls vs-powers">
               {POWERUPS.map((pu) => {
