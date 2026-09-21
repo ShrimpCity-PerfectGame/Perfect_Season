@@ -331,10 +331,16 @@ await runTest("the share card says who won and never names a player", async () =
     .filter((o) => o.kind === "player").map((o) => o.name);
   const leaked = names.filter((n) => card.includes(n));
   assert(leaked.length === 0, `no player is named on it, found ${JSON.stringify(leaked)}`);
-  // The opponent's own card is the same match from the other side.
+  // The opponent's own card is the same match from the other side: it says what happened to THEM, but the
+  // scoreline belongs to the match, not to whoever is posting it. Winner first on both, the way a football
+  // score is written - read your-side-first it turned 23-20, the commonest score there is, into "20-23".
   const theirs = versusShareText(m, m.result, "guest", "https://gridspin.test");
-  assert(theirs !== card && theirs.includes(`${m.result.guest.points}–${m.result.host.points}`),
-    `and reads from their side: ${firstLine(theirs)}`);
+  const winner = m.result.winner;
+  const loser = winner === "host" ? "guest" : "host";
+  const line = `${m.result[winner].points}–${m.result[loser].points}`;
+  assert(theirs !== card, `the two cards differ: ${firstLine(theirs)}`);
+  assert(card.includes(line) && theirs.includes(line), `both carry the same scoreline, winner first (${line})`);
+  assert(/Beat |Lost to |Tied/.test(firstLine(theirs)), `and each says how it went for its own reader: ${firstLine(theirs)}`);
 });
 
 console.log("test-versus-flow.mjs done");

@@ -35,7 +35,7 @@ import {
 } from "./versus-logic.mjs";
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
 import {
-  SLOT_LABEL, teamVars, teamLabel, shortYr, POS_NAME, cityRange, statCells, useCloseOnBack, keepFocusInside,
+  SLOT_LABEL, teamVars, teamLabel, shortYr, POS_NAME, cityRange, statCells, useCloseOnBack, keepFocusInside, Confetti,
 } from "./ui-common.jsx";
 
 // The two slots 1v1 adds, beside the six every other mode already labels. A chip says which slot a pick filled
@@ -86,8 +86,11 @@ export const VERSUS_CSS = `
 .vs-rosters .roster{grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin-bottom:0}
 .vs-rosters .slot{min-height:52px;padding:6px 8px}
 .vs-rosters .slot .v{font-size:13px}
-.vs-final{display:grid;gap:6px;justify-items:center;text-align:center;padding:18px 0}
+/* position:relative so the confetti has something to fall inside, and overflow:hidden so it doesn't spill past
+   the block - the same pair .cel uses, because this is the same celebration. */
+.vs-final{display:grid;gap:6px;justify-items:center;text-align:center;padding:18px 0;position:relative;overflow:hidden}
 .vs-score{font-family:var(--display);font-size:56px;line-height:1;font-variant-numeric:tabular-nums}
+.vs-beat{margin:0;font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:13px;opacity:.85}
 .vs-lines{display:grid;gap:3px;font-size:13px;margin-top:8px;max-width:420px}
 .vs-lines .vs-ln{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding:4px 0}
 /* The powerups, under the reel: an icon, the name, and how many are left. The icon carries the row on a phone,
@@ -750,14 +753,27 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     const mine = side || "host";
     const theirs = mine === "host" ? "guest" : "host";
     const won = result.winner === mine;
+    const tied = result.winner === null;
+    // Winner first, always - the way a football score is written, and the way the FINALS table stores the real
+    // ones it is drawn from. Shown your-side-first it came out reversed for whoever lost, so the commonest
+    // scoreline in football turned into "20-23", which is a scoreline nobody writes.
+    const hi = tied ? mine : result.winner;
+    const lo = hi === "host" ? "guest" : "host";
     return (
       <section className="versus" data-view="done" data-code={match.code}>
-        <h2 className="h">{result.winner === null ? "A tie" : won ? "You win" : "You lose"}</h2>
+        <h2 className="h">{tied ? "A tie" : won ? "You win" : "You lose"}</h2>
         <div className="vs-final">
-          <div className="vs-score">{result[mine].points}–{result[theirs].points}</div>
-          <p className="vs-note">
-            {name(match, mine)} {result[mine].score} · {name(match, theirs)} {result[theirs].score}
+          {won && <Confetti n={24} />}
+          <div className="vs-score">{result[hi].points}–{result[lo].points}</div>
+          {/* Who beat whom, in names rather than sides - the heading says how it went for you, this says what
+              happened. Both, because the scoreline alone doesn't say which number was yours. */}
+          <p className="vs-beat">
+            {tied ? `${name(match, mine)} and ${name(match, theirs)} tied` : `${name(match, hi)} beat ${name(match, lo)}`}
           </p>
+          {/* The roster scores are NOT repeated here. Each one is already the subtitle on its own roster strip
+              below, which is where it belongs - attached to the eight picks that earned it. Said twice, and
+              directly under the football final, it read as a second competing scoreline rather than as the
+              working behind the first. One score on this screen; the numbers behind it sit with the rosters. */}
           {result[mine].against || result[theirs].against ? (
             <p className="vs-note">
               {result[theirs].against ? `Your defense took ${result[theirs].against} off them.` : ""}
@@ -889,8 +905,12 @@ export function versusShareText(match, result, side, siteUrl) {
   const theirs = mine === "host" ? "guest" : "host";
   const them = name(match, theirs);
   const head = result.winner === null ? "Tied" : result.winner === mine ? `Beat ${them}` : `Lost to ${them}`;
+  // Winner first, as on the screen and as a football score is written. Your-side-first turned the commonest
+  // scoreline in the game into "20-23" every time you lost.
+  const hi = result.winner === null ? mine : result.winner;
+  const lo = hi === "host" ? "guest" : "host";
   const lines = [
-    `Gridspin Duel ${result.winner === null ? "🤝" : result.winner === mine ? "🏆" : "💀"} ${head} ${result[mine].points}–${result[theirs].points}`,
+    `Gridspin Duel ${result.winner === null ? "🤝" : result.winner === mine ? "🏆" : "💀"} ${head} ${result[hi].points}–${result[lo].points}`,
     `${result[mine].score} to ${result[theirs].score} on the boards`,
   ];
   // The two things a 1v1 has that a season doesn't, and the only two worth a line.

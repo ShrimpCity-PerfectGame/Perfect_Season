@@ -2,8 +2,9 @@
 // files (profile.jsx, moderation.jsx, ...). Moved here out of perfect-season.jsx so those files don't
 // have to import the main component module back - everything below is a plain function, constant or
 // stateless component, with no app state, apart from the register of open dialogs at the bottom.
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { TEAMS, BEST_FIELDS, normFormat, WINDOWS, passerRating } from "./game-logic.mjs";
+import { PALETTE } from "./theme.mjs";
 
 export const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
 export const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };
@@ -152,4 +153,21 @@ export function closeTopDialog() {
   if (!top) return false;
   top.close.current?.();
   return true;
+}
+
+// The celebration confetti, shared by the season result, Build-a-player and a won duel. Lives here rather than
+// in perfect-season.jsx because versus.jsx needs it too and cannot import the main component back. Purely
+// decorative, so aria-hidden; the whole thing is display:none under prefers-reduced-motion. It needs a
+// position:relative parent to fall inside - .cel and .vs-final both provide one.
+export function Confetti({ n = 26 }) {
+  const bits = useMemo(() => Array.from({ length: n }, (_, i) => ({
+    left: `${(i * 97) % 100}%`, delay: `${(i % 9) * 0.12}s`,
+    bg: [PALETTE.lime, PALETTE.blue, PALETTE.orange, PALETTE.violet, PALETTE.cream][i % 5],
+    dur: `${2.2 + ((i * 7) % 9) / 10}s`,
+  })), [n]);
+  return (
+    <div className="confetti" aria-hidden="true">
+      {bits.map((b, i) => <i key={i} style={{ left: b.left, background: b.bg, animationDelay: b.delay, animationDuration: b.dur }} />)}
+    </div>
+  );
 }

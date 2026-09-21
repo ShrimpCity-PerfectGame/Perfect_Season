@@ -40,6 +40,9 @@ CLAUDE.md.
   opponent as well, so it is a real decision. A **steal**, which takes the pick they just made and sends them
   back to the board for another. And a **double dip**, two off one board in exchange for giving up your next
   pick, which leaves them the board after to themselves.
+- **A result screen that says one thing.** The football score, big, winner first the way a score is
+  written — then "Rival beat ShrimpCity" under it, and each roster with its own number above it. Confetti if
+  you won.
 - **A clock on every pick**, and either player can call it — so an opponent who closes the tab costs you the wait,
   not the match. A pick the clock makes is the best thing still on the board for the slots you have open.
 

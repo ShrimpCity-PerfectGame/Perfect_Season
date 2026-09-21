@@ -24,7 +24,7 @@ import {
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
-  POS_NAME, cityRange, statCells,
+  POS_NAME, cityRange, statCells, Confetti,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -1906,19 +1906,6 @@ function bestOrderFor(history, format) {
     if (ok && (!best || total > best.totalRating)) best = { slotAssignment: assignment, totalRating: total };
   }
   return best;
-}
-
-function Confetti({ n = 26 }) {
-  const bits = useMemo(() => Array.from({ length: n }, (_, i) => ({
-    left: `${(i * 97) % 100}%`, delay: `${(i % 9) * 0.12}s`,
-    bg: [PALETTE.lime, PALETTE.blue, PALETTE.orange, PALETTE.violet, PALETTE.cream][i % 5],
-    dur: `${2.2 + ((i * 7) % 9) / 10}s`,
-  })), [n]);
-  return (
-    <div className="confetti" aria-hidden="true">
-      {bits.map((b, i) => <i key={i} style={{ left: b.left, background: b.bg, animationDelay: b.delay, animationDuration: b.dur }} />)}
-    </div>
-  );
 }
 
 // ---------- Sharing ----------

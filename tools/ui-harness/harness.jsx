@@ -25,6 +25,7 @@
 //   screen=shop&coins=N[&team=KC]                  ShopScreen on the mock, signed in with N coins (default 4,210), a
 //                                                  few items owned, a badge item owned through its badge, and a
 //                                                  badge earned but not yet paid (its item says it unlocks next season)
+//   screen=versus[&waiting=1][&done=1][&picks=N]     a duel on the mock: mid-board, from the other side, or played out
 //   screen=picker[&owned=sideline,night-game][&current=trophy]   the avatar picker on its own, on Choose an avatar,
 //                                                  owning the listed packs (default: sideline)
 import { useState } from "react";
@@ -471,8 +472,9 @@ async function setUpVersus() {
   vs.rpcs.join_match({ p_code: code });
 
   // A few picks in, so the board is mid-match rather than freshly dealt: options taken, both rosters part
-  // filled, and the roster strips showing filled slots beside open ones.
-  const turns = Number(params.get("picks") || 3);
+  // filled, and the roster strips showing filled slots beside open ones. ?done=1 plays it all the way out
+  // instead, which is the only way to look at the result screen - nothing visual ever checked it.
+  const turns = params.get("done") === "1" ? V.MATCH_PICKS : Number(params.get("picks") || 3);
   for (let i = 0; i < turns; i++) {
     const st = vs._replay(code);
     if (!st || st.done || !st.turn) break;
