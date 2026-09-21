@@ -111,6 +111,39 @@ each Supabase project before this is busy, and remember anonymous users count to
 `tests/test-guest-accounts.mjs` covers the game's side; the naming and the trade-up are held to the real SQL in
 `tests/test-profile-data.mjs`.
 
+**1v1 (v1.19.0).** Two players draft against each other from the same boards and the better roster wins.
+**`VERSUS.md` is the reference** - read it before touching anything below. The short version, and the parts that
+are unlike every other mode:
+
+- **The server holds the draft.** Every other mode is drafted in the browser and checked afterwards, because one
+  player's draft can be replayed from its seed. A 1v1 cannot: the second picker's legal choices depend on the
+  first picker's pick, so no browser can hold the truth. The picks live in `matches` / `match_picks` (public
+  select, **no client write policy at all**) and only the `match-pick` Edge Function's service role writes them.
+- **`versus-logic.mjs` owns every rule**, and `supabase/functions/match-pick/index.ts` owns none of them: it says
+  who is asking, calls `decideMove`, and writes down what comes back. Same reasoning as game-logic.mjs - a rule
+  enforced on one side and not the other will drift. It also means the rules are tested with no Deno runtime and
+  no mock that mirrors them.
+- **Nothing is stored twice.** `replayMatch` derives the boards, both rosters, what is gone and whose turn it is
+  from the match's own rows, so a reconnecting client, a lying client and the server all compute from one place.
+  Add state to the rows, never to a screen.
+- **Eight boards, sixteen picks**, and every board offers that team's players, its defense in each year of the
+  era and its kicker - a defense can go fifth and a kicker first. A board that cannot serve *both* players is
+  skipped before it is dealt (VERSUS.md 8): 33 of the 160 boards hold one quarterback or one tight end, so two
+  players who both need one cannot both be served from it.
+- **No probability anywhere.** The higher score wins, every time. `winProb` and `gameResult` are not called: an
+  upset is the best part of a 17-game season and the worst possible end to one game between two people. The
+  football final is drawn from the result and can never contradict it.
+- **Defenses and kickers are 1v1's alone.** `data/versus-pool.json` (861 of each, 1999-2025, built by
+  `tools/data/build-versus-pool.mjs` from nflverse) is read by `versus.jsx` and the Edge Function and nothing
+  else; `POS` and `SLOTS` are untouched, and no existing score or board moves.
+- **Guests may not play** (VERSUS.md 5), for the reason they may not play the daily: a guest account costs
+  nothing to make, so two tabs would farm the board. **Known gap:** two *real* accounts in two tabs still can.
+  It costs an email each and moves nothing but the PvP board; the answer if it is abused is a rate limit on
+  `create_match` plus ignoring matches between accounts that only ever play each other.
+- **Runbook** (SQL editor): end a stuck match -
+  `update matches set status = 'abandoned', ended_at = now() where code = 'ABC123';`. Take a farmed result back -
+  delete the match row (its picks follow) and decrement `pvp_wins` / `pvp_losses` on the two profiles by hand.
+
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
 Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`
 only allows that for a provider - an email signup still brings its name and passes every check), and the game
@@ -284,6 +317,14 @@ node tests/test-profile-links.mjs      # /u/name addresses, Back/Forward, every 
 node tests/test-signin-google.mjs      # signing in with Google: the name it has to pick first, what's refused, and the account it ends up with
 node tests/test-guest-accounts.mjs     # guests: a finished season posts without an account, the daily and shop are refused, and keeping the seasons
 node tests/test-a11y.mjs           # axe-core over every screen in the installed Chrome; and that a roster chip names its slot, which axe can't see
+
+# 1v1 (v1.19.0). See VERSUS.md. versus-logic.mjs holds the rules, so most of these need no database and no browser.
+node tests/test-versus-pool.mjs        # the defense/kicker data: one of each per team-season, on the players' scale, seasons pinned by hand
+node tests/test-versus-boards.mjs      # the board's three pools, what fits where, a board that can't serve both players, whole matches played out
+node tests/test-versus-rules.mjs       # every refusal decideMove makes, then a match to the end with all four powerups spent
+node tests/test-versus-sql.mjs         # the migration in PGlite: nobody writes the tables, lobbies, invites, match_state's shape, the 1v1 board
+node tests/test-versus-flow.mjs        # a whole match through the mock client: create, join, the clock, the records, the share card
+node tests/test-versus-screen.mjs      # the screens in the real app: the tile, the lobby's link, a shared board, a re-spin, the board
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -666,6 +707,10 @@ suite and still broke the live Leaderboard for every existing account.
   submit-run doesn't change. v1.17.0's (guests) does: re-run `migration-profiles.sql` (the `guest` column,
   `new_guest_name`, and claim_username's trade-up), turn on anonymous sign-ins in that project, **then deploy
   submit-run** (it refuses a guest's daily), then the client.
+  v1.19.0's (1v1): run `migration-versus.sql`, then **deploy the Edge Functions** (`node deploy-function.mjs <env>`
+  now deploys both - submit-run and match-pick share game-logic.mjs and data/players.json, so deploying one of a
+  pair is the drift this section warns about), then the client. The migration only adds objects, so the live site
+  keeps working between the steps; nothing in it touches an existing table except two new `profiles` columns.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging

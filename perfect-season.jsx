@@ -560,7 +560,7 @@ const CSS = `
 /* Stop the browser pinning the view to the bottom while a season's tiles tick in under it. */
 html:has(.result-hero){overflow-anchor:none}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
-.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
+.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.mode.m-versus,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
 /* Leaderboard scope: true black. After the dark list so its champion block takes night tokens. */
 .ps.night,.night .champion,.cs-night{${cssVars("night")};color:var(--ink)}
@@ -709,11 +709,16 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .mode.m-unlimited .icon{background:var(--surface);border-color:var(--line2)}
 .mode.m-unlimited .go{background:var(--accent);color:var(--on-accent)}
 /* over/under: the orange special moment */
-/* 1v1 takes the violet, the one colour in the palette nothing else uses - a head-to-head should not look
-   like the Unlimited tile. Ink on violet is 5.3:1; cream on it would be 3.2 and fail AA. */
-.mode.m-versus{background:${PALETTE.violet};color:${PALETTE.ink};border-color:${PALETTE.ink}}
-.mode.m-versus p{color:${PALETTE.ink};opacity:.8}
-.mode.m-versus .icon{background:color-mix(in srgb,#fff 42%,${PALETTE.violet})}
+/* 1v1 takes the dark scope, like the Unlimited tile, and is told apart by the violet rather than painted in
+   it. Violet as a field does not survive the contrast test either way round: ink on it is 4.46:1 and cream on
+   it 3.2, and AA wants 4.5. Tinted into a dark ground it is safe, distinct, and still the one colour in the
+   palette nothing else uses. Text takes the dark scope's own tokens - see the scope list above. */
+.mode.m-versus{background:linear-gradient(135deg,color-mix(in srgb,${PALETTE.violet} 34%,var(--bg)),var(--bg));border-color:${PALETTE.ink};box-shadow:4px 4px 0 ${PALETTE.ink}}
+@media (hover:hover){.mode.m-versus:hover:not(.static){box-shadow:6px 8px 0 ${PALETTE.ink}}}
+.mode.m-versus .icon{background:${PALETTE.violet};border-color:var(--line2)}
+/* The lime pill, as the Unlimited tile uses - cream on violet is 3.2:1, and the accent pair is the one that
+   is already held to AA by tests/test-theme-contrast.mjs. The violet stays the icon and the tint. */
+.mode.m-versus .go{background:var(--accent);color:var(--on-accent)}
 .mode.m-sou{background:var(--orange);color:${PALETTE.ink};border-color:${PALETTE.ink}}
 .mode.m-sou p{color:${PALETTE.ink};opacity:.8}
 .mode .mt{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -4194,11 +4199,16 @@ export default function PerfectSeason() {
 
         {/* ---------------- 1v1 (VERSUS.md 9) ---------------- */}
         {view === "versus" && (
-          <VersusScreen
-            key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
-            format={format} onBack={leaveVersus} onCode={setVersusCode}
-            onShare={shareOut} siteUrl={APP_SITE_URL}
-          />
+          <>
+            {/* The screen names itself for a screen reader, as every other one does (v1.18.0's pass); the
+                headings inside it are the lobby's, the draft's and the result's, which change as it goes. */}
+            <h1 className="vh">1v1</h1>
+            <VersusScreen
+              key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
+              format={format} onBack={leaveVersus} onCode={setVersusCode}
+              onShare={shareOut} siteUrl={APP_SITE_URL}
+            />
+          </>
         )}
 
         {/* ---------------- SHOP (SHOP.md 8) ---------------- */}

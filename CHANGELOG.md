@@ -24,6 +24,25 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
+## [1.19.0] — unreleased
+
+### Added
+
+- **1v1.** Send someone a link and draft against them. You both watch the same eight boards, pick in turn, and
+  the better roster wins — no dice, no upsets, just the sixteen picks. It goes on a board of its own, beside the
+  others on the Leaderboard; it never touches your season record.
+- **A defense and a kicker.** Every board in a 1v1 offers that team's players, its defense in each year of the
+  era, and its kicker — so you can take the 2006 Ravens defense fifth or a kicker first, whenever you want them.
+  Real seasons, rated against their own year: 861 defenses and 861 kickers from 1999 to 2025. Their defense comes
+  off your score, your kicker adds to it, and each is worth exactly what one roster slot is worth.
+- **Powerups, one set each.** Two re-spins — and when you pick first, the board you spin to is dealt to your
+  opponent as well, so it is a real decision. A **steal**, which takes the pick they just made and sends them
+  back to the board for another. A **double dip**, two off one board in exchange for giving up your next pick,
+  which leaves them the board after to themselves. And **steal the pick**, to lead a board you would have
+  followed.
+- **A clock on every pick**, and either player can call it — so an opponent who closes the tab costs you the wait,
+  not the match. A pick the clock makes is the best thing still on the board for the slots you have open.
+
 ## [1.18.0] — unreleased
 
 ### Changed

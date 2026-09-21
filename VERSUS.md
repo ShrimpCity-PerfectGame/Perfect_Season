@@ -416,7 +416,10 @@ gets a versus variant: the two scores, the result, and a link to play the winner
   tile, a lobby whose link is also the address, a guest told to sign in, the opponent's screen showing the same
   board, a pick landing in a slot on the right side of it, and the follower's re-spin taking them to a board of
   their own while the host keeps the one he picked from.
-- `tests/test-a11y.mjs` gains the new screens.
+- `tests/test-a11y.mjs` gains the 1v1 lobby, which is the screen a player reaches from the Modes tile. The
+  draft itself needs two accounts and a live match, which the UI harness has no fixture for - so what holds it
+  is `tests/test-versus-screen.mjs`'s markup checks (every slot named in letters, every option a real button)
+  plus the same theme-contrast and touch-target rules every other screen follows.
 
 ## 12. Order of work
 

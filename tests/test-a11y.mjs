@@ -28,9 +28,11 @@ const browser = await launch();
 const page = await browser.newPage();
 await page.setViewport({ width: 390, height: 844 });
 
-// Every screen, as a player reaches it: a query the harness understands, then the tab to click once it's up.
+// Every screen, as a player reaches it: a query the harness understands, then the tab to click once it's up -
+// or, for a screen that opens from a Modes tile rather than the nav, the tile's name.
 const SCREENS = [
   ["Modes", "?as=player", null],
+  ["the 1v1 lobby", "?as=player", { tile: "1v1" }],
   ["Modes as a guest", "?as=guest", null],
   ["the rules", "?as=player&howto=1", null],
   ["the Draft screen", "?as=player", "Draft"],
@@ -44,7 +46,10 @@ for (const [name, query, tab] of SCREENS) {
   await runTest(`${name} has no accessibility violations`, async () => {
     await page.goto(HARNESS + query, { waitUntil: "load" });
     await sleep(1600);
-    if (tab) {
+    if (tab && tab.tile) {
+      await page.evaluate((label) => [...document.querySelectorAll(".mode .mn")].find((e) => e.textContent === label)?.closest("button")?.click(), tab.tile);
+      await sleep(2200);
+    } else if (tab) {
       await page.evaluate((label) => [...document.querySelectorAll("nav .tab")].find((b) => b.textContent.startsWith(label))?.click(), tab);
       await sleep(2200);
     }
