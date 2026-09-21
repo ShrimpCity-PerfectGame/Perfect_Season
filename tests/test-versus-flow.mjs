@@ -5,6 +5,7 @@
 // create_match and join_match, whose session is whose, the picks landing in the table, and the records moving
 // once the last pick lands. The rules are the same `decideMove` both this mock and the real Edge Function call.
 import { assert, runTest, makeMockAuth, setupDom, loadModule } from "./helpers.mjs";
+import { playMove } from "../storage.js";
 import {
   replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, LOOK_SECONDS,
 } from "../versus-logic.mjs";
@@ -34,6 +35,49 @@ const move = async (sb, body, now = tick()) => {
   if (error) return error.context ? await error.context.json() : { reason: "network" };
   return data;
 };
+
+// The real playMove, not this file's `move` helper - which reads error.context itself and so would pass even
+// if storage-versus.js had stopped doing it. That is the bug this is here for: supabase-js reports every
+// non-2xx as an `error` with the body behind it, and a playMove that doesn't read it turns every rule in
+// VERSUS.md 4 and 7 into "couldn't reach the server". Each shape below is one the function really sends.
+await runTest("a refusal reaches the player as its reason, not as the network being down", async () => {
+  const { sb, as, A, B } = await twoPlayers();
+  const had = globalThis.window;
+  globalThis.window = { ...(had || {}), __ps_supabase__: sb };
+  try {
+    await as(A);
+    const code = (await call(sb, "create_match", {})).code;
+
+    // 404: a code nobody has.
+    const missing = await playMove({ code: "NOPE12" });
+    assert(!missing.ok && missing.reason === "not_found", `a match that doesn't exist: ${JSON.stringify(missing)}`);
+
+    // 409: a match that isn't drafting - this lobby has nobody in it yet.
+    const idle = await playMove({ code, claim: "clock" });
+    assert(!idle.ok && idle.reason === "not_your_match", `a match not under way: ${JSON.stringify(idle)}`);
+
+    // 403: signed in, a real match under way, not in it.
+    await as(B);
+    await call(sb, "join_match", { p_code: code });
+    await sb.auth.signOut();
+    await sb.auth.signUp({ email: "three@x.test", password: "password1", options: { data: { username: "gamma" } } });
+    const stranger = await playMove({ code, claim: "clock" });
+    assert(!stranger.ok && stranger.reason === "not_your_match", `somebody else's match: ${JSON.stringify(stranger)}`);
+
+    // 409 from decideMove itself: a rule, not a routing problem.
+    const state = replayMatch(await asReplay(sb, code));
+    await as(state.turn.side === "host" ? B : A); // whoever is NOT on the clock
+    const early = await playMove({ code, respin: "team" });
+    assert(!early.ok && early.reason === "not_your_turn", `a rule refusing it says which rule: ${JSON.stringify(early)}`);
+
+    // 401: signed out entirely.
+    await sb.auth.signOut();
+    const out = await playMove({ code, claim: "clock" });
+    assert(!out.ok && out.reason === "unauthorized", `no session at all: ${JSON.stringify(out)}`);
+  } finally {
+    if (had) globalThis.window = had; else delete globalThis.window;
+  }
+});
 
 await runTest("a lobby, a link, and the first one through it is the opponent", async () => {
   const { sb, as, A, B } = await twoPlayers();

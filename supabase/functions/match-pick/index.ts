@@ -133,8 +133,14 @@ Deno.serve(async (req) => {
     slot: decided.slot, auto: decided.auto,
   });
   // A taken pick_no means the other client got there first - a client that is behind, not a failure worth a 500.
-  // It re-reads the match and sees the pick it missed.
-  if (writeError) return json({ error: "already picked", reason: "conflict" }, 409);
+  // It re-reads the match and sees the pick it missed. Only 23505 (unique_violation) means that, though: every
+  // other write failure was reported as "already picked" too, which told a player to try again over a check
+  // constraint that will refuse them forever, and hid the constraint from whoever had to debug it.
+  if (writeError) {
+    if (writeError.code === "23505") return json({ error: "already picked", reason: "conflict" }, 409);
+    console.error("match_picks insert failed", writeError);
+    return json({ error: "failed to save" }, 500);
+  }
 
   // Re-read rather than assume, and let versus-logic say whether that was the last pick: a double dip and a
   // steal both move where the end of a match is, so counting to sixteen here would be wrong.

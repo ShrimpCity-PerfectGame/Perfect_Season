@@ -30,6 +30,9 @@ async function call(who, fn, args) {
   const res = await attempt(who, `select ${fn}(${names.map((n, i) => `${n} => $${i + 1}`).join(", ")}) as r`, names.map((n) => args[n]));
   return res.error ? { error: res.error } : { data: res.rows[0].r };
 }
+// create_match now hands back a match already in progress rather than opening a second one, which is right for
+// a player and awkward for a test file that shares four accounts across every case. Each one starts clean.
+const noMatches = async () => owner("delete from matches");
 const guestNameOf = async (id) => (await owner("select username from profiles where id = $1", [id]))[0]?.username;
 
 await runTest("a client can read matches and picks, and write neither", async () => {
@@ -72,6 +75,7 @@ await runTest("a client can read matches and picks, and write neither", async ()
 });
 
 await runTest("opening a lobby: signed in, not a guest, and only one at a time", async () => {
+  await noMatches();
   assert((await call(null, "create_match", { p_format: "fantasy" })).error, "signed out, it can't even be called");
   assert((await call(ANON_GUEST, "create_match", { p_format: "fantasy" })).data?.error === "guest_not_allowed",
     `a guest is refused - it costs nothing to make another one, got ${JSON.stringify(await guestNameOf(ANON_GUEST))}`);
@@ -83,9 +87,28 @@ await runTest("opening a lobby: signed in, not a guest, and only one at a time",
   const again = (await call(OTHER, "create_match", { p_format: "fantasy" })).data;
   assert(again.code === first.code, `asking twice gives back the same lobby, got ${again.code} then ${first.code}`);
   assert((await owner("select count(*)::int as n from matches where host_id = $1", [OTHER]))[0].n === 1, "and leaves one row, not two");
+
+  // ...and a match already going comes back too, on either side of it. Only `open` was looked for, so a player
+  // who went back to Modes mid-draft and tapped 1v1 again was parked in a fresh lobby while the match they had
+  // walked away from auto-picked their whole roster for them.
+  await noMatches();
+  const live = (await call(HOST, "create_match", {})).data;
+  await call(GUEST, "join_match", { p_code: live.code });
+  const asHost = (await call(HOST, "create_match", {})).data;
+  assert(asHost.code === live.code && asHost.status === "drafting",
+    `the host is sent back to their match, not into a new lobby: ${JSON.stringify([asHost.code, asHost.status])}`);
+  const asGuest = (await call(GUEST, "create_match", {})).data;
+  assert(asGuest.code === live.code, `and so is the other player: ${JSON.stringify(asGuest.code)}`);
+  assert((await owner("select count(*)::int as n from matches"))[0].n === 1, "with still one match in the world, not three");
+
+  // A finished one is not a match to go back to: that is when a new lobby is right.
+  await owner("update matches set status = 'done' where code = $1", [live.code]);
+  const fresh = (await call(HOST, "create_match", {})).data;
+  assert(fresh.code !== live.code && fresh.status === "open", `once it is over, asking opens a new one: ${JSON.stringify(fresh.status)}`);
 });
 
 await runTest("taking an invite: the first one through the link is the opponent", async () => {
+  await noMatches();
   const code = (await call(HOST, "create_match", {})).data.code;
   assert((await call(GUEST, "join_match", { p_code: "NOPE12" })).data?.error === "not_found", "a code nobody has");
   assert((await call(ANON_GUEST, "join_match", { p_code: code })).data?.error === "guest_not_allowed", "a guest can't take one either");
@@ -103,6 +126,7 @@ await runTest("taking an invite: the first one through the link is the opponent"
 });
 
 await runTest("anything taken in a match is gone, for both sides", async () => {
+  await noMatches();
   const code = (await call(HOST, "create_match", {})).data.code;
   await call(GUEST, "join_match", { p_code: code });
   const id = (await owner("select id from matches where code = $1", [code]))[0].id;
@@ -131,6 +155,7 @@ await runTest("anything taken in a match is gone, for both sides", async () => {
 });
 
 await runTest("match_state reads the whole thing back, for a reload or a stranger", async () => {
+  await noMatches();
   const code = (await call(HOST, "create_match", {})).data.code;
   await call(GUEST, "join_match", { p_code: code });
   const id = (await owner("select id from matches where code = $1", [code]))[0].id;
@@ -213,6 +238,7 @@ await runTest("the 1v1 board ranks by wins, fully tiebroken, and only counts peo
 // could go wrong was permanent: a lost record nothing could retry, a double-counted win if it did, or sixteen
 // picks on a drafting row that answers already_finished to every later move.
 await runTest("finishing a match writes the result and both records, once", async () => {
+  await noMatches();
   await owner("update profiles set pvp_wins = 0, pvp_losses = 0");
   const code = (await call(HOST, "create_match", {})).data.code;
   await call(GUEST, "join_match", { p_code: code });

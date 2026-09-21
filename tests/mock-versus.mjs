@@ -74,10 +74,13 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     const uid = state.currentUserId();
     if (!uid) return { error: "not_signed_in" };
     if (!canPlay(uid)) return { error: "guest_not_allowed" };
-    // One open lobby per host: asking twice gives back the one already waiting, so a double tap doesn't leave a
-    // trail of links nobody will open.
-    const open = [...matches.values()].find((m) => m.host_id === uid && m.status === "open");
-    if (open) return matchState({ p_code: open.code });
+    // One match at a time, and on either side of it: asking again gives back the one already going, so a double
+    // tap doesn't leave a trail of links nobody will open - and a player who went back to Modes mid-draft is
+    // returned to their match rather than parked in a new lobby while that one auto-picks for them.
+    const mine = [...matches.values()]
+      .filter((m) => (m.host_id === uid || m.guest_id === uid) && (m.status === "open" || m.status === "drafting"))
+      .sort((a, b) => (a.status === b.status ? 0 : a.status === "drafting" ? -1 : 1));
+    if (mine.length) return matchState({ p_code: mine[0].code });
     const code = newCode();
     matches.set(code, {
       id: `match-${nextId++}`, code, host_id: uid, guest_id: null,
@@ -127,14 +130,21 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
   // The match-pick Edge Function. `now` is a test hook, standing in for the server's clock so a test can let a
   // turn run out without waiting 45 seconds.
   async function invokeMatchPick(body, { now = Date.now() } = {}) {
+    // Every refusal below comes back the way the real function's does - a non-2xx, which supabase-js reports as
+    // an `error` with the body behind error.context - and with the status index.ts actually sends. These five
+    // were the ones still shaped as a tidy { data }, which is exactly the shape that let every refusal reach a
+    // player as "couldn't reach the server" while every test passed: no test could tell a client that reads
+    // error.context from one that doesn't, on the paths most likely to fire. `conflict` is the worst of them,
+    // because it is the ordinary two-players-racing case.
     const uid = state.currentUserId();
-    if (!uid) return { error: { message: "unauthorized" } };
+    if (!uid) return httpError("unauthorized", 401);
     const code = typeof body?.code === "string" ? body.code.toUpperCase() : "";
+    if (!code) return httpError("not_found", 400);
     const m = matches.get(code);
-    if (!m) return { data: { error: "not_found", reason: "not_found" } };
-    if (m.status !== "drafting") return { data: { error: "not_your_match", reason: "not_your_match" } };
+    if (!m) return httpError("not_found", 404);
+    if (m.status !== "drafting") return httpError("not_your_match", 409);
     const side = sideOf(m, uid);
-    if (!side) return { data: { error: "not_your_match", reason: "not_your_match" } };
+    if (!side) return httpError("not_your_match", 403);
 
     const decided = V.decideMove({
       code, format: m.format, side, move: body, now,
@@ -175,7 +185,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
 
     const o = decided.option;
     const key = `${m.id}|${decided.pickNo}`;
-    if (matchPicks.has(key)) return { data: { error: "conflict", reason: "conflict" } };
+    if (matchPicks.has(key)) return httpError("conflict", 409); // the other client got there first
     matchPicks.set(key, {
       match_id: m.id, pick_no: decided.pickNo, user_id: idOf(m, decided.side), board_idx: decided.boardIdx,
       kind: o.kind, player_id: o.kind === "player" ? o.id : null,

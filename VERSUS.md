@@ -12,9 +12,18 @@ prefixed class names, and nothing reaches production without going through stagi
   joins as the opponent. The link is the whole matchmaking system — there is no queue, because there aren't
   enough players for one to be anything but a wait.
 - Both screens then watch the **same eight boards**, dealt from one seed, in order.
-- Picks alternate, snaking by board: on board 1 the host picks first and the opponent picks second **from the
-  same board, minus what was just taken**; on board 2 the opponent picks first; and so on. Eight boards,
-  sixteen picks, eight to a side.
+- Picks alternate, snaking by board: on board 1 one player picks first and the other picks second **from the
+  same board, minus what was just taken**; on board 2 they swap; and so on. Eight boards, sixteen picks, eight
+  to a side.
+- **Which of them leads board 1 is a coin flip on the match code** (`hostLeadsEven`), not whoever opened the
+  lobby. Leading a board is worth more the earlier it comes — both rosters still have slots open, so they are
+  chasing the same options — and measured over 10,000 matches with both sides played identically, the lead is
+  worth 1.97 points of final score on board 0 against 0.57 on board 7. Whoever leads 0, 2, 4 and 6 therefore
+  wins about 54% of decided matches. That used to be the host every time, because `create_match` makes the
+  caller the host, so anyone who always sent the invite rather than clicking one won more for nothing. Seeded on
+  the code it is the same answer on both screens and the server, and neither player can choose it. The board-0
+  leader still has the edge; **Steal the pick is what a follower spends to take it** (worth 3.70 points on
+  board 0, against a 1.97 lead premium), which is the powerup earning its place.
 - A roster is the six single player already uses — **QB, RB, WR, TE, Flex, Flex** — plus a **defense** and a
   **kicker** (section 6).
 - **Every board offers all eight**: that team's players in that era, that team's defense in each year of the era,
@@ -73,18 +82,23 @@ draft that only moves when a socket delivers is a draft that stops.
 | `turn_deadline` | timestamptz null | when the player on the clock loses the pick |
 | `respins` | jsonb not null default `[]` | every re-spin spent, `{ pickNo, kind, by, key }` (section 7) — enough for a reconnecting client to rebuild the same boards |
 | `dips` | jsonb not null default `[]` | every double dip spent, `{ boardIdx, by }` (section 7) — which board was drafted three times, and which one after it only once |
+| `swaps` | jsonb not null default `[]` | every Steal the pick spent, `{ boardIdx, by }` (section 7) — which boards had their order reversed before the first pick landed |
 | `result` | jsonb null | both sides' scores and the three parts each was built from (section 6), written once, by the server |
 | `winner_id` | uuid null | set with `result`; null for a draw |
 | `created_at` / `ended_at` | timestamptz | |
 
-RLS on. **Select** is allowed to anyone (a match is public once it exists — its result appears on a board), and
+RLS on. **Select** is allowed to anyone for a match that is under way or finished (its result appears on a
+board), but an **open lobby is visible only to its host**: its code is the whole invite, so a readable
+`matches` meant anybody could `select code from matches where status = 'open'` and walk into a lobby ahead of
+the friend it was sent to. Nothing legitimate needs it — every client reads through `match_state`, which is
+security definer and bypasses the policy, so the code still opens the lobby for whoever holds it. Otherwise,
 there is **no client insert, update or delete policy at all**.
 
 **`match_picks`** `(match_id, pick_no)` primary key, plus:
 
 | column | rule |
 |---|---|
-| `pick_no` | 1–16. The number alone says whose turn it was (section 1's snake order). |
+| `pick_no` | 1–16. The number and the match code together say whose turn it was (section 1's snake order, whose direction is seeded on the code). |
 | `user_id` | who made it |
 | `board_idx` | 0–7 |
 | `kind` | `player` \| `dst` \| `k` — which pool the pick came from, so the three can't be confused for each other |
@@ -139,6 +153,17 @@ player may make — that is how a match survives an opponent who has closed the 
 decides, never the client (`too_early`), and the pick the clock owes is the available option worth the most to
 that roster by section 6's own arithmetic, over every open slot, marked `auto`. Worth the most, not
 highest-rated: a 112 defense and a 112 quarterback are not the same number of points.
+
+**It is deliberately not the best *play*, and that is a decision rather than an oversight.** `optionValue`
+measures every kind against `AVERAGE_RATING` (65), which is the middle of the defense and kicker scale but not
+of what a board actually offers — a board's best Flex averages 112.5, its best quarterback 92.5, its best
+defense 79.7. So the clock takes the option that adds the most points to your score, ignoring what you could
+still get for that slot from a later board. Measured, its choice differs from a replacement-aware best on 38.7%
+of turns and gives up about 0.66 points of final score per auto-pick, against a median match margin of 4.8.
+Per-slot replacement baselines would close that in one line, and `autoPick` is `optionValue`'s only caller, so
+the blast radius would be timeouts alone. It has been left as it is on purpose: timing out is supposed to cost
+something, a mild and explainable penalty is the right size for that cost, and an optimal autopilot would make
+walking away from the clock nearly free. Revisit it as a balance question, not as a bug.
 
 `POST { code, respin }`, `{ code, steal: true, slot }`, `{ code, dip: true }` and `{ code, stealPick: true }`
 are the powerups, with the rules and refusals in section 7. All of them restart the clock — spending one is a

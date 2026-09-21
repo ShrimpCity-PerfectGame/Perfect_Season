@@ -43,6 +43,33 @@ CLAUDE.md.
 - **A clock on every pick**, and either player can call it — so an opponent who closes the tab costs you the wait,
   not the match. A pick the clock makes is the best thing still on the board for the slots you have open.
 
+### Fixed
+
+Everything below was found by a review pass over the whole feature before it shipped, so none of it ever reached
+a player — but it is written down because the shapes are worth remembering.
+
+- **Three ways a match could end with no result**, all of which left it unfinishable, ungradeable and impossible
+  to leave: a steal spent on a board somebody had also double dipped (which swallowed the dip and ended the
+  match at fourteen picks), Steal the pick spent on a board already dipped (which stranded the dipper with no
+  legal pick), and stealing your own pick. Seven of four hundred fuzzed matches broke the first way; none do now.
+- **Who leads the first board is a coin flip on the match code**, not whoever created the lobby. Leading a board
+  is worth more the earlier it comes, so whoever led boards 0, 2, 4 and 6 won 53–54% of matches — and that was
+  always the host, so anyone who habitually sent the invite rather than clicking one won more, permanently.
+- **The 1v1 board no longer greys out while you wait** for the other player to pick, which had put the player
+  names at 3.43:1 for about half of every match. Its rules button has a name on a phone, its clock is readable
+  on all 32 teams, and a screen reader no longer re-reads the whole board once a second.
+- **An open lobby can't be found by anyone but its host.** Its code is the whole invite, and `matches` was
+  readable, so open lobbies could be listed and walked into ahead of the friend they were sent for.
+- **Tapping 1v1 during a match takes you back to it** instead of opening a second lobby while the first one
+  auto-picks your roster for you. On Android, Back leaves 1v1 rather than cycling between it and Modes forever.
+  Signing in with Google from an invite keeps the invite.
+- **Powerups that would do nothing are refused rather than spent** — a re-spin after your first pick on a board,
+  a second double dip on one board, Steal the pick on a board only one player is on.
+- **Two Jaguars seasons left out of the defense and kicker data.** nflverse only has eight weeks of 2001 and
+  2002 for them, while points allowed is the full year, so both rated as defenses that gave up a season's points
+  on half a season's sacks — and the 2002 board offered a three-game fill-in as the team's kicker. 859 of each
+  now, rather than 861 with two wrong.
+
 ## [1.18.0] — unreleased
 
 ### Changed
@@ -54,7 +81,7 @@ CLAUDE.md.
 - **Position colours no longer carry meaning on their own.** A roster chip on a best-lineup card now says the slot
   it filled — QB, RB, WR, TE or Flex — instead of leaving it to the colour.
 
-## [1.17.0] — unreleased
+## [1.17.0] — 2026-09-20
 
 ### Added
 
@@ -72,7 +99,7 @@ CLAUDE.md.
 - A guest can't play the daily — it's one draft a day per account, and a guest account can be made again and
   again — and has no profile or shop. Coins still pile up for when you keep them.
 
-## [1.16.0] — unreleased
+## [1.16.0] — 2026-09-20
 
 ### Added
 

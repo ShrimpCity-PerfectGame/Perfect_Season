@@ -5,3 +5,12 @@ enabled = true
 # getUser(), already in index.ts) is the standard workaround so the preflight can still succeed.
 verify_jwt = false
 entrypoint = "./functions/submit-run/index.ts"
+
+# match-pick needs exactly the same, for exactly the same reason - it checks the caller's JWT itself in its
+# index.ts. Without this block, only deploy-function.mjs's --no-verify-jwt flag keeps the preflight working, so
+# a hand-run `npx supabase functions deploy match-pick` would ship it with the platform gate on and break CORS
+# for every browser in a way nothing in this repo would catch.
+[functions.match-pick]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/match-pick/index.ts"

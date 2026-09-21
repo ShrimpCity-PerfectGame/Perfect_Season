@@ -78,13 +78,28 @@ create table if not exists public.match_picks (
   -- null never conflicts in a unique index. `kind` is in the second so a team's defense and its kicker from the
   -- same year are not read as the same thing.
   unique (match_id, kind, player_id, season),
-  unique (match_id, kind, team, season)
+  unique (match_id, kind, team, season),
+  -- And one player never fills the same slot twice. The two above stop an OPTION being drafted twice; this
+  -- stops a roster being overwritten, which is a different write: a steal is the only thing in the game that
+  -- rewrites user_id and slot on a row that already exists, so it is the only thing that could put two picks
+  -- of one player's in one slot and leave them a slot short at the end - which grades as null and wedges the
+  -- match. The rules refuse that already; this is the database refusing it too. Named, because it is added
+  -- again below for databases that already have this table.
+  constraint match_picks_one_per_slot unique (match_id, user_id, slot)
 );
 
 -- Added after the fact for a table that may already exist, since this file is re-run rather than replaced.
 alter table public.match_picks add column if not exists stolen_by uuid references auth.users(id) on delete set null;
 alter table public.matches add column if not exists dips  jsonb not null default '[]'::jsonb;
 alter table public.matches add column if not exists swaps jsonb not null default '[]'::jsonb;
+-- The same for the one-slot-per-player constraint, which is in the create above and so would never reach a
+-- database that already has the table. Postgres has no `add constraint if not exists`, hence the block.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'match_picks_one_per_slot') then
+    alter table public.match_picks add constraint match_picks_one_per_slot unique (match_id, user_id, slot);
+  end if;
+end $$;
 
 alter table public.matches enable row level security;
 alter table public.match_picks enable row level security;
@@ -183,8 +198,13 @@ begin
   if v_uid is null then return jsonb_build_object('error', 'not_signed_in'); end if;
   if not public.can_play_versus(v_uid) then return jsonb_build_object('error', 'guest_not_allowed'); end if;
 
+  -- A match already in progress comes back instead of a new lobby, and on either side of it. Only `open` was
+  -- looked for, so a player who went back to Modes mid-draft and tapped 1v1 again got a brand-new lobby to
+  -- wait in while the match they had walked away from auto-picked their whole roster for them. There is no
+  -- legitimate reason to hold two at once, and this is also how a reconnecting player finds their way back.
   select code into v_code from public.matches
-   where host_id = v_uid and status = 'open' order by created_at desc limit 1;
+   where status in ('open', 'drafting') and (host_id = v_uid or guest_id = v_uid)
+   order by case status when 'drafting' then 0 else 1 end, created_at desc limit 1;
   if v_code is null then
     v_code := public.new_match_code();
     insert into public.matches (code, host_id, format) values (v_code, v_uid, v_format);

@@ -717,6 +717,12 @@ suite and still broke the live Leaderboard for every existing account.
   now deploys both - submit-run and match-pick share game-logic.mjs and data/players.json, so deploying one of a
   pair is the drift this section warns about), then the client. The migration only adds objects, so the live site
   keeps working between the steps; nothing in it touches an existing table except two new `profiles` columns.
+  **It has to be re-run on staging**, which already has the step-one version: the review pass added `finish_match`,
+  a `match_picks_one_per_slot` constraint and a tighter select policy on `matches`, and the later columns and
+  constraints are all written as `add column if not exists` / a guarded `do $$` block for exactly that reason.
+  **Any match in flight has to be abandoned first** (`update matches set status = 'abandoned' where status =
+  'drafting';`) - who leads which board is now seeded on the match code, so a match already under way would
+  replay to a different board order than it was drafted from.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging
