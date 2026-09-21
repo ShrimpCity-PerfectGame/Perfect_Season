@@ -28,17 +28,21 @@
 // team", "Re-spin era", "Double dip", "Steal" and "Steal the pick"; each roster is a .vs-rosters .roster with
 // a .slot per slot, carrying data-slot and data-filled.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createMatch, joinMatch, fetchMatch, playMove, subscribeMatch, versusPath } from "./storage.js";
+import { createMatch, joinMatch, fetchMatch, playMove, subscribeMatch, versusPath, sget, sset } from "./storage.js";
 import {
   replayMatch, optionsOn, optionId, optionFits, openSlots, matchResult,
   VERSUS_SLOTS, MATCH_BOARDS, respinsLeft, dipsLeft, stealsLeft, pickStealsLeft,
 } from "./versus-logic.mjs";
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
-import { SLOT_LABEL, teamVars, teamLabel, shortYr, POS_NAME, cityRange, statCells } from "./ui-common.jsx";
+import {
+  SLOT_LABEL, teamVars, teamLabel, shortYr, POS_NAME, cityRange, statCells, useCloseOnBack, keepFocusInside,
+} from "./ui-common.jsx";
 
 // The two slots 1v1 adds, beside the six every other mode already labels. A chip says which slot a pick filled
 // in letters, never by colour alone - the accessibility floor tests/test-a11y.mjs keeps.
 const VS_SLOT_LABEL = { ...SLOT_LABEL, DST: "DEF", K: "K" };
+// Per device, like the game's own rules flag. ps- prefixed, as every storage key in this app is.
+const VERSUS_HOWTO_KEY = "ps-vs-howto-seen";
 
 export const VERSUS_CSS = `
 /* ===== 1v1 =====
@@ -75,6 +79,16 @@ export const VERSUS_CSS = `
 .vs-score{font-family:var(--display);font-size:56px;line-height:1;font-variant-numeric:tabular-nums}
 .vs-lines{display:grid;gap:3px;font-size:13px;margin-top:8px;max-width:420px}
 .vs-lines .vs-ln{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding:4px 0}
+/* The powerups, under the reel: an icon, the name, and how many are left. The icon carries the row on a phone,
+   where the label shortens - so it has to be a glyph that reads small, not a picture. */
+.vs-pu{display:inline-flex;align-items:center;gap:7px}
+.vs-pi{font-size:15px;line-height:1;flex:none}
+.vs-pu-help{opacity:.85}
+.vs-hh{font-family:var(--display);font-size:20px;margin:18px 0 8px}
+.vs-plist{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.vs-plist li{display:flex;gap:10px;align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:9px}
+.vs-plist .vs-pi{font-size:18px;margin-top:2px;width:22px;text-align:center}
+.vs-pd{font-size:13px;opacity:.8;margin-top:3px}
 .vs-note{font-size:13px;opacity:.85}
 .vs-err{color:var(--loss);font-weight:700;font-size:13px}
 @media (max-width:900px){.vs-rosters .roster{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -146,6 +160,37 @@ const optionMeta = (o) => (o.kind === "player"
   ? `${o.season} ${teamLabel(o.team, o.season)}, ${o.g} games`
   : `${o.season} ${teamLabel(o.team, o.season)}`);
 
+// The powerups, in one place, because the buttons and the rules screen have to say the same thing about them -
+// a control whose label and whose explanation drift apart is worse than no explanation at all. The icon is a
+// glyph rather than a picture: it has to read at 12px on a phone, beside four others, under a clock.
+export const POWERUPS = [
+  {
+    id: "team", icon: "↻", label: "Re-spin team", short: "Team",
+    blurb: "Another team, same era.",
+    detail: "If you pick first on the board, the new one is dealt to your opponent as well - so a board that is wrong for you can easily be right for them. If you pick second it is yours alone, and you walk away from a board they have already picked over.",
+  },
+  {
+    id: "era", icon: "↻", label: "Re-spin era", short: "Era",
+    blurb: "Same team, another era.",
+    detail: "Works exactly like the team re-spin, and has its own use: one for the roster you are chasing, one for the era you want it from.",
+  },
+  {
+    id: "dip", icon: "⚡", label: "Double dip", short: "Double",
+    blurb: "Two off this board - and you give up your next pick.",
+    detail: "Two picks here, none on the next board, so you still finish with eight. The cost is real: they get the next board to themselves, and this one is two options poorer when they pick from it.",
+  },
+  {
+    id: "steal", icon: "😈", label: "Steal", short: "Steal",
+    blurb: "Take the pick they just made.",
+    detail: "Only when you pick second, and only the pick just made. It becomes yours, and they go straight back to this board and pick again - so they lose the player, not the turn.",
+  },
+  {
+    id: "stealPick", icon: "🔀", label: "Steal the pick", short: "First",
+    blurb: "Pick first on a board you would have picked second on.",
+    detail: "Spend it before either of you has taken anything. The order on that board flips, and the snake carries on as normal from the next board.",
+  },
+];
+
 // The groups the board is laid out in: the four positions the single-player draft uses, then the two 1v1 adds.
 const GROUPS = [
   ["QB", POS_NAME.QB, (o) => o.kind === "player" && o.pos === "QB"],
@@ -155,6 +200,52 @@ const GROUPS = [
   ["DST", "Defenses", (o) => o.kind === "dst"],
   ["K", "Kickers", (o) => o.kind === "k"],
 ];
+
+// 1v1's own rules, which are not the game's rules. Someone arriving on an invite has very likely never seen
+// this mode, and the single-player How to play answers none of the questions they actually have - whose turn,
+// what the clock does, what the five buttons are. Its own dialog, with its own seen-flag, so it appears once.
+export function VersusHowTo({ onClose }) {
+  const btn = useRef(null);
+  const dialog = useRef(null);
+  useCloseOnBack(onClose);
+  useEffect(() => {
+    btn.current && btn.current.focus({ preventScroll: true });
+    const k = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="vs-howto-title" tabIndex={-1}
+        onKeyDown={(e) => keepFocusInside(e, dialog.current)} onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="modal-x" aria-label="Close" onClick={onClose}>×</button>
+        <h2 id="vs-howto-title">How 1v1 works</h2>
+        <ol>
+          <li>You and your opponent watch the <b>same eight boards</b>, one team and era at a time.</li>
+          <li>You take turns, and the order <b>snakes</b>: whoever picks first on one board picks second on the next.</li>
+          <li>The second picker takes from <b>the same board, minus what was just taken</b>.</li>
+          <li>A roster is <b>QB, RB, WR, TE and two Flex</b>, the same six single player uses, plus a <b>defense</b> and a <b>kicker</b>. Every board offers all of them, so take a defense fifth if you want one.</li>
+          <li>Every pick has a <b>clock</b>. Run it out and the best available option is taken for you - a dropped connection costs a pick, not the match.</li>
+          <li>When both rosters are full, <b>the better one wins</b>. No dice: their defense comes off your score, your kicker adds to it, and the higher number takes it every time.</li>
+        </ol>
+        <h3 className="vs-hh">Your powerups</h3>
+        <ul className="vs-plist">
+          {POWERUPS.map((p) => (
+            <li key={p.id}>
+              <span className="vs-pi" aria-hidden="true">{p.icon}</span>
+              <div>
+                <b>{p.label}</b> — {p.blurb}
+                <div className="vs-pd">{p.detail}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p className="note">One of each, per match, spent on your own turn. A powerup the rules would refuse is greyed out.</p>
+        <button ref={btn} className="btn primary" onClick={onClose}>Got it</button>
+      </div>
+    </div>
+  );
+}
 
 // Your roster, as the draft screen shows one: a strip of slots with who is in them.
 function RosterStrip({ roster, label, sub }) {
@@ -180,7 +271,7 @@ function RosterStrip({ roster, label, sub }) {
 // The board, drawn the way the single-player draft draws one - the same reel, the same cards, the same
 // "Lock in" (VERSUS.md 9). The classes are the app's own, so this inherits the whole look rather than
 // approximating it, and anything that changes there changes here.
-function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected, busy }) {
+function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected, busy, controls }) {
   const [team, w] = boardKey.split("|");
   const options = optionsOn(boardKey);
   const open = openSlots(roster);
@@ -196,6 +287,10 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
           {cityRange(team, Number(w)) && <span className="city">{cityRange(team, Number(w))}</span>}
         </div>
       </div>
+
+      {/* Under the team and the era, where the re-spins live in the single-player draft - which is also where
+          you are looking when you decide you do not want this board. */}
+      {controls}
 
       {GROUPS.map(([key, heading, belongs]) => {
         const list = options.filter(belongs);
@@ -261,6 +356,15 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // Every hook here runs on every render of this screen, lobby or draft - one that only ran on the draft would
   // be React error #310 the moment a lobby turned into one.
   const [stuck, sentinel] = useStuck();
+  // 1v1's own rules, shown once per device and from the button under the board thereafter. Its own flag, not
+  // the game's: somebody who has played a hundred seasons has still never seen a snake draft with a clock.
+  const [showRules, setShowRules] = useState(false);
+  useEffect(() => {
+    let live = true;
+    (async () => { if (live && !(await sget(VERSUS_HOWTO_KEY, false))) setShowRules(true); })();
+    return () => { live = false; };
+  }, []);
+  const closeRules = useCallback(() => { setShowRules(false); sset(VERSUS_HOWTO_KEY, "1", false); }, []);
   const joined = useRef(false);
 
   const refresh = useCallback(async (c) => {
@@ -360,6 +464,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   if (!match) {
     return (
       <section className="versus" data-view="lobby">
+        {showRules ? <VersusHowTo onClose={closeRules} /> : null}
         <h2 className="h">1v1</h2>
         <p className="note">
           Open a lobby and send the link. You and whoever takes it draft from the same eight boards — six players,
@@ -381,6 +486,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   if (match.status === "open") {
     return (
       <section className="versus" data-view="lobby" data-code={match.code}>
+        {showRules ? <VersusHowTo onClose={closeRules} /> : null}
         <h2 className="h">Your lobby</h2>
         <div className="vs-link">
           <code>{link}</code>
@@ -435,6 +541,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
 
   return (
     <section className="versus vs-draft" data-view="draft" data-code={match.code}>
+      {showRules ? <VersusHowTo onClose={closeRules} /> : null}
       {/* The bar the single-player draft floats once you scroll past the reel, carrying what a 1v1 needs
           instead: who is on the clock, the seconds left, and both rosters as chips. */}
       <div className={`sticky ${stuck ? "show" : ""}`} aria-hidden={!stuck} style={teamVars(boardTeam)}>
@@ -483,39 +590,36 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
         <Board
           boardKey={state.boardKey} taken={state.taken} roster={state.roster[side || "host"]}
           myTurn={myTurn} busy={busy} selected={selected} setSelected={setSelected}
+          controls={myTurn && powers ? (
+            <div className="rerolls vs-powers">
+              {POWERUPS.map((pu) => {
+                const n = pu.id === "team" ? powers.respin.team : pu.id === "era" ? powers.respin.era : powers[pu.id];
+                const illegal = (pu.id === "dip" && state.boardIdx >= MATCH_BOARDS - 1)
+                  || ((pu.id === "steal" || pu.id === "stealPick") && state.turn.first);
+                return (
+                  <button key={pu.id} className="btn vs-pu" disabled={busy || n < 1 || illegal}
+                    title={`${pu.blurb} ${n} left.`}
+                    aria-label={`${pu.label}. ${pu.blurb} ${n} left.`}
+                    onClick={() => send(pu.id === "team" ? { respin: "team" } : pu.id === "era" ? { respin: "era" } : { [pu.id]: true })}>
+                    <span className="vs-pi" aria-hidden="true">{pu.icon}</span>
+                    <span className="rs-long">{pu.label} <span className="left">({n})</span></span>
+                    <span className="rs-short" aria-hidden="true">{pu.short} <b>{n}</b></span>
+                  </button>
+                );
+              })}
+              <button className="btn linkish vs-pu-help" onClick={() => setShowRules(true)}>
+                <span className="vs-pi" aria-hidden="true">?</span>
+                <span className="rs-long">How 1v1 works</span>
+                <span className="rs-short" aria-hidden="true">Rules</span>
+              </button>
+            </div>
+          ) : null}
           onPick={(o, slot) => { setSelected(null); send({
             boardIdx: state.boardIdx, kind: o.kind, slot,
             playerId: o.kind === "player" ? o.id : undefined,
             team: o.kind === "player" ? undefined : o.team, season: o.season,
           }); }}
         />
-      ) : null}
-
-      {/* The powerups sit where the re-spins sit in the single-player draft, under the board, and are only
-          offered on your own turn - the rules refuse them otherwise anyway. */}
-      {myTurn && powers ? (
-        <div className="rerolls vs-powers">
-          <button className="btn" disabled={busy || powers.respin.team < 1} onClick={() => send({ respin: "team" })}>
-            <span className="rs-long">Re-spin team <span className="left">({powers.respin.team} left)</span></span>
-            <span className="rs-short" aria-hidden="true">↻ Team <b>{powers.respin.team}</b></span>
-          </button>
-          <button className="btn" disabled={busy || powers.respin.era < 1} onClick={() => send({ respin: "era" })}>
-            <span className="rs-long">Re-spin era <span className="left">({powers.respin.era} left)</span></span>
-            <span className="rs-short" aria-hidden="true">↻ Era <b>{powers.respin.era}</b></span>
-          </button>
-          <button className="btn" disabled={busy || powers.dip < 1 || state.boardIdx >= MATCH_BOARDS - 1}
-            title="Take two off this board, and give up your pick on the next one" onClick={() => send({ dip: true })}>
-            Double dip <span className="left">({powers.dip})</span>
-          </button>
-          <button className="btn" disabled={busy || powers.steal < 1 || state.turn.first}
-            title="Take the pick they just made" onClick={() => send({ steal: true })}>
-            Steal <span className="left">({powers.steal})</span>
-          </button>
-          <button className="btn" disabled={busy || powers.stealPick < 1 || state.turn.first}
-            title="Pick first on this board instead" onClick={() => send({ stealPick: true })}>
-            Steal the pick <span className="left">({powers.stealPick})</span>
-          </button>
-        </div>
       ) : null}
 
     </section>

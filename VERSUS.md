@@ -375,7 +375,18 @@ server re-spins that board itself, charged to no one.
 
 - **The Modes tile** — "1v1" beside the others: create a lobby, or the link to the one you already have open.
 - **The lobby** — your link with a copy button, and the state of the other side ("waiting for an opponent" /
-  "they're here"). Realtime; no polling.
+  "they're here").
+- **Its own rules** (`VersusHowTo`), shown once per device under its own flag (`ps-vs-howto-seen`) and from a
+  button under the board after that. Somebody arriving on an invite has very likely never seen this mode, and
+  the game's How to play answers none of the questions it raises — whose turn, what the clock does, what the
+  five buttons are. The game's own rules are therefore **never shown on this screen**: not held back for it, not
+  left open behind an arrival, and the header's "How to play" pill is hidden here.
+- **Signing in happens on this screen**, not on the Account tab. The match code lives in this view, so sending
+  somebody away to log in loses the match they were invited to.
+- **The powerups sit under the team and era**, where the re-spins sit in the single-player draft — which is also
+  where a player is looking when they decide they don't want this board. Each carries a glyph (`POWERUPS` in
+  versus.jsx, one definition that the buttons and the rules screen both read, so a control's label and its
+  explanation can't drift apart).
 - **The draft** — and it is the **single-player draft's own screen**, not a version of it. The same dark
   scoreboard scope, the same reel in the team's colours, the same `.sec` / `.card` markup with stat cells, the
   same two-step pick ending in **🔒 Lock in**, the same floating bar once you scroll. 1v1 adds only what it has

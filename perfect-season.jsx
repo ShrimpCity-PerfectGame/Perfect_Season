@@ -2073,6 +2073,11 @@ export default function PerfectSeason() {
   // while they're open (a reload shows the same page); closing them returns to the screen underneath.
   const openedAtHowTo = typeof window !== "undefined" && parseSitePath(window.location.pathname) === "howto";
   const [howTo, setHowTo] = useState(openedAtHowTo);
+  // The first-run rules, waiting for somewhere sensible to appear. Never over 1v1: somebody who arrived on an
+  // invite came for that mode, and the game's own rules answer none of the questions it raises - it has its
+  // own (versus.jsx's VersusHowTo). Held as a flag rather than checked once at startup, so it holds however
+  // they got there: a typed address, a link, or Back into one.
+  const [pendingHowTo, setPendingHowTo] = useState(false);
   const atHowTo = useRef(openedAtHowTo);
   const [share, setShare] = useState({ state: "idle", text: "" });
   const [confirmReset, setConfirmReset] = useState(false);
@@ -2183,7 +2188,8 @@ export default function PerfectSeason() {
       if (ok && validDraft(saved) && (saved.history.length > 0 || saved.mode.kind === "free")) restoreDraft(saved);
       refreshWip();
       setDraftReady(true);
-      if (!(await sget(HOWTO_KEY, false))) setHowTo(true);
+      // Held rather than opened, so it can wait for a screen it belongs on - see the effect below.
+      if (!(await sget(HOWTO_KEY, false))) setPendingHowTo(true);
     })();
     siteActivity.current = subscribeSiteActivity({
       onOnlineCount: setOnline,
@@ -2250,6 +2256,15 @@ export default function PerfectSeason() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screenKey]);
+
+  useEffect(() => {
+    // Never the game's rules on the 1v1 screen - not held back, not left open behind an arrival. That mode has
+    // its own, under its board, and this dialog answers none of what it asks.
+    if (view === "versus") { if (howTo) setHowTo(false); return; }
+    if (!pendingHowTo) return;
+    setPendingHowTo(false);
+    setHowTo(true);
+  }, [pendingHowTo, view, howTo]);
 
   // Back and Forward put back the screen the entry describes, opening it the way its tab or tile would -
   // Over/Under and Build-a-player through their own openers, since leaving them dropped the round or build.
@@ -3576,7 +3591,9 @@ export default function PerfectSeason() {
             </button>
           ))}
           <div className="hdr-links">
-            <button className="pill hdrchip help" onClick={() => setHowTo(true)}>How to play</button>
+            {/* Not on the 1v1 screen: the rules that matter there are 1v1's, and they are a button under its
+                board ("How 1v1 works"). */}
+            {view !== "versus" && <button className="pill hdrchip help" onClick={() => setHowTo(true)}>How to play</button>}
             {!user && authReady && <button className="pill hdrchip login" onClick={() => openTab("profile")}>Log in</button>}
             {user && (
               <button className="whoami" aria-label={`Your profile, ${user}`} onClick={() => openTab("profile")}>
@@ -4176,11 +4193,27 @@ export default function PerfectSeason() {
             {/* The screen names itself for a screen reader, as every other one does (v1.18.0's pass); the
                 headings inside it are the lobby's, the draft's and the result's, which change as it goes. */}
             <h1 className="vh">1v1</h1>
+            {/* Signing in happens HERE, not on the Account tab. Somebody who clicked a friend's invite while
+                signed out was being sent away to log in, and came back to a screen that had forgotten which
+                match they were invited to - the code lives in this view, so leaving it loses the match. */}
+            {authReady && !userId ? (
+              <div className="versus" data-view="signedout" data-code={versusCode || ""}>
+                <p className="note">
+                  {versusCode
+                    ? "You've been invited to a 1v1. Sign in here and you'll go straight into it — a match needs an account on both sides, so a result has somewhere to go."
+                    : "A 1v1 needs an account on both sides, so its result has somewhere to go. Sign in and the lobby is one tap away."}
+                </p>
+                <AuthPanel onAuthed={onAuthed} title={versusCode ? "Sign in to take the invite" : "Sign in to play 1v1"}
+                  blurb="Your seasons, streak and coins come with you." />
+                <button className="btn" onClick={leaveVersus}>Back</button>
+              </div>
+            ) : (
             <VersusScreen
               key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
               format={format} onBack={leaveVersus} onCode={setVersusCode}
               onShare={shareOut} siteUrl={APP_SITE_URL}
             />
+            )}
           </>
         )}
 

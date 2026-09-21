@@ -99,6 +99,25 @@ await runTest("a guest is told to sign in rather than shown a lobby", async () =
   assert(!versus() || versus().dataset.view !== "draft", "and a guest never reaches a draft");
 });
 
+await runTest("an invite taken while signed out signs you in where you stand", async () => {
+  // The bug this pins: clicking a friend's link while signed out used to open the single-player rules (which
+  // answer none of a 1v1's questions), and logging in from there walked you off the screen that was holding
+  // the code - so you came back to no match.
+  await auth.auth.signOut();
+  await flush();
+  window.history.pushState({ ps: "view", view: "versus", code: "ZZZZ99" }, "", "/vs/ZZZZ99");
+  window.dispatchEvent(new window.PopStateEvent("popstate", { state: { ps: "view", view: "versus", code: "ZZZZ99" } }));
+  await flush();
+  await flush();
+
+  assert(!container.querySelector("#howto-title"), "the game's own rules do not open over an invite");
+  const panel = container.querySelector(".versus[data-view='signedout']");
+  assert(panel, `the 1v1 screen offers a sign-in in place: ${text(container).slice(0, 160)}`);
+  assert(panel.dataset.code === "ZZZZ99", `and still knows which match: ${panel.dataset.code}`);
+  assert(container.querySelector(".panel input"), "with the login on the same screen");
+  assert(window.location.pathname === "/vs/ZZZZ99", "and the address still holds the invite");
+});
+
 await runTest("the opponent's screen shows the same board, and a pick lands on it", async () => {
   // Two accounts, one browser: the host opens the lobby, then the opponent signs in and takes the link - which
   // is exactly what happens on two machines, minus the machines.
