@@ -4,6 +4,7 @@
 // those.
 import { assert, runTest } from "./helpers.mjs";
 import { freshDb, addAccount, addGuestAccount, asUser, asAnon, uuid, sql } from "./pg-fixture.mjs";
+import { makeVersus } from "./mock-versus.mjs";
 
 const db = await freshDb();
 const HOST = uuid(1), GUEST = uuid(2), OTHER = uuid(3), ANON_GUEST = uuid(4);
@@ -189,6 +190,47 @@ await runTest("the 1v1 board ranks by wins, fully tiebroken, and only counts peo
   assert(after.pvp_wins === before.pvp_wins + 1 && loser.pvp_losses === 5, `one win, one loss: ${after.pvp_wins}/${loser.pvp_losses}`);
   const direct = await attempt(HOST, "update profiles set pvp_wins = 99 where id = $1", [HOST]);
   assert(!!direct.error || direct.affected === 0, `and a client can't write its own record: ${JSON.stringify(direct)}`);
+});
+
+await runTest("the mock ranks the 1v1 board exactly as the SQL does", async () => {
+  // Two implementations of one ordering is the drift CLAUDE.md warns about, and an ordering is the easiest
+  // thing in the world to get subtly different - a missing tiebreak shows up only when two people tie.
+  const rows = await owner("select id, username, guest, pvp_wins, pvp_losses from profiles");
+  const profiles = new Map(rows.map((r) => [r.id, { ...r }]));
+  const mock = makeVersus({ profiles, currentUserId: () => null });
+
+  // The records above, plus a pair that tie on both numbers so the name tiebreak has to decide, and a guest
+  // with a record, who belongs on no board at all.
+  const extra = [
+    ["tiea", 5, 5, false], ["tieb", 5, 5, false], ["tiec", 5, 5, false],
+    ["ghost", 9, 0, true], ["idle", 0, 0, false],
+  ];
+  for (let i = 0; i < extra.length; i++) {
+    const [username, wins, losses, guest] = extra[i];
+    const id = uuid(20 + i);
+    // Through the fixture's own helpers, so these accounts are made the way the database makes one.
+    if (guest) await addGuestAccount(db, id);
+    else await addAccount(db, { id, username });
+    await owner("update profiles set username = $2, pvp_wins = $3, pvp_losses = $4 where id = $1", [id, username, wins, losses]);
+    profiles.set(id, { id, username, guest, pvp_wins: wins, pvp_losses: losses });
+  }
+
+  // Row order is the whole point and is compared as it comes. Key order within a row is not: jsonb sorts keys
+  // its own way and a JavaScript object keeps insertion order, and neither is anything the app reads.
+  const same = (rows) => JSON.stringify(rows.map((r) => Object.fromEntries(Object.entries(r).sort())));
+  for (const limit of [3, 10, 50]) {
+    const fromSql = (await call(null, "versus_top", { p_limit: limit })).data;
+    const fromMock = mock.rpcs.versus_top({ p_limit: limit });
+    assert(same(fromSql) === same(fromMock),
+      `limit ${limit}:
+  sql  ${same(fromSql)}
+  mock ${same(fromMock)}`);
+  }
+  const all = (await call(null, "versus_top", { p_limit: 50 })).data;
+  assert(!all.some((r) => r.username === "ghost"), "a guest is on no board, whatever its record");
+  assert(!all.some((r) => r.username === "idle"), "and nor is somebody who has never played one");
+  const ties = all.filter((r) => r.username.startsWith("tie")).map((r) => r.username);
+  assert(JSON.stringify(ties) === JSON.stringify(["tiea", "tieb", "tiec"]), `a dead tie is broken by name, got ${ties}`);
 });
 
 await runTest("running the migration again changes nothing", async () => {
