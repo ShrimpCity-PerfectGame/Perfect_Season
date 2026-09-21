@@ -262,3 +262,6 @@ export * from "./storage-moderation.js";
 // ---------- Coins and the shop (v1.12.0) ----------
 // See SHOP.md.
 export * from "./storage-shop.js";
+// ---------- 1v1 (v1.19.0) ----------
+// See VERSUS.md.
+export * from "./storage-versus.js";

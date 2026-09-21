@@ -13,7 +13,8 @@ import * as V from "../versus-logic.mjs";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 // state: tests/mock-supabase.mjs's shared state ({ profiles, currentUserId, ... })
-export function makeVersus(state) {
+// onMatchChange(matchId): what Realtime does for free in production - tell both screens to read again.
+export function makeVersus(state, { onMatchChange = () => {} } = {}) {
   const matches = new Map(); // code -> row (snake_case, as the real table)
   const matchPicks = new Map(); // "matchId|pickNo" -> row
   let nextId = 1;
@@ -93,6 +94,7 @@ export function makeVersus(state) {
     m.guest_id = uid;
     m.status = "drafting";
     m.turn_deadline = new Date(Date.now() + V.TURN_SECONDS * 1000).toISOString();
+    onMatchChange(m.id); // how the host's lobby learns somebody arrived
     return matchState({ p_code: m.code });
   }
 
@@ -124,20 +126,21 @@ export function makeVersus(state) {
     if (!decided.ok) return { data: { error: decided.reason, reason: decided.reason } };
 
     const restartClock = () => { m.turn_deadline = new Date(now + V.TURN_SECONDS * 1000).toISOString(); };
+    const changed = (payload) => { onMatchChange(m.id); return payload; };
     if (decided.action === "respin") {
       m.respins = [...m.respins, { pickNo: decided.pickNo, kind: decided.kind, by: side, key: decided.key }];
       restartClock();
-      return { data: { ok: true, board: decided.key } };
+      return changed({ data: { ok: true, board: decided.key } });
     }
     if (decided.action === "dip") {
       m.dips = [...m.dips, { boardIdx: decided.boardIdx, by: side }];
       restartClock();
-      return { data: { ok: true } };
+      return changed({ data: { ok: true } });
     }
     if (decided.action === "swap") {
       m.swaps = [...m.swaps, { boardIdx: decided.boardIdx, by: side }];
       restartClock();
-      return { data: { ok: true } };
+      return changed({ data: { ok: true } });
     }
     if (decided.action === "steal") {
       // The row changes hands rather than a second one being written - what keeps "drafted exactly once" true.
@@ -146,7 +149,7 @@ export function makeVersus(state) {
       row.slot = decided.slot;
       row.stolen_by = uid;
       restartClock();
-      return { data: { ok: true, slot: decided.slot } };
+      return changed({ data: { ok: true, slot: decided.slot } });
     }
 
     const o = decided.option;
@@ -161,7 +164,7 @@ export function makeVersus(state) {
 
     // Asked, never counted to sixteen: a double dip and a steal both move where the end of a match is.
     const after = V.replayMatch({ code, picks: asPicks(m), respins: m.respins, dips: m.dips, swaps: m.swaps });
-    if (!after.done) { restartClock(); return { data: { ok: true } }; }
+    if (!after.done) { restartClock(); return changed({ data: { ok: true } }); }
 
     const result = V.matchResult({ code, format: m.format, host: after.roster.host, guest: after.roster.guest });
     m.status = "done";
@@ -170,7 +173,7 @@ export function makeVersus(state) {
     m.ended_at = new Date(now).toISOString();
     m.turn_deadline = null;
     if (result.winner) recordVersus(m.winner_id, idOf(m, result.winner === "host" ? "guest" : "host"));
-    return { data: { ok: true, result } };
+    return changed({ data: { ok: true, result } });
   }
 
   return {

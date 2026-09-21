@@ -8,8 +8,10 @@ import {
   fetchProfile, submitRun, submitDnf,
   fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
+  versusPath, parseVersusPath,
 } from "./storage.js";
 import gameData from "./data/players.json";
+import versusPool from "./data/versus-pool.json";
 import { cssVars, PALETTE, THEME } from "./theme.mjs";
 import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
@@ -31,11 +33,15 @@ import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
 import { BACK_EVENT } from "./app-shell.mjs";
 import { COSMETICS_CSS, FramedAvatar, Coin } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
+import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
+import { initVersusData } from "./versus-logic.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
 import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, parseSitePath } from "./site-pages.mjs";
 initGameData(gameData.players, gameData.opponents);
+// 1v1's defenses and kickers (VERSUS.md 6). Only versus.jsx reads them; single player never does.
+initVersusData(versusPool);
 
 // Baked in by build.mjs's esbuild `define` (same mechanism as SUPABASE_URL - see storage.js).
 const IS_STAGING = APP_ENV === "staging";
@@ -703,6 +709,11 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .mode.m-unlimited .icon{background:var(--surface);border-color:var(--line2)}
 .mode.m-unlimited .go{background:var(--accent);color:var(--on-accent)}
 /* over/under: the orange special moment */
+/* 1v1 takes the violet, the one colour in the palette nothing else uses - a head-to-head should not look
+   like the Unlimited tile. Ink on violet is 5.3:1; cream on it would be 3.2 and fail AA. */
+.mode.m-versus{background:${PALETTE.violet};color:${PALETTE.ink};border-color:${PALETTE.ink}}
+.mode.m-versus p{color:${PALETTE.ink};opacity:.8}
+.mode.m-versus .icon{background:color-mix(in srgb,#fff 42%,${PALETTE.violet})}
 .mode.m-sou{background:var(--orange);color:${PALETTE.ink};border-color:${PALETTE.ink}}
 .mode.m-sou p{color:${PALETTE.ink};opacity:.8}
 .mode .mt{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -1247,7 +1258,7 @@ p.gamecoins .earned{display:flex}
 // The whole stylesheet the app renders, for previewing one screen on its own (the UI harness).
 // The screens in their own files bring their own rules, each scoped to its class prefix (pf-, av-, ap-,
 // md-), after the base stylesheet so they can reuse its tokens and classes.
-export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS;
+export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS;
 
 const reducedMotion = () => typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's
@@ -1431,12 +1442,15 @@ export function authErrorFromAddress(loc = typeof window === "undefined" ? null 
 // The screens history entries describe: a player's profile, at profilePath(name), or any other view, at "/".
 // The address alone can only name a profile or Modes, so an entry without a screen of its own (a typed
 // address, or one written before this) is read from its address.
-const HISTORY_VIEWS = ["home", "play", "profile", "players", "board", "stats", "statsou", "buildplayer", "reports", "shop"];
+const HISTORY_VIEWS = ["home", "play", "profile", "players", "board", "stats", "statsou", "buildplayer", "reports", "shop", "versus"];
 function screenOf(state, pathname) {
   if (state?.ps === "profile" && typeof state.name === "string" && state.name) return state;
   if (state?.ps === "view" && HISTORY_VIEWS.includes(state.view)) return state;
   const name = parseProfilePath(pathname);
   if (name) return { ps: "profile", name };
+  // /vs/<code> is an invite (VERSUS.md 9): opening it goes straight into that match.
+  const versusCode = parseVersusPath(pathname);
+  if (versusCode) return { ps: "view", view: "versus", code: versusCode };
   // /leaderboard is the Leaderboard's own address; /how-to-play opens Modes with the rules over it.
   return { ps: "view", view: parseSitePath(pathname) === "board" ? "board" : "home" };
 }
@@ -1444,11 +1458,17 @@ function screenOf(state, pathname) {
 // engines have of its own - site-pages.mjs), and every other screen at "/". Every history write passes
 // this, so the address always names what's on screen, and a challenge link or a stray /u/ address tidies
 // itself as soon as the app has mounted.
-const pathFor = (s) => (s.ps === "profile" ? profilePath(s.name) : s.view === "board" ? BOARD_PATH : "/");
-const sameScreen = (a, b) => a.ps === b.ps && (a.ps === "profile" ? a.name === b.name : a.view === b.view);
+const pathFor = (s) => (s.ps === "profile" ? profilePath(s.name)
+  : s.view === "board" ? BOARD_PATH
+  // A match keeps its own address, so the link in the bar is the one to send somebody.
+  : s.view === "versus" && s.code ? versusPath(s.code) : "/");
+// Two entries describe the same screen. A match is the one view that isn't named by its view alone: opening a
+// lobby turns /vs/nothing into /vs/ABC123, and the address has to follow, because the address IS the invite.
+const sameScreen = (a, b) => a.ps === b.ps
+  && (a.ps === "profile" ? a.name === b.name : a.view === b.view && (a.view !== "versus" || (a.code || null) === (b.code || null)));
 // Screens with a history entry of their own, so Back from one returns to the screen it was opened from: a
 // profile, and the shop (SHOP.md 8), which opens from a profile card or a season's result but stays at "/".
-const ownsEntry = (s) => s.ps === "profile" || s.view === "shop";
+const ownsEntry = (s) => s.ps === "profile" || s.view === "shop" || s.view === "versus";
 // A profile's sitewide rank in each format before it's known, or when the player has no score in it.
 const NO_RANK = Object.fromEntries(FORMATS.map((f) => [f, null]));
 // History writes are best effort. A page opened from a file (the UI harness) can't change its path, so the
@@ -2025,7 +2045,11 @@ export default function PerfectSeason() {
   // and /how-to-play the rules (site-pages.mjs); every other address opens Modes.
   const [view, setView] = useState(() => (typeof window === "undefined" ? "home"
     : parseProfilePath(window.location.pathname) ? "profile"
-      : parseSitePath(window.location.pathname) === "board" ? "board" : "home"));
+      : parseVersusPath(window.location.pathname) ? "versus"
+        : parseSitePath(window.location.pathname) === "board" ? "board" : "home"));
+  // The match 1v1 is showing, which is the one part of a screen that lives in its address (VERSUS.md 9): the
+  // link is the whole matchmaking system, so it has to survive a reload and be there to copy out of the bar.
+  const [versusCode, setVersusCode] = useState(() => (typeof window === "undefined" ? null : parseVersusPath(window.location.pathname)));
   // Whose profile the profile view shows. null there is your own profile from the Profile tab, or the
   // Account tab's login for a guest - see shownProfile below.
   const [profileOf, setProfileOf] = useState(() => (typeof window === "undefined" ? null : parseProfilePath(window.location.pathname)));
@@ -2212,7 +2236,7 @@ export default function PerfectSeason() {
   // Whose profile is on screen: the one opened, else your own (the Profile tab). null on the profile view
   // means a guest on the Account tab, who gets the login instead.
   const shownProfile = view === "profile" ? profileOf || user || null : null;
-  const screenKey = shownProfile ? `profile:${shownProfile}` : `view:${view}`;
+  const screenKey = shownProfile ? `profile:${shownProfile}` : `view:${view}${view === "versus" ? `:${versusCode || ""}` : ""}`;
   // The screen the current history entry describes, and how far down the page was when the player last
   // left a screen (a tab or a name), so Back can return to that spot.
   const historyScreen = useRef(null);
@@ -2223,7 +2247,8 @@ export default function PerfectSeason() {
   // other screens just keeps the current entry up to date. Done here rather than in each click handler, so
   // every route in or out counts: the tabs, the header, the names, and the profile's own buttons.
   useEffect(() => {
-    const next = shownProfile ? { ps: "profile", name: shownProfile } : { ps: "view", view };
+    const next = shownProfile ? { ps: "profile", name: shownProfile }
+      : { ps: "view", view, ...(view === "versus" && versusCode ? { code: versusCode } : {}) };
     const prev = historyScreen.current;
     historyScreen.current = next;
     if (!prev) {
@@ -2256,12 +2281,13 @@ export default function PerfectSeason() {
     // shop signed out - is Modes instead, and its entry says so. Decided before it's recorded as the current
     // screen, so opening Modes in its place doesn't count as leaving the shop and push an entry mid-traversal.
     // stats?.guest rather than isGuest: this handler is written during render, before the derived values.
-    if (s.ps === "view" && ((s.view === "reports" && !isMod) || (s.view === "shop" && (!userId || stats?.guest)))) {
+    if (s.ps === "view" && ((s.view === "reports" && !isMod) || ((s.view === "shop" || (s.view === "versus" && !s.code)) && (!userId || stats?.guest)))) {
       s = { ps: "view", view: "home" };
       writeHistory("replaceState", s);
     }
     historyScreen.current = s;
     if (s.ps === "profile") { setProfileOf(s.name); setView("profile"); }
+    else if (s.view === "versus") { setVersusCode(s.code || null); openTab("versus"); }
     else if (s.view === "statsou") openSou();
     else if (s.view === "buildplayer") openBuildPicker();
     else openTab(s.view);
@@ -2326,6 +2352,18 @@ export default function PerfectSeason() {
     leftAt.current = window.scrollY || 0;
     setProfileOf(name);
     setView("profile");
+  }
+  // 1v1 (VERSUS.md), from the Modes tile. A code already in the address is an invite and is kept; opening it
+  // from the tile starts fresh, so the last match's link doesn't reopen a finished draft.
+  function openVersus() {
+    if (!userId || isGuest) return; // a guest may not play one - VERSUS.md 5
+    setVersusCode(null);
+    openTab("versus");
+  }
+  function leaveVersus() {
+    setVersusCode(null);
+    if (window.history.state?.ps === "view" && window.history.state.view === "versus") window.history.back();
+    else openTab("home");
   }
   // The shop (SHOP.md 8), from your profile card or a season's coins. Signed in only.
   function openShop() {
@@ -3692,6 +3730,15 @@ export default function PerfectSeason() {
                 <span className="go">Let's go</span>
               </button>
 
+              <button className="mode m-versus" onClick={openVersus}>
+                <div className="mt">
+                  <span className="icon" aria-hidden="true">⚔️</span>
+                  <span className="mn">1v1</span>{isGuest && <span className="pill">Account needed</span>}
+                </div>
+                <p>Send someone a link and draft against them off the same eight boards - six players, a defense and a kicker each. The better roster wins, and it goes on its own board.</p>
+                <span className="go">{user && !isGuest ? "Open a lobby" : "Sign in to play"}</span>
+              </button>
+
               <button className="mode m-sou" onClick={openSou}>
                 <div className="mt">
                   <span className="icon" aria-hidden="true">📊</span>
@@ -4130,6 +4177,14 @@ export default function PerfectSeason() {
 
         {/* ---------------- REPORTS (moderators) ---------------- */}
         {view === "reports" && isMod && <ModerationQueue onOpenProfile={openProfile} />}
+
+        {/* ---------------- 1v1 (VERSUS.md 9) ---------------- */}
+        {view === "versus" && (
+          <VersusScreen
+            key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
+            format={format} onBack={leaveVersus} onCode={setVersusCode}
+          />
+        )}
 
         {/* ---------------- SHOP (SHOP.md 8) ---------------- */}
         {view === "shop" && user && userId && (

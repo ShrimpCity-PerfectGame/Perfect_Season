@@ -12,7 +12,9 @@
     { "source": "/c/:code", "destination": "/page.html" },
     { "source": "/c/:code/", "destination": "/page.html" },
     { "source": "/u/:name", "destination": "/page.html" },
-    { "source": "/u/:name/", "destination": "/page.html" }
+    { "source": "/u/:name/", "destination": "/page.html" },
+    { "source": "/vs/:code", "destination": "/page.html" },
+    { "source": "/vs/:code/", "destination": "/page.html" }
   ],
   "headers": [
     {
@@ -26,6 +28,10 @@
     },
     {
       "source": "/u/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
+    },
+    {
+      "source": "/vs/(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
     }
   ]

@@ -410,6 +410,10 @@ gets a versus variant: the two scores, the result, and a link to play the winner
   test doesn't cover: `create_match` and `join_match`, a guest refused on both sides of the link, whose session
   is whose, sixteen picks landing in the table, the clock called by the player who is *not* on it, every powerup
   spent through the client, and the records moving when the last pick lands — PvP only, never career wins.
+- `tests/test-versus-screen.mjs` — the screens in the real app, which is where the wiring lives: the Modes
+  tile, a lobby whose link is also the address, a guest told to sign in, the opponent's screen showing the same
+  board, a pick landing in a slot on the right side of it, and the follower's re-spin taking them to a board of
+  their own while the host keeps the one he picked from.
 - `tests/test-a11y.mjs` gains the new screens.
 
 ## 12. Order of work
@@ -420,6 +424,6 @@ gets a versus variant: the two scores, the result, and a link to play the winner
    result, and `decideMove` — shared by the browser and the function. ✅
 4. The Edge Function and its rule tests. ✅ (all four powerups included)
 5. The mock, so the tests can drive a match without a network. ✅ (`tests/mock-versus.mjs`)
-6. The screens, then the flow test.
+6. The screens, then the flow test. ✅ (`versus.jsx`, `storage-versus.js`, the Modes tile, `/vs/<code>`)
 7. Records, the board, the share card.
 8. Staging, then production, as a version.

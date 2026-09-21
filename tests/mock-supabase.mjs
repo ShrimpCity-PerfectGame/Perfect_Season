@@ -69,7 +69,9 @@ export function makeMockAuth() {
   const shop = makeShop(state, { wallet, profileData });
   state.ownsAvatarPack = shop.ownsAvatarPack;
   // 1v1 (VERSUS.md), the same way: its two tables, its three database functions and the match-pick function.
-  const versus = makeVersus(state);
+  // Every write to a match reaches both screens over Realtime, which here means firing the channel the
+  // screens subscribed to. A channel nobody has opened is simply nobody listening.
+  const versus = makeVersus(state, { onMatchChange: (id) => channels.get(`match-${id}`)?._fireChange({ table: "matches" }) });
   const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables };
   // These have no client write policy at all - the app changes them only through database functions -
   // so a direct write gets the error RLS would give.
@@ -183,13 +185,16 @@ export function makeMockAuth() {
   function channel(name) {
     const presenceListeners = [];
     const broadcastListeners = {};
+    const changeListeners = []; // postgres_changes, which 1v1 watches a match with (VERSUS.md 2)
     const presence = {};
     const chan = {
       on(type, opts, cb) {
         if (type === "broadcast") (broadcastListeners[opts?.event] ||= []).push(cb);
+        else if (type === "postgres_changes") changeListeners.push(cb);
         else presenceListeners.push(cb);
         return chan;
       },
+      _fireChange(payload) { changeListeners.forEach((cb) => cb(payload || {})); },
       subscribe(cb) { if (cb) cb("SUBSCRIBED"); return chan; },
       async track(meta) {
         presence["mock-self"] = [meta || {}];
