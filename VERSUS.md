@@ -108,7 +108,6 @@ there is **no client insert, update or delete policy at all**.
 | `season` | the season drafted, for all three kinds |
 | `slot` | `QB` \| `RB` \| `WR` \| `TE` \| `FLEX1` \| `FLEX2` \| `DST` \| `K` |
 | `auto` | the clock made this one, not the player |
-| `stolen_by` | who stole this pick (section 7); `user_id` and `slot` are then theirs. Normally null |
 
 RLS on, public select, no client write policy. Two unique constraints carry the rule that makes a 1v1 draft a 1v1
 draft — **what one player takes is gone for the other**: `(match_id, kind, player_id, season)` for players and
@@ -166,7 +165,7 @@ the blast radius would be timeouts alone. It has been left as it is on purpose: 
 something, a mild and explainable penalty is the right size for that cost, and an optimal autopilot would make
 walking away from the clock nearly free. Revisit it as a balance question, not as a bug.
 
-`POST { code, respin }`, `{ code, steal: true, slot }` and `{ code, dip: true }` are the powerups, with the
+`POST { code, respin }`, `{ code, steal: true, pickNo, slot }` and `{ code, dip: true }` are the powerups, with the
 rules and refusals in section 7. All of them restart the clock — spending one is a turn's worth of thinking
 too, and all of them are spent on your own turn.
 
@@ -395,10 +394,10 @@ same user and the same slot, both correct.
 On the screen it is a two-step: the Steal button arms it, the other roster's filled slots become the buttons,
 and tapping one sends it. The roster has to be the target, because the roster is what you are choosing from.
 
-In the database a steal **updates the pick's row** rather than writing a second one: `user_id` and `slot` become
-the thief's and `stolen_by` records who did it. That is what keeps the two unique constraints in section 3
-honest — the option is still drafted exactly once, by exactly one player. `replayMatch` reads `stolen_by` and
-knows the board's second pick belongs to the leader, re-picking, rather than to the follower.
+**One steal per turn.** A steal does not advance the pick number — it hands the same turn to the player it
+robbed — so without that rule the victim, now on the clock at that turn, could steal straight back at the same
+`at`. `replayMatch` keys steals by `at`, so the second overwrote the first and the survivor was then discarded
+as well: both players spent their one steal and nothing moved at all. Refused as `already_stolen`.
 
 ### Double dip
 
@@ -483,7 +482,7 @@ server re-spins that board itself, charged to no one.
 - **Its own rules** (`VersusHowTo`), shown once per device under its own flag (`ps-vs-howto-seen`) and from a
   button under the board after that. Somebody arriving on an invite has very likely never seen this mode, and
   the game's How to play answers none of the questions it raises — whose turn, what the clock does, what the
-  five buttons are. The game's own rules are therefore **never shown on this screen**: not held back for it, not
+  four buttons are. The game's own rules are therefore **never shown on this screen**: not held back for it, not
   left open behind an arrival, and the header's "How to play" pill is hidden here.
 - **Signing in happens on this screen**, not on the Account tab. The match code lives in this view, so sending
   somebody away to log in loses the match they were invited to.
@@ -500,10 +499,16 @@ server re-spins that board itself, charged to no one.
   takeaways, sacks; made/attempted, long, 50-yarders.
 - **Never a grade on the board.** Single player shows stats and lets a player judge them, and a grade would hand
   the pick over. The result screen may grade; the board may not.
-- **What just happened, in one line** — "alex stole Christian McCaffrey", "sam doubled up", each with its
-  powerup's icon. Derived from the match's rows rather than remembered as it goes, so a client that reconnects
-  mid-board sees the same event as one that never left, and there is no running log to keep in step.
-- **A powerup track under each roster** — five icons a side, struck through as they are spent. Tracking a match
+- **A powerup takes the whole screen** (`.vs-boom`) — "Stolen / alpha took Christian McCaffrey" across the
+  board for 2.4 seconds, tinted by which powerup it was. It began as one line above the board and nobody
+  noticed it: the powerups are the loudest thing in the mode and they read as a status message. Still
+  **derived from the match's rows** rather than remembered as it goes (`latestEvent`), so a client that
+  reconnects mid-board sees the same event as one that never left, and there is no running log to keep in
+  step. It is ranked by the TURN each powerup was spent on, which is the only reason a dip records an `at`:
+  ordered by the board it changes, a dip was outranked by a re-spin later on that same board and never
+  appeared at all. It sits under a dialog rather than over one, passes no clicks, and its words reach a
+  screen reader as one sentence instead of a headline and a caption ("alpha stole Christian McCaffrey").
+- **A powerup track under each roster** — four icons a side, struck through as they are spent. Tracking a match
   by reading the other player's picks is hard enough without also having to remember what they still hold. It
   reads without colour: a spent one is struck through and says "used" for a screen reader.
 - **The result** — the football final, the two scores, both rosters, and a share card. Deliberately *not* a

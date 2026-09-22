@@ -12,7 +12,7 @@ import { getClient, READ, callReason } from "./storage-core.js";
 const failed = (reason) => ({ ok: false, reason });
 
 // A match as every screen reads it - the lobby, the draft and a reload all take this shape.
-//   { id, code, hostId, guestId, hostName, guestName, format, status, turnDeadline, respins, dips, swaps,
+//   { id, code, hostId, guestId, hostName, guestName, format, status, turnDeadline, respins, dips, steals,
 //     result, winnerId, createdAt, picks: [...] }
 function mapMatch(data) {
   if (!data || typeof data !== "object" || data.error) return null;
@@ -23,7 +23,11 @@ function mapMatch(data) {
     status: data.status, turnDeadline: data.turnDeadline ?? null,
     respins: Array.isArray(data.respins) ? data.respins : [],
     dips: Array.isArray(data.dips) ? data.dips : [],
-    swaps: Array.isArray(data.swaps) ? data.swaps : [],
+    // Every one of the three powerup records has to be here. This is an explicit whitelist, so a record the
+    // server sends and this does not name simply vanishes - and replayMatch derives whose TURN it is from
+    // these, so a missing one makes the two screens disagree about that and deadlock the match. `swaps` sat
+    // here after Steal the pick was cut, and `steals` was not added when the steal became a match record.
+    steals: Array.isArray(data.steals) ? data.steals : [],
     result: data.result ?? null, winnerId: data.winnerId ?? null, createdAt: data.createdAt ?? null,
     picks: (Array.isArray(data.picks) ? data.picks : []).filter((p) => p && typeof p === "object"),
   };

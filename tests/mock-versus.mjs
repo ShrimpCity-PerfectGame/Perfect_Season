@@ -161,7 +161,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       return changed({ data: { ok: true, board: decided.key } });
     }
     if (decided.action === "dip") {
-      m.dips = [...m.dips, { boardIdx: decided.boardIdx, by: side }];
+      m.dips = [...m.dips, { boardIdx: decided.boardIdx, at: decided.at, by: side }];
       restartClock();
       return changed({ data: { ok: true } });
     }

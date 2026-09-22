@@ -579,7 +579,9 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     if (!canDoubleDip({ key, taken: state.taken, boardIdx: state.boardIdx, dipperRoster: mine, otherRoster: theirs, picksAfter })) {
       return refuse("no_room");
     }
-    return { ok: true, action: "dip", boardIdx: state.boardIdx, side, state };
+    // `at` is only for the screen: replayMatch keys a dip by its board, but the announcement has to know WHEN
+    // it was declared or it cannot tell which of two powerups on one board happened last.
+    return { ok: true, action: "dip", boardIdx: state.boardIdx, at: state.pickNo, side, state };
   }
 
   // ANY one player off their roster, named by the pick that put him there - not only the pick just made. The
@@ -591,6 +593,13 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
   // front of you both - which works wherever the stolen player came from.
   if (move.steal) {
     if (stealsLeft(steals, side) < 1) return refuse("no_steals_left");
+    // One steal per turn. A steal does not advance the pick number - it hands the SAME turn to the player it
+    // robbed - so without this the victim, now on the clock at that turn, could immediately steal back at the
+    // same `at`. replayMatch keys steals by `at`, so the second one overwrote the first in the Map, and the
+    // survivor was then discarded too (its `by` no longer matched the order it was checked against): both
+    // players spent their one steal, and nothing moved at all. Retaliating is the obvious human response to
+    // being robbed, and the button is right there.
+    if ((steals || []).some((x) => x.at === state.pickNo)) return refuse("already_stolen");
     const target = picks.find((p) => p.pickNo === Number(move.pickNo));
     if (!target) return refuse("nothing_to_steal");
     // It has to be on their roster right now - which rules out your own players, an option that was never

@@ -237,7 +237,9 @@ await runTest("the powerups show for both players, and say who has spent what", 
   // And a track under each roster, so a player can see what the other still holds without remembering it.
   const tracks = [...container.querySelectorAll(".vs-track")];
   assert(tracks.length === 2, `one track per player, got ${tracks.length}`);
-  assert(tracks.every((t) => t.querySelectorAll("li").length === EXPECTED.length), "each showing all four");
+  // A literal, not EXPECTED.length. Derived from the same list it is checking, dropping a powerup from both
+  // passed - which is exactly what the comment above promises it will not do.
+  assert(tracks.every((t) => t.querySelectorAll("li").length === 4), "each showing all four");
   // A spent one reads as spent without colour - struck through, and said in words for a screen reader.
   const spent = [...container.querySelectorAll(".vs-track .vs-tk")].filter((li) => li.classList.contains("spent"));
   assert(spent.every((li) => li.textContent.includes("used")), "a spent powerup says so in words");
@@ -338,6 +340,75 @@ await runTest("the last pick lands on the other screen before the result does", 
     || { winner: "host", margin: 1, host: { score: 1, against: 0, points: 7 }, guest: { score: 0, against: 0, points: 3 } };
   await openMatch("delta@x.test", code);
   assert(versus().dataset.view === "done", `and then the result: ${versus().dataset.view}`);
+});
+
+// A steal, driven through the buttons, in the real app.
+//
+// This is the test that was missing, and the gap was exactly where the bug was. Every other suite drives the
+// rules directly, or reads the mock's own state - so all of them passed while `steals` was dropped twice on the
+// CLIENT read path: mapMatch never named the new record, and the screen's replayMatch call omitted it. The
+// effect was a deadlock. The victim's screen said it was not their turn, the thief's said it still was, and
+// neither could move until the clock ran out. The seam between the client's mapper and the screen had no test.
+await runTest("a steal through the buttons moves the player on both screens", async () => {
+  await signUp("zeta@x.test", "zeta");
+  await signUp("eta@x.test", "eta");
+  await signIn("zeta@x.test");
+  const code = (await auth.rpc("create_match", {})).data.code;
+  await signIn("eta@x.test");
+  await auth.rpc("join_match", { p_code: code });
+
+  // Two picks in, so each side owns somebody.
+  for (let i = 0; i < 2; i++) {
+    const st = auth._versus._replay(code);
+    await signIn(st.turn.side === "host" ? "zeta@x.test" : "eta@x.test");
+    const best = autoPick(st.boardKey, st.taken, st.roster[st.turn.side], "fantasy");
+    const o = best.option;
+    pastOpeningWindow(code);
+    await auth._versus.invokeMatchPick({
+      code, boardIdx: st.boardIdx, kind: o.kind, slot: best.slot,
+      playerId: o.kind === "player" ? o.id : undefined,
+      team: o.kind === "player" ? undefined : o.team, season: o.season,
+    });
+  }
+
+  const before = auth._versus._replay(code);
+  const thiefSide = before.turn.side;
+  const victimSide = thiefSide === "host" ? "guest" : "host";
+  const thiefEmail = thiefSide === "host" ? "zeta@x.test" : "eta@x.test";
+  // A player rather than a defense or a kicker, so the name on screen is just his name - versus.jsx owns
+  // optionName and node cannot import a .jsx.
+  const mine2 = VERSUS_SLOTS.map((sl) => before.roster[victimSide][sl]).find((o) => o && o.kind === "player");
+  const theirName = mine2?.name;
+  assert(theirName, `the other player owns a player to take: ${JSON.stringify(VERSUS_SLOTS.map((sl) => before.roster[victimSide][sl]).filter(Boolean).map((o) => o.kind))}`);
+
+  await openMatch(thiefEmail, code);
+  assert(versus().dataset.view === "draft", `the thief is on the draft screen: ${versus().dataset.view}`);
+
+  // Arm the steal, then tap them on the other roster - which is the whole UI for it.
+  await click(findButtonByText(container, "Steal"));
+  await flush();
+  const grab = [...container.querySelectorAll(".vs-them .vs-grab")];
+  assert(grab.length > 0, `their filled slots become buttons: ${text(container).slice(0, 160)}`);
+  const target = grab.find((b) => b.textContent.includes(theirName)) || grab[0];
+  await click(target);
+  await flush();
+  await flush();
+
+  // The match itself.
+  const m = auth._versus._matches.get(code);
+  assert(m.steals.length === 1, `the steal is on the match: ${JSON.stringify(m.steals)}`);
+
+  // And the screen agrees with the server, which is the part that was broken. The thief holds him; the player
+  // who was robbed is on the clock, because the thief spent their turn taking him.
+  const after = auth._versus._replay(code);
+  assert(VERSUS_SLOTS.some((sl) => after.roster[thiefSide][sl] && optionId(after.roster[thiefSide][sl]) === optionId(mine2)),
+    "he is on the thief's roster");
+  const yours = container.querySelector(".vs-side:not(.vs-them)");
+  assert(text(yours).includes(theirName), `and the screen shows him on YOUR roster: ${text(yours).slice(0, 200)}`);
+  const theirs = container.querySelector(".vs-them");
+  assert(!text(theirs).includes(theirName), `and off theirs: ${text(theirs).slice(0, 200)}`);
+  assert(after.turn.side === victimSide, `the robbed player is on the clock: ${after.turn.side}`);
+  assert(text(container).includes("is picking"), `so the thief's screen says it is not their turn: ${text(container).slice(0, 120)}`);
 });
 
 // The draft keeps a clock ticking and a Realtime channel open, both of which would hold the process open

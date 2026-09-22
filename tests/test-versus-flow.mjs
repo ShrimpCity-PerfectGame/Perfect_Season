@@ -352,7 +352,11 @@ await runTest("the share card says who won and never names a player", async () =
 
   const firstLine = (t) => t.split("\n")[0];
   assert(card.startsWith("Gridspin Duel"), `it says what it is: ${firstLine(card)}`);
-  assert(card.includes(`${m.result.host.points}–${m.result.guest.points}`), `with the final on it: ${card}`);
+  // Winner first, not host first. Written host-first this passed only because the host happens to win this
+  // seeded match, and it contradicted the winner-first assertion further down.
+  const hi = m.result.winner === null ? "host" : m.result.winner;
+  const lo = hi === "host" ? "guest" : "host";
+  assert(card.includes(`${m.result[hi].points}–${m.result[lo].points}`), `with the final on it, winner first: ${card}`);
   assert(card.includes("https://gridspin.test"), "and a link, last");
   // Never the players - the same rule the season card follows, for the same reason.
   const names = [...VERSUS_SLOTS.map((s) => end.roster.host[s]), ...VERSUS_SLOTS.map((s) => end.roster.guest[s])]
@@ -368,7 +372,35 @@ await runTest("the share card says who won and never names a player", async () =
   const line = `${m.result[winner].points}–${m.result[loser].points}`;
   assert(theirs !== card, `the two cards differ: ${firstLine(theirs)}`);
   assert(card.includes(line) && theirs.includes(line), `both carry the same scoreline, winner first (${line})`);
-  assert(/Beat |Lost to |Tied/.test(firstLine(theirs)), `and each says how it went for its own reader: ${firstLine(theirs)}`);
+  // Each card says how it went for ITS OWN reader, and they must differ - a regex accepting any of the three
+  // passed a card that said "Beat" on both sides.
+  const mineWon = m.result.winner === "host";
+  assert(firstLine(card).includes(mineWon ? "Beat" : "Lost to"), `the host card reads from the host side: ${firstLine(card)}`);
+  assert(firstLine(theirs).includes(mineWon ? "Lost to" : "Beat"), `and the guest card from theirs: ${firstLine(theirs)}`);
+});
+// Two powerups on one turn, and the screen announces the one that happened last. A dip is stored against its
+// BOARD, because that is what it changes, and the announcement was ordered by that - so a dip declared after a
+// re-spin on the same board ranked behind it and never appeared, although the server had accepted both. What
+// it is ranked by now is the turn it was declared on, which is what "last" means.
+await runTest("a dip declared after a re-spin is the thing announced", async () => {
+  setupDom();
+  const { latestEvent } = await loadModule("versus.jsx");
+  const nameOf = (side) => (side === "host" ? "alpha" : "beta");
+  // Board 3, the follower's turn: they re-spin the team, then declare a double dip. One turn, both spent.
+  const match = {
+    respins: [{ pickNo: 8, kind: "team", by: "guest" }],
+    dips: [{ boardIdx: 3, at: 8, by: "guest" }],
+    steals: [],
+  };
+  const state = { roster: { host: {}, guest: {} } };
+  assert(latestEvent(match, state, nameOf).title === "Double dip",
+    `the dip is the newer of the two: ${latestEvent(match, state, nameOf).title}`);
+  // The other order still reads the other way round, or this would be a constant rather than an ordering.
+  const first = { ...match, respins: [{ pickNo: 9, kind: "team", by: "host" }] };
+  assert(latestEvent(first, state, nameOf).title === "Re-spin", "and a later re-spin outranks the dip");
+  // A dip written before it carried a turn - a match already in progress across the deploy - still announces.
+  const old = { respins: [], dips: [{ boardIdx: 3, by: "guest" }], steals: [] };
+  assert(latestEvent(old, state, nameOf).title === "Double dip", "a record with no turn on it still announces");
 });
 
 console.log("test-versus-flow.mjs done");

@@ -8,7 +8,9 @@
 -- What this file owns is the shape, who may read it, and the three things that don't need the game's rules:
 -- opening a lobby, joining one, and reading the whole state back after a reload.
 --
--- Only adds objects, so it is safe to re-run; running it twice pays nobody twice and drops nothing.
+-- Safe to re-run, and running it twice pays nobody twice. It is no longer additive only: it drops the columns
+-- and the constraint that two cut features left behind (swaps, stolen_by, match_picks_one_per_slot), each
+-- explained where it happens. Nothing it drops was ever written to by a shipped release.
 --
 -- Runbook:
 --   End a match that is stuck:   update public.matches set status = 'abandoned', ended_at = now() where code = 'ABC123';
@@ -96,6 +98,22 @@ alter table public.matches drop column if exists swaps;
 -- two rosters had at the time, so a steal applied at the stolen pick's own turn would deal different boards
 -- from the ones the match was really played on.
 alter table public.matches add column if not exists steals jsonb not null default '[]'::jsonb;
+-- respins is in the create above and nowhere else, so a database that predates it never gets the column and
+-- match_state below fails to compile against it. dips and steals each have a line; this one was missed.
+alter table public.matches add column if not exists respins jsonb not null default '[]'::jsonb;
+
+-- All three have to be ARRAYS. Only the service role writes them, so this needs a bug rather than an attacker -
+-- but the cost of that bug is total: versus-logic.mjs does `(steals || []).map(...)`, which throws on an object
+-- or a number, the Edge Function has no try/catch around decideMove, so EVERY later move on that match answers
+-- 500 - the clock claim included. finish_match becomes unreachable, the row stays `drafting` for good, and
+-- create_match keeps returning both players into the dead match. One check constraint each closes it.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'matches_powerups_are_arrays') then
+    alter table public.matches add constraint matches_powerups_are_arrays check (
+      jsonb_typeof(respins) = 'array' and jsonb_typeof(dips) = 'array' and jsonb_typeof(steals) = 'array');
+  end if;
+end $$;
 
 -- ...which puts match_picks back to append-only, so stolen_by has nothing left to say.
 alter table public.match_picks drop column if exists stolen_by;

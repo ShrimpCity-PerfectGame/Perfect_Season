@@ -31,7 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMatch, joinMatch, fetchMatch, playMove, subscribeMatch, versusPath, sget, sset } from "./storage.js";
 import {
   replayMatch, optionsOn, optionId, optionFits, openSlots, matchResult, pickId,
-  VERSUS_SLOTS, MATCH_BOARDS, TURN_SECONDS, respinsLeft, dipsLeft, stealsLeft,
+  VERSUS_SLOTS, MATCH_BOARDS, respinsLeft, dipsLeft, stealsLeft,
 } from "./versus-logic.mjs";
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
 import {
@@ -86,6 +86,13 @@ export const VERSUS_CSS = `
   box-shadow:inset 0 3px 0 var(--pc,var(--muted)),0 0 0 2px color-mix(in srgb,var(--accent) 35%,transparent)}
 .vs-grab .sub{color:var(--accent-ink);font-weight:800}
 .vs-grabnote{margin:6px 0 0}
+/* The only way to spend a steal is one of these, so they answer to the same floor every other real control
+   does. They are not .btn, so @media (pointer:coarse) in perfect-season.jsx never reached them - and the
+   phone audit never flagged it, because nothing it drives had ever armed a steal. */
+@media (pointer:coarse){
+  .vs-rosters .vs-grab{min-height:44px;position:relative;z-index:1}
+  .vs-them .vs-grab .sub{display:block;font-size:11px}
+}
 @media (hover:hover){.vs-grab:hover{background:var(--surface2)}}
 /* position:relative so the confetti has something to fall inside, and overflow:hidden so it doesn't spill past
    the block - the same pair .cel uses, because this is the same celebration. */
@@ -108,7 +115,7 @@ export const VERSUS_CSS = `
 /* A powerup, across the whole screen. pointer-events:none throughout, and that is not optional: one of these
    can land while you are on the clock, so it must never swallow a tap, a Lock in, or the board underneath it.
    It paints its own dark ground rather than trusting whatever is behind it. */
-.vs-boom{position:fixed;inset:0;z-index:60;display:grid;place-items:center;pointer-events:none;
+.vs-boom{position:fixed;inset:0;z-index:40;display:grid;place-items:center;pointer-events:none;
   background:radial-gradient(60% 45% at 50% 50%,rgba(6,10,22,.86),rgba(6,10,22,.5) 65%,rgba(6,10,22,0));
   animation:vs-boom-bg 2.4s ease-out forwards}
 .vs-boom-in{display:grid;justify-items:center;gap:12px;padding:0 24px;text-align:center;
@@ -367,7 +374,9 @@ export function latestEvent(match, state, nameOf) {
       text: `${nameOf(r.by)} re-spun the ${era ? "era" : "team"}` });
   }
   for (const d of match.dips || []) {
-    out.push({ at: (d.boardIdx * 2 + 1) * 4 + 1, key: `dip:${d.boardIdx}:${d.by}`, icon: "⚡", tone: "dip",
+    // The turn it was declared on when the record has one. Ordered by BOARD it was outranked by any re-spin
+    // or steal on the same board, so the dip announcement simply never appeared in those orders.
+    out.push({ at: (d.at != null ? d.at : d.boardIdx * 2 + 1) * 4 + 1, key: `dip:${d.boardIdx}:${d.by}`, icon: "⚡", tone: "dip",
       title: "Double dip", detail: `${nameOf(d.by)} takes two off this board`,
       text: `${nameOf(d.by)} doubled up — two off this board, and no pick on the next` });
   }
@@ -405,7 +414,7 @@ function useFlash(event) {
 // `onSteal(slot)` turns the filled slots into buttons, which is how a steal picks its target - the powerup
 // takes any one player off the other roster, so the roster itself has to be the thing you tap. Passed only
 // while a steal is actually being spent, so the strip is a display the rest of the time.
-function RosterStrip({ roster, label, sub, them, onSteal }) {
+function RosterStrip({ roster, label, sub, them, onSteal, busy }) {
   return (
     <div className={`vs-side ${them ? "vs-them" : ""} ${onSteal ? "vs-picking" : ""}`}>
       <p className="vs-side-hd">{label}{sub ? <span className="vs-sub"> {sub}</span> : null}</p>
@@ -414,7 +423,8 @@ function RosterStrip({ roster, label, sub, them, onSteal }) {
           const o = roster[slot];
           if (o && onSteal) {
             return (
-              <button key={slot} type="button" className={`slot filled pos-${slot.startsWith("FLEX") ? "FLEX" : slot} vs-grab`}
+              <button key={slot} type="button" disabled={busy}
+                      className={`slot filled pos-${slot.startsWith("FLEX") ? "FLEX" : slot} vs-grab`}
                       data-slot={slot} data-filled="1" onClick={() => onSteal(slot)}>
                 <span className="vh">{`Steal ${optionName(o)} from their ${POS_NAME[slot.startsWith("FLEX") ? "FLEX" : slot] || VS_SLOT_LABEL[slot]}`}</span>
                 <div className="k" aria-hidden="true">{VS_SLOT_LABEL[slot]}</div>
@@ -655,8 +665,11 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     onCode?.(res.match.code);
   };
 
+  // All three powerup records, or the screen replays a different match from the one the server holds: a
+  // missing `steals` had the victim of a steal told it was not their turn while the thief was told it still
+  // was, so neither could move until the clock ran out.
   const state = useMemo(() => (match && match.status !== "open" ? replayMatch({
-    code: match.code, picks: match.picks, respins: match.respins, dips: match.dips,
+    code: match.code, picks: match.picks, respins: match.respins, dips: match.dips, steals: match.steals,
   }) : null), [match]);
 
   const side = match ? (match.hostId === userId ? "host" : match.guestId === userId ? "guest" : null) : null;
@@ -687,6 +700,10 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const mine = state && side ? powerupsFor(match, side) : null;
   const theirs = state && side ? powerupsFor(match, side === "host" ? "guest" : "host") : null;
   const flash = useFlash(latestEvent(match, state, (s) => name(match, s)));
+  // Armed, and still your turn. The effect below clears `stealing` when the turn moves, but an effect runs
+  // after the frame it is reacting to: for that one frame their roster still said "Take one of theirs" and
+  // its slots were still buttons. Read through `myTurn` at render time there is no such frame.
+  const arming = stealing && myTurn;
   // A refusal belongs to the moment it happened. It was only ever cleared by the next move, so one left over
   // from another board and another turn sat on screen reading as nonsense - "that would leave the other player
   // with nothing to pick" over a board with thirty options on it. Any pick landing clears it.
@@ -938,10 +955,10 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           {/* While a steal is being spent, their filled slots are the buttons - the powerup takes any one of
               their players, so the roster is what you aim it at. */}
           <RosterStrip them roster={state.roster[side === "host" ? "guest" : "host"]}
-            label={stealing ? "Take one of theirs" : `${name(match, side === "host" ? "guest" : "host")}'s roster`}
-            onSteal={stealing ? grab : null} />
+            label={arming ? "Take one of theirs" : `${name(match, side === "host" ? "guest" : "host")}'s roster`}
+            onSteal={arming ? grab : null} busy={busy} />
           {theirs ? <PowerupTrack left={theirs} label={name(match, side === "host" ? "guest" : "host")} /> : null}
-          {stealing ? (
+          {arming ? (
             <p className="vs-note vs-grabnote">
               Tap whoever you want. <button className="linkbtn" onClick={() => setStealing(false)}>Cancel</button>
             </p>

@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
     return error ? json({ error: "failed to save" }, 500) : json({ ok: true, board: decided.key });
   }
   if (decided.action === "dip") {
-    const dips = [...(match.dips || []), { boardIdx: decided.boardIdx, by: decided.side }];
+    const dips = [...(match.dips || []), { boardIdx: decided.boardIdx, at: decided.at, by: decided.side }];
     const { error } = await service.from("matches").update({ dips, turn_deadline: nextDeadline() }).eq("id", match.id);
     return error ? json({ error: "failed to save" }, 500) : json({ ok: true });
   }

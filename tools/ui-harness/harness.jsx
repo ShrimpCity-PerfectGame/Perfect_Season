@@ -498,7 +498,18 @@ async function setUpVersus() {
       await signIn(before.turn.side === "host" ? MINE : THEIRS);
       if (boom === "respin") await vs.invokeMatchPick({ code, respin: "team" });
       else if (boom === "dip") await vs.invokeMatchPick({ code, dip: true });
-      else if (!before.turn.first) await vs.invokeMatchPick({ code, steal: true });
+      else {
+        // A steal names the pick it takes. Sent without one it was Number(undefined) -> NaN -> refused as
+        // nothing_to_steal, so ?boom=steal silently never spent one and the announcement it exists to show
+        // never fired. The `!turn.first` guard here was left over from the old "only the pick just made" rule.
+        const them = before.turn.side === "host" ? "guest" : "host";
+        const o = V.VERSUS_SLOTS.map((sl) => before.roster[them][sl]).find(Boolean);
+        const row = o && vs._matches.get(code) && [...vs.tables.match_picks.values()]
+          .find((r) => r.match_id === vs._matches.get(code).id && V.optionId(o) === V.pickId({
+            kind: r.kind, playerId: r.player_id, team: r.team, season: r.season,
+          }));
+        if (row) await vs.invokeMatchPick({ code, steal: true, pickNo: row.pick_no });
+      }
     }
   }
   // Signed in as whoever is on the clock, so the board renders in the state it is picked from. ?waiting=1 shows

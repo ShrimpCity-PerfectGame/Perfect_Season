@@ -36,14 +36,11 @@ CLAUDE.md.
   era, and its kicker — so you can take the 2006 Ravens defense fifth or a kicker first, whenever you want them.
   Real seasons, rated against their own year: 859 defenses and 859 kickers from 1999 to 2025. Their defense comes
   off your score, your kicker adds to it, and each is worth exactly what one roster slot is worth.
-- **Powerups, one set each.** Two re-spins — and when you pick first, the board you spin to is dealt to your
-  opponent as well, so it is a real decision. A **steal**, which takes the pick they just made and sends them
-  back to the board for another. And a **double dip**, two off one board in exchange for giving up your next
-  pick, which leaves them the board after to themselves.
-- **Steal takes anyone off their roster**, not just the player they picked last. Tap Steal, then tap whoever
-  you want - he is yours, and they get your pick to replace him. Under the old rule ten of the sixteen picks in
-  a match could never be stolen at all, because of the way the order snakes. A player can only change hands
-  once, so nobody spends their steal taking back what was taken from them.
+- **Powerups, one set each, all spent on your own turn.** Two re-spins — and when you pick first, the board you
+  spin to is dealt to your opponent as well, so it is a real decision. A **steal**: tap it, then tap anyone on
+  their roster and he is yours, while they get your pick to replace him. And a **double dip**, two off one
+  board in exchange for giving up your next pick, which leaves them the board after to themselves. A player can
+  only change hands once, so nobody spends their steal taking back what was taken from them.
 - **A powerup takes the whole screen.** Spend one and both players see it: the icon, the powerup in letters
   the size of the screen — RE-SPIN, DOUBLE DIP, STOLEN — and who did what underneath. It used to be a line of
   small text above the board that was easy to miss entirely.
@@ -66,10 +63,12 @@ CLAUDE.md.
 Everything below was found by a review pass over the whole feature before it shipped, so none of it ever reached
 a player — but it is written down because the shapes are worth remembering.
 
-- **Two ways a match could end with no result**, both of which left it unfinishable, ungradeable and impossible
+- **Three ways a match could end with no result**, all of which left it unfinishable, ungradeable and impossible
   to leave: a steal spent on a board somebody had also double dipped, which swallowed the dip and ended the
-  match at fourteen picks, and stealing your own pick. Seven of four hundred fuzzed matches broke the first way;
-  none do now.
+  match at fourteen picks; stealing your own pick; and both players stealing on the same turn, which cancelled
+  out and spent both powerups for nothing. Seven of four hundred fuzzed matches broke the first way; none do now.
+- **A steal the other player could not see.** The screen never received the record of it, so the two of you
+  disagreed about whose turn it was and neither could move until the clock ran out.
 - **Who leads the first board is a coin flip on the match code**, not whoever created the lobby. Leading a board
   is worth more the earlier it comes, so whoever led boards 0, 2, 4 and 6 won 53–54% of matches — and that was
   always the host, so anyone who habitually sent the invite rather than clicking one won more, permanently.

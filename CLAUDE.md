@@ -727,11 +727,15 @@ suite and still broke the live Leaderboard for every existing account.
   submit-run** (it refuses a guest's daily), then the client.
   v1.19.0's (1v1): run `migration-versus.sql`, then **deploy the Edge Functions** (`node deploy-function.mjs <env>`
   now deploys both - submit-run and match-pick share game-logic.mjs and data/players.json, so deploying one of a
-  pair is the drift this section warns about), then the client. The migration only adds objects, so the live site
-  keeps working between the steps; nothing in it touches an existing table except two new `profiles` columns.
-  **It has to be re-run on staging**, which already has the step-one version: the review pass added `finish_match`,
-  a `match_picks_one_per_slot` constraint and a tighter select policy on `matches`, and the later columns and
-  constraints are all written as `add column if not exists` / a guarded `do $$` block for exactly that reason.
+  pair is the drift this section warns about), then the client. **This migration is the one exception to "only
+  adds objects"** in the whole repo: two cut features left `matches.swaps`, `match_picks.stolen_by` and the
+  constraint `match_picks_one_per_slot` behind, and it drops all three. So the gap between steps is NOT
+  harmless here - between the migration and the function, the deployed old `match-pick` writes columns that no
+  longer exist and every powerup answers 500. Deploy the functions immediately after, and do not leave it part
+  done. Nothing it drops was ever written to by a shipped release, which is the only reason dropping is safe at
+  all; if 1v1 ever ships, none of these drops may be re-run against production.
+  **It has to be re-run on staging**, which already has an older version; every add is `add column if not
+  exists` and every drop is `if exists`, so re-running is safe on any shape from step two onward.
   **Any match in flight has to be abandoned first** (`update matches set status = 'abandoned' where status =
   'drafting';`) - who leads which board is now seeded on the match code, so a match already under way would
   replay to a different board order than it was drafted from.
