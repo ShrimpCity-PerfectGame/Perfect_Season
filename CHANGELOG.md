@@ -51,6 +51,22 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   no chip.
 - **The daily waits until the game knows who you are.** On a slow connection a returning guest could start
   it before their session loaded, draft all six, and have it refused at the end — with the day marked used.
+- **GM mode can't deal you a board you can't afford anybody on.** It used to, and the only way out was
+  abandoning the draft — which counts against you, for a player who'd made a legal pick every round. A
+  greedy spender hit it in nearly a quarter of drafts. You also can't spend so much that the slots you have
+  left become unfillable: the game now holds back the minimum for them, which is the same reserve the bot
+  it scores you against has always kept.
+- **Every season is scored against a real par.** The bot you're measured against was supposed to take the
+  *second* best player each round, but whenever both Flex slots were open the second best was literally the
+  same man as the best — so on 27% of its picks it had no handicap at all. Par was too high and **every
+  season scored about 17% fewer points and coins than intended**. Totals already banked stay where they
+  are; seasons from here on earn what they were always meant to. A related one: 2% of finished GM seasons
+  scored nothing at all, because the bot spent itself out of a roster and the game read that as "no par".
+- **A re-spin can't hand you a team you're already drafting.** Every draft is built to never repeat a team,
+  and re-spins ignored that — one draft in eight ended up drafting the same team twice.
+- **"Best possible order" no longer names the same player twice** and promises a total no roster could reach.
+- **Reloading the moment after a pick no longer loses it.** For about a second while the next board spun up,
+  the saved draft was still the one from before your last pick.
 - **A draft in progress leaves with the account that dealt it.** Log out with one on the go and the next
   person to sign in on that device inherited it, and was charged the abandoned draft when they moved on.
 

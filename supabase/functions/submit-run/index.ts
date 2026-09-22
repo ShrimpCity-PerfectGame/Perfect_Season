@@ -214,7 +214,7 @@ Deno.serve(async (req) => {
     return json({ error: "unknown mode" }, 400);
   }
 
-  const replay = GL.replayDraft(seed, history, seq);
+  const replay = GL.replayDraft(seed, history, seq, { gm, format });
   if (!replay.ok) return json({ error: "illegal roster", reason: replay.reason }, 400);
   const roster = replay.roster;
 

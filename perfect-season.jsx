@@ -15,7 +15,7 @@ import versusPool from "./data/versus-pool.json";
 import { cssVars, PALETTE, THEME } from "./theme.mjs";
 import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
-  hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, rerollCandidate,
+  hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, capLeftFor, rerollCandidate, MIN_SALARY,
   flexRating, effectiveRating, winProb, shuffle, windowedShuffle, tagOpp, buildTimeline, simulateSeason,
   applyDnf, LOSER_PTS, MARGINS, GM_CAP, playerSalary, REROLL_BUDGET,
   passerRating, normFormat, BEST_FIELDS, FORMATS,
@@ -1920,13 +1920,18 @@ function bestOrderFor(history, format) {
   for (const order of permute(SLOTS)) {
     let total = 0, ok = true;
     const assignment = {};
+    // Nobody twice. A player can appear on two of the six boards - a re-spin that repeated a team used
+    // to make that common, and a trade still does it - and without this he was counted in two slots at
+    // once, so the panel named the same man twice and advertised a total no roster could reach.
+    const taken = new Set();
     for (let i = 0; i < boardKeys.length; i++) {
       const slot = order[i], key = boardKeys[i];
-      const top = (BOARDS[key] || []).filter((p) => fits(p.pos, slot))
+      const top = (BOARDS[key] || []).filter((p) => fits(p.pos, slot) && !taken.has(p.id))
         .reduce((a, p) => (!a || effectiveRating(slot, p, format) > effectiveRating(slot, a, format) ? p : a), null);
       if (!top) { ok = false; break; }
       total += effectiveRating(slot, top, format) * (slot === "QB" ? QB_WEIGHT : 1);
       assignment[slot] = { key, player: top };
+      taken.add(top.id);
     }
     if (ok && (!best || total > best.totalRating)) best = { slotAssignment: assignment, totalRating: total };
   }
@@ -2059,6 +2064,8 @@ export default function PerfectSeason() {
   const [spin, setSpin] = useState(null);
   const [display, setDisplay] = useState(null);
   const [spinning, setSpinning] = useState(false);
+  // Where the reel is going, while it is still going there. Only the draft snapshot reads it.
+  const spinTarget = useRef(null);
   const [used, setUsed] = useState([]);
   const [rerolls, setRerolls] = useState({ team: REROLL_BUDGET, years: REROLL_BUDGET });
   const [selected, setSelected] = useState(null);
@@ -2179,6 +2186,25 @@ export default function PerfectSeason() {
   const open = SLOTS.filter((s) => !roster[s]);
   const capUsed = SLOTS.reduce((sum, s) => sum + (roster[s] ? playerSalary(roster[s], mode?.format) : 0), 0);
   const capRemaining = GM_CAP - capUsed;
+  // GM only: what this pick must leave behind. Every slot still to fill costs at least MIN_SALARY, so a
+  // pick that eats into that reserve strands the draft - and the only way out of a stranded GM draft was
+  // abandoning it, which is charged as a DNF for a roster the player had made legal picks into all the
+  // way. A greedy spender hit it in 23.8% of drafts; with this and the cap-aware board skip, 0.1%.
+  //
+  // It is the same reserve botPar keeps, which matters for more than symmetry: par is measured against a
+  // bot holding it back, so a player allowed to spend past it is scored against a standard they were not
+  // held to. Dropped when the board has nothing that clears it - there is no point protecting a future
+  // you cannot reach, and the fallback is what the bot does too.
+  const capHold = useMemo(() => {
+    if (!mode?.gm || !spin || result) return 0;
+    const hold = (open.length - 1) * MIN_SALARY;
+    if (hold <= 0) return 0;
+    const board = BOARDS[`${spin.team}|${spin.w}`] || [];
+    const reachable = board.some((p) => !drafted.has(p.id)
+      && open.some((sl) => fits(p.pos, sl))
+      && playerSalary(p, mode.format) <= capRemaining - hold);
+    return reachable ? hold : 0;
+  }, [mode, spin, result, open, drafted, capRemaining]);
 
   // One more go before believing a bad answer. supabase-js retries a dropped GET itself, but not a 500,
   // 502, 504 or 429 - and this read decides whether somebody is signed in at all, so it is worth more
@@ -2560,8 +2586,8 @@ export default function PerfectSeason() {
 
   // Keep the draft in progress on this device so a reload doesn't lose it
   useEffect(() => {
-    if (!draftReady || result || !spin || spinning || !mode) return;
-    const snap = { history, spin, used, rerolls, mode, seq, seqIdx };
+    if (!draftReady || result || !spin || !mode) return;
+    const snap = { history, spin: spinTarget.current || spin, used, rerolls, mode, seq, seqIdx };
     sset(DRAFT_KEY, snap, false);
     sset(mode.kind === "daily" ? DAILY_PROGRESS(mode.date, mode.format) : FREE_PROGRESS, snap, false);
     setWip((w) => ({ ...w, [slotId(mode)]: history.length }));
@@ -2822,7 +2848,14 @@ export default function PerfectSeason() {
   function animateTo(target, pin = null) {
     clearInterval(timer.current);
     setSelected(null);
-    if (reducedMotion()) { setSpin(target); setDisplay(target); return; }
+    if (reducedMotion()) { spinTarget.current = null; setSpin(target); setDisplay(target); return; }
+    // `spin` deliberately lags the reel - it is what the board list renders from, so moving it now would
+    // show the new board's players while the reel is still cycling and give the reveal away. But the
+    // SNAPSHOT has to be the truth, and for ~910ms it was not: `history` and `seqIdx` had already moved
+    // on while `spin` still pointed at the board just picked from, so the effect below refused to save
+    // at all rather than save something inconsistent. A reload inside that window came back to the
+    // previous board with the pick missing - on the Daily, a free re-pick of your last man.
+    spinTarget.current = target;
     setSpinning(true);
     let n = 0;
     timer.current = setInterval(() => {
@@ -2831,7 +2864,7 @@ export default function PerfectSeason() {
         team: pin === "team" ? target.team : pick(TEAM_CODES),
         w: pin === "years" ? target.w : Math.floor(Math.random() * WINDOWS.length),
       });
-      if (n >= 14) { clearInterval(timer.current); setSpin(target); setDisplay(target); setSpinning(false); }
+      if (n >= 14) { clearInterval(timer.current); spinTarget.current = null; setSpin(target); setDisplay(target); setSpinning(false); }
     }, 65);
   }
 
@@ -2857,8 +2890,11 @@ export default function PerfectSeason() {
 
   function restoreDraft(saved) {
     // Stop a reel still spinning for the draft being left: its interval would end by setting that draft's
-    // next board as this one's spin, and the snapshot effect would then save it under this draft.
+    // next board as this one's spin, and the snapshot effect would then save it under this draft. The
+    // target it was travelling to goes with it, for exactly the same reason - the snapshot reads that
+    // while a reel is running, so a stale one is the same bug by a different route.
     clearInterval(timer.current);
+    spinTarget.current = null;
     setSpinning(false);
     const r = {};
     saved.history.forEach((h) => { r[h.slot] = findPlayer(h.key, h.id, h.season); });
@@ -2907,14 +2943,14 @@ export default function PerfectSeason() {
     setShown(0); setPo({ idx: 0, stage: "pre" }); setRerolls({ team: REROLL_BUDGET, years: REROLL_BUDGET });
     setPending(null); setNotice(""); setResumed(false); setConfirmReset(false);
     setShare({ state: "idle", text: "" });
-    const i = boardAt(list, 0, initialRoster);
+    const i = boardAt(list, 0, initialRoster, capLeftFor(initialRoster, m));
     setSeqIdx(i);
     const [t, w] = list[i].split("|");
     animateTo({ team: t, w: Number(w) });
   }
 
   function advance(r, from) {
-    const i = boardAt(seq, from, r);
+    const i = boardAt(seq, from, r, capLeftFor(r, mode));
     if (i < 0) return false;
     setSeqIdx(i);
     const [t, w] = seq[i].split("|");
@@ -2934,7 +2970,7 @@ export default function PerfectSeason() {
     // later when sequential advancement reaches its old spot.) rerollCandidate (game-logic.mjs)
     // mirrors this selection exactly, so a server-side replay can reproduce the same pick.
     const shown = new Set(seq);
-    const next = rerollCandidate({ seed: mode.seed, kind, seqIdx, spinTeam: spin.team, spinW: spin.w, shown, drafted: d, open: o });
+    const next = rerollCandidate({ seed: mode.seed, kind, seqIdx, spinTeam: spin.team, spinW: spin.w, shown, drafted: d, open: o, sequenceRules: true });
     if (!next) return;
     const n = [...seq]; n.splice(seqIdx + 1, 0, next);
     setSeq(n); setSeqIdx(seqIdx + 1); setUsed([...used, next]);
@@ -3097,6 +3133,7 @@ export default function PerfectSeason() {
     const n = [...seq]; n.splice(seqIdx + 1, 0, key);
     setSeq(n); setSeqIdx(seqIdx + 1);
     clearInterval(timer.current);
+    spinTarget.current = null;
     setSpinning(false);
     setSelected(null);
     setSpin({ team, w }); setDisplay({ team, w });
@@ -3346,7 +3383,14 @@ export default function PerfectSeason() {
   function rollBapRound(pos, filled, remaining, seen) {
     const final = rollBapPair(pos, seen);
     clearTimeout(bapTimer.current);
-    if (!final || reducedMotion()) { setBap({ stage: "build", pos, filled, remaining, seen: [...seen, final.player.id], ...final }); return; }
+    // `!final` and `reducedMotion()` shared a branch that then read `final.player.id`, so a roll that
+    // came back empty threw a TypeError and white-screened Build-a-player - for everyone with reduced
+    // motion on as well, since they take the same branch. It cannot happen on today's data (every
+    // position has qualifying players in the final season), and it becomes reachable the moment a
+    // season is added whose last year does not, which is the first item under Housekeeping.
+    // Back to choosing a position, which is the only recoverable place to be: this one has nobody left.
+    if (!final) { setBap({ stage: "pickpos" }); return; }
+    if (reducedMotion()) { setBap({ stage: "build", pos, filled, remaining, seen: [...seen, final.player.id], ...final }); return; }
     // The player-phase flicker only cycles through candidates who actually play THIS position
     // for the team just rolled - showing some other team's QB while "Texans" sits above it
     // would read as a mistake, not a spin. Draw from every era that team has had at this
@@ -4137,9 +4181,13 @@ export default function PerfectSeason() {
                                 {slotsFor.filter((s) => !s.startsWith("FLEX") || s === slotsFor.find((x) => x.startsWith("FLEX"))).map((s) => {
                                   const cost = mode.gm ? playerSalary(p, mode.format) : 0;
                                   const tooExpensive = mode.gm && cost > capRemaining;
+                                  // ...and one you could afford but which leaves nothing for the slots
+                                  // you still have to fill. Said differently from "over cap", because it
+                                  // is a different problem with a different answer: pick somebody cheaper.
+                                  const leavesNothing = mode.gm && !tooExpensive && cost > capRemaining - capHold;
                                   return (
-                                    <button key={s} className="btn solid" disabled={tooExpensive} onClick={() => draft(p, s)}>
-                                      🔒 Lock in · {SLOT_LABEL[s]}{mode.gm && ` - $${cost}M${tooExpensive ? " (over cap)" : ""}`}
+                                    <button key={s} className="btn solid" disabled={tooExpensive || leavesNothing} onClick={() => draft(p, s)}>
+                                      🔒 Lock in · {SLOT_LABEL[s]}{mode.gm && ` - $${cost}M${tooExpensive ? " (over cap)" : leavesNothing ? ` (leaves under $${MIN_SALARY}M a slot)` : ""}`}
                                     </button>
                                   );
                                 })}

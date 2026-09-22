@@ -228,9 +228,23 @@ export function withSeed(seed, fn) {
 export const fits = (pos, slot) => (slot.startsWith("FLEX") ? pos !== "QB" : slot === pos);
 export const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
-export function boardHasOption(key, drafted, open) {
+// Whether a board can be picked from at all: somebody on it who isn't drafted and fits a slot still open.
+//
+// `cap` is GM mode's, and it is the whole of the answer there: a board nobody AFFORDABLE is on is exactly
+// as unusable as one nobody eligible is on, and the sequence already knows how to walk past the second
+// kind. It did not know about the first, so GM dealt boards where every Lock in button was disabled and
+// the only way out was abandoning the draft - 17.7% of drafts by a player taking the best affordable man
+// each round, and a re-spin was no escape either: 6.9% of them landed on another board just as dead.
+//
+// Passing it is optional and omitting it gives the original answer exactly, so nothing outside GM moves.
+// The server applies the same test in replayDraft, from the roster it has rebuilt, or it would reject a
+// draft for skipping a board the app was right to skip.
+export function boardHasOption(key, drafted, open, cap = null) {
   const b = BOARDS[key];
-  return !!b && b.some((p) => !drafted.has(p.id) && open.some((s) => fits(p.pos, s)));
+  if (!b) return false;
+  return b.some((p) => !drafted.has(p.id)
+    && open.some((s) => fits(p.pos, s))
+    && (!cap || playerSalary(p, cap.format) <= cap.left));
 }
 
 // The draft sequence for a seed: six boards plus alternates for re-spins, with no repeated team
@@ -249,20 +263,49 @@ export function seededSequence(seed) {
   return out;
 }
 
-export function boardAt(list, from, r) {
+export function boardAt(list, from, r, cap = null) {
   const d = new Set(Object.values(r).map((p) => p.id));
   const o = SLOTS.filter((s) => !r[s]);
-  for (let i = from; i < list.length; i++) if (boardHasOption(list[i], d, o)) return i;
+  for (let i = from; i < list.length; i++) if (boardHasOption(list[i], d, o, cap)) return i;
   return -1;
+}
+// What is left of the cap for a roster part-drafted, or null outside GM - the shape boardAt and
+// boardHasOption want. One place to work it out, so the client and the replay cannot drift.
+export function capLeftFor(roster, { gm, format } = {}) {
+  if (!gm) return null;
+  let spent = 0;
+  for (const s of SLOTS) if (roster[s]) spent += playerSalary(roster[s], format);
+  return { format, left: GM_CAP - spent };
 }
 
 // Mirrors reroll()'s pool selection exactly (same RNG derivation, same match() filter) - shared
 // so the client's live reroll and the server's replay/legality check can never drift apart.
 // Returns the picked board key, or null if no candidate exists (same as a no-op reroll).
-export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, drafted, open }) {
+// `sequenceRules` is single player's, and only single player's: seededSequence builds its drafts to "no
+// team twice, no era more than twice", and a re-spin has to keep that or the rules mean nothing - 11.9% of
+// completed drafts used to hold the same team twice, 27.3% one era more than twice. 1v1 shares this
+// function and does NOT share those rules: it deals eight boards, and versus-logic.mjs decides for itself
+// what a board has to be able to do (VERSUS.md 8). So it is off unless asked for.
+export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, drafted, open, sequenceRules = false }) {
+  // What the planned sequence already holds, by team and by era. seededSequence builds every draft to
+  // "no team twice, no era more than twice" - and a re-spin used to ignore both, checking only that the
+  // exact team|era pair was unseen. So a team re-spin could hand you a team already queued later under
+  // another era: 11.9% of completed drafts drafted from the same team twice, and 27.3% had one era more
+  // than twice. The point of those rules is that six boards feel like six different boards.
+  // Which teams the planned sequence already holds. seededSequence allows each team once across the
+  // whole plan, so this leaves plenty to spin to - unlike its other rule, "no era more than twice",
+  // which the plan fills completely (five eras, twice each, is exactly the ten boards it returns). An
+  // era re-spin measured against THAT has nothing to offer and would simply stop working, so the era
+  // count is left alone: seeing one era twice among six boards is ordinary, and a third is a great deal
+  // less jarring than drafting Cleveland twice - which is what this rule is really for, and what
+  // 11.9% of completed drafts used to do.
+  const teams = new Set();
+  for (const key of shown) teams.add(key.split("|")[0]);
   const match = (key) => {
     const [t, w] = key.split("|");
-    return !shown.has(key) && (kind === "team" ? Number(w) === spinW : t === spinTeam) && boardHasOption(key, drafted, open);
+    if (shown.has(key) || !boardHasOption(key, drafted, open)) return false;
+    if (kind !== "team") return t === spinTeam;          // same team, another era: never a repeat
+    return Number(w) === spinW && (!sequenceRules || !teams.has(t));
   };
   const rng = mulberry32(hashStr(`${seed}-reroll-${kind}-${seqIdx}`));
   const pool = Object.keys(BOARDS).filter(match);
@@ -282,7 +325,7 @@ export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, dr
 // happened, with no risk of a coincidental collision. Walking both together left to right also
 // naturally reconstructs the roster/drafted state at each point, since picks and reroll insertions
 // occur in the same real-time order they appear in `seq`.
-export function replayDraft(seed, history, seq) {
+export function replayDraft(seed, history, seq, { gm = false, format } = {}) {
   const fail = (reason) => ({ ok: false, reason });
   if (!Array.isArray(history) || !Array.isArray(seq) || history.length !== SLOTS.length) return fail("wrong shape");
 
@@ -317,13 +360,15 @@ export function replayDraft(seed, history, seq) {
       else if (team === prevTeam && Number(w) !== Number(prevW)) kind = "years";
       else return fail("reroll insertion doesn't share a team or era with the board it replaced");
       if (rerollsUsed[kind] >= REROLL_BUDGET) return fail(`more than ${REROLL_BUDGET} ${kind} reroll(s) used`);
-      const expected = rerollCandidate({ seed, kind, seqIdx: si - 1, spinTeam: prevTeam, spinW: Number(prevW), shown, drafted, open });
+      const expected = rerollCandidate({ seed, kind, seqIdx: si - 1, spinTeam: prevTeam, spinW: Number(prevW), shown, drafted, open, sequenceRules: true });
       if (expected !== key) return fail("reroll result doesn't match what this seed would produce");
       rerollsUsed[kind]++;
       shown.add(key);
     }
 
-    if (!boardHasOption(key, drafted, open)) { prevKey = key; prevOnScreen = false; continue; } // client would have skipped this board too
+    // The client would have skipped this board too - nobody on it fits a slot still open, or in GM
+    // nobody on it is still affordable.
+    if (!boardHasOption(key, drafted, open, capLeftFor(roster, { gm, format }))) { prevKey = key; prevOnScreen = false; continue; }
 
     if (histPtr < history.length && history[histPtr].key === key) {
       const h = history[histPtr];
@@ -410,6 +455,11 @@ export function effectiveRating(slot, p, format) {
 // Prices follow whichever format is being played, so the cap stays meaningful in both - pricing
 // standard-format rosters off full-PPR ratings would make big-play receivers better AND cheaper.
 export const GM_CAP = 150; // in $M, for a 6-man "roster"
+// The floor playerSalary can return, so "what every slot still to fill costs at the very least" is one
+// number both the bot and the draft screen hold back. They must agree: par is measured against a bot
+// keeping this reserve, so a player allowed to spend past it is scored against a standard they were
+// not held to - and, worse, can spend themselves out of a roster they are then charged a DNF for.
+export const MIN_SALARY = 1;
 export function playerSalary(p, format) {
   const r = Math.max(0, (normFormat(format) === "standard" ? p.stdRating : p.rating) - 35);
   return Math.max(1, Math.round(0.0055 * r * r));
@@ -464,6 +514,17 @@ export const LADDERS = ["daily", "unlimited", "genius", "gm"];
 // for this draft" rather than an error.
 export function botPar(boardKeys, { format, gm } = {}) {
   if (!Array.isArray(boardKeys) || boardKeys.length !== SLOTS.length) return null;
+  // Two passes under a salary cap. The first is the real bot; if IT paints itself into a corner - the
+  // pick is greedy, so it can spend itself out of a legal roster on boards a human completed - the
+  // second walks the same boards taking the cheapest man who fits, which is what somebody short of cap
+  // actually does and all but always finishes. Only if even that can't field a roster is there no par.
+  // The alternative was `null`, and draftPoints turns null into ZERO points for a season that was
+  // played properly: 2.2% of finished GM seasons scored nothing at all.
+  return botWalk(boardKeys, { format, gm, cheapest: false })
+    ?? (gm ? botWalk(boardKeys, { format, gm, cheapest: true }) : null);
+}
+
+function botWalk(boardKeys, { format, gm, cheapest } = {}) {
   const roster = {};
   const drafted = new Set();
   let spent = 0;
@@ -471,18 +532,49 @@ export function botPar(boardKeys, { format, gm } = {}) {
   for (const key of boardKeys) {
     const open = SLOTS.filter((s) => !roster[s]);
     const board = BOARDS[key] || [];
-    const remaining = open.length - 1; // every other slot still needs at least the $1M minimum
-    const cands = [];
+    const remaining = (open.length - 1) * MIN_SALARY; // every other slot still needs at least the minimum
+    const all = [];        // everything legal, cap aside
+    const affordable = [];  // ...and still leaving the minimum for every slot after this one
     for (const p of board) {
       if (drafted.has(p.id)) continue;
       const cost = gm ? playerSalary(p, format) : 0;
-      if (gm && spent + cost + remaining > GM_CAP) continue;
-      for (const s of open) if (fits(p.pos, s)) cands.push({ p, s, cost, r: effectiveRating(s, p, format) });
+      for (const s of open) {
+        if (!fits(p.pos, s)) continue;
+        const c = { p, s, cost, r: effectiveRating(s, p, format) };
+        if (gm && spent + cost > GM_CAP) continue;          // cannot be bought at all
+        all.push(c);
+        if (!gm || spent + cost + remaining <= GM_CAP) affordable.push(c);
+      }
     }
-    if (!cands.length) return null;
+    // Short of cap, a human takes the cheapest man who fits rather than giving up, and so does the
+    // bot. It used to give up: `remaining` reserves $1M a slot AND the pick is greedy, so on 2-5% of
+    // finished GM seasons the bot spent itself out of a legal roster on boards a human had completed,
+    // botPar came back null, and draftPoints turned that into zero points for a season that was
+    // played properly.
+    const pool = affordable.length ? affordable : all;
+    if (!pool.length) return null;
+    if (cheapest) {
+      // The spend-least walk: cheapest first, and the best slot for him among equals.
+      const cheap = pool.slice().sort((a, b) => a.cost - b.cost || b.r - a.r || a.p.id - b.p.id || a.s.localeCompare(b.s))[0];
+      roster[cheap.s] = cheap.p;
+      drafted.add(cheap.p.id);
+      spent += cheap.cost;
+      continue;
+    }
+    // One candidate per PLAYER, at the best slot open to him. This was one per (player, slot) pair -
+    // and flexRating does not depend on WHICH flex, so whenever both Flex slots were open the same man
+    // held ranks 1 and 2 and "the second best" was literally the best again. The handicap no-opped on
+    // 27% of the bot's picks, which made par too high and every points total and coin payout about 17%
+    // low. BOT_PICK_RANK's 250-draft calibration was measured against that, so fixing it moves the
+    // ladder: totals already banked stay, and seasons from here on earn what they were meant to.
+    const bestSlot = new Map();
+    for (const c of pool) {
+      const held = bestSlot.get(c.p.id);
+      if (!held || c.r > held.r || (c.r === held.r && c.s.localeCompare(held.s) < 0)) bestSlot.set(c.p.id, c);
+    }
     // Sorted by rating, then player id, then slot - the id/slot tiebreaks are what make this
     // reproducible rather than dependent on board array order.
-    cands.sort((a, b) => b.r - a.r || a.p.id - b.p.id || a.s.localeCompare(b.s));
+    const cands = [...bestSlot.values()].sort((a, b) => b.r - a.r || a.p.id - b.p.id || a.s.localeCompare(b.s));
     const choice = cands[Math.min(BOT_PICK_RANK - 1, cands.length - 1)];
     roster[choice.s] = choice.p;
     drafted.add(choice.p.id);

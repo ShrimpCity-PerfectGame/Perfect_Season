@@ -110,4 +110,42 @@ await runTest("the Unlimited tile deals a new draft rather than the finished one
   if (doneCode) assert(finished(now) !== doneCode, `and a new code, not ${doneCode}`);
 });
 
+// The snapshot has to be the truth while the reel is running, not only once it stops. `spin` lags the
+// animation on purpose - it is what the board list renders from, so moving it early gives the reveal
+// away - but `history` and `seqIdx` have already moved on, so for the ~910ms of the reel the effect
+// refused to save at all rather than save something inconsistent. A reload inside that window came
+// back to the previous board with the pick missing; on the Daily, a free re-pick of your last man.
+//
+// jsdom has no matchMedia, so reducedMotion() is falsy and animateTo skips the reel entirely - which
+// is why this was never reproducible in a test. Giving it one that says motion is fine is the whole
+// trick.
+await runTest("a pick is saved while the reel is still spinning", async () => {
+  setupDom();
+  window.matchMedia = (q) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
+  window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
+  const { container } = await mount();
+  await flush(4);
+  await click(modeButton(container, "Unlimited"));
+  await flush(4);
+  for (let i = 0; i < 60 && !container.querySelector(".card .hit"); i++) await flush(2);
+
+  container.querySelector(".card .hit").click();
+  await flush(2);
+  const lock = [...container.querySelectorAll("button")].find((b) => /Lock in/i.test(b.textContent));
+  assert(lock, "a Lock in button to press");
+  lock.click();
+  await flush(2);                                   // the reel is running now
+
+  const mid = JSON.parse((await window.storage.get("ps-free-wip", false)).value);
+  assert(mid.history.length === 1, `the pick is already saved: ${mid.history.length} picks`);
+
+  await new Promise((r) => setTimeout(r, 1300));    // let the reel finish
+  await flush(4);
+  const after = JSON.parse((await window.storage.get("ps-free-wip", false)).value);
+  assert(after.history.length === mid.history.length, "and the count does not change when it stops");
+  assert(`${after.spin.team}|${after.spin.w}` === `${mid.spin.team}|${mid.spin.w}`,
+    `nor the board: ${mid.spin.team}|${mid.spin.w} -> ${after.spin.team}|${after.spin.w}`);
+});
+
 console.log("test-finish-race.mjs done");

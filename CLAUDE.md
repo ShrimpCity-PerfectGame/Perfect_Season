@@ -290,6 +290,7 @@ node tests/test-wip-race.mjs      # end-of-draft storage race (see pendingClears
 node tests/test-finish-race.mjs   # the same race through the four readers that write to the record: Run it back must not charge a DNF
 node tests/test-submit-race.mjs   # two submissions that overlap both land - profiles is a read-modify-write and carries a `rev`
 node tests/test-profile-read-fails.mjs # a failed profiles read is not "this account has no profile": no lockout, no stuck guest
+node tests/test-draft-rules.mjs   # the draft's own invariants: GM can't strand, every draft has a par, a re-spin never repeats a team
 node tests/test-board-order.mjs   # board section reordering timing
 node tests/test-reroll-pool.mjs   # reroll can't repeat an already-used team+era
 node tests/test-flex-scoring.mjs  # Flex grades on raw production, not position
@@ -804,6 +805,21 @@ sequence.
 **Assume storage operations can fail.** `window.storage.delete` may not take effect. Clear saved
 state by **overwriting it with an invalid snapshot first**, then deleting (`clearDraft`). Never let
 a failed delete resurrect finished state — see the storage-ordering note in Architecture above.
+
+**GM mode's cap is a reserve, not just a ceiling.** `MIN_SALARY` is what every slot still to fill costs at
+the very least, and three places hold it back together: `botPar` keeps it (so par is measured against a bot
+that never strands itself), the draft screen disables a pick that would eat into it, and `boardAt`/
+`boardHasOption` take an optional `cap` so a board nobody affordable is on is skipped exactly like one
+nobody eligible is on. `replayDraft` takes `{ gm, format }` and applies the same test from the roster it
+rebuilds, or it would reject a draft for skipping a board the app was right to skip. Without all of it a
+greedy spender stranded itself in 23.8% of GM drafts with a DNF as the only exit; with it, 0.1%.
+
+**`rerollCandidate` is shared with 1v1, which does not share single player's sequence rules.** Passing
+`sequenceRules: true` adds "no team the plan already holds" - `seededSequence`'s own rule, which a re-spin
+used to ignore. It is opt-in because 1v1 deals eight boards under its own rules (VERSUS.md 8), and applying
+single player's there silently stopped its era re-spin working. Note the sequence's OTHER rule, "no era more
+than twice", is deliberately not enforced on a re-spin: the plan already fills every era to that limit, so
+measuring against it would leave an era re-spin nothing to offer.
 
 **Rerun the difficulty bot after any grading or board change.** `node tests/test-difficulty.mjs
 [N]` plays N drafts with a simple first-eligible-player bot and reports avg wins / perfect-season
