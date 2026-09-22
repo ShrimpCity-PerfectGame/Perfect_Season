@@ -126,12 +126,26 @@ accident. This is explained in-game (the grading note under the graded roster, t
 order" note, and How to play), because while it went unexplained it just read as a bug.
 
 The cap's second job is protecting the simulation: `winProb` is decided outright at a 20-point gap
-and the strongest opponent is rated 120, so a team score of 140 would beat every opponent in the
-game automatically. Uncapped Flex can't realistically reach that, because the named slots stay
-capped — it would take two 168-caliber Flex players plus three clipped named picks on the same six
-boards. Across 400 best-available drafts the highest team score observed was 129.2. **If the player
-data is ever regenerated or re-rated, re-check that headroom**; it's the assumption that makes
-uncapped Flex safe.
+and the strongest opponent is rated 122, so a team score of 142 would beat every opponent in the
+game automatically — the season isn't simulated at all, it's a guaranteed 20–0 and a Perfect season
+badge. Uncapped Flex can't reach that in **Fantasy**, because the named slots stay capped: it would
+take two 168-caliber Flex players plus three clipped named picks on the same six boards. Across 400
+best-available drafts the highest team score observed was 129.2, and across 6,000 seeds 139.6.
+
+**That argument was made on Fantasy only, and Championship broke it.** Re-anchoring production onto
+the shared scale lifts the top Flex rating from 172.8 to 197.9 — the same player, LaDainian
+Tomlinson 2006 — and two of those plus three capped named picks clears 142. A sweep of 16,550 real
+six-character challenge codes found **three** that could be drafted into a guaranteed 20–0, and
+`replayDraft` accepts every one of them, because they are legal drafts and not tampering.
+
+So **Championship's Flex is capped at Fantasy's own ceiling** (`flexCap()`, measured from the data
+at `initGameData` rather than written down, so it follows a new season rather than going stale).
+Fantasy is unchanged by construction — nothing on that scale can exceed its own maximum — and no
+posted Championship score moved, the highest on the live board being 120.7.
+`tests/test-scoring-format.mjs` pins both halves: that the two ceilings agree, and that the exact
+roster code `0X2TIZ` handed out no longer beats everything. **If the player data is ever regenerated
+or re-rated, re-check that headroom** — for both formats this time; it's the assumption the whole
+Flex cap rests on.
 
 ## Step 7 — Letter grades (display only)
 

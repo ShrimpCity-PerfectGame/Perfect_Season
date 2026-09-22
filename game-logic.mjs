@@ -134,6 +134,10 @@ export let OPPS = [];
 export let PLAYOFF_OPPS = [];
 let flexStatsByEra = [];
 let flexStatsByEraStd = [];
+// The highest Flex rating the FANTASY scale gives any player who can actually stand in a Flex slot.
+// Championship is held to it - see flexRating.
+let flexCeiling = Infinity;
+export const flexCap = () => flexCeiling;
 
 export function initGameData(players, opponents) {
   const boards = {};
@@ -186,6 +190,15 @@ export function initGameData(players, opponents) {
     flexStatsByEra[w] = poolStats(pool, (p) => p.ppr, (p) => p.rating);
     flexStatsByEraStd[w] = poolStats(pool, (p) => p.stdPoints, (p) => p.stdRating);
   });
+  // Measured, not written down, so it follows the data: add a season and it moves with it.
+  flexCeiling = -Infinity;
+  for (const key of Object.keys(BOARDS)) {
+    for (const p of BOARDS[key]) {
+      if (!FLEX_POS.includes(p.pos)) continue;
+      const r = flexRating(p, "fantasy");
+      if (r > flexCeiling) flexCeiling = r;
+    }
+  }
 }
 
 // ---------- Seeded randomness ----------
@@ -363,7 +376,20 @@ export function flexRating(p, format) {
   const std = normFormat(format) === "standard";
   const s = (std ? flexStatsByEraStd : flexStatsByEra)[p.w];
   const points = std ? p.stdPoints : p.ppr;
-  return s.ratingMean + ((points - s.pprMean) / s.pprStd) * s.ratingStd;
+  const raw = s.ratingMean + ((points - s.pprMean) / s.pprStd) * s.ratingStd;
+  // Championship may not out-reach Fantasy. The paragraph above names the condition this whole cap
+  // exists for - "if that ever stops being true, this is the first thing to re-check" - and for
+  // Championship it had: re-anchoring production onto the shared scale lifted the top Flex rating from
+  // 172.8 to 197.9 (LaDainian Tomlinson 2006, the same player either way). Two of those and three
+  // capped named picks cleared 140, which beats every opponent in the game at winProb exactly 1 - so
+  // the season was not simulated at all, and 3 of 16,550 real challenge codes handed out a guaranteed
+  // 20-0 that replayDraft correctly accepts, because it is a legal draft.
+  //
+  // Fantasy's own ceiling is the cap because Fantasy's is the one that was measured safe (129.2 over
+  // 400 best-available drafts, 139.6 over 6,000 seeds). Fantasy is unchanged by construction: nothing
+  // there can exceed its own maximum. Nobody on the live Championship board was near it - the top
+  // score there is 120.7 - so no posted score moves.
+  return std ? Math.min(flexCeiling, raw) : raw;
 }
 // The rating a player should count as in team-score math for the slot they're in: their normal
 // positional grade for a named slot, or their stats-only flexRating for a Flex spot. Omitting

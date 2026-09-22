@@ -34,6 +34,11 @@ CLAUDE.md.
   wrote last, and the finished season was simply gone, while the code it was played on stayed used up. The
   retry then said "already recorded". A personal best could not be recovered. Every write now carries the
   version of the record it was based on, so the second one is applied on top of the first instead of over it.
+- **Championship could hand out a guaranteed 20–0.** Championship re-scores every player, and that lifted
+  what a Flex pick can be worth well past what Fantasy allows — far enough that a team score of 142 beats
+  every opponent in the game outright, so the season isn't really played. Three of the first 16,550 challenge
+  codes we checked could be drafted into one. Championship's Flex is now held to Fantasy's own ceiling.
+  Nobody's score changes: the best Championship team so far is 120.7.
 - **Playing one season before signing in could lock you out of your own account.** Open the site on a new
   phone, play an Unlimited season without signing in first, and the game takes a guest account for you — which
   hid every sign-in and sign-out control at once, because as far as the app was concerned you were signed in.

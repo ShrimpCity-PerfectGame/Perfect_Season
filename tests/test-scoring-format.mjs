@@ -193,4 +193,51 @@ await runTest("playing either format's daily keeps one shared streak", async () 
   assert(GL.nextStreak(after, "2026-03-05") === 4, "the same day again must not double-count");
 });
 
+
+// The season simulation stops being a simulation above a certain team score: winProb is decided
+// outright at a 20-point gap (SPREAD), so a roster rated more than that above the strongest opponent
+// in the game beats everything automatically - 20-0, a Perfect season badge, no dice rolled. The
+// comment on flexRating names this as the condition the Flex cap exists for and says that if it ever
+// stops holding, that is the first thing to re-check. For Championship it had stopped holding:
+// re-anchoring production onto the shared scale lifted the top Flex rating from 172.8 to 197.9, and
+// 3 of 16,550 real challenge codes handed out a guaranteed perfect season that replayDraft accepts,
+// because it is a legal draft.
+await runTest("Championship's Flex cannot out-reach Fantasy's", async () => {
+  const flexable = all.filter((p) => GL.fits(p.pos, "FLEX1"));
+  const top = (format) => Math.max(...flexable.map((p) => GL.flexRating(p, format)));
+  const fantasy = top("fantasy");
+  const standard = top("standard");
+  assert(Math.abs(standard - fantasy) < 0.05,
+    `the two ceilings agree: fantasy ${fantasy.toFixed(1)}, championship ${standard.toFixed(1)}`);
+  // And Fantasy is untouched by the cap - nothing can exceed its own maximum.
+  assert(Math.abs(fantasy - GL.flexCap()) < 0.05, `the cap IS Fantasy's ceiling: ${GL.flexCap().toFixed(1)}`);
+});
+
+await runTest("the rosters that guaranteed a 20-0 no longer do", async () => {
+  // An opponent's strength is `reg` (its regular-season rating); `po` is the playoff one where it has one.
+  const strongest = Math.max(...GL.OPPS.flatMap((o) => [o.reg, o.po].filter((r) => typeof r === "number")));
+  // SPREAD isn't exported, so read it off winProb itself: the gap at which a win becomes certain.
+  let spread = 0;
+  while (spread < 100 && GL.winProb(strongest + spread, strongest) < 1) spread += 0.1;
+  const certain = strongest + spread;
+
+  // The exact roster the sweep drafted on code 0X2TIZ in Championship - every man legal on the board
+  // that code deals him. It scored 143.3 and beat every opponent in the game at winProb exactly 1.
+  const lineup = {
+    QB: find("Jeff Garcia", 2000, "SF"),
+    RB: find("Maurice Jones-Drew", 2009, "JAX"),
+    WR: find("Michael Thomas", 2019, "NO"),
+    TE: find("Rob Gronkowski", 2011, "NE"),
+    FLEX1: find("LaDainian Tomlinson", 2006, "LAC"),
+    FLEX2: find("Marshall Faulk", 2000, "LA"),
+  };
+  for (const [slot, p] of Object.entries(lineup)) assert(p, `${slot} is in the pool`);
+  let tot = 0, wt = 0;
+  for (const sl of GL.SLOTS) { const k = sl === "QB" ? GL.QB_WEIGHT : 1; tot += GL.effectiveRating(sl, lineup[sl], "standard") * k; wt += k; }
+  const score = tot / wt;
+  assert(score < certain,
+    `it scores ${score.toFixed(1)}, and anything from ${certain.toFixed(1)} beats every opponent outright`);
+  assert(GL.winProb(score, strongest) < 1, "and the strongest opponent is not a certain win");
+});
+
 console.log("test-scoring-format.mjs done");
