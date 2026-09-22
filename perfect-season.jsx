@@ -2801,9 +2801,18 @@ export default function PerfectSeason() {
   // rather than resumed into a guaranteed rejection. A draft with no picks yet still counts: its
   // boards are already dealt, so coming back must resume them and abandoning it is a DNF. (Treating
   // it as nothing let you look at the first board, leave, and come back to new boards for free.)
+  // A daily also has to be TODAY's. Its seed matching its own date only says the snapshot is
+  // self-consistent, not that it is current, and `ps-draft` holds whatever was last on screen - so
+  // yesterday's unfinished daily came back this morning, with the Draft tab's in-progress dot
+  // advertising it and nothing anywhere saying it was yesterday's boards. Finishing it counted for
+  // yesterday: the server accepts a date within a day of its own (it has to, for time zones), so
+  // `daily_last` and the streak were credited for a day that was never played - deal one each night
+  // and finish it each morning and a skipped day is banked. Worse further out: past that window the
+  // server refuses it outright and the whole finished season is lost.
   const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history)
     && BOARDS[`${s.spin.team}|${s.spin.w}`] && s.history.every((h) => findPlayer(h.key, h.id, h.season))
-    && (s.mode.kind !== "daily" || s.mode.seed === dailySeed(s.mode.date, s.mode.format));
+    && (s.mode.kind !== "daily"
+      || (s.mode.date === todayKey() && s.mode.seed === dailySeed(s.mode.date, s.mode.format)));
   // Whether abandoning a saved draft costs this account a DNF: one with picks, or one this account dealt.
   // A board a guest only looked at on this device isn't charged to whoever signs in afterwards.
   const chargeableDraft = (s) => s.history.length > 0 || s.mode.owner === (userId || null);

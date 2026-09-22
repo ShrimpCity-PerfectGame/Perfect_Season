@@ -34,6 +34,10 @@ CLAUDE.md.
   wrote last, and the finished season was simply gone, while the code it was played on stayed used up. The
   retry then said "already recorded". A personal best could not be recovered. Every write now carries the
   version of the record it was based on, so the second one is applied on top of the first instead of over it.
+- **Yesterday's unfinished daily is no longer waiting for you this morning.** A daily you left half-played
+  came back the next day, on the Draft tab, with nothing saying whose boards they were — and finishing it
+  counted for the day before, so a streak got credit for a day that was never played. Leave one unfinished now
+  and today's daily is simply today's.
 - **Championship could hand out a guaranteed 20–0.** Championship re-scores every player, and that lifted
   what a Flex pick can be worth well past what Fantasy allows — far enough that a team score of 142 beats
   every opponent in the game outright, so the season isn't really played. Three of the first 16,550 challenge
