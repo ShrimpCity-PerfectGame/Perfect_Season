@@ -74,8 +74,14 @@ declare
   -- was typed, and the zero-width characters hide words from the eye entirely. Stripped rather than refused,
   -- because turning down a report over a character nobody can see means the thing being reported goes
   -- unreported - and the report sheet has already shown the reporter the cleaned text.
+  -- The whitespace class is spelled out rather than written as \s. Postgres's \s is [[:space:]], which is
+  -- resolved through LC_CTYPE: under C it is the six ASCII characters below, but under en_US.UTF-8 - which
+  -- is what a Supabase database is created with - it ALSO matches U+0085, U+2000-U+200A, U+2028, U+2029,
+  -- U+205F and U+3000. So the rule would have been one thing in the tests (PGlite reports datcollate = C)
+  -- and another on the live site, and the note a moderator read would not be the note cleanNote showed the
+  -- reporter. Written out, both sides agree wherever this runs.
   v_note text := btrim(regexp_replace(
-                   regexp_replace(coalesce(p_note, ''), '\s+', ' ', 'g'),
+                   regexp_replace(coalesce(p_note, ''), '[ \t\n\r\f\v]+', ' ', 'g'),
                    U&'[\0001-\001F\007F-\009F\061C\200B\200E\200F\2028\2029\202A-\202E\2060-\2064\2066-\206F\FEFF]', '', 'g'));
 begin
   if v_uid is null or not exists (select 1 from profiles where id = v_uid) then

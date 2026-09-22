@@ -51,6 +51,29 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   no chip.
 - **The daily waits until the game knows who you are.** On a slow connection a returning guest could start
   it before their session loaded, draft all six, and have it refused at the end — with the day marked used.
+- **A draft you had on the go when this update landed is dealt again, rather than refused at the end.**
+  Re-spins are worked out afresh from the code when a season is handed in, and this release changed what a
+  team re-spin gives you — so a draft re-spun before it and finished after would have been turned down as
+  an illegal roster, which for a daily means the day gone with nothing to show. Nothing is charged for it.
+- **GM mode can't re-spin you into a board you can't afford anybody on either.** The dealer learned about
+  the cap and the re-spin button didn't, so the one control you reach for to escape a dead board could hand
+  you another one.
+- **A season can't be worth six times what it should be.** When the bot you're scored against couldn't
+  field a roster under the cap, the game fell back to measuring you against one that simply bought the
+  cheapest man available — which isn't a benchmark, and paid up to 717 ladder points for a season worth 97.
+- **A patchy connection can't cost you an account any more.** Three more places read your profile without
+  allowing for the read failing: signing up could tell you it went wrong when it hadn't, a saved season
+  could be reported as lost with its coins hidden, and a season played on a slow connection could quietly
+  sign you out of a real account and post itself under a throwaway.
+- **Logging out takes the draft with it properly.** It was cleared from storage but left on screen, so the
+  next person on that device was handed it anyway — and charged for abandoning it.
+- **Two quick taps on a mode tile cost one abandoned draft, not two.**
+- **Guests look like guests on the Over/Under and builds boards even if they played before this release.**
+  Those rows kept an ordinary name that led to a player who doesn't exist.
+- **A guest who taps Report is told why, instead of being told their connection failed.**
+- **"Today's daily" says it's waiting instead of ignoring you** while your account loads.
+- **Two boards ordered tied names differently from every other board.**
+- **Nothing is under 12px any more** — the roster chips on the boards and the "You" marker were the last two.
 - **A report reaches a moderator saying what was typed.** The note was the one box on the site that took
   anything at all, including the invisible characters that hide a word and the one that turns the rest of a
   sentence backwards — in a message whose whole job is to be read by somebody deciding what to do about

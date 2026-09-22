@@ -80,6 +80,14 @@ works with the old client (it only adds fields to its answer), but it needs the 
 
 ## 3. Database
 
+**`badge_rewards` (v2.0.0).** What each badge pays, seeded from `badges.mjs` in `migration-wallet.sql`.
+`award_badges` used to credit the amount its caller handed it; it now names the badges and the table prices
+them. Two things to know: an id with no row is **skipped and not recorded**, so it pays the first season
+after the migration that adds it (raising would fail every submission if the function shipped first), and
+the seed **overwrites** rather than only adding missing rows, unlike `shop_items` - a badge's price is not a
+runbook setting, because the browser prints it from `badges.mjs`. A new badge is a `badges.mjs` entry **and**
+a re-run of `migration-wallet.sql`. RLS on, no policies, `revoke all` from anon and authenticated.
+
 All new SQL is re-runnable and follows PROFILES.md 3's rules: `set search_path = public, pg_temp` on every
 function, `stable` for reads, every `order by` fully tiebroken, a refusal raised as its code
 (`raise exception 'not_enough' using errcode = 'P0001'`), and `revoke execute ... from public, anon, authenticated`

@@ -73,10 +73,13 @@ export const bioLength = (text) => [...String(text ?? "")].length;
 // whatever client sent it - so this has to be what Postgres does, character for character, and it is NOT
 // cleanBio. Two differences, both found by the sequence tests/test-moderation.mjs runs through the mock
 // and the real SQL side by side:
-//   - the whitespace collapsed is the ASCII set Postgres's \s matches. JS's \s also takes a non-breaking
-//     space and the other Unicode spaces; Postgres's does not, so collapsing them here would let a note
-//     the database counts as 201 characters through at 199.
-//   - the ends are trimmed of plain spaces only, which is what btrim does.
+//   - the whitespace collapsed is the six ASCII characters, spelled out on both sides. It is NOT Postgres's
+//     \s, which is [[:space:]] and resolved through LC_CTYPE - ASCII under C, but under the en_US.UTF-8 a
+//     Supabase database is created with it also takes U+0085, U+2000-U+200A, U+2028, U+2029, U+205F and
+//     U+3000. Matching \s would therefore have meant one rule in the tests (PGlite is C) and another in
+//     production, so report_player spells the class out too and neither side depends on the locale.
+//   - the ends are trimmed of plain spaces only, which is what btrim does. JS's own trim() would also take
+//     the non-breaking and other Unicode spaces, and the database does not.
 const NOTE_SPACE = /[ \t\n\r\f\v]+/g;
 export function cleanNote(text) {
   return String(text ?? "")

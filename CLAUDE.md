@@ -806,11 +806,16 @@ suite and still broke the live Leaderboard for every existing account.
   **Any match in flight has to be abandoned first** (`update matches set status = 'abandoned' where status =
   'drafting';`) - who leads which board is now seeded on the match code, so a match already under way would
   replay to a different board order than it was drafted from.
-  v2.0.0's (the public release): re-run **`migration-profiles.sql`**, **`migration-runs-log.sql`**,
+  v2.0.0's (the public release): re-run **`migration-runs-log.sql`**, **`migration-profiles.sql`**,
   **`migration-moderation.sql`** and **`migration-wallet.sql`**, in that order, then **deploy the Edge
-  Functions**, then the client. profiles goes first, unlike v1.11.0's order: `site_stats` and `best_gm` in
-  runs-log now read `profiles.guest`, and profiles is what adds the column. All four only add or replace
-  objects, so the site keeps working between them.
+  Functions**, then the client. All four only add or replace objects, so the site keeps working between
+  them. Runs-log goes first, as it did in v1.11.0, and it has to: `player_profile` in migration-profiles.sql
+  calls `player_stats(uuid)`, which only runs-log defines, and a `language sql` body is validated when it is
+  created - so profiles-first fails outright on a database that doesn't already have it. It works on staging
+  and production either way (both have had `player_stats` since v1.11.0) and fails on a new environment,
+  which is the worst shape for a runbook to be in. The other direction is fine: runs-log reads
+  `profiles.guest`, and every database this order will ever run against has had it since v1.17.0 or gets it
+  from `schema.sql`.
   What is in each: profiles/runs-log carry the guest column, the name snapshots and the `collate "C"` tiebreaks
   from phase 2, and `profiles.rev`, which is what stops a finished season being overwritten by the abandoned
   draft that "Run it back" fires - **the Edge Function will not save a season without it**, so that one is not

@@ -3,6 +3,7 @@
 // the most weight is the one about what is never stored - everything that isn't this site's own files, which
 // is every account, leaderboard, wallet and submit-run call.
 import { execFileSync } from "node:child_process";
+import vm from "node:vm";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,6 +94,8 @@ await runTest("build.mjs writes a worker stamped with this exact build", async (
   }
   assert(first.html.includes('rel="manifest"'), "the page links the manifest, without which no browser offers to install it");
   assert(first.js.includes("/sw.js"), "the bundle registers it");
+  assert(first.sw.includes("/how-to-play") && first.sw.includes("/privacy"),
+    "the worker knows the pages that have a file of their own, from site-paths.mjs");
   assert(/<meta name="theme-color" content="[^"]+"/.test(first.html), "the page ships a theme colour for the app to keep in step");
 
   // The bundle's name never changes, so the stamp is the only thing that can tell two builds apart: a deploy
@@ -177,6 +180,77 @@ await runTest("an installed copy is painted the colour of the screen it's on", a
   await click(tab("Modes"));
   await flush(3);
   assert(colour() === THEME.light.bg, `and everything else is cream, got ${colour()}`);
+});
+
+
+// pageKey is tested above as a pure function, which says nothing about whether the worker CALLS it -
+// reverting keyFor to `(request) => request` left this whole suite green. And the built file is minified,
+// so reading it for names proves nothing either. So: run it. This drives public/sw.js's own fetch handler
+// against a stand-in Cache API and asks what it really stored, and under what.
+await runTest("the worker that ships files a page under its path, not the address it was asked for", async () => {
+  execFileSync(process.execPath, ["build.mjs"], {
+    cwd: root, stdio: "pipe",
+    env: { ...process.env, APP_ENV: "staging", SITE_URL: SITE, SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "k" },
+  });
+  const source = readFileSync(path.join(root, "public", "sw.js"), "utf8");
+
+  const store = new Map();
+  const keyOf = (r) => (typeof r === "string" ? r : r.url);
+  const cache = {
+    put: async (req, res) => { store.set(keyOf(req), res); },
+    match: async (req) => store.get(keyOf(req)),
+    add: async () => {},
+    keys: async () => [...store.keys()],
+  };
+  const listeners = {};
+  const sandbox = {
+    self: {
+      addEventListener: (name, fn) => { listeners[name] = fn; },
+      location: { origin: SITE },
+      skipWaiting: async () => {},
+      clients: { claim: async () => {} },
+      caches: null,
+    },
+    caches: { open: async () => cache, keys: async () => [], delete: async () => {}, match: async (r) => cache.match(r) },
+    fetch: async (req) => ({ ok: true, status: 200, type: "basic", url: keyOf(req), clone() { return this; } }),
+    URL, Set, Map, Promise, console,
+  };
+  sandbox.self.caches = sandbox.caches;
+  vm.createContext(sandbox);
+  vm.runInContext(source, sandbox);
+  assert(typeof listeners.fetch === "function", "the built worker registers a fetch handler");
+
+  const ask = async (url) => {
+    const answered = [], waits = [];
+    listeners.fetch({
+      request: { url, method: "GET", mode: "navigate" },
+      respondWith: (p) => answered.push(p),
+      waitUntil: (p) => waits.push(p),
+    });
+    await Promise.all(answered).catch(() => {});
+    await Promise.all(waits).catch(() => {});
+  };
+
+  // The one that matters: signing in with Google comes back to /?code=<authorization code>.
+  await ask(`${SITE}/?code=4%2F0AY0e-SECRETCODE`);
+  let keys = [...store.keys()];
+  assert(keys.length === 1 && keys[0] === `${SITE}/`, `the shell is filed under "/" alone: ${keys.join(", ")}`);
+  assert(!keys.some((k) => k.includes("SECRETCODE")), "and the authorization code is nowhere in the store");
+
+  // Twenty shared links are one entry, not twenty - nothing prunes this store but the next release.
+  for (const u of [`${SITE}/c/ABC123?beat=20-0`, `${SITE}/c/ZZZ999`, `${SITE}/u/somebody`, `${SITE}/vs/QWE456`]) await ask(u);
+  keys = [...store.keys()];
+  assert(keys.length === 1, `every address served the shell is the same entry: ${keys.join(", ")}`);
+
+  // A page with a file of its own keeps its own key, or offline /privacy would be the game.
+  await ask(`${SITE}/privacy`);
+  assert(store.has(`${SITE}/privacy`) && store.has(`${SITE}/`), `/privacy is its own entry: ${[...store.keys()].join(", ")}`);
+
+  // And opening one of our own FILES in a tab is a navigation too. Filed under "/", it served that file in
+  // place of the game to everything that falls back to the shell.
+  const shellBefore = await cache.match(`${SITE}/`);
+  await ask(`${SITE}/icon.svg`);
+  assert((await cache.match(`${SITE}/`)) === shellBefore, "opening /icon.svg in a tab does not replace the shell");
 });
 
 await close();

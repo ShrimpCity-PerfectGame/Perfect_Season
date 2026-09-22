@@ -377,6 +377,12 @@ SVG in Gridspin's style (cream/ink/lime/blue/orange/violet, ink strokes, like th
 
 ### 6.2 `avatar-picker.jsx` + `avatar-image.mjs` (agent D)
 
+**`report_player` (v2.0.0):** its note is no longer merely trimmed - it is cleaned the way a bio is
+(`cleanNote`, one line of plain text with the control, bidi and zero-width characters dropped), so
+`note_too_long` counts the cleaned text. It also raises **`guest_not_allowed`**: a guest account costs
+nothing to make, so six throwaways could put 24 open reports on somebody. `mod_act`'s rename clears `guest`
+on `profiles` and `sou_runs` as well as rewriting the username.
+
 **Accepted, and deliberate (v2.0.0):** the 25 MB limit is on the file's *bytes*, and nothing checks its
 *pixels* before decoding it. A two-page PNG can declare 30,000 x 30,000 and decode to ~3.6 GB, which ends the
 tab. It is left open because the only way to reach it is to choose such a file from your own file picker, the

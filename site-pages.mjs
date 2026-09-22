@@ -14,8 +14,9 @@ import { THEME } from "./theme.mjs";
 // The light scope's tokens, so the pages are painted in the same colors as the app.
 const T = THEME.light;
 
-export const HOWTO_PATH = "/how-to-play";
-export const BOARD_PATH = "/leaderboard";
+import { HOWTO_PATH, BOARD_PATH, PRIVACY_PATH } from "./site-paths.mjs";
+// The addresses live in site-paths.mjs, which the service worker also reads - see the note there.
+export { HOWTO_PATH, BOARD_PATH, PRIVACY_PATH } from "./site-paths.mjs";
 
 // Which site page an address names, or null for every other address (a profile, a challenge link, Modes).
 // A trailing slash is the same page: Vercel serves both, so both must open the same screen.
@@ -32,7 +33,7 @@ const b = (text) => ({ text, b: true });
 // The rules, exactly as the How to play dialog shows them (perfect-season.jsx's HowTo).
 export const HOWTO_STEPS = [
   ["Each round spins a ", b("team and a five-year era"), ", like “Rams, 1999–2005.” Draft one player from that board."],
-  ["Fill six spots: ", b("QB, RB, WR, TE, and two Flex"), ". A Flex can be any RB, WR, or TE — and it's graded on raw production rather than against his own position, with no upper limit, so ", b("your best player is often worth more in Flex"), " than in his natural spot."],
+  ["Fill six spots: ", b("QB, RB, WR, TE, and two Flex"), ". A Flex can be any RB, WR, or TE — and it's graded on raw production rather than against his own position, so ", b("your best player is often worth more in Flex"), " than in his natural spot."],
   ["Every player shows ", b("his best season"), " for that team in that era. The stats are real. The fantasy points are hidden."],
   ["You get ", b("one team re-spin and one era re-spin"), " per draft. Use them wisely."],
   ["Play ", b("unlimited"), " drafts any time, or take the ", b("daily"), " — one draft a day, the same boards for everyone."],
@@ -113,7 +114,7 @@ export const SITE_PAGES = [
     id: "howto",
     path: HOWTO_PATH,
     file: "how-to-play.html",
-    updated: "2026-09-20",
+    updated: "2026-09-22",
     nav: "How to play",
     title: "How to play Gridspin – football draft game rules",
     description: "How Gridspin works: spin a random NFL team and a five-year era, draft six real player seasons, then play 17 games and the playoffs. The rules, the scoring and the re-spins.",
@@ -141,7 +142,7 @@ export const SITE_PAGES = [
   },
   {
     id: "privacy",
-    path: "/privacy",
+    path: PRIVACY_PATH,
     file: "privacy.html",
     // PRIVACY_UPDATED in words, and this in the sitemap: change both together.
     updated: "2026-09-21",

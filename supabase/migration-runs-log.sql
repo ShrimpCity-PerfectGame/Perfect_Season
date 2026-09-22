@@ -190,10 +190,10 @@ returns jsonb language sql stable security invoker set search_path = public as $
     ),
     'most_drafted', (
       select coalesce(jsonb_agg(jsonb_build_object('name', d.name, 'season', d.season, 'team', d.team, 'count', d.n)
-                                order by d.n desc, d.name, d.season, d.team), '[]'::jsonb)
+                                order by d.n desc, d.name collate "C", d.season, d.team collate "C"), '[]'::jsonb)
         from (select entry->>'name' as name, (entry->>'season')::integer as season, entry->>'team' as team, count(*) as n
                 from entries group by 1, 2, 3
-               order by n desc, name, season, team limit 15) d
+               order by n desc, (entry->>'name') collate "C", season, (entry->>'team') collate "C" limit 15) d
     ),
     'most_wins', (
       select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.wins desc, p.username collate "C"), '[]'::jsonb)
@@ -214,9 +214,9 @@ returns jsonb language sql stable security invoker set search_path = public as $
     -- A minimum sample so a 1-0 account can't top a percentage board.
     'best_win_pct', (
       select coalesce(jsonb_agg(stats_card(to_jsonb(p)) || jsonb_build_object('pct', p.pct)
-                                order by p.pct desc, p.username), '[]'::jsonb)
+                                order by p.pct desc, p.username collate "C"), '[]'::jsonb)
         from (select *, wins::numeric / (wins + losses) as pct from played where wins + losses >= 3
-               order by pct desc, username limit p_limit) p
+               order by pct desc, username collate "C" limit p_limit) p
     ),
     'avg_win_pct', (
       select coalesce(round(100 * sum(wins)::numeric / nullif(sum(wins + losses), 0)), 0) from played

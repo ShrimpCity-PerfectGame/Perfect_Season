@@ -490,6 +490,13 @@ $$;
 -- a throwaway account as an ordinary one.
 alter table public.sou_runs add column if not exists guest boolean not null default false;
 alter table public.builds add column if not exists guest boolean not null default false;
+-- And the rows that were written before the column existed. The trigger below only stamps a row as it is
+-- written, so without this every Over/Under score and every build posted by a guest since v1.17.0 keeps
+-- `guest = false` - which is exactly the state the column was added to prevent. Worse than merely missing
+-- the chip: player_profile now refuses a guest, so those names render as ordinary links that lead to
+-- "there's no player with that name". Cheap, and a no-op on the second run.
+update public.sou_runs s set guest = true from public.profiles p where p.id = s.user_id and p.guest and not s.guest;
+update public.builds b set guest = true from public.profiles p where p.id = b.user_id and p.guest and not b.guest;
 -- The browser still writes sou_runs (Over/Under) and builds (Build-a-player) itself: schema.sql's policies
 -- only check that the row's user_id is the caller's. Scores there are taken on trust (CLAUDE.md), but what
 -- the boards and profiles show as text must not be.

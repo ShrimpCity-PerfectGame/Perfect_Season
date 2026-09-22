@@ -124,6 +124,9 @@ const REPORT_ERROR = {
   signed_out: "Log in to report a player.",
   missing: "We couldn't find that player. Their username may have changed.",
   invalid: `Pick a reason, and keep the note to ${REPORT_NOTE_MAX} characters.`,
+  // A guest can be made again and again, so reporting from one would let six throwaways put 24 open
+  // reports on somebody. The same rule as the daily, the shop and Duel, and it says so the same way.
+  guest: "Keep your seasons first - reports come from a full account, on the Account tab.",
   network: "The report didn't send. Check your connection and try again.",
 };
 

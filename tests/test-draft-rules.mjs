@@ -96,7 +96,10 @@ await runTest("the bot's handicap is a different player, not the same one twice"
   }
   assert(n > 100, `enough drafts to average over: ${n}`);
   const gap = (top / n) - (par / n);
-  assert(gap > 2, `par sits meaningfully below a no-handicap bot: gap ${gap.toFixed(2)} (mean par ${(par / n).toFixed(2)})`);
+  // 15, not 2. Measured on these same 120 drafts: 17.9 with the dedup, 12.9 without it - so a threshold of 2
+  // had six times the headroom the bug needed, and reverting the fix left the whole suite green. The floor is
+  // set just under the fixed value, which is what makes it a regression test rather than a formality.
+  assert(gap > 15, `par sits meaningfully below a no-handicap bot: gap ${gap.toFixed(2)} (mean par ${(par / n).toFixed(2)})`);
 });
 
 await runTest("a re-spin never hands you a team the draft already has", async () => {
@@ -143,6 +146,72 @@ await runTest("1v1's re-spins are not held to single player's sequence rules", a
   assert(looseNull <= strictNull, `1v1 is never the more restricted of the two: ${looseNull} vs ${strictNull}`);
   // ...and they really are different answers, or the flag would be doing nothing.
   assert(differed > 0, "the two modes genuinely get different candidates");
+});
+
+await runTest("a GM re-spin never deals a board nobody affordable is on", async () => {
+  // boardAt learned the cap in 2.0 and rerollCandidate did not, so the one control a player reaches for to
+  // escape a dead board could hand them another one - 1.17% of offered re-spins, 12.35% of seeds. The client
+  // and replayDraft pass the same cap now, so a re-spin the screen offers is one the server accepts.
+  let offered = 0, dead = 0;
+  for (let i = 0; i < 300; i++) {
+    const format = i % 2 ? "standard" : "fantasy";
+    const seed = `GMSPIN${i}`;
+    const seq = GL.seededSequence(seed);
+    const roster = {};
+    const drafted = new Set();
+    // Spend most of the cap on the first few boards, which is where the dead ends live.
+    let idx = GL.boardAt(seq, 0, roster, GL.capLeftFor(roster, { gm: true, format }));
+    for (let n = 0; n < 5 && idx >= 0; n++) {
+      const open = GL.SLOTS.filter((s) => !roster[s]);
+      const left = GL.capLeftFor(roster, { gm: true, format });
+      let best = null;
+      for (const p of GL.BOARDS[seq[idx]]) {
+        if (drafted.has(p.id) || GL.playerSalary(p, format) > left.left) continue;
+        for (const s of open) {
+          if (!GL.fits(p.pos, s)) continue;
+          const r = GL.effectiveRating(s, p, format);
+          if (!best || r > best.r) best = { p, s, r };
+        }
+      }
+      if (!best) break;
+      roster[best.s] = best.p; drafted.add(best.p.id);
+      idx = GL.boardAt(seq, idx + 1, roster, GL.capLeftFor(roster, { gm: true, format }));
+    }
+    if (idx < 0) continue;
+    const open = GL.SLOTS.filter((s) => !roster[s]);
+    const cap = GL.capLeftFor(roster, { gm: true, format });
+    const [team, w] = seq[idx].split("|");
+    for (const kind of ["team", "years"]) {
+      const next = GL.rerollCandidate({ seed, kind, seqIdx: idx, spinTeam: team, spinW: Number(w),
+        shown: new Set(seq), drafted, open, cap, sequenceRules: true });
+      if (!next) continue;
+      offered++;
+      if (!GL.boardHasOption(next, drafted, open, cap)) dead++;
+    }
+  }
+  assert(offered > 200, `enough re-spins to be measuring anything: ${offered}`);
+  assert(dead === 0, `${dead} of ${offered} GM re-spins landed on a board nobody affordable is on`);
+});
+
+await runTest("a rescued par is a benchmark, not a bad player", async () => {
+  // When the greedy bot spends itself out of a roster, par used to come from a walk taking the CHEAPEST man
+  // who fits - which is not a benchmark. Par fell as low as 41.6 against a median of 91, and draftPoints
+  // (500 x (score/par - 0.85)) turned a 95-point season into 717 ladder points instead of 97. Codes are the
+  // client's own choice, so that is a seed worth hunting: about one try in 167.
+  const pars = [];
+  for (let i = 0; i < 600; i++) {
+    const format = i % 2 ? "standard" : "fantasy";
+    const r = playGreedily(`PARFLOOR${i}`, { format, gm: true });
+    if (r.stuck) continue;
+    const p = GL.botPar(r.keys, { format, gm: true });
+    if (p != null) pars.push(p);
+  }
+  assert(pars.length > 400, `enough finished GM drafts: ${pars.length}`);
+  const worst = Math.min(...pars);
+  // A collapsed par is what it looks like; an honestly low one sits in the same band as a no-cap draft's.
+  assert(worst > 65, `the lowest par is still a real benchmark: ${worst.toFixed(1)}`);
+  assert(GL.draftPoints(95, worst) < 350,
+    `and a strong season against it cannot run away with the ladder: ${GL.draftPoints(95, worst)} points`);
 });
 
 console.log("test-draft-rules.mjs done");

@@ -131,7 +131,14 @@ console.log("vercel.json");
 const vercel = JSON.parse(readFileSync(path.join(root, "vercel.json"), "utf8"));
 const rule = (vercel.headers || []).find((h) => h.headers.some((x) => x.key === "X-Robots-Tag" && x.value === "noindex"));
 const hostRe = rule && new RegExp(`^${rule.has.find((c) => c.type === "host").value}$`);
-check("every *.vercel.app address sends noindex", !!hostRe && ["perfect-season-t9sk.vercel.app", "perfect-season-beta.vercel.app", "perfect-season-staging.vercel.app"].every((h) => hostRe.test(h)));
+// Staging and any other *.vercel.app copy are told to stay away. The two ORIGINAL production addresses are
+// not: they serve production's own HTML, whose canonical points at www.gridspin.app - and a noindex on a
+// page that points at another is the one signal pair that can carry the noindex across to it. This test used
+// to require all three to match, which is why the exemption shipped inert for a release: the `$` in
+// `(?!perfect-season-t9sk$|...)` anchored to the end of the HOST, so the lookahead could never fire, and the
+// assertion that would have caught it was asserting the bug.
+check("staging and other *.vercel.app copies send noindex", !!hostRe && hostRe.test("perfect-season-staging.vercel.app") && hostRe.test("some-preview-xyz.vercel.app"));
+check("the two legacy production addresses do not", !!hostRe && !hostRe.test("perfect-season-t9sk.vercel.app") && !hostRe.test("perfect-season-beta.vercel.app"));
 check("gridspin.app itself is never noindexed", !!hostRe && !hostRe.test("gridspin.app") && !hostRe.test("www.gridspin.app"));
 check("challenge links (/c/CODE) serve the app", (vercel.rewrites || []).some((r) => r.source === "/c/:code" && r.destination === "/page.html"));
 check("challenge links with a trailing slash serve the app too", (vercel.rewrites || []).some((r) => r.source === "/c/:code/" && r.destination === "/page.html"));

@@ -116,7 +116,11 @@ export async function checkLayout(page) {
         out.push({ kind: "off-screen", detail: `${label(el)} spans ${Math.round(r.left)}..${Math.round(r.right)} of ${vw}` });
       }
       const s = getComputedStyle(el);
-      if ((s.overflow === "hidden" || s.overflowX === "hidden" || s.textOverflow === "ellipsis") && el.scrollWidth > el.clientWidth + 2 && el.childNodes.length && el.textContent.trim()) {
+      // A visually-hidden element is a 1px box with overflow:hidden holding a whole sentence, which is
+      // exactly the shape of a clipped one. Every heading and label the accessibility pass added reads as
+      // a clip here, and forty of them drowned the check that is supposed to find a real one.
+      const hiddenForScreenReaders = el.clientWidth <= 1 || el.clientHeight <= 1;
+      if (!hiddenForScreenReaders && (s.overflow === "hidden" || s.overflowX === "hidden" || s.textOverflow === "ellipsis") && el.scrollWidth > el.clientWidth + 2 && el.childNodes.length && el.textContent.trim()) {
         out.push({ kind: "clipped-text", detail: `${label(el)} content ${el.scrollWidth}px in ${el.clientWidth}px` });
       }
       const ownText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
@@ -124,8 +128,21 @@ export async function checkLayout(page) {
     }
 
     const targets = [...document.querySelectorAll(".ps button, .ps a, .ps input, .ps select, .ps textarea, .ps [role=button]")].filter(visible);
-    for (const el of targets) {
+    // What a finger can actually hit. Text links and pills keep their look and get an invisible ::after
+    // reaching past their edges instead of a min-height (CLAUDE.md, the 1.8.0 phone audit), and
+    // getBoundingClientRect cannot see a pseudo-element - so every name on the Leaderboard read as a 17px
+    // target, 650 of them in one sweep, and the real ones were lost in the list. This reads the ::after's
+    // own insets and grows the box by them, which is what the rule was written to do.
+    const hitBox = (el) => {
       const r = el.getBoundingClientRect();
+      const a = getComputedStyle(el, "::after");
+      if (!a || a.content === "none" || a.position !== "absolute") return { width: r.width, height: r.height };
+      const px = (v) => (v && v.endsWith("px") ? parseFloat(v) : 0); // auto, or a percentage, adds nothing we can measure
+      const width = Math.max(r.width - px(a.left) - px(a.right), px(a.minWidth));
+      return { width, height: r.height - px(a.top) - px(a.bottom) };
+    };
+    for (const el of targets) {
+      const r = hitBox(el);
       if (r.height < 44 || r.width < 44) out.push({ kind: r.height < 24 || r.width < 24 ? "tap-target-under-24px" : "tap-target-under-44px", detail: `${label(el)} is ${Math.round(r.width)}x${Math.round(r.height)}` });
       if (/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) && parseFloat(getComputedStyle(el).fontSize) < 16) {
         out.push({ kind: "ios-zooms-on-focus", detail: `${label(el)} font-size ${getComputedStyle(el).fontSize} (iOS zooms inputs under 16px)` });

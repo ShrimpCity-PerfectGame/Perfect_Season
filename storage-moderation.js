@@ -10,6 +10,10 @@ import { AVATAR_BUCKET, isOwnAvatarPath } from "./profile-rules.mjs";
 const REPORT_REFUSALS = {
   limit: "limit", duplicate: "duplicate", self: "self", not_signed_in: "signed_out",
   no_such_player: "missing", bad_reason: "invalid", note_too_long: "invalid",
+  // A guest may not report, for the reason a guest may not play the daily: the account costs nothing to
+  // make, so six throwaways would put 24 open reports on somebody. Unmapped, this fell through to
+  // "network" and told them their connection had failed - forever, for a rule rather than a fault.
+  guest_not_allowed: "guest",
 };
 const MOD_REFUSALS = {
   not_moderator: "not_moderator", taken: "taken", blocked: "blocked", invalid: "invalid",

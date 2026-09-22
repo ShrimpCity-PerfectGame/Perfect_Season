@@ -286,7 +286,7 @@ export function capLeftFor(roster, { gm, format } = {}) {
 // completed drafts used to hold the same team twice, 27.3% one era more than twice. 1v1 shares this
 // function and does NOT share those rules: it deals eight boards, and versus-logic.mjs decides for itself
 // what a board has to be able to do (VERSUS.md 8). So it is off unless asked for.
-export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, drafted, open, sequenceRules = false }) {
+export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, drafted, open, cap = null, sequenceRules = false }) {
   // What the planned sequence already holds, by team and by era. seededSequence builds every draft to
   // "no team twice, no era more than twice" - and a re-spin used to ignore both, checking only that the
   // exact team|era pair was unseen. So a team re-spin could hand you a team already queued later under
@@ -301,9 +301,14 @@ export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, dr
   // 11.9% of completed drafts used to do.
   const teams = new Set();
   for (const key of shown) teams.add(key.split("|")[0]);
+  // `cap` matters as much here as it does in boardAt. The dealer skips a board nobody affordable is on;
+  // the re-spin did not, so in GM it could hand you a board whose every Lock in is disabled - which is the
+  // dead end this release set out to close, reached by the one control a player reaches for to escape it.
+  // Measured before the fix: 1.17% of offered re-spins landed on a dead board, and 12.35% of GM seeds held
+  // at least one. replayDraft passes the same cap from the roster it is rebuilding, so the two agree.
   const match = (key) => {
     const [t, w] = key.split("|");
-    if (shown.has(key) || !boardHasOption(key, drafted, open)) return false;
+    if (shown.has(key) || !boardHasOption(key, drafted, open, cap)) return false;
     if (kind !== "team") return t === spinTeam;          // same team, another era: never a repeat
     return Number(w) === spinW && (!sequenceRules || !teams.has(t));
   };
@@ -360,7 +365,7 @@ export function replayDraft(seed, history, seq, { gm = false, format } = {}) {
       else if (team === prevTeam && Number(w) !== Number(prevW)) kind = "years";
       else return fail("reroll insertion doesn't share a team or era with the board it replaced");
       if (rerollsUsed[kind] >= REROLL_BUDGET) return fail(`more than ${REROLL_BUDGET} ${kind} reroll(s) used`);
-      const expected = rerollCandidate({ seed, kind, seqIdx: si - 1, spinTeam: prevTeam, spinW: Number(prevW), shown, drafted, open, sequenceRules: true });
+      const expected = rerollCandidate({ seed, kind, seqIdx: si - 1, spinTeam: prevTeam, spinW: Number(prevW), shown, drafted, open, cap: capLeftFor(roster, { gm, format }), sequenceRules: true });
       if (expected !== key) return fail("reroll result doesn't match what this seed would produce");
       rerollsUsed[kind]++;
       shown.add(key);
@@ -514,14 +519,65 @@ export const LADDERS = ["daily", "unlimited", "genius", "gm"];
 // for this draft" rather than an error.
 export function botPar(boardKeys, { format, gm } = {}) {
   if (!Array.isArray(boardKeys) || boardKeys.length !== SLOTS.length) return null;
-  // Two passes under a salary cap. The first is the real bot; if IT paints itself into a corner - the
-  // pick is greedy, so it can spend itself out of a legal roster on boards a human completed - the
-  // second walks the same boards taking the cheapest man who fits, which is what somebody short of cap
-  // actually does and all but always finishes. Only if even that can't field a roster is there no par.
-  // The alternative was `null`, and draftPoints turns null into ZERO points for a season that was
-  // played properly: 2.2% of finished GM seasons scored nothing at all.
-  return botWalk(boardKeys, { format, gm, cheapest: false })
-    ?? (gm ? botWalk(boardKeys, { format, gm, cheapest: true }) : null);
+  // The real bot: greedy, holding back what the slots after this one will cost.
+  const par = botWalk(boardKeys, { format, gm, cheapest: false });
+  if (par != null || !gm) return par;
+
+  // It painted itself into a corner - the pick is greedy, so on 0.6% of finished GM drafts it spends
+  // itself out of a legal roster on boards a human completed. Answering `null` was worse than wrong:
+  // draftPoints turns null into ZERO points for a season that was played properly, and 2.2% of finished
+  // GM seasons scored nothing at all.
+  //
+  // The first answer to that was a spend-least walk, and it was wrong in the other direction. A bot
+  // taking the cheapest man who fits is not a benchmark, it is a bad player: measured over 4,000 GM
+  // drafts it put par as low as 41.6 against a median of 91, and draftPoints - 500 x (score/par - 0.85)
+  // - turned a 95-point season into 717 ladder points instead of 97. Free-mode codes are the client's
+  // own choice (the accepted gap in CLAUDE.md), so that is a seed worth hunting for: about one try in
+  // 167, no 20-0 needed, just a draft that finishes.
+  //
+  // So when the bot can't finish, par is what a typical draft gets out of the boards it was dealt.
+  // Measured over 7,300 drafts in both modes and both formats, par lands at 0.674-1.067 of the best
+  // those six boards could give, median 0.836 without a cap and 0.828 with one - a tight enough band
+  // that the middle of it is a fairer stand-in than either extreme. The cheapest walk still sets the
+  // floor, so a rescue is never scored as worse than the one roster we know completes.
+  const cheap = botWalk(boardKeys, { format, gm, cheapest: true });
+  const best = bestPossible(boardKeys, format);
+  if (best == null) return cheap;
+  return Math.max(cheap ?? 0, PAR_TYPICAL_SHARE * best) || null;
+}
+
+// The share of a draft's best-possible team score that par usually comes to. Measured, not chosen: see
+// botPar. Only the rescue path reads it, so an ordinary draft's par is exactly what it always was.
+const PAR_TYPICAL_SHARE = 0.83;
+
+// The best weighted score those boards can give, handicap and cap aside - a greedy walk with no reserve
+// and nothing held back, which is the ceiling the share above is a share of.
+function bestPossible(boardKeys, format) {
+  const roster = {};
+  const drafted = new Set();
+  for (const key of boardKeys) {
+    const open = SLOTS.filter((s) => !roster[s]);
+    let best = null;
+    for (const p of BOARDS[key] || []) {
+      if (drafted.has(p.id)) continue;
+      for (const s of open) {
+        if (!fits(p.pos, s)) continue;
+        const r = effectiveRating(s, p, format);
+        if (!best || r > best.r) best = { p, s, r };
+      }
+    }
+    if (!best) return null;
+    roster[best.s] = best.p;
+    drafted.add(best.p.id);
+  }
+  let total = 0, weight = 0;
+  for (const s of SLOTS) {
+    if (!roster[s]) return null;
+    const w = s === "QB" ? QB_WEIGHT : 1;
+    total += effectiveRating(s, roster[s], format) * w;
+    weight += w;
+  }
+  return total / weight;
 }
 
 function botWalk(boardKeys, { format, gm, cheapest } = {}) {

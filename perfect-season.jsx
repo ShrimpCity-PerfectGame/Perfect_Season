@@ -743,7 +743,7 @@ p.gamecoins .earned{display:flex}
 .lb td.r,.lb th.r{text-align:right}
 .lb tr.me td{background:color-mix(in srgb,var(--accent) 30%,transparent)}
 .lb .rk{font-family:var(--display);font-weight:400;font-size:22px;width:36px}
-.you{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--on-accent);background:var(--accent);
+.you{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--on-accent);background:var(--accent);
   border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:2px}
 .lb .crown{position:absolute;left:2px;top:0;font-size:16px;transform:rotate(-14deg)}
 /* Leaderboard in black: giant ranks, lime for #1 only, and your own row outlined. */
@@ -826,7 +826,7 @@ p.gamecoins .earned{display:flex}
 .sticky .pk{font-size:12px;color:var(--muted)}
 .sticky .sp{margin-left:auto;display:flex;gap:6px}
 .chips{display:flex;gap:4px}
-.chip{font-size:11px;font-weight:800;padding:3px 6px;border-radius:5px;border:1px dashed var(--line2);color:var(--muted)}
+.chip{font-size:12px;font-weight:800;padding:3px 6px;border-radius:5px;border:1px dashed var(--line2);color:var(--muted)}
 /* The slot a chip's colour stands for, said in letters as well - the colour is the decoration, not the fact. */
 .chip-slot{opacity:.75;letter-spacing:.04em}
 /* Reads as the h3 it used to be: it's a heading level, not a size (the level below the screen's own name). */
@@ -2214,6 +2214,14 @@ export default function PerfectSeason() {
   // One more go before believing a bad answer. supabase-js retries a dropped GET itself, but not a 500,
   // 502, 504 or 429 - and this read decides whether somebody is signed in at all, so it is worth more
   // patience than a read that only fills in a number somewhere.
+  // Who is signed in when the app could NOT read their profile - see adoptSession. A ref, because the path
+  // that has to respect it (finishing a season) does not re-render when it changes.
+  const sessionUnread = useRef(null);
+
+  // What the SIGNED_OUT handler reads to tell a draft in progress from a season already played.
+  const resultRef = useRef(null);
+  useEffect(() => { resultRef.current = result; }, [result]);
+
   const readProfileTwice = async (id) => {
     try {
       return await fetchProfile(id);
@@ -2242,12 +2250,20 @@ export default function PerfectSeason() {
       // and claim_username then answered `already_named`, so its own form could never get out either.
       // Leaving the screen alone is the honest answer: nothing is claimed about who this is.
       setNotice("Your account didn't load. Reload the page to try again.");
+      // And remember that somebody IS signed in, even though we can't say who. Without this the app
+      // believes nobody is: finishing a season took the signed-out path, signed in a brand-new anonymous
+      // guest, and Supabase replaced the live session with it - so a real account was evicted and its
+      // season posted under a throwaway that can never be merged back. The notice alone was not enough,
+      // because the effect that clears a notice on the next view change took it away while this remained.
+      sessionUnread.current = id;
       return;
     }
     if (prof) {
+      sessionUnread.current = null;
       setNeedsName(null);
       setUserId(id); setUser(prof.username); setStats(prof); loadAccountExtras(id);
     } else {
+      sessionUnread.current = null;
       setNeedsName({ id, email: session.user.email || "" });
     }
   };
@@ -2268,6 +2284,18 @@ export default function PerfectSeason() {
         // than in logOut because every way out of an account comes through this event.
         clearDraftTracked("free", FREE_PROGRESS);
         setWip((w) => ({ ...w, free: null }));
+        // And the one on screen, if a draft is actually in progress. Clearing only the stored copy left it
+        // live in React state, where playUnlimited short-circuits on it before it ever reads storage - so
+        // Bob was handed Alice's board anyway, and the snapshot effect (which stops at `!mode`) wrote it
+        // straight back under her owner stamp. The play screen has a no-draft branch of its own, so
+        // dropping it is safe. A FINISHED season is left alone: its result screen is what the player is
+        // looking at, it can't be inherited (both the snapshot effect and playUnlimited stop at `result`),
+        // and taking it away would delete the thing they just earned. The ref is because this handler is
+        // registered once, so it would close over the first render's `result` forever.
+        if (!resultRef.current) {
+          setMode(null); setSpin(null); setHistory([]); setUsed([]); setSeq([]); setSeqIdx(0);
+          setRoster({}); setSelected(null);
+        }
       }
       // Coming back from Google lands here, not in the read above: supabase-js takes the session out of
       // the address after the page has already mounted.
@@ -2592,7 +2620,7 @@ export default function PerfectSeason() {
   // Keep the draft in progress on this device so a reload doesn't lose it
   useEffect(() => {
     if (!draftReady || result || !spin || !mode) return;
-    const snap = { history, spin: spinTarget.current || spin, used, rerolls, mode, seq, seqIdx };
+    const snap = { history, spin: spinTarget.current || spin, used, rerolls, mode, seq, seqIdx, rules: DRAFT_RULES };
     sset(DRAFT_KEY, snap, false);
     sset(mode.kind === "daily" ? DAILY_PROGRESS(mode.date, mode.format) : FREE_PROGRESS, snap, false);
     setWip((w) => ({ ...w, [slotId(mode)]: history.length }));
@@ -2678,7 +2706,12 @@ export default function PerfectSeason() {
       if (res.ok) {
         // The balance the save left, straight from its answer, for a profile card that's already open.
         if (res.coins && account === accountReq.current) onShopBalance(res.coins.balance);
-        fresh = await fetchProfile(uid);
+        // Caught here, and never allowed to turn a save that WORKED into one the player is told failed.
+        // fetchProfile throws now - a dropped read is not "this account has no profile" - and this call
+        // sits after submitRun has already succeeded, so the throw was reaching the catch below: saveError
+        // on a season that really was recorded, its coins and badges hidden with it, and a message nothing
+        // clears until the next save.
+        fresh = await fetchProfile(uid).catch(() => null);
         if (fresh && account === accountReq.current) {
           setStats(fresh);
           // The name as it is now: a moderator may have renamed this account since it signed in, and the shop and
@@ -2698,7 +2731,11 @@ export default function PerfectSeason() {
   }
 
   async function onAuthed(uid, username, isNew) {
-    let s = (await fetchProfile(uid)) || blankStats(username);
+    // The account exists and the session is live by the time this runs, so a dropped read must not undo
+    // either: it threw out of here into AuthPanel's catch, which said "Something went wrong. Try again."
+    // over a signup that HAD succeeded - and pressing the button again answered "already exists", with the
+    // app still showing signed out over a real session. An empty card is recoverable; that was not.
+    let s = (await readProfileTwice(uid).catch(() => null)) || blankStats(username);
     const notes = [];
     if (isNew) {
       // Bring over seasons played on this device before accounts existed - display-only now:
@@ -2777,7 +2814,10 @@ export default function PerfectSeason() {
   async function postAsGuest(trace, runId) {
     const { data, error } = await authSignInAsGuest();
     const uid = data?.user?.id;
-    const prof = uid ? await fetchProfile(uid) : null;
+    // Caught, and given a second go: the guest account already exists by now, so an uncaught read rejected
+    // out of a call nobody awaits - leaving a live guest session the app could not see, a season that was
+    // never submitted, and nothing at all on screen. The next finished season then made a SECOND throwaway.
+    const prof = uid ? await readProfileTwice(uid).catch(() => null) : null;
     if (error || !prof) {
       setNotice("That season couldn't be posted. Make an account and it'll be saved.");
       return;
@@ -2924,8 +2964,36 @@ export default function PerfectSeason() {
   // `daily_last` and the streak were credited for a day that was never played - deal one each night
   // and finish it each morning and a skipped day is banked. Worse further out: past that window the
   // server refuses it outright and the whole finished season is lost.
+  // A saved draft carries the rules it was drafted under, because submit-run recomputes every re-spin
+  // from the seed when the season is handed in - and v2.0.0 changed what a TEAM re-spin produces (it may
+  // no longer hand you a team the draft already holds, which is seededSequence's own rule). Measured over
+  // 3,000 seeds, 69.7% of team re-spins land on a different board now. A draft re-spun on the old client
+  // and finished on the new server is therefore rejected as an illegal roster - and finish() has already
+  // marked the day used and cleared the snapshot by the time that answer arrives, so a daily would simply
+  // be gone. Era re-spins are untouched (3,000 of 3,000 identical), and so is a draft that never re-spun.
+  //
+  // Such a snapshot is not valid, which is the whole fix: it is never resumed, abandonCurrent charges a
+  // DNF only for a draft validDraft accepts, and a daily whose snapshot is dropped is simply dealt again,
+  // because dailyDone is a separate flag that an unfinished daily never set. Nobody loses anything but the
+  // boards they were part-way through, and only across the one release.
+  const DRAFT_RULES = 2; // bump whenever a game-logic.mjs change makes an already-saved `seq` unreplayable
+  const wouldBeRejected = (s) => {
+    if (s.rules >= DRAFT_RULES || !Array.isArray(s.seq) || !s.mode?.seed) return false;
+    const base = new Set(seededSequence(s.mode.seed));
+    for (let i = 1; i < s.seq.length; i++) {
+      if (base.has(s.seq[i])) continue; // an entry the seed itself planned - not a re-spin
+      const [team, w] = String(s.seq[i]).split("|");
+      const [prevTeam, prevW] = String(s.seq[i - 1]).split("|");
+      if (Number(w) === Number(prevW) && team !== prevTeam) return true; // a team re-spin, under the old rule
+      // And in GM, EITHER kind: rerollCandidate takes the cap now, so it draws from a smaller pool than
+      // the old client did and the seeded pick lands elsewhere.
+      if (s.mode.gm) return true;
+    }
+    return false;
+  };
   const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history)
     && BOARDS[`${s.spin.team}|${s.spin.w}`] && s.history.every((h) => findPlayer(h.key, h.id, h.season))
+    && !wouldBeRejected(s)
     && (s.mode.kind !== "daily"
       || (s.mode.date === todayKey() && s.mode.seed === dailySeed(s.mode.date, s.mode.format)));
   // Whether abandoning a saved draft costs this account a DNF: one with picks, or one this account dealt.
@@ -2975,7 +3043,9 @@ export default function PerfectSeason() {
     // later when sequential advancement reaches its old spot.) rerollCandidate (game-logic.mjs)
     // mirrors this selection exactly, so a server-side replay can reproduce the same pick.
     const shown = new Set(seq);
-    const next = rerollCandidate({ seed: mode.seed, kind, seqIdx, spinTeam: spin.team, spinW: spin.w, shown, drafted: d, open: o, sequenceRules: true });
+    // The cap goes in, or a re-spin can deal a board nobody affordable is on - and replayDraft passes the
+    // same one from the roster it rebuilds, so a re-spin the screen offers is a re-spin the server accepts.
+    const next = rerollCandidate({ seed: mode.seed, kind, seqIdx, spinTeam: spin.team, spinW: spin.w, shown, drafted: d, open: o, cap: capLeftFor(roster, { gm: mode.gm, format: mode.format }), sequenceRules: true });
     if (!next) return;
     const n = [...seq]; n.splice(seqIdx + 1, 0, next);
     setSeq(n); setSeqIdx(seqIdx + 1); setUsed([...used, next]);
@@ -3070,7 +3140,11 @@ export default function PerfectSeason() {
       if (!user) {
         setPending(trace);
         pendingRun.current = sim.runId;
-        if (mode.kind !== "daily") postAsGuest(trace, sim.runId);
+        // Not if somebody is already signed in and we simply couldn't read them: taking a guest account
+        // here would sign the real one out. The season waits in `pending` instead, which is what it is
+        // for - the next successful read posts it under the account it belongs to.
+        if (mode.kind !== "daily" && !sessionUnread.current) postAsGuest(trace, sim.runId);
+        else if (sessionUnread.current) setNotice("Your account didn't load, so this season is waiting. Reload the page and it'll be saved.");
       }
       addSeasonContext(sim, fmt, saving, mode.kind === "daily" && user ? (stats?.dailyBestStreak || 0) : null);
       // Point the leaderboard at the format just played before refreshing it, so the rank shown
@@ -3191,11 +3265,23 @@ export default function PerfectSeason() {
   //
   // It is also the single place a DNF is charged for an abandoned free draft - resetDraft used to
   // charge one itself and then call restart(), which charged a second one for the same draft.
+  // Every caller reads the saved draft across an `await`, so two taps in one frame both saw it, both
+  // passed chargeableDraft and both charged: two DNFs and -100 ladder points for one draft. The mode tiles
+  // are deliberately big, forgiving targets on a phone, which makes that easy to do by accident. The second
+  // caller joins the first's work rather than being turned away, so whatever it goes on to do still waits
+  // for the abandon to finish.
+  const abandoning = useRef(null);
+
   async function abandonCurrent() {
-    const saved = await readFreeDraft();
-    if (validDraft(saved) && saved.mode.kind === "free" && chargeableDraft(saved)) recordDnf(saved.history.length, saved.mode);
-    clearDraftTracked("free", FREE_PROGRESS);
-    setWip((w) => ({ ...w, free: null }));
+    if (abandoning.current) return abandoning.current;
+    const job = (async () => {
+      const saved = await readFreeDraft();
+      if (validDraft(saved) && saved.mode.kind === "free" && chargeableDraft(saved)) recordDnf(saved.history.length, saved.mode);
+      clearDraftTracked("free", FREE_PROGRESS);
+      setWip((w) => ({ ...w, free: null }));
+    })();
+    abandoning.current = job;
+    try { return await job; } finally { abandoning.current = null; }
   }
 
   // The draft screen's Unlimited pill: back to the free draft already in progress, whatever its
@@ -4039,7 +4125,11 @@ export default function PerfectSeason() {
             <h2 className="locked-h">No draft going right now</h2>
             <p className="note" style={{ marginTop: 0 }}>Pick a mode to start one.</p>
             <div className="frow" style={{ marginTop: 10 }}>
-              <button className="btn solid" onClick={startDaily}>Play today's daily</button>
+              {/* Disabled until the session has loaded, like the challenge card's button: startDaily returns
+                  early without one, and a full-size, enabled primary control that answers a tap with nothing
+                  reads as broken. On a slow connection readProfileTwice's retry makes this seconds, not
+                  milliseconds. */}
+              <button className="btn solid" onClick={startDaily} disabled={!authReady}>Play today's daily</button>
               <button className="btn" onClick={playUnlimited}>Unlimited draft</button>
             </div>
           </div>
@@ -4774,7 +4864,9 @@ export default function PerfectSeason() {
             <h1 className="h">Build-a-player - {POS_NAME[bap.pos]}</h1>
             <div className="panel" style={{ textAlign: "center" }}>
               <p className="note" style={{ marginTop: 0 }}>{bap.spinPhase === "team" ? "Rolling a team..." : "Rolling their player..."}</p>
-              <h1 key={bap.displayTeam} className="title" style={{ margin: "10px 0", animation: "pop .15s ease-out" }}>{TEAMS[bap.displayTeam][0]}</h1>
+              {/* A p, not a heading. It was an h1, so the screen had two - and this one changes on every
+                  frame of the roll, which a screen reader announces each time as a top-level heading. */}
+              <p key={bap.displayTeam} className="title" style={{ margin: "10px 0", animation: "pop .15s ease-out" }}>{TEAMS[bap.displayTeam][0]}</p>
               {/* The player line is always there (hidden while the team rolls) so Cancel doesn't jump. */}
               <h3 key={bap.displayPlayer || "pending"} style={{ margin: 0, animation: "pop .15s ease-out", visibility: bap.spinPhase === "player" ? "visible" : "hidden" }}>{bap.displayPlayer || " "}</h3>
             </div>

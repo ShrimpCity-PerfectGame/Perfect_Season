@@ -1032,6 +1032,31 @@ await runTest("8c. a GM season must fit under the salary cap: an uncapped roster
     "index.ts refuses a GM roster over the cap, before its duplicate guard writes anything");
 });
 
+// Two rules that ship in files nothing in this suite executes. The mocks mirror the Edge Function and PGlite
+// runs the SQL, so both are checked - but the mirror is not the thing that ships, and PGlite's own collation
+// is C, which is the one setting under which the collate clauses do nothing. Both were verified by deleting
+// them: the whole suite stayed green. Read as text, the way the GM cap refusal above already is.
+await runTest("the rules that only exist in the deployed files are in the deployed files", async () => {
+  const index = readFileSync(new URL("../supabase/functions/submit-run/index.ts", import.meta.url), "utf8");
+  // profiles is a read-modify-write, so every write carries the revision it read. Without this a finished
+  // season is silently overwritten by the DNF that "Run it back" fires, while finished_codes keeps the code
+  // and the ledger keeps the coins - the one failure CLAUDE.md calls unrecoverable.
+  assert(/\.eq\("rev", *(row\.rev *\|\| *0|Number\(row\.rev\) *\|\| *0)\)/.test(index),
+    "applyToProfile guards its update on the rev it read");
+  assert(/rev: *\(?(row\.rev *\|\| *0)\)? *\+ *1/.test(index), "and bumps it, so the next writer sees the change");
+  const cas = index.indexOf('.eq("rev"');
+  assert(cas > index.indexOf("for (let attempt"), "inside the retry loop, not before it");
+
+  // Every username tiebreak in the Stats SQL sorts collate "C", because tests/helpers.mjs's JS mirror compares
+  // code points and a Supabase database is created en_US.UTF-8. PGlite is C, so the parity test cannot see a
+  // missing one - best_win_pct and most_drafted were both left out of the original sweep and nothing noticed.
+  const runs = readFileSync(new URL("../supabase/migration-runs-log.sql", import.meta.url), "utf8");
+  const orders = runs.split("\n").filter((l) => /order by/.test(l) && /username|entry->>'name'|\bname\b/.test(l) && !/^\s*--/.test(l));
+  const uncollated = orders.filter((l) => !/collate "C"/.test(l));
+  assert(orders.length >= 8, `enough username orderings to be checking the right thing: ${orders.length}`);
+  assert(uncollated.length === 0, `every one of them collates:\n  ${uncollated.join("\n  ")}`);
+});
+
 await runTest("8d. the same draft counts once: the same code in any variant or format is a duplicate, while a code's case and space variants are other seeds - other boards, needing their own legal draft, each counting once", async () => {
   const P = await signUp("codevariants");
   // A code whose first-pick draft fits the GM cap in both formats, so every variant below is a legal season.
