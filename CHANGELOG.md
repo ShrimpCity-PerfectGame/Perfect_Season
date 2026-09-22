@@ -24,7 +24,7 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
-## [1.19.0] — unreleased
+## [1.19.0] — 2026-09-21
 
 ### Added
 
@@ -100,7 +100,7 @@ a player — but it is written down because the shapes are worth remembering.
   on half a season's sacks — and the 2002 board offered a three-game fill-in as the team's kicker. 859 of each
   now, rather than 861 with two wrong.
 
-## [1.18.0] — unreleased
+## [1.18.0] — 2026-09-21
 
 ### Changed
 
