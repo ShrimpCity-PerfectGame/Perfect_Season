@@ -155,7 +155,7 @@ async function buildPlayer(container) {
     await click(container.querySelector(".panel .frow button"));
     await flush();
   }
-  await until(() => container.querySelector("h2.h")?.textContent.startsWith("Build complete"), "the finished build");
+  await until(() => container.querySelector("h1.h, h2.h")?.textContent.startsWith("Build complete"), "the finished build");
 }
 
 // The ledger rows a step added, for the account.

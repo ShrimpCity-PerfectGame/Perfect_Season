@@ -51,6 +51,14 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   no chip.
 - **The daily waits until the game knows who you are.** On a slow connection a returning guest could start
   it before their session loaded, draft all six, and have it refused at the end — with the day marked used.
+- **Over/Under reads its rounds out and keeps your place.** After every guess the verdict went unannounced
+  and the keyboard lost its place entirely — which, against a seven-second clock where running out counts
+  as a miss, made it close to unplayable without a mouse.
+- **Every screen says what it is.** Over/Under and Build-a-player never named themselves, and the draft
+  board and a playoff result screen put their headings in the wrong order.
+- **Nothing on the site is smaller than 12px any more** — the slot chips in the draft's floating bar, the
+  duel scoreline, the version tag, the tag on the home page and the scoring labels were all under it.
+- **The duel board stops cutting off "24 left on the board"** on the narrowest phones.
 - **Over/Under knows you've played, whichever device you played on.** The "already played today" note
   lived only in the browser you played in, so opening it on your phone after your laptop dealt you a whole
   second set — which was then quietly thrown away, because the day was already recorded. It checks the day

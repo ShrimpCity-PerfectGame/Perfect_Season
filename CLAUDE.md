@@ -338,7 +338,8 @@ node tests/test-avatar-image.mjs       # crop/resize/encode and metadata strippi
 node tests/test-profile-links.mjs      # /u/name addresses, Back/Forward, every name link, signup's username check
 node tests/test-signin-google.mjs      # signing in with Google: the name it has to pick first, what's refused, and the account it ends up with
 node tests/test-guest-accounts.mjs     # guests: a finished season posts without an account, the daily and shop are refused, and keeping the seasons
-node tests/test-a11y.mjs           # axe-core over every screen in the installed Chrome; and that a roster chip names its slot, which axe can't see
+node tests/test-a11y.mjs           # axe-core over every screen in the installed Chrome - including the draft BOARD, Over/Under
+                                   # and Build-a-player, which it used to miss; and that a roster chip names its slot, which axe can't see
 
 # 1v1 (v1.19.0). See VERSUS.md. versus-logic.mjs holds the rules, so most of these need no database and no browser.
 node tests/test-versus-pool.mjs        # the defense/kicker data: one of each per team-season, on the players' scale, seasons pinned by hand

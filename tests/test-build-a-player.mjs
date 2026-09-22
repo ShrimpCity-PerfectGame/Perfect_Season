@@ -29,14 +29,14 @@ async function waitForBuildStage() {
 }
 
 await runTest("choosing a position rolls a team and player, then lets you build without ever starting a draft", async () => {
-  assert(container.querySelector("h2.h")?.textContent === "Build-a-player", "expected the position-choice screen first");
+  assert(container.querySelector("h1.h, h2.h")?.textContent === "Build-a-player", "expected the position-choice screen first");
   const posBtn = [...container.querySelectorAll(".frow button")].find((b) => ["Quarterbacks", "Running backs", "Wide receivers", "Tight ends"].includes(b.textContent));
   assert(posBtn, "expected a position choice button");
   await click(posBtn);
   await flush();
 
   await waitForBuildStage();
-  const heading = container.querySelector("h2.h")?.textContent;
+  const heading = container.querySelector("h1.h, h2.h")?.textContent;
   // \s: the space before the dash is non-breaking, so the heading never wraps with the dash first.
   assert(/^Build-a-player\s- /.test(heading), "expected the build screen heading after the roll animation, got: " + heading);
 
@@ -48,7 +48,7 @@ await runTest("choosing a position rolls a team and player, then lets you build 
     else await flush();
   }
 
-  assert(container.querySelector("h2.h")?.textContent.startsWith("Build complete"), "expected the build-complete summary after 9 attributes, got: " + container.querySelector("h2.h")?.textContent);
+  assert(container.querySelector("h1.h, h2.h")?.textContent.startsWith("Build complete"), "expected the build-complete summary after 9 attributes, got: " + container.querySelector("h1.h, h2.h")?.textContent);
   assert(!container.querySelector(".roster"), "Build-a-player must never open the normal 6-slot roster/draft");
   assert(!text(container).includes("Pick 1 of 6"), "Build-a-player must never start a normal draft");
   const rows = [...container.querySelectorAll(".panel .rc")];

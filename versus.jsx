@@ -57,6 +57,10 @@ export const VERSUS_CSS = `
    readable clock on all 32 teams. The number is what says time is short; .low only colours what it already says. */
 .vs-pnr{display:flex;align-items:center;gap:10px;min-width:0}
 .vs-pnr .vs-left{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* At 320 the clock beside it leaves about 108px for 121px of text, so "24 left on the board" became
+   "24 left on the b...". The board count is the thing a player is actually reading there, so the
+   words give way rather than the number. */
+@media (max-width:360px){.vs-pnr .vs-left{font-size:12px;letter-spacing:-.01em}}
 .vs-reelclock{font-family:var(--display);font-size:30px;line-height:1;flex:none;
   color:#fff;font-variant-numeric:tabular-nums;background:rgba(6,10,22,.88);border-radius:10px;padding:2px 9px}
 .vs-reelclock .vs-s{font-size:16px;opacity:.75;margin-left:1px}

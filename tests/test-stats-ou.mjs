@@ -18,7 +18,7 @@ await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textConte
 await flush();
 
 await runTest("the rules screen gates the timer, then guessing until lives run out locks today's game", async () => {
-  assert(container.querySelector("h2.h")?.textContent === "Over/Under", "expected the Over/Under intro screen");
+  assert(container.querySelector("h1.h, h2.h")?.textContent === "Over/Under", "expected the Over/Under intro screen");
   assert(text(container).includes("Three lives"), "expected the rules to mention three lives, got: " + text(container).slice(0, 300));
   assert(!container.querySelector(".sou-timer"), "the clock must not be running before the rules are accepted");
 
@@ -41,7 +41,7 @@ await runTest("the rules screen gates the timer, then guessing until lives run o
   }
 
   assert(text(container).includes("is done"), "expected the day to lock after 3 misses within 30 rounds (astronomically unlikely not to happen)");
-  assert(container.querySelector("h2.h")?.textContent === "Over/Under", "expected to land on the finished Over/Under summary");
+  assert(container.querySelector("h1.h, h2.h")?.textContent === "Over/Under", "expected to land on the finished Over/Under summary");
   assert(/Your score: \d+/.test(text(container)), "expected a final score, got: " + text(container).slice(0, 300));
   assert(text(container).includes("Today's leaderboard"), "expected today's leaderboard section");
 });

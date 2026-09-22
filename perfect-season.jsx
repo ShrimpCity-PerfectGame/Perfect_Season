@@ -553,7 +553,7 @@ html:has(.result-hero){overflow-anchor:none}
 .best b{display:block;font-family:var(--display);font-weight:400;font-size:28px;color:var(--ink)}
 .muted{color:var(--muted)}
 .note{font-size:13px;color:var(--muted);margin-top:8px}
-h2.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.01em;font-size:28px;line-height:1.1;color:var(--ink);margin:0 0 6px;text-wrap:balance}
+h1.h,h2.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.01em;font-size:28px;line-height:1.1;color:var(--ink);margin:0 0 6px;text-wrap:balance}
 h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.01em;font-size:22px;line-height:1.1;color:var(--ink);margin:0 0 6px;text-wrap:balance}
 
 /* ===== buttons: tactile, sticker-like ===== */
@@ -614,7 +614,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .whoami{display:inline-flex;align-items:center;gap:7px;min-width:0;max-width:44vw;background:none;border:none;padding:0;font-weight:700;font-size:14px;color:var(--ink)}
 .whoname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (hover:hover){.whoami:hover .whoname{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
-.ver{flex:none;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--surface2);border-radius:6px;padding:2px 7px;font-variant-numeric:tabular-nums}
+.ver{flex:none;font-size:12px;font-weight:600;color:var(--muted);background:var(--surface2);border-radius:6px;padding:2px 7px;font-variant-numeric:tabular-nums}
 .stagebar{margin:0 0 14px;padding:9px 14px;border-radius:12px;font-size:13.5px;color:var(--ink);border:2px solid var(--orange);
   background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--orange) 26%,transparent) 0 12px,color-mix(in srgb,var(--orange) 12%,transparent) 12px 24px)}
 
@@ -634,7 +634,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
   background:radial-gradient(circle,color-mix(in srgb,var(--accent) 60%,transparent),transparent 68%);filter:blur(30px);opacity:.5;pointer-events:none}
 .eyebrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 .wordmark{font-family:var(--display);font-weight:400;font-size:24px;line-height:1;text-transform:uppercase;letter-spacing:.02em;margin:0;color:var(--ink)}
-.kicker{font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:var(--surface);border:2px solid var(--ink);border-radius:999px;padding:4px 10px}
+.kicker{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:var(--surface);border:2px solid var(--ink);border-radius:999px;padding:4px 10px}
 .headline{margin:0;font-family:var(--display);font-weight:400;text-transform:uppercase;line-height:.86;color:var(--ink)}
 .headline .hl1{display:block;font-size:clamp(40px,9vw,78px)}
 .headline .big20{display:inline-block;font-size:clamp(96px,23vw,236px);margin-top:.05em;white-space:nowrap}
@@ -660,7 +660,7 @@ button.pill{font-family:inherit;transition:border-color .12s}
   transition:transform .12s,box-shadow .12s}
 @media (hover:hover){.fmtbtn:hover{transform:translateY(-1px)}}
 .fmtbtn.on{background:var(--accent);color:var(--on-accent);border-color:var(--on-accent);box-shadow:3px 3px 0 var(--hard)}
-.fmtsub{font-family:'Inter',system-ui,sans-serif;font-weight:700;font-size:11px;text-transform:none;letter-spacing:0;opacity:.75}
+.fmtsub{font-family:'Inter',system-ui,sans-serif;font-weight:700;font-size:12px;text-transform:none;letter-spacing:0;opacity:.75}
 .fmtnote{flex-basis:100%;margin:2px 0 0;color:var(--muted);font-size:13.5px;max-width:66ch}
 .modes{display:grid;gap:14px;margin-bottom:24px}
 .mode{display:block;width:100%;text-align:left;border:2px solid var(--ink);border-radius:18px;padding:16px 18px;color:var(--ink);background:var(--surface);
@@ -958,7 +958,7 @@ p.gamecoins .earned{display:flex}
 .recap-sum{font-size:15px;margin:2px 0 10px}
 .recap-sum b{font-family:var(--display);font-weight:400;font-size:24px;color:var(--accent-ink)}
 .pre{border-radius:16px;padding:18px;margin-bottom:18px;background:radial-gradient(ellipse 60% 100% at 0% 0%,var(--glow),transparent 65%),var(--surface);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
-.pre h3{font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:36px;margin:0;color:var(--accent)}
+.pre h2{font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:36px;margin:0;color:var(--accent)}
 .pre p{margin:4px 0 14px;color:var(--muted);font-size:15px}
 .champion{position:relative;overflow:hidden;border-radius:16px;padding:18px 20px 18px 24px;margin-bottom:20px;
   background:radial-gradient(ellipse 70% 100% at 0% 0%,var(--glow),transparent 60%),var(--surface);box-shadow:5px 5px 0 ${PALETTE.ink}}
@@ -1041,7 +1041,7 @@ p.gamecoins .earned{display:flex}
   .modes{gap:12px}.mode{padding:14px}.mode .mn{font-size:26px}.mode .icon{width:38px;height:38px;font-size:19px;border-radius:10px}
   .btn.reset{margin-left:0}.rc{grid-template-columns:24px 1fr}.rc .alt{grid-column:2}
   .cells{display:grid;grid-template-columns:repeat(4,1fr);width:100%;gap:8px 6px}.cell{width:auto}
-  .sticky .in{gap:4px 8px;padding:calc(6px + var(--sa-top,0px)) calc(12px + var(--sa-right,0px)) 7px calc(18px + var(--sa-left,0px))}.sticky .tm{font-size:24px}.sticky .chip{padding:2px 4px;font-size:10.5px}
+  .sticky .in{gap:4px 8px;padding:calc(6px + var(--sa-top,0px)) calc(12px + var(--sa-right,0px)) 7px calc(18px + var(--sa-left,0px))}.sticky .tm{font-size:24px}.sticky .chip{padding:2px 5px;font-size:12px}
   .sticky .btn.sm{padding:4px 8px;font-size:11.5px}.sticky .pk{display:none}.sticky .sp{margin-left:auto}
   .roster{grid-template-columns:repeat(3,minmax(0,1fr))}.title{font-size:36px}
   .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.tile .n{font-size:clamp(26px,9vw,38px)}.tiles .tile:last-child:nth-child(odd){grid-column:1/-1}
@@ -1110,7 +1110,7 @@ p.gamecoins .earned{display:flex}
 .g.up .w::after{content:none}
 .g.up::after{content:"🚨";position:absolute;top:5px;right:7px;font-size:13px;line-height:1}
 .g.po.up{box-shadow:0 0 0 1px var(--accent) inset}
-.pre h3{line-height:1}
+.pre h2{line-height:1}
 .pg-top{gap:12px}
 .pg-top span:last-child{white-space:nowrap}
 .flash{line-height:1}
@@ -1214,6 +1214,11 @@ p.gamecoins .earned{display:flex}
   .namelink::after{content:'';position:absolute;left:-6px;right:-6px;top:-10px;bottom:-10px;min-width:44px}
   /* The header chips sit just above the tab grid on phones: keep their hit areas off the tabs. */
   .nav button.pill::after{bottom:-4px}
+  /* 40, not the 44 the rule above sets: six tabs and two header chips share the top of a 320px
+     phone, and the chips' ::after hit areas reach down into this row. 44 here made them overlap, and
+     a hit area that steals a neighbouring control's taps is the exact bug the z-index rules exist to
+     stop. The tabs are full-width targets, so the shortfall is four pixels on the axis that has the
+     most room to spare. */
   .nav .tab{min-height:40px}
   .linkbtn::after{content:'';position:absolute;left:-6px;right:-6px;top:-13px;bottom:-13px}
   button.pill::after{content:'';position:absolute;left:-4px;right:-4px;top:-8px;bottom:-8px}
@@ -3275,6 +3280,13 @@ export default function PerfectSeason() {
   // The clock shouldn't start the instant you land on the screen - openSou always stops at a
   // rules/confirm screen first (souIntro); beginSou is what actually deals round one (or
   // resumes) and starts the timer.
+  // Where to put focus once a guess is answered: the button that has just appeared, not the one that
+  // has just gone. preventScroll because this screen is short and jumping it is worse than not.
+  const souNext = useRef(null);
+  useEffect(() => {
+    if (sou?.guess) souNext.current?.focus({ preventScroll: true });
+  }, [sou?.guess, sou?.roundIndex]);
+
   async function openSou() {
     setView("statsou");
     if (souDone) { loadSouBoard(todayKey()); return; }
@@ -4150,6 +4162,11 @@ export default function PerfectSeason() {
 
                 {/* Only a truly-done position (state 2) sinks to the bottom - a filled named
                     slot that's still flex-eligible (state 1) stays put next to open ones. */}
+                {!spinning && (
+                  <h2 className="vh">
+                    {TEAMS[disp.team][0]} {WINDOWS[disp.w][0]}–{WINDOWS[disp.w][1]}, pick {pickNo} of {SLOTS.length}
+                  </h2>
+                )}
                 {!spinning && [...POS].sort((a, b) => (secState(a) === 2 ? 1 : 0) - (secState(b) === 2 ? 1 : 0)).map((pos) => {
                   const list = board.filter((p) => p.pos === pos);
                   if (!list.length) return null;
@@ -4269,7 +4286,7 @@ export default function PerfectSeason() {
 
                 {inPlayoffs && po.stage === "pre" && (
                   <div className="pre">
-                    <h3>You're in the playoffs</h3>
+                    <h2>You're in the playoffs</h2>
                     <p>{regW}–{regGames.length - regW} in the regular season. {poGames[0].label === "Divisional" ? "That earns the top seed and a first-round bye." : "You're in as a wild card, so it's four wins to a title."}</p>
                     <div className="frow">
                       <button className="btn solid" onClick={() => setPo({ idx: 0, stage: "live" })}>Kick off the {poGames[0].label} round vs the {poGames[0].opp}</button>
@@ -4739,7 +4756,7 @@ export default function PerfectSeason() {
         {/* ---------------- BUILD-A-PLAYER ---------------- */}
         {view === "buildplayer" && bap && bap.stage === "pickpos" && (
           <>
-            <h2 className="h">Build-a-player</h2>
+            <h1 className="h">Build-a-player</h1>
             <p className="note" style={{ marginTop: 0 }}>
               Choose a position. You'll roll a team, then their active player from last season, and take one attribute from him at a time until your build is complete.
             </p>
@@ -4754,7 +4771,7 @@ export default function PerfectSeason() {
 
         {view === "buildplayer" && bap && bap.stage === "rolling" && (
           <>
-            <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
+            <h1 className="h">Build-a-player - {POS_NAME[bap.pos]}</h1>
             <div className="panel" style={{ textAlign: "center" }}>
               <p className="note" style={{ marginTop: 0 }}>{bap.spinPhase === "team" ? "Rolling a team..." : "Rolling their player..."}</p>
               <h1 key={bap.displayTeam} className="title" style={{ margin: "10px 0", animation: "pop .15s ease-out" }}>{TEAMS[bap.displayTeam][0]}</h1>
@@ -4767,7 +4784,7 @@ export default function PerfectSeason() {
 
         {view === "buildplayer" && bap && bap.stage === "build" && (
           <>
-            <h2 className="h">Build-a-player - {POS_NAME[bap.pos]}</h2>
+            <h1 className="h">Build-a-player - {POS_NAME[bap.pos]}</h1>
             <p className="note" style={{ marginTop: 0 }}>
               Take one of his attributes for your build. {bap.remaining.length} attribute{bap.remaining.length === 1 ? "" : "s"} left.
             </p>
@@ -4810,7 +4827,7 @@ export default function PerfectSeason() {
 
         {view === "buildplayer" && bap && bap.stage === "done" && (
           <>
-            <h2 className="h">Build complete - {POS_NAME[bap.pos]}</h2>
+            <h1 className="h">Build complete - {POS_NAME[bap.pos]}</h1>
             <p className="note" style={{ marginTop: 0 }}>
               Assembled from {new Set(Object.values(bap.filled).map((f) => f.fromName)).size} different real players' last-season attributes. Overall: <b>{grade(bapOverallScore(bap.filled))}</b>
             </p>
@@ -4840,7 +4857,7 @@ export default function PerfectSeason() {
           const bapDone = bap.shown >= bap.sim.games.length;
           return (
             <>
-              <h2 className="h">The verdict</h2>
+              <h1 className="h">The verdict</h1>
               <p className="note" style={{ marginTop: 0 }}>
                 Your {POS_NAME[bap.pos].replace(/s$/, "").toLowerCase()} took over for the {bap.opp.season} {TEAMS[bap.opp.team][0]}.
               </p>
@@ -4886,7 +4903,7 @@ export default function PerfectSeason() {
         {/* ---------------- OVER/UNDER ---------------- */}
         {view === "statsou" && souIntro && (
           <>
-            <h2 className="h">Over/Under</h2>
+            <h1 className="h">Over/Under</h1>
             <div className="panel">
               <p style={{ marginTop: 0 }}>
                 The same rounds for everyone today, {prettyDate(souIntro.date)}. You'll see a real player's career stat line and guess over or under a number.
@@ -4904,14 +4921,17 @@ export default function PerfectSeason() {
 
         {view === "statsou" && sou && !souIntro && (
           <>
-            <h2 className="h">Over/Under</h2>
+            <h1 className="h">Over/Under</h1>
             <div className="sou-hud">
               <span className="sou-hearts">{"❤️".repeat(Math.max(0, sou.lives))}{"🖤".repeat(Math.max(0, SOU_LIVES - sou.lives))}</span>
               <span className="sou-score">Score {sou.score}</span>
               {/* Stays mounted after a guess, just hidden, so the HUD doesn't shrink and shift everything up. */}
               <span className={`sou-timer ${sou.timeLeft <= 3 && !sou.guess ? "danger" : ""}`} style={sou.guess ? { visibility: "hidden" } : undefined}>{sou.timeLeft}</span>
             </div>
-            <div className="panel">
+            {/* Announced, because this screen changes under you on a clock. A new round replaces the
+                player, his teams and the line; a guess adds the verdict. Nothing else in here moves, and
+                the countdown deliberately sits outside it - a timer read out every second is unusable. */}
+            <div className="panel" role="status" aria-live="polite">
               <h3 style={{ marginTop: 0 }}>{sou.round.name}</h3>
               <p className="note sou-teams" style={{ marginTop: 0 }}>{POS_NAME[sou.round.pos].replace(/s$/, "")} · played for {sou.round.teams.join(", ")}</p>
               <p className="sou-line">Career {sou.round.statLabel}: <b>{sou.round.line.toLocaleString()}</b></p>
@@ -4930,9 +4950,9 @@ export default function PerfectSeason() {
                       {sou.guess === "timeout" ? "Too slow." : sou.correct ? "Correct!" : "Wrong."} Actual: {sou.round.trueValue.toLocaleString()} {sou.round.statLabel}.
                     </p>
                     {sou.lives > 0 ? (
-                      <button className="btn solid" onClick={() => startSouRound(sou.date, sou.roundIndex + 1, sou.lives, sou.score)}>Next round</button>
+                      <button ref={souNext} className="btn solid" onClick={() => startSouRound(sou.date, sou.roundIndex + 1, sou.lives, sou.score)}>Next round</button>
                     ) : (
-                      <button className="btn solid" onClick={() => setSou(null)}>See today's result</button>
+                      <button ref={souNext} className="btn solid" onClick={() => setSou(null)}>See today's result</button>
                     )}
                   </>
                 )}
@@ -4949,7 +4969,7 @@ export default function PerfectSeason() {
 
         {view === "statsou" && !sou && !souIntro && souDone && (
           <>
-            <h2 className="h">Over/Under</h2>
+            <h1 className="h">Over/Under</h1>
             <p className="note" style={{ marginTop: 0 }}>Today's Over/Under, {prettyDate(todayKey())}, is done. Come back tomorrow for a new set.</p>
             <div className="panel">
               <h3 style={{ marginTop: 0 }}>Your score: {souDone.score}</h3>

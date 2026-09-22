@@ -82,7 +82,7 @@ await runTest("leaving by any route - even the header's Log in link - cleans up 
   await click(findButtonByText(container, "Modes"));
   await flush();
   await openSou();
-  const headings = [...container.querySelectorAll("h2.h")].filter((h) => h.textContent === "Over/Under").length;
+  const headings = [...container.querySelectorAll("h1.h, h2.h")].filter((h) => h.textContent === "Over/Under").length;
   assert(headings === 1, "expected just the resume screen, not the rules stacked on a stale round, got " + headings + " Over/Under headings");
   assert(!container.querySelector(".sou-answers"), "no stale round's answer buttons should be on screen");
 });

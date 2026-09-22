@@ -45,6 +45,14 @@ const SCREENS = [
   ["Stats", "?as=player", "Stats"],
   ["the Players index", "?as=player", "Players"],
   ["a profile", "?as=player", "Profile"],
+  // The three nobody was opening. "the Draft screen" above is the Draft NAV TAB - the history list -
+  // not the board a draft is actually played on, so the board's own heading order was never checked:
+  // it went from its h1 straight to the positions' h3s, which is the bug the duel board had already
+  // fixed. Over/Under and Build-a-player were not on this list at all, and neither named itself with
+  // an h1. Each is opened from its Modes tile, the way a player reaches it.
+  ["the draft board", "?as=player", { tile: "Unlimited" }],
+  ["Over/Under", "?as=player", { tile: "Over/Under" }],
+  ["Build-a-player", "?as=player", { tile: "Build-a-player" }],
 ];
 
 for (const [name, query, tab] of SCREENS) {
