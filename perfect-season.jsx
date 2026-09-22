@@ -1644,7 +1644,18 @@ function AuthPanel({ onAuthed, title, blurb }) {
       } else {
         const { data, error } = await authSignIn(emailTrim, pw);
         if (error) { setBusy(false); return setErr("Incorrect email or password."); }
-        const prof = await fetchProfile(data.user.id);
+        let prof = null;
+        try {
+          prof = await fetchProfile(data.user.id);
+        } catch (e) {
+          // Signed in, but we could not read who they are - and `|| ""` here used to turn that into an
+          // empty username, which every `if (user)` in the app reads as nobody being signed in. From
+          // there the next finished season took the signed-out path and replaced the real session with a
+          // brand-new guest to post under. Say so instead; the session is real and pressing Log in again
+          // simply tries the read again.
+          setBusy(false);
+          return setErr("Signed in, but your account didn't load. Check your connection and try again.");
+        }
         await onAuthed(data.user.id, prof?.username || "", false);
       }
     } catch (e) {
@@ -2006,9 +2017,7 @@ function HowTo({ onClose }) {
     // preventScroll: focusing the button at the bottom otherwise opens the dialog scrolled past
     // steps 1-3 on a phone.
     btn.current && btn.current.focus({ preventScroll: true });
-    const k = (e) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
+    // Escape is useCloseOnBack's, above - one register, so only the dialog on top answers.
   }, []);
   return (
     <div className="modal-bg" onClick={onClose}>
@@ -2171,6 +2180,18 @@ export default function PerfectSeason() {
   const capUsed = SLOTS.reduce((sum, s) => sum + (roster[s] ? playerSalary(roster[s], mode?.format) : 0), 0);
   const capRemaining = GM_CAP - capUsed;
 
+  // One more go before believing a bad answer. supabase-js retries a dropped GET itself, but not a 500,
+  // 502, 504 or 429 - and this read decides whether somebody is signed in at all, so it is worth more
+  // patience than a read that only fills in a number somewhere.
+  const readProfileTwice = async (id) => {
+    try {
+      return await fetchProfile(id);
+    } catch (e) {
+      await new Promise((r) => setTimeout(r, 600));
+      return fetchProfile(id);
+    }
+  };
+
   // Who a session belongs to: their profile, or - for an account that signed in with Google and hasn't
   // picked a name - the dialog that asks for one. An account has no profile row until it claims a name
   // (PROFILES.md), so "signed in with nothing to show" is exactly that case and nothing else.
@@ -2178,7 +2199,20 @@ export default function PerfectSeason() {
   adoptSession.current = async (session) => {
     const id = session?.user?.id;
     if (!id) return;
-    const prof = await fetchProfile(id);
+    let prof = null;
+    try {
+      // Worth a couple of goes before giving up: this runs on every page load AND every time the tab is
+      // brought back to the front (auth-js re-emits SIGNED_IN then), so one unlucky read used to be
+      // enough, over and over, for the rest of the session.
+      prof = await readProfileTwice(id);
+    } catch (e) {
+      // A read that failed is NOT "this account has no profile". Raising the name dialog here put a
+      // modal with no close button, no Escape and no backdrop click over a perfectly good account -
+      // and claim_username then answered `already_named`, so its own form could never get out either.
+      // Leaving the screen alone is the honest answer: nothing is claimed about who this is.
+      setNotice("Your account didn't load. Reload the page to try again.");
+      return;
+    }
     if (prof) {
       setNeedsName(null);
       setUserId(id); setUser(prof.username); setStats(prof); loadAccountExtras(id);
@@ -2251,6 +2285,19 @@ export default function PerfectSeason() {
   const screenKey = shownProfile ? `profile:${shownProfile}` : `view:${view}${view === "versus" ? `:${versusCode || ""}` : ""}`;
   // The screen the current history entry describes, and how far down the page was when the player last
   // left a screen (a tab or a name), so Back can return to that spot.
+  // A notice is about the thing that just happened, so it goes when the player moves on. It used to go
+  // only on signing out, resetting, or finishing a season - so "the daily is one draft a day per account",
+  // raised when a guest taps the Daily, then sat above every screen in the app for the rest of the session.
+  // Not simply "clear on a view change": the notices that matter are all raised BY something that changes
+  // the view in the same breath, so that would clear them before they were ever read. This lets one live
+  // through the change it arrived with and clears it on the next.
+  const noticeAt = useRef(null);
+  useEffect(() => {
+    if (!notice) { noticeAt.current = null; return; }
+    if (noticeAt.current === null) { noticeAt.current = view; return; }
+    if (noticeAt.current !== view) { noticeAt.current = null; setNotice(""); }
+  }, [notice, view]);
+
   const historyScreen = useRef(null);
   const leftAt = useRef(0);
   // The screen the page opened in. Only leaveVersus reads it, to tell an entry it pushed from the one that was
@@ -2385,7 +2432,14 @@ export default function PerfectSeason() {
   // 1v1 (VERSUS.md), from the Modes tile. A code already in the address is an invite and is kept; opening it
   // from the tile starts fresh, so the last match's link doesn't reopen a finished draft.
   function openVersus() {
-    if (!userId || isGuest) return; // a guest may not play one - VERSUS.md 5
+    // A guest is told why, the way startDaily tells them. A bare return left a full-size, enabled tile
+    // answering a tap with nothing at all, which reads as broken rather than as a rule.
+    if (isGuest) {
+      setNotice("A duel needs an account on both sides. Keep your seasons and you can send one.");
+      openTab("profile");
+      return;
+    }
+    if (!userId) return; // signed out: the tile says "Sign in to play" and the Account tab is one tap away
     setVersusCode(null);
     openTab("versus");
   }
@@ -2407,7 +2461,12 @@ export default function PerfectSeason() {
   }
   // The shop (SHOP.md 8), from your profile card or a season's coins. Signed in only.
   function openShop() {
-    if (!userId || isGuest) return; // a guest has no shop: nothing it owns would have anywhere to show
+    if (isGuest) {
+      setNotice("The shop is for accounts — a guest has nowhere to wear what it buys. Keep your seasons first.");
+      openTab("profile");
+      return;
+    }
+    if (!userId) return;
     openTab("shop");
   }
   // The shop's Back: the entry it was opened from, the way the browser's Back gets there. An entry the app
@@ -2650,9 +2709,15 @@ export default function PerfectSeason() {
   // A guest that has kept its seasons: the same account, under its own name from now on, so everything it
   // has played comes back with that name on it.
   async function onSeasonsKept(username) {
-    const fresh = (userId && (await fetchProfile(userId))) || null;
+    let fresh = null;
+    try { fresh = userId ? await fetchProfile(userId) : null; } catch (e) { /* it has already happened */ }
     setUser(fresh?.username || username);
-    if (fresh) setStats(fresh);
+    // The trade-up is done - claim_username answered "ok" before this was called - so what it did is
+    // applied from what we know, not from a re-read that may not arrive. Waiting on the read left the
+    // account with `guest` still true under its new name, and the app gates the daily, the shop and
+    // Duel on exactly that: all three kept refusing, and pressing Keep my seasons again could only ever
+    // answer `already_named`, which that form has no message for.
+    setStats((s) => fresh || (s ? { ...s, username, guest: false } : s));
     setNotice(`Your seasons are yours, ${fresh?.username || username}.`);
     loadLeaderboard();
   }

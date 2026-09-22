@@ -147,10 +147,8 @@ export function ReportSheet({ username, onClose }) {
   useEffect(() => {
     const opener = document.activeElement;
     sheet.current?.focus({ preventScroll: true });
-    const onKey = (e) => { if (e.key === "Escape") close(); };
-    window.addEventListener("keydown", onKey);
+    // Escape is useCloseOnBack's, above - one register, so only the sheet on top answers.
     return () => {
-      window.removeEventListener("keydown", onKey);
       // Back to wherever the sheet was opened from (the Report button).
       if (opener && opener !== document.body && document.contains(opener)) opener.focus?.({ preventScroll: true });
     };

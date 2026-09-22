@@ -2,7 +2,7 @@
 // sheet. Both halves are here - the shell's routing on its own, with the native pieces faked, and then the
 // game in jsdom answering a Back press the way the shell asks it to. Nothing here needs a device, and the
 // website is checked too: it must never hear a Back event it wasn't built for.
-import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, makeMockAuth, loadModule } from "./helpers.mjs";
 import { BACK_EVENT, barStyleFor, followSystemBars, goBack, nativeShare } from "../app-shell.mjs";
 
 // ---------- the shell on its own ----------
@@ -185,6 +185,37 @@ await runTest("Back closes a report sheet before the profile it opened over", as
   assert(!sheet(), "Back closes the sheet");
   assert(!exited, "and doesn't leave the app");
   assert(window.location.pathname === "/u/bob", `bob's profile is still underneath, got ${window.location.pathname}`);
+});
+
+// Escape reads the same register Back does, so it closes only the dialog on top. Three dialogs used to
+// add their own window listener, which meant every one of them fired on every press: a first-run device
+// landing on somebody's profile has the rules up, and tapping Report puts the sheet over them - one
+// Escape closed both, the sheet they meant and the rules underneath they had not read yet.
+await runTest("Escape closes the dialog on top, not every dialog at once", async () => {
+  // Node cannot import .jsx directly; loadModule bundles it the way every other screen test does.
+  const { useCloseOnBack, closeTopDialog } = await loadModule("ui-common.jsx");
+  const React = await import("react");
+  const { act } = await import("react-dom/test-utils");
+  const { createRoot } = await import("react-dom/client");
+  setupDom();
+
+  const closed = [];
+  const Dialog = ({ name }) => { useCloseOnBack(() => closed.push(name)); return null; };
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+
+  // The rules open first, then the report sheet over them.
+  await act(async () => { root.render(React.createElement(React.Fragment, null,
+    React.createElement(Dialog, { key: "rules", name: "rules" }),
+    React.createElement(Dialog, { key: "sheet", name: "sheet" }))); });
+
+  await act(async () => { window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" })); });
+  assert(closed.join(",") === "sheet", `only the one on top closed, got: ${closed.join(",") || "(none)"}`);
+
+  // And Back agrees with it, through the same register.
+  assert(closeTopDialog() === true, "Back still finds a dialog to close");
+  await act(async () => { root.unmount(); });
 });
 
 await close();

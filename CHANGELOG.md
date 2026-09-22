@@ -24,6 +24,24 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
+## [2.0.0] — unreleased
+
+Gridspin's public release. No new modes — this is the pass that makes the game safe to point strangers at.
+(The version is a milestone, not a semver bump: by this repo's own convention a fixes-only release would be
+a minor one. 2.0.0 is the number the site is being advertised under.)
+
+### Fixed
+
+- **A patchy connection can no longer lock you out of your own account.** One failed read of your profile used
+  to be indistinguishable from "this account is brand new", which could sign you out without saying so and post
+  your next season under a fresh guest, or trap you behind the "pick a name" box that has no way out — and that
+  box came back every time you switched back to the tab. It says what happened and lets you try again.
+- **Keeping your seasons takes effect even if the page can't refresh itself afterwards.** You were being told
+  the daily, the shop and duels were still off-limits under your brand-new name.
+- **A message about one thing stops following you around the whole site.**
+- **Tapping Duel or the Shop as a guest tells you why** instead of doing nothing at all.
+- **Escape closes the thing you opened last**, not everything that happens to be open.
+
 ## [1.19.1] — unreleased
 
 ### Fixed

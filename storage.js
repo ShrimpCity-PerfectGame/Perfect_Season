@@ -80,8 +80,24 @@ const bestCol = (format) => BEST_COL[format] || BEST_COL.fantasy;
 // ...and which column ranks each points ladder.
 const LADDER_COL = { daily: "points_daily", unlimited: "points_unlimited", genius: "points_genius", gm: "points_gm" };
 
+// `null` means the account genuinely has no profile row, which is a real and ordinary state: an account
+// signed in with Google has none until it claims a name (PROFILES.md). A read that FAILED is not that, and
+// until this threw they were the same value - which is how one dropped read could sign you out of your own
+// account and post your next season as a guest, lock a named account behind the un-dismissable "pick a name"
+// dialog, and leave a guest who had just traded up still being refused the daily under their new name.
+//
+// It is not rare enough to ignore: postgrest-js retries a GET only on a dropped connection or a 503/520, so
+// a 500, 502, 504 or 429 from PostgREST or the edge lands here as a plain error, and so does any outage
+// lasting past its ~7 seconds of backoff.
 export async function fetchProfile(userId) {
-  const { data } = await getClient().from("profiles").select("*").eq("id", userId).single();
+  const { data, error } = await getClient().from("profiles").select("*").eq("id", userId).single();
+  // PostgREST answers `.single()` with no rows as PGRST116. That is the answer, not a failure.
+  if (error && error.code !== "PGRST116") {
+    const failed = new Error("the profile could not be read");
+    failed.cause = error;
+    failed.profileReadFailed = true;
+    throw failed;
+  }
   return rowToProfile(data);
 }
 

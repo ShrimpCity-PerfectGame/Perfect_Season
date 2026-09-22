@@ -124,8 +124,14 @@ export function makeMockAuth() {
           order(col, opts) { state.order = { col, asc: opts?.ascending !== false }; return builder; },
           limit(n) { state.limit = n; return builder; },
           single() {
+            const failed = readError(table);
+            if (failed) return Promise.resolve({ data: null, error: failed });
             const rows = run();
-            return Promise.resolve(rows[0] ? { data: rows[0], error: null } : { data: null, error: { message: "no rows" } });
+            // PostgREST's own code for "`.single()` matched nothing", which storage.js's fetchProfile
+            // tells apart from a read that failed - the two used to be the same value here too.
+            return Promise.resolve(rows[0]
+              ? { data: rows[0], error: null }
+              : { data: null, error: { code: "PGRST116", message: "no rows" } });
           },
           // `{ count: "exact", head: true }` (fetchBuildCount, fetchOwnRank) returns just the count
           // of rows matching the filters, which may be chained on before it's awaited.
@@ -262,6 +268,16 @@ export function makeMockAuth() {
   // Test-only: the tables whose writes inside submit-run fail the way a database error would (not a unique
   // violation), to reach index.ts's failure branches - e.g. auth._failWrites.add("profiles").
   const failWrites = new Set();
+  // Test-only: tables whose READS fail the way PostgREST reports a 500 - an error with no PGRST116 on
+  // it, which is the thing storage.js's fetchProfile has to tell apart from "there is no such row".
+  // A number means "fail this many times, then answer normally"; 0 or absent means never.
+  const failReads = new Map();
+  const readError = (table) => {
+    const left = failReads.get(table) || 0;
+    if (left <= 0) return null;
+    failReads.set(table, left - 1);
+    return { code: "500", message: `could not read ${table}` };
+  };
   const writeError = (table) => (failWrites.has(table) ? { code: "08006", message: `could not write ${table}` } : null);
   // Test-only: something to await between reading a profile and writing it back, so a test can land a
   // second submission in that gap. The real function has two whole round trips there (the guest check
@@ -546,6 +562,8 @@ export function makeMockAuth() {
     _inventory: shop.tables.inventory,
     _wallet: wallet, // its server functions (credit_coins, award_badges) and helpers, for setting up a test
     _failWrites: failWrites, // test-only: tables whose writes inside submit-run fail (see invokeSubmitRun)
+    // test-only: make the next N reads of a table fail as a 500 would (see readError).
+    _failReads: (table, times = 1) => failReads.set(table, times),
     // test-only: a promise submit-run awaits between reading a profile and writing it back, used once.
     _pauseBeforeProfileWrite: (fn) => { beforeProfileWrite = fn; },
     _versus: versus, // test-only: 1v1's matches, and the state of one as versus-logic sees it

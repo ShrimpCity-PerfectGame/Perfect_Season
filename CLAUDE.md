@@ -283,6 +283,7 @@ node tests/test-mode-switch.mjs   # switching Unlimited/Genius/GM mid-draft star
 node tests/test-wip-race.mjs      # end-of-draft storage race (see pendingClears below)
 node tests/test-finish-race.mjs   # the same race through the four readers that write to the record: Run it back must not charge a DNF
 node tests/test-submit-race.mjs   # two submissions that overlap both land - profiles is a read-modify-write and carries a `rev`
+node tests/test-profile-read-fails.mjs # a failed profiles read is not "this account has no profile": no lockout, no stuck guest
 node tests/test-board-order.mjs   # board section reordering timing
 node tests/test-reroll-pool.mjs   # reroll can't repeat an already-used team+era
 node tests/test-flex-scoring.mjs  # Flex grades on raw production, not position
@@ -509,6 +510,16 @@ overwrite each other.
 - **Cosmetic artwork uses fixed colors**, like the avatar drawings: frame and card-theme paints are data in
   `cosmetics.jsx` (`COLORS`), not theme tokens, because an item looks the same wherever it's worn. Text on a card
   still takes its scope's tokens, and `tests/test-cosmetics.mjs` checks those against every paint behind text.
+
+**A failed read is not an answer.** `fetchProfile` threw its error away, so "the read failed" and "this
+account has no profile row" were the same value - `null` - and both are real states, because an account
+signed in with Google has no profile until it claims a name. One dropped read could therefore sign you out
+of your own account and post your next season under a new guest, lock a named account behind the
+un-dismissable "pick a name" dialog (which re-armed on every tab refocus, since auth-js re-emits
+`SIGNED_IN` then), or leave a guest who had just traded up still being refused the daily, the shop and
+Duel under their new name. It now throws, PGRST116 ("no rows") being the one error that means absence;
+`adoptSession` gives it a second go and then says so rather than claiming anything about who you are, and
+`onSeasonsKept` applies what `claim_username` has already done instead of waiting on a re-read.
 
 **`profiles` is a read-modify-write, so every write carries the revision it read.** submit-run applies a
 season by reading the whole row, working out the new one with `applyRun`/`applyDnf`, and writing it back - the

@@ -197,4 +197,30 @@ await runTest("a guest who already has an account can still reach it", async () 
   assert(inputs.some((i) => i.type === "password"), `and the login form is up, got ${inputs.length} fields`);
 });
 
+// A tile a guest cannot use has to say so. Both of these were a bare `return` - a full-size, enabled
+// tile that answered a tap with nothing at all, which reads as broken rather than as a rule, while
+// startDaily three functions away already did it properly. And the message it raises has to go away
+// again: `notice` used to clear only on signing out, resetting or finishing a season, so one raised
+// here sat above every screen in the app for the rest of the session.
+await runTest("a guest tapping Duel is told why, and the message does not follow them around", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+
+  await click(tab(c, "Modes"));
+  await until(() => [...c.querySelectorAll(".mode .mn")].some((e) => e.textContent === "Duel"), "the Modes tiles");
+  const duel = [...c.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Duel").closest("button");
+  await click(duel);
+  await flush(4);
+
+  assert(/duel needs an account/i.test(text(c)), `it says why, got: ${text(c).slice(-240)}`);
+  assert(findButtonByText(c, "Keep my seasons"), "and puts them where they can do something about it");
+
+  // Now move on: the message belongs to that moment, not to the rest of the session.
+  await click(tab(c, "Modes"));
+  await flush(4);
+  assert(!/duel needs an account/i.test(text(c)),
+    `and it is gone once they move on, got: ${text(c).slice(0, 240)}`);
+});
+
 await close();

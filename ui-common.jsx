@@ -128,20 +128,35 @@ export function keepFocusInside(e, container) {
   else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
 }
 
-// ---------- Android's Back button (app-shell.mjs) ----------
-// Anything that opens over a screen says here what closing it means, for as long as it is open. Back then
-// closes the one on top, exactly as Escape does, and only once nothing is open does it leave the screen
+// ---------- Closing what is open over a screen ----------
+// Anything that opens over a screen says here what closing it means, for as long as it is open. Escape and
+// Android's Back both close the one on TOP, and only once nothing is open does Back leave the screen
 // (perfect-season.jsx's Back handler). Dialogs mount in the order they open, so the last registered is the
-// one on top. On the website nothing calls closeTopDialog, so this register is never read.
+// one on top.
+//
+// Escape lives here too, rather than in each dialog. Three of them used to add their own window listener,
+// which meant every one of them fired on every press: a first-run device landing on a profile has the rules
+// up, and tapping Report put the sheet over them - then one Escape closed both, the sheet the player meant
+// and the rules underneath they had not read yet. Back already got this right; only Escape didn't, because
+// it never read this register.
 const openDialogs = [];
 export function useCloseOnBack(onClose) {
-  // The latest onClose, like the Escape listeners: registered once, but never left holding a stale close.
+  // The latest onClose: registered once, but never left holding a stale close.
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
     const dialog = { close };
     openDialogs.push(dialog);
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      // Only the topmost answers, whichever dialog's listener this happens to be.
+      if (openDialogs[openDialogs.length - 1] !== dialog) return;
+      e.stopPropagation();
+      close.current?.();
+    };
+    window.addEventListener("keydown", onKey);
     return () => {
+      window.removeEventListener("keydown", onKey);
       const i = openDialogs.indexOf(dialog);
       if (i >= 0) openDialogs.splice(i, 1);
     };

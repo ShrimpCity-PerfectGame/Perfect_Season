@@ -292,9 +292,7 @@ export function VersusHowTo({ onClose }) {
   useCloseOnBack(onClose);
   useEffect(() => {
     btn.current && btn.current.focus({ preventScroll: true });
-    const k = (e) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
+    // Escape is useCloseOnBack's, above - one register, so only the dialog on top answers.
   }, [onClose]);
   return (
     <div className="modal-bg" onClick={onClose}>
