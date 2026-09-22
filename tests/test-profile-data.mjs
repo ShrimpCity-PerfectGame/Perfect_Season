@@ -127,6 +127,28 @@ await runTest("a signed-out caller, or a session with no account, gets not_signe
   assert((await owner("select count(*)::int as n from profile_details where user_id = $1", [uuid(99)]))[0].n === 0, "no row was created");
 });
 
+await runTest("a guest may not put a bio or a picture on the site", async () => {
+  // The app never offers the editor to a guest, but these functions are the boundary - a modified browser
+  // calls them directly. Without this, one anonymous sign-in and one POST puts arbitrary text and up to ten
+  // pictures in a PUBLIC bucket, under an account that has no profile screen for anyone to report and costs
+  // nothing to make again. It would also make the privacy page untrue where it says a guest account holds
+  // nothing personal.
+  const GUEST = uuid(9);
+  await addGuestAccount(db, GUEST);
+  for (const [fn, args] of [
+    ["save_profile", { p_bio: "anything at all", p_favorite_team: "KC" }],
+    ["set_avatar", { p_path: null, p_preset: "crown" }],
+  ]) {
+    const r = await call(GUEST, fn, args);
+    assert(r.error === "guest_not_allowed", `${fn} from a guest should raise guest_not_allowed, got ${JSON.stringify(r).slice(0, 120)}`);
+  }
+  // And nothing was written.
+  const rows = await owner("select count(*)::int as n from profile_details where user_id = $1", [GUEST]);
+  assert(rows[0].n === 0, `a refused guest leaves no details row: ${JSON.stringify(rows)}`);
+  // A real account is unaffected.
+  assert(!(await call(BOB, "save_profile", { p_bio: "a real bio", p_favorite_team: "NE" })).error, "a full account still saves");
+});
+
 await runTest("save_profile trims, enforces the length, character, word and team rules, and leaves the picture alone", async () => {
   let res = await call(BOB, "set_avatar", { p_path: null, p_preset: "trophy" });
   assert(res.data?.avatar_preset === "trophy", "bob picks a default avatar first");

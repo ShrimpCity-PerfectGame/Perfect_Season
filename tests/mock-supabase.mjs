@@ -360,7 +360,16 @@ export function makeMockAuth() {
       if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return { data: { error: "missing challenge code" } };
       // ...and not the daily's own seed, which is short enough to pass as a code and would make a free
       // run a bit-exact rehearsal of that day's daily - same boards, same season, recorded and paid.
-      if (/^daily-/i.test(mode.code)) return { data: { error: "that code is reserved", reason: "reserved_code" } };
+      // The hash, not the spelling: hashStr is invertible, so a code that hashes like a daily seed IS that
+      // daily. Mirrors supabase/functions/submit-run/index.ts.
+      const dailyHashes = new Set();
+      for (let d = -2; d <= 2; d++) {
+        const day = new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
+        for (const f of ["fantasy", "standard"]) dailyHashes.add(GL.hashStr(GL.dailySeed(day, f)));
+      }
+      if (/^daily-/i.test(mode.code) || dailyHashes.has(GL.hashStr(mode.code))) {
+        return { data: { error: "that code is reserved", reason: "reserved_code" } };
+      }
       seed = mode.code;
     } else {
       return { data: { error: "unknown mode" } };

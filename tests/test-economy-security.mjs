@@ -1032,6 +1032,53 @@ await runTest("8c. a GM season must fit under the salary cap: an uncapped roster
     "index.ts refuses a GM roster over the cap, before its duplicate guard writes anything");
 });
 
+// The daily cannot be rehearsed on a challenge code, however the code is spelled.
+//
+// A free code is used verbatim AS the seed, so a code that HASHES like a daily seed is that daily: the same
+// boards, the same re-spin streams, and - because the season is seeded `<seed>#<lineup>` and hashStr is a
+// rolling hash - the same season, bit for bit. Refusing the literal string `daily-...` was not enough, and
+// this test is the proof: hashStr is FNV-1a/32 and invertible, so the collision below is found in about a
+// second with a meet-in-the-middle, and it fits the app's own code box. No modified client required.
+await runTest("a challenge code that hashes like the daily is refused, whatever it looks like", async () => {
+  const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const PRIME = 16777619;
+  let inv = 1;
+  for (let i = 0; i < 6; i++) inv = Math.imul(inv, 2 - Math.imul(PRIME, inv)); // PRIME^-1 mod 2^32
+  const step = (h, c) => Math.imul(h ^ c, PRIME) >>> 0;
+  const unstep = (h, c) => ((Math.imul(h, inv) >>> 0) ^ c) >>> 0;
+
+  const seed = GL.dailySeed(new Date().toISOString().slice(0, 10), "fantasy");
+  const target = GL.hashStr(seed);
+  const fwd = new Map();
+  for (const a of A) for (const b of A) for (const c of A) for (const e of A) {
+    let h = 2166136261 >>> 0;
+    for (const ch of [a, b, c, e]) h = step(h, ch.charCodeAt(0));
+    if (!fwd.has(h)) fwd.set(h, a + b + c + e);
+  }
+  let forged = null;
+  outer:
+  for (const a of A) for (const b of A) for (const c of A) for (const e of A) {
+    let h = target;
+    for (const ch of [e, c, b, a]) h = unstep(h, ch.charCodeAt(0));
+    const pre = fwd.get(h);
+    if (pre) { forged = pre + a + b + c + e; break outer; }
+  }
+  assert(forged, "a collision exists and is findable - that is the whole point");
+  assert(GL.hashStr(forged) === target, `${forged} hashes like ${seed}`);
+  assert(/^[A-Z0-9]{4,8}$/.test(forged), `${forged} is a shape the app's own code box accepts`);
+  assert(JSON.stringify(GL.seededSequence(forged)) === JSON.stringify(GL.seededSequence(seed)),
+    "and it deals the day's own boards, which is what makes it worth forging");
+
+  // submit-run has to refuse it. The mock mirrors the function; the function is read as text below.
+  const played = await free(forged, draftTrace(forged));
+  assert(played?.reason === "reserved_code",
+    `a forged daily code is refused: ${JSON.stringify(played).slice(0, 160)}`);
+
+  const index = readFileSync(new URL("../supabase/functions/submit-run/index.ts", import.meta.url), "utf8");
+  assert(/dailyHashes\.has\(GL\.hashStr\(mode\.code\)\)/.test(index),
+    "and the deployed function compares the hash, not the spelling");
+});
+
 // Two rules that ship in files nothing in this suite executes. The mocks mirror the Edge Function and PGlite
 // runs the SQL, so both are checked - but the mirror is not the thing that ships, and PGlite's own collation
 // is C, which is the one setting under which the collate clauses do nothing. Both were verified by deleting

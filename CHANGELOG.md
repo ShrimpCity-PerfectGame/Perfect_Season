@@ -51,10 +51,10 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   no chip.
 - **The daily waits until the game knows who you are.** On a slow connection a returning guest could start
   it before their session loaded, draft all six, and have it refused at the end — with the day marked used.
-- **A draft you had on the go when this update landed is dealt again, rather than refused at the end.**
-  Re-spins are worked out afresh from the code when a season is handed in, and this release changed what a
-  team re-spin gives you — so a draft re-spun before it and finished after would have been turned down as
-  an illegal roster, which for a daily means the day gone with nothing to show. Nothing is charged for it.
+- **A GM draft you had on the go when this update landed is dealt again, rather than refused at the end.**
+  GM now knows about the salary cap when it deals a board and when you re-spin one, so a GM draft started
+  before this release and finished after it could have been turned down as an illegal roster. Nothing is
+  charged for it, and a daily is simply dealt again. Every other mode carries on exactly where you left it.
 - **GM mode can't re-spin you into a board you can't afford anybody on either.** The dealer learned about
   the cap and the re-spin button didn't, so the one control you reach for to escape a dead board could hand
   you another one.
@@ -74,6 +74,11 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **"Today's daily" says it's waiting instead of ignoring you** while your account loads.
 - **Two boards ordered tied names differently from every other board.**
 - **Nothing is under 12px any more** — the roster chips on the boards and the "You" marker were the last two.
+- **Duels grade the best players properly again.** A limit meant for the 17-game season had reached duel
+  scoring, where it made the two best Flex seasons in the game worth exactly the same — in the one mode
+  where the better roster is supposed to win outright.
+- **Guests can't put a bio or a picture on the site.** Guest accounts have no profile page for anyone to
+  see or report, so pictures posted from one couldn't be moderated at all.
 - **A report reaches a moderator saying what was typed.** The note was the one box on the site that took
   anything at all, including the invisible characters that hide a word and the one that turns the rest of a
   sentence backwards — in a message whose whole job is to be read by somebody deciding what to do about
@@ -102,8 +107,10 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   before dealing anything now.
 - **The highest-OVR board shows ten builds again.** A few malformed rows from before the game checked them
   were sorting above everything and taking up slots, so the board showed fewer than ten — or nothing at all.
-- **A challenge code can't be the daily's own.** Used as a code, it dealt that day's daily boards and played
-  out that day's exact season, which is a rehearsal the daily is supposed to make impossible.
+- **The daily can't be rehearsed on a challenge code.** A code that deals the day's boards played out that
+  day's exact season — so you could try it against as many rosters as you liked and then play the real one
+  knowing the answer. Blocking codes that merely *looked* like the daily wasn't enough; the game now
+  recognises the draft itself, however the code is spelled.
 - **GM mode can't deal you a board you can't afford anybody on.** It used to, and the only way out was
   abandoning the draft — which counts against you, for a player who'd made a legal pick every round. A
   greedy spender hit it in nearly a quarter of drafts. You also can't spend so much that the slots you have
@@ -115,8 +122,6 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   season scored about 17% fewer points and coins than intended**. Totals already banked stay where they
   are; seasons from here on earn what they were always meant to. A related one: 2% of finished GM seasons
   scored nothing at all, because the bot spent itself out of a roster and the game read that as "no par".
-- **A re-spin can't hand you a team you're already drafting.** Every draft is built to never repeat a team,
-  and re-spins ignored that — one draft in eight ended up drafting the same team twice.
 - **"Best possible order" no longer names the same player twice** and promises a total no roster could reach.
 - **Reloading the moment after a pick no longer loses it.** For about a second while the next board spun up,
   the saved draft was still the one from before your last pick.

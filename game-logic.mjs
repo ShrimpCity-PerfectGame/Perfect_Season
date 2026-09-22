@@ -281,36 +281,12 @@ export function capLeftFor(roster, { gm, format } = {}) {
 // Mirrors reroll()'s pool selection exactly (same RNG derivation, same match() filter) - shared
 // so the client's live reroll and the server's replay/legality check can never drift apart.
 // Returns the picked board key, or null if no candidate exists (same as a no-op reroll).
-// `sequenceRules` is single player's, and only single player's: seededSequence builds its drafts to "no
-// team twice, no era more than twice", and a re-spin has to keep that or the rules mean nothing - 11.9% of
-// completed drafts used to hold the same team twice, 27.3% one era more than twice. 1v1 shares this
-// function and does NOT share those rules: it deals eight boards, and versus-logic.mjs decides for itself
-// what a board has to be able to do (VERSUS.md 8). So it is off unless asked for.
-export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, drafted, open, cap = null, sequenceRules = false }) {
-  // What the planned sequence already holds, by team and by era. seededSequence builds every draft to
-  // "no team twice, no era more than twice" - and a re-spin used to ignore both, checking only that the
-  // exact team|era pair was unseen. So a team re-spin could hand you a team already queued later under
-  // another era: 11.9% of completed drafts drafted from the same team twice, and 27.3% had one era more
-  // than twice. The point of those rules is that six boards feel like six different boards.
-  // Which teams the planned sequence already holds. seededSequence allows each team once across the
-  // whole plan, so this leaves plenty to spin to - unlike its other rule, "no era more than twice",
-  // which the plan fills completely (five eras, twice each, is exactly the ten boards it returns). An
-  // era re-spin measured against THAT has nothing to offer and would simply stop working, so the era
-  // count is left alone: seeing one era twice among six boards is ordinary, and a third is a great deal
-  // less jarring than drafting Cleveland twice - which is what this rule is really for, and what
-  // 11.9% of completed drafts used to do.
-  const teams = new Set();
-  for (const key of shown) teams.add(key.split("|")[0]);
-  // `cap` matters as much here as it does in boardAt. The dealer skips a board nobody affordable is on;
-  // the re-spin did not, so in GM it could hand you a board whose every Lock in is disabled - which is the
-  // dead end this release set out to close, reached by the one control a player reaches for to escape it.
-  // Measured before the fix: 1.17% of offered re-spins landed on a dead board, and 12.35% of GM seeds held
-  // at least one. replayDraft passes the same cap from the roster it is rebuilding, so the two agree.
+export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, drafted, open, cap = null }) {
   const match = (key) => {
     const [t, w] = key.split("|");
     if (shown.has(key) || !boardHasOption(key, drafted, open, cap)) return false;
     if (kind !== "team") return t === spinTeam;          // same team, another era: never a repeat
-    return Number(w) === spinW && (!sequenceRules || !teams.has(t));
+    return Number(w) === spinW;
   };
   const rng = mulberry32(hashStr(`${seed}-reroll-${kind}-${seqIdx}`));
   const pool = Object.keys(BOARDS).filter(match);
@@ -365,7 +341,7 @@ export function replayDraft(seed, history, seq, { gm = false, format } = {}) {
       else if (team === prevTeam && Number(w) !== Number(prevW)) kind = "years";
       else return fail("reroll insertion doesn't share a team or era with the board it replaced");
       if (rerollsUsed[kind] >= REROLL_BUDGET) return fail(`more than ${REROLL_BUDGET} ${kind} reroll(s) used`);
-      const expected = rerollCandidate({ seed, kind, seqIdx: si - 1, spinTeam: prevTeam, spinW: Number(prevW), shown, drafted, open, cap: capLeftFor(roster, { gm, format }), sequenceRules: true });
+      const expected = rerollCandidate({ seed, kind, seqIdx: si - 1, spinTeam: prevTeam, spinW: Number(prevW), shown, drafted, open, cap: capLeftFor(roster, { gm, format }) });
       if (expected !== key) return fail("reroll result doesn't match what this seed would produce");
       rerollsUsed[kind]++;
       shown.add(key);
@@ -422,7 +398,7 @@ export function replayDraft(seed, history, seq, { gm = false, format } = {}) {
 // 168-caliber Flex players plus three capped named picks on the same six boards. Across 400
 // best-available drafts the highest team score seen was 129.2. If that ever stops being true (new
 // season data, a re-rating), this is the first thing to re-check.
-export function flexRating(p, format) {
+export function flexRating(p, format, { capFlex = true } = {}) {
   const std = normFormat(format) === "standard";
   const s = (std ? flexStatsByEraStd : flexStatsByEra)[p.w];
   const points = std ? p.stdPoints : p.ppr;
@@ -439,13 +415,18 @@ export function flexRating(p, format) {
   // 400 best-available drafts, 139.6 over 6,000 seeds). Fantasy is unchanged by construction: nothing
   // there can exceed its own maximum. Nobody on the live Championship board was near it - the top
   // score there is 120.7 - so no posted score moves.
-  return std ? Math.min(flexCeiling, raw) : raw;
+  // ...in the SEASON simulation, which is the only thing the ceiling is about: a Championship Flex could
+  // reach a team score that beats every opponent in the game outright, so the season wasn't really played.
+  // A duel has no opponents and no probability - the higher roster simply wins - so capFlex is false there
+  // (versus-logic.mjs), or the two best Flex seasons in the game would be worth exactly the same and a duel
+  // could tie two rosters that are not equal. It also keeps duel scoring identical to what is live today.
+  return std && capFlex ? Math.min(flexCeiling, raw) : raw;
 }
 // The rating a player should count as in team-score math for the slot they're in: their normal
 // positional grade for a named slot, or their stats-only flexRating for a Flex spot. Omitting
 // `format` gives the original full-PPR grading exactly.
-export function effectiveRating(slot, p, format) {
-  if (slot.startsWith("FLEX")) return flexRating(p, format);
+export function effectiveRating(slot, p, format, { capFlex = true } = {}) {
+  if (slot.startsWith("FLEX")) return flexRating(p, format, { capFlex });
   return normFormat(format) === "standard" ? p.stdRating : p.rating;
 }
 

@@ -225,6 +225,13 @@ begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
   end if;
+  -- And not a guest. A guest has no profile screen for anyone to look at or report, and an anonymous
+  -- account costs nothing to make again - so without this, one sign-in and one POST puts arbitrary text on
+  -- the site under a name nobody can act on. The app never offers the editor to a guest; this is the rule
+  -- rather than the manners, which is the whole point of these functions (CLAUDE.md, Profiles).
+  if exists (select 1 from public.profiles where id = v_uid and guest) then
+    raise exception 'guest_not_allowed' using errcode = 'P0001';
+  end if;
   if char_length(v_bio) > 160 then
     raise exception 'bio_too_long' using errcode = 'P0001';
   end if;
@@ -262,6 +269,13 @@ declare
 begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
+  end if;
+  -- And not a guest, for the reason save_profile says - with one more: pictures go in a PUBLIC bucket, ten
+  -- per account, on an account that can be made again and again and has no profile screen to report. That
+  -- is open image hosting on gridspin.app, and it would make the privacy page untrue where it says a guest
+  -- account holds nothing personal.
+  if exists (select 1 from public.profiles where id = v_uid and guest) then
+    raise exception 'guest_not_allowed' using errcode = 'P0001';
   end if;
   if p_path is not null and p_preset is not null then
     raise exception 'bad_request' using errcode = 'P0001';

@@ -820,7 +820,8 @@ suite and still broke the live Leaderboard for every existing account.
   from phase 2, and `profiles.rev`, which is what stops a finished season being overwritten by the abandoned
   draft that "Run it back" fires - **the Edge Function will not save a season without it**, so that one is not
   optional and not last. moderation cleans a report's note. wallet adds `badge_rewards`. The functions change
-  because `game-logic.mjs` did (the GM cap reserve, the bot's par, Championship's Flex ceiling) and because
+  because `game-logic.mjs` did (the GM cap in `boardAt`/`rerollCandidate`, the bot's par, Championship's Flex
+  ceiling - which **1v1 is exempt from**, see SCORING.md) and because
   submit-run refuses a challenge code that is the daily's own seed - every one of those is a rule the browser
   and the function have to agree on, and the scoring half decides what a season is worth.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
@@ -866,12 +867,17 @@ nobody eligible is on. `replayDraft` takes `{ gm, format }` and applies the same
 rebuilds, or it would reject a draft for skipping a board the app was right to skip. Without all of it a
 greedy spender stranded itself in 23.8% of GM drafts with a DNF as the only exit; with it, 0.1%.
 
-**`rerollCandidate` is shared with 1v1, which does not share single player's sequence rules.** Passing
-`sequenceRules: true` adds "no team the plan already holds" - `seededSequence`'s own rule, which a re-spin
-used to ignore. It is opt-in because 1v1 deals eight boards under its own rules (VERSUS.md 8), and applying
-single player's there silently stopped its era re-spin working. Note the sequence's OTHER rule, "no era more
-than twice", is deliberately not enforced on a re-spin: the plan already fills every era to that limit, so
-measuring against it would leave an era re-spin nothing to offer.
+**A re-spin may repeat a team the plan already holds, and changing that is harder than it looks.** It is
+`seededSequence`'s own rule and a re-spin ignores it, so about one completed draft in eight drafts the same
+team twice. v2.0.0 fixed it and the fix was reverted before release, which is the part worth keeping:
+`rerollCandidate` is seeded, so narrowing its pool moves which board a given code deals - measured, **69.7%
+of team re-spins land somewhere else**. submit-run recomputes every re-spin from the seed when a season is
+handed in, so every draft re-spun on the OLD client and finished on the NEW one is refused as an illegal
+roster, after `finish()` has already spent the day. A guard in the client can only protect snapshots the new
+bundle wrote; a tab already open on the old one has none of that code. **Any future change to what a re-spin
+deals has the same shape**, and wants server-issued seeds under it rather than a client-side rule. The
+sequence's other rule, "no era more than twice", is a dead end for a different reason: the plan already fills
+every era to that limit, so measuring a re-spin against it leaves nothing to offer.
 
 **Rerun the difficulty bot after any grading or board change.** `node tests/test-difficulty.mjs
 [N]` plays N drafts with a simple first-eligible-player bot and reports avg wins / perfect-season

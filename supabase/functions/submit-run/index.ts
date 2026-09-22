@@ -209,16 +209,28 @@ Deno.serve(async (req) => {
     // finished_codes holds a code of at most 32 characters (the app's own are 4 to 8), so a longer
     // one is refused here, before the replay, rather than by that insert after it.
     if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return json({ error: "missing challenge code" }, 400);
-    // ...and not the daily's own seed. A free code is used verbatim AS the seed, and dailySeed is
-    // "daily-<date>" or "daily-<date>-std" - 16 and 20 characters, comfortably inside the limit above.
-    // The season is seeded "<seed>#<lineup>" in both branches, so such a code is not merely the same
-    // boards: it is the same season, bit for bit, played through the real verified path, recorded and
-    // paid. isPlausibleDailyDate accepts UTC+1, so tomorrow's worked too. Rehearse a day's daily
-    // against different rosters, then submit the real one with whichever went 20-0.
+    // ...and not the daily's own draft, by any spelling of it. A free code is used verbatim AS the seed,
+    // so a code that hashes the way a daily seed hashes IS that daily: same boards, same re-spin streams,
+    // and - because the season is seeded "<seed>#<lineup>" and hashStr is a rolling hash, so equal state
+    // after the prefix means equal hash for every suffix - the same season, bit for bit. Rehearse the day
+    // against as many rosters as you like on the forged code, then play the real daily and pick the winner.
     //
-    // The app's own box can't send one (it strips to [A-Z0-9]{4,8}), so this is for a modified client -
-    // but CLAUDE.md and schema.sql both say the Daily is "fully closed", and it was not.
-    if (/^daily-/i.test(mode.code)) return json({ error: "that code is reserved", reason: "reserved_code" }, 400);
+    // Refusing the literal string was not enough, and thinking it was is the mistake worth writing down:
+    // hashStr is FNV-1a/32 and invertible, so a meet-in-the-middle finds an 8-character [A-Z0-9] collision
+    // in about a second - "5214I2DA" for daily-2026-09-23 - and the app's own code box accepts exactly that
+    // shape. What identifies a draft is the hash, not the text, so that is what this compares.
+    //
+    // Two days either side covers every daily still worth forging: isPlausibleDailyDate already allows a
+    // day's grace in each direction, and a daily_runs row can only ever be written for a date the function
+    // itself decides. Ten comparisons, and no dependence on how the code was spelled.
+    const dailyHashes = new Set<number>();
+    for (let d = -2; d <= 2; d++) {
+      const day = new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
+      for (const f of ["fantasy", "standard"]) dailyHashes.add(GL.hashStr(GL.dailySeed(day, f)));
+    }
+    if (/^daily-/i.test(mode.code) || dailyHashes.has(GL.hashStr(mode.code))) {
+      return json({ error: "that code is reserved", reason: "reserved_code" }, 400);
+    }
     seed = mode.code;
   } else {
     return json({ error: "unknown mode" }, 400);

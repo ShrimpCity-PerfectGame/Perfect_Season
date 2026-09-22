@@ -142,6 +142,12 @@ So **Championship's Flex is capped at Fantasy's own ceiling** (`flexCap()`, meas
 at `initGameData` rather than written down, so it follows a new season rather than going stale).
 Fantasy is unchanged by construction — nothing on that scale can exceed its own maximum — and no
 posted Championship score moved, the highest on the live board being 120.7.
+**1v1 is exempt** (`effectiveRating(..., { capFlex: false })` from `versus-logic.mjs`). The ceiling exists
+because a season is *simulated* against a fixed opponent pool, and a high enough team score beats all of it
+outright; a duel has no opponents and no probability - the higher roster simply wins. Capping there would
+make the two best Flex seasons in the game (LaDainian Tomlinson 2006 and Christian McCaffrey 2019) worth
+exactly the same, so a duel could tie two rosters that are not equal. It also keeps duel scoring identical
+to what is already live, which is why 1v1 needs no special handling when this deploys.
 `tests/test-scoring-format.mjs` pins both halves: that the two ceilings agree, and that the exact
 roster code `0X2TIZ` handed out no longer beats everything. **If the player data is ever regenerated
 or re-rated, re-check that headroom** — for both formats this time; it's the assumption the whole

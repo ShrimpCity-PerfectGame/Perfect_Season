@@ -116,7 +116,10 @@ export function optionValue(o, slot, format) {
 }
 // A pick's rating, whichever pool it came from: a player's depends on the slot and the format, a defense's and
 // a kicker's is the one the pool gave it.
-const ratingIn = (slot, o, format) => (o.kind === "player" ? effectiveRating(slot, o, format) : o.rating);
+// capFlex: false - a duel is scored on the raw value, see flexRating. The Championship ceiling exists to
+// stop a season simulation being a foregone conclusion; a duel has no simulation, and capping here would make
+// the best Flex season in the game worth exactly the same as the second best.
+const ratingIn = (slot, o, format) => (o.kind === "player" ? effectiveRating(slot, o, format, { capFlex: false }) : o.rating);
 
 // ---------- Whose turn, and on which board ----------
 

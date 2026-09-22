@@ -102,51 +102,7 @@ await runTest("the bot's handicap is a different player, not the same one twice"
   assert(gap > 15, `par sits meaningfully below a no-handicap bot: gap ${gap.toFixed(2)} (mean par ${(par / n).toFixed(2)})`);
 });
 
-await runTest("a re-spin never hands you a team the draft already has", async () => {
-  // seededSequence builds every draft to "no team twice", and a re-spin ignored it - it checked only
-  // that the exact team|era pair was unseen, so a team re-spin could hand you a team queued later
-  // under another era. 11.9% of completed drafts drafted from the same team twice.
-  let repeats = 0;
-  const runs = 300;
-  for (let i = 0; i < runs; i++) {
-    const seed = `RESPIN${i}`;
-    const seq = GL.seededSequence(seed);
-    const shown = new Set(seq);
-    const roster = {};
-    const open = GL.SLOTS.filter((s) => !roster[s]);
-    const [team, w] = seq[0].split("|");
-    const next = GL.rerollCandidate({
-      seed, kind: "team", seqIdx: 0, spinTeam: team, spinW: Number(w),
-      shown, drafted: new Set(), open, sequenceRules: true,
-    });
-    if (!next) continue;
-    const teams = new Set([...shown].map((k) => k.split("|")[0]));
-    if (teams.has(next.split("|")[0])) repeats++;
-  }
-  assert(repeats === 0, `${repeats} of ${runs} team re-spins repeated a team already in the sequence`);
-});
 
-await runTest("1v1's re-spins are not held to single player's sequence rules", async () => {
-  // versus-logic.mjs shares rerollCandidate and does NOT share those rules - it deals eight boards and
-  // decides for itself what a board must be able to do. The rules are opt-in for exactly that reason:
-  // applying them there silently stopped the era re-spin working at all.
-  let differed = 0, looseNull = 0, strictNull = 0;
-  for (let i = 0; i < 200; i++) {
-    const seed = `SHARED${i}`;
-    const seq = GL.seededSequence(seed);
-    const [team, w] = seq[0].split("|");
-    const args = { seed, kind: "team", seqIdx: 0, spinTeam: team, spinW: Number(w), shown: new Set(seq), drafted: new Set(), open: [...GL.SLOTS] };
-    const loose = GL.rerollCandidate({ ...args });
-    const strict = GL.rerollCandidate({ ...args, sequenceRules: true });
-    if (!loose) looseNull++;
-    if (!strict) strictNull++;
-    if (loose !== strict) differed++;
-  }
-  // The rules only ever remove candidates, so 1v1's answer is available at least as often...
-  assert(looseNull <= strictNull, `1v1 is never the more restricted of the two: ${looseNull} vs ${strictNull}`);
-  // ...and they really are different answers, or the flag would be doing nothing.
-  assert(differed > 0, "the two modes genuinely get different candidates");
-});
 
 await runTest("a GM re-spin never deals a board nobody affordable is on", async () => {
   // boardAt learned the cap in 2.0 and rerollCandidate did not, so the one control a player reaches for to
@@ -183,7 +139,7 @@ await runTest("a GM re-spin never deals a board nobody affordable is on", async 
     const [team, w] = seq[idx].split("|");
     for (const kind of ["team", "years"]) {
       const next = GL.rerollCandidate({ seed, kind, seqIdx: idx, spinTeam: team, spinW: Number(w),
-        shown: new Set(seq), drafted, open, cap, sequenceRules: true });
+        shown: new Set(seq), drafted, open, cap });
       if (!next) continue;
       offered++;
       if (!GL.boardHasOption(next, drafted, open, cap)) dead++;

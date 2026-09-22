@@ -2259,9 +2259,20 @@ export default function PerfectSeason() {
       return;
     }
     if (prof) {
+      const held = sessionUnread.current ? pending : null;
       sessionUnread.current = null;
       setNeedsName(null);
       setUserId(id); setUser(prof.username); setStats(prof); loadAccountExtras(id);
+      // A season finished while this account couldn't be read is waiting in `pending` - nothing else ever
+      // consumes it here, so without this it was orphaned the moment a later read succeeded (auth-js
+      // re-emits SIGNED_IN on every tab refocus), while the notice told the player to reload, which is the
+      // one thing that loses it. onAuthed does the same for the signup path.
+      if (held) {
+        setPending(null);
+        const res = await submitAndSync(id, held);
+        showSaveAnswer(pendingRun.current, res);
+        setNotice(res.ok ? "Your account loaded, and the season you played has been saved." : "");
+      }
     } else {
       sessionUnread.current = null;
       setNeedsName({ id, email: session.user.email || "" });
@@ -2277,12 +2288,20 @@ export default function PerfectSeason() {
     const { data: authSub } = authOnChange((event, session) => {
       if (event === "SIGNED_OUT") {
         setUserId(null); setUser(null); setStats(null); setNeedsName(null); clearAccountExtras();
+        // Nobody is signed in now, readable or not. Left set, this turned off guest posting for the
+        // rest of the session: a visitor's finished season took neither branch in finish() - no guest
+        // account, nothing submitted - and was told to reload, which is what destroys it.
+        sessionUnread.current = null;
         // The Unlimited slot goes with them. `chargeableDraft` only checks whose draft it is when it has
         // NO picks, so one with picks was charged to whoever signed in next: Alice makes three picks and
         // logs out, Bob signs up on the same device, taps Unlimited and resumes Alice's board - and the
         // DNF for abandoning it lands on Bob. It is their draft, and it leaves when they do. Here rather
         // than in logOut because every way out of an account comes through this event.
         clearDraftTracked("free", FREE_PROGRESS);
+        // ps-draft too. It is the copy the mount restore reads, so clearing only the slot meant one
+        // reload put the departing account's draft back - and the snapshot effect wrote it straight
+        // into the slot again, still stamped with their owner, for the next person to be charged.
+        clearDraft(DRAFT_KEY);
         setWip((w) => ({ ...w, free: null }));
         // And the one on screen, if a draft is actually in progress. Clearing only the stored copy left it
         // live in React state, where playUnlimited short-circuits on it before it ever reads storage - so
@@ -2976,21 +2995,18 @@ export default function PerfectSeason() {
   // DNF only for a draft validDraft accepts, and a daily whose snapshot is dropped is simply dealt again,
   // because dailyDone is a separate flag that an unfinished daily never set. Nobody loses anything but the
   // boards they were part-way through, and only across the one release.
-  const DRAFT_RULES = 2; // bump whenever a game-logic.mjs change makes an already-saved `seq` unreplayable
-  const wouldBeRejected = (s) => {
-    if (s.rules >= DRAFT_RULES || !Array.isArray(s.seq) || !s.mode?.seed) return false;
-    const base = new Set(seededSequence(s.mode.seed));
-    for (let i = 1; i < s.seq.length; i++) {
-      if (base.has(s.seq[i])) continue; // an entry the seed itself planned - not a re-spin
-      const [team, w] = String(s.seq[i]).split("|");
-      const [prevTeam, prevW] = String(s.seq[i - 1]).split("|");
-      if (Number(w) === Number(prevW) && team !== prevTeam) return true; // a team re-spin, under the old rule
-      // And in GM, EITHER kind: rerollCandidate takes the cap now, so it draws from a smaller pool than
-      // the old client did and the seeded pick lands elsewhere.
-      if (s.mode.gm) return true;
-    }
-    return false;
-  };
+  // Bump this, AND rewrite wouldBeRejected's body, whenever a game-logic.mjs change makes an already-saved
+  // draft unreplayable. The number alone is not the change: the body is a test for one specific release's
+  // difference, so leaving it while bumping the number would throw away good drafts and miss the new break.
+  const DRAFT_RULES = 2;
+  // GM is the only mode this release deals differently: boardAt and rerollCandidate both take the salary cap
+  // now, so a GM draft dealt by the previous client can be sitting on a board this release skips, or holding
+  // a re-spin drawn from a wider pool. Neither shows in the snapshot - a draft resting on a cap-dead board
+  // carries no re-spin at all - so the honest answer is not to resume a GM draft from before the change.
+  // Nothing is charged for it (abandonCurrent only charges a draft validDraft accepts) and a daily is simply
+  // dealt again, because dailyDone is a separate flag an unfinished daily never set. Every other mode is
+  // untouched and resumes as it always did.
+  const wouldBeRejected = (s) => !(s.rules >= DRAFT_RULES) && !!s.mode?.gm;
   const validDraft = (s) => s && s.spin && s.mode && Array.isArray(s.history)
     && BOARDS[`${s.spin.team}|${s.spin.w}`] && s.history.every((h) => findPlayer(h.key, h.id, h.season))
     && !wouldBeRejected(s)
@@ -3045,7 +3061,7 @@ export default function PerfectSeason() {
     const shown = new Set(seq);
     // The cap goes in, or a re-spin can deal a board nobody affordable is on - and replayDraft passes the
     // same one from the roster it rebuilds, so a re-spin the screen offers is a re-spin the server accepts.
-    const next = rerollCandidate({ seed: mode.seed, kind, seqIdx, spinTeam: spin.team, spinW: spin.w, shown, drafted: d, open: o, cap: capLeftFor(roster, { gm: mode.gm, format: mode.format }), sequenceRules: true });
+    const next = rerollCandidate({ seed: mode.seed, kind, seqIdx, spinTeam: spin.team, spinW: spin.w, shown, drafted: d, open: o, cap: capLeftFor(roster, { gm: mode.gm, format: mode.format }) });
     if (!next) return;
     const n = [...seq]; n.splice(seqIdx + 1, 0, next);
     setSeq(n); setSeqIdx(seqIdx + 1); setUsed([...used, next]);

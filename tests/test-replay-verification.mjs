@@ -31,9 +31,9 @@ function simulateDraft(seed, rerollPlan = []) {
       const [spinTeam, spinW] = seq[seqIdx].split("|");
       const open = gl.SLOTS.filter((s) => !roster[s]);
       const shown = new Set(seq);
-      // sequenceRules the way the draft screen asks for them - this helper stands in for the client, and
+      // Exactly as the draft screen asks for it - this helper stands in for the client, and
       // replayDraft recomputes the candidate under the same rules to check it.
-      const next = gl.rerollCandidate({ seed, kind: plan.kind, seqIdx, spinTeam, spinW: Number(spinW), shown, drafted, open, sequenceRules: true });
+      const next = gl.rerollCandidate({ seed, kind: plan.kind, seqIdx, spinTeam, spinW: Number(spinW), shown, drafted, open });
       if (!next) throw new Error(`no reroll candidate available for ${plan.kind} at pick ${pickNum}`);
       seq.splice(seqIdx + 1, 0, next);
       seqIdx = seqIdx + 1;
