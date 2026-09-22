@@ -161,13 +161,16 @@ export const VERSUS_CSS = `
   /* 12px is the floor tools/ui-harness/audit.mjs holds the whole app to; these were 10.5 and 10. */
   .vs-rosters .slot .k{font-size:12px}
   .vs-side-hd{margin-bottom:3px;font-size:11px}
-  .vs-them .roster{grid-template-columns:repeat(8,minmax(0,1fr));gap:3px}
-  .vs-them .slot{min-height:30px;padding:3px 1px;text-align:center}
-  .vs-them .slot .v{display:none}
-  .vs-them .slot .k{font-size:12px}
-  /* Filled has to read without colour, because on this strip the name is gone: the solid edge and the
-     position bar .slot.filled already draws are the shape saying so, and the background only tints it. */
-  .vs-them .slot[data-filled="1"]{border-style:solid;background:var(--surface2)}
+  /* The other player's roster shows WHO, the same as yours. It was eight across with the names hidden, to buy
+     vertical space - and that made the screen unreadable in the way that matters: you could not see what they
+     had taken from you, or who was on their roster to steal. The names are the whole point of the strip. Same
+     four-by-two shape as yours so the two read as a comparison, just tighter. */
+  .vs-them .slot{min-height:34px;padding:3px 5px}
+  /* Wraps rather than ellipsising, the same as your own strip: "Trevor La..." is not a player you can pick out
+     of a roster, and knowing who they hold is the entire job of this block. */
+  .vs-them .slot .v{font-size:12px;margin-top:0;line-height:1.15}
+  .vs-them .slot .k{font-size:11px}
+  .vs-them .slot[data-filled="1"]{border-style:solid}
   .vs-them .vs-track{margin-top:4px}
   .vs-powers .btn{padding:7px 9px}
 }
