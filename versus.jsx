@@ -25,12 +25,12 @@
 // Test hooks: the root is <section class="versus" data-view="lobby|draft|done" data-code=...>; every option on
 // the board is a <div class="card" data-opt="player|<id>|<season>" | "dst|TEAM|<season>" | "k|TEAM|<season>">
 // whose .hit selects it and whose .drafts holds the Lock in buttons; the powerups are buttons named "Re-spin
-// team", "Re-spin era", "Double dip" and "Steal"; each roster is a .vs-rosters .roster with
-// a .slot per slot, carrying data-slot and data-filled.
+// team", "Re-spin era", "Double dip" and "Steal"; each roster is a .vs-rosters .roster with a .slot per slot
+// carrying data-slot and data-filled - and while a steal is armed, their filled slots are .vs-grab buttons.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMatch, joinMatch, fetchMatch, playMove, subscribeMatch, versusPath, sget, sset } from "./storage.js";
 import {
-  replayMatch, optionsOn, optionId, optionFits, openSlots, matchResult,
+  replayMatch, optionsOn, optionId, optionFits, openSlots, matchResult, pickId,
   VERSUS_SLOTS, MATCH_BOARDS, TURN_SECONDS, respinsLeft, dipsLeft, stealsLeft,
 } from "./versus-logic.mjs";
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
@@ -79,6 +79,14 @@ export const VERSUS_CSS = `
 .vs-rosters .roster{grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin-bottom:0}
 .vs-rosters .slot{min-height:52px;padding:6px 8px}
 .vs-rosters .slot .v{font-size:13px}
+/* Their roster while a steal is armed: every filled slot is a button, so it has to look like one. The lime
+   edge is the same "this is the thing to press" the draft uses on a selected card. */
+.vs-picking .vs-side-hd{color:var(--accent-ink)}
+.vs-grab{cursor:pointer;text-align:left;font:inherit;color:inherit;border-color:var(--accent);
+  box-shadow:inset 0 3px 0 var(--pc,var(--muted)),0 0 0 2px color-mix(in srgb,var(--accent) 35%,transparent)}
+.vs-grab .sub{color:var(--accent-ink);font-weight:800}
+.vs-grabnote{margin:6px 0 0}
+@media (hover:hover){.vs-grab:hover{background:var(--surface2)}}
 /* position:relative so the confetti has something to fall inside, and overflow:hidden so it doesn't spill past
    the block - the same pair .cel uses, because this is the same celebration. */
 .vs-final{display:grid;gap:6px;justify-items:center;text-align:center;padding:18px 0;position:relative;overflow:hidden}
@@ -249,8 +257,8 @@ export const POWERUPS = [
   },
   {
     id: "steal", icon: "😈", label: "Steal", short: "Steal",
-    blurb: "Take the pick they just made.",
-    detail: "Only when you pick second, and only the pick just made. It becomes yours, and they go straight back to this board and pick again - so they lose the player, not the turn.",
+    blurb: "Take any player off their roster.",
+    detail: "On your turn, tap anyone on their roster and he is yours. You spend your pick doing it, and they get that pick instead - so they lose the player, not the turn. A player can only change hands once.",
   },
 ];
 
@@ -317,7 +325,7 @@ export function powerupsFor(match, side) {
   return {
     team: respins.team, era: respins.era,
     dip: dipsLeft(match.dips || [], side),
-    steal: stealsLeft(match.picks || [], side),
+    steal: stealsLeft(match.steals || [], side),
   };
 }
 
@@ -363,12 +371,11 @@ export function latestEvent(match, state, nameOf) {
       title: "Double dip", detail: `${nameOf(d.by)} takes two off this board`,
       text: `${nameOf(d.by)} doubled up — two off this board, and no pick on the next` });
   }
-  for (const p of match.picks || []) {
-    if (!p.stolenBy) continue;
-    const taken = state.roster[p.stolenBy]?.[p.slot];
-    out.push({ at: p.pickNo * 4 + 2, key: `steal:${p.pickNo}`, icon: "😈", tone: "steal",
-      title: "Stolen", detail: taken ? `${nameOf(p.stolenBy)} took ${optionName(taken)}` : `${nameOf(p.stolenBy)} took the pick`,
-      text: `${nameOf(p.stolenBy)} stole ${taken ? optionName(taken) : "the pick"}` });
+  for (const x of match.steals || []) {
+    const taken = state.roster[x.by]?.[x.slot];
+    const who = taken ? optionName(taken) : "a player";
+    out.push({ at: x.at * 4 + 2, key: `steal:${x.at}`, icon: "😈", tone: "steal",
+      title: "Stolen", detail: `${nameOf(x.by)} took ${who}`, text: `${nameOf(x.by)} stole ${who}` });
   }
   if (!out.length) return null;
   return out.sort((a, b) => a.at - b.at)[out.length - 1];
@@ -394,13 +401,28 @@ function useFlash(event) {
 }
 
 // Your roster, as the draft screen shows one: a strip of slots with who is in them.
-function RosterStrip({ roster, label, sub, them }) {
+//
+// `onSteal(slot)` turns the filled slots into buttons, which is how a steal picks its target - the powerup
+// takes any one player off the other roster, so the roster itself has to be the thing you tap. Passed only
+// while a steal is actually being spent, so the strip is a display the rest of the time.
+function RosterStrip({ roster, label, sub, them, onSteal }) {
   return (
-    <div className={`vs-side ${them ? "vs-them" : ""}`}>
+    <div className={`vs-side ${them ? "vs-them" : ""} ${onSteal ? "vs-picking" : ""}`}>
       <p className="vs-side-hd">{label}{sub ? <span className="vs-sub"> {sub}</span> : null}</p>
       <div className="roster" data-side={label}>
         {VERSUS_SLOTS.map((slot) => {
           const o = roster[slot];
+          if (o && onSteal) {
+            return (
+              <button key={slot} type="button" className={`slot filled pos-${slot.startsWith("FLEX") ? "FLEX" : slot} vs-grab`}
+                      data-slot={slot} data-filled="1" onClick={() => onSteal(slot)}>
+                <span className="vh">{`Steal ${optionName(o)} from their ${POS_NAME[slot.startsWith("FLEX") ? "FLEX" : slot] || VS_SLOT_LABEL[slot]}`}</span>
+                <div className="k" aria-hidden="true">{VS_SLOT_LABEL[slot]}</div>
+                <div className="v" aria-hidden="true">{optionName(o)}</div>
+                <div className="sub" aria-hidden="true">Take him</div>
+              </button>
+            );
+          }
           // `filled` is the app's own class for a slot with somebody in it - the inset position-coloured bar -
           // and `pos-*` is what sets the --pc that bar is drawn in. This was written as `on`, a class no
           // stylesheet in the app has ever had, so every filled slot kept the dashed empty-slot border and none
@@ -567,6 +589,9 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // Whether the Realtime socket has actually confirmed itself. False until it says SUBSCRIBED, and false again
   // the moment it errors or closes - which is what decides how hard the poll below has to work.
   const [live, setLive] = useState(false);
+  // Armed by the Steal button: their roster becomes the thing you tap, because a steal now takes any one of
+  // their players rather than whatever was picked last.
+  const [stealing, setStealing] = useState(false);
   // Every hook here runs on every render of this screen, lobby or draft - one that only ran on the draft would
   // be React error #310 the moment a lobby turned into one.
   const [stuck, sentinel] = useStuck();
@@ -672,8 +697,10 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     lastAt.current = atPick;
     setError(null);
     // The open card goes with it. Left alone, a card expanded on your turn kept its Lock in buttons on screen
-    // after the turn moved - pressing one only ever earned a refusal from the server.
+    // after the turn moved - pressing one only ever earned a refusal from the server. An armed steal goes too:
+    // their roster must not stay tappable once it is not your turn.
     setSelected(null);
+    setStealing(false);
   }, [atPick]);
   // When the clock runs out somebody has to say so, and it may be either of them - that is what keeps a match
   // alive when the other player has closed the tab. Asked once, a beat after zero, so the two screens don't
@@ -709,6 +736,17 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     setBusy(false);
     if (!res.ok) setError(res.reason);
     await refresh(match.code);
+  };
+
+  // A steal names the pick that put the player on their roster, which is the one thing the screen has to work
+  // out for itself: `state.roster` holds options, and the server thinks in pick numbers.
+  const grab = async (slot) => {
+    const them = side === "host" ? "guest" : "host";
+    const option = state?.roster[them]?.[slot];
+    const row = option && (match.picks || []).find((p) => pickId(p) === optionId(option));
+    setStealing(false);
+    if (!row) { setError("nothing_to_steal"); return; }
+    await send({ steal: true, pickNo: row.pickNo });
   };
 
   if (!userId) {
@@ -897,8 +935,17 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           {mine ? <PowerupTrack left={mine} label="You" /> : null}
         </div>
         <div>
-          <RosterStrip them roster={state.roster[side === "host" ? "guest" : "host"]} label={`${name(match, side === "host" ? "guest" : "host")}'s roster`} />
+          {/* While a steal is being spent, their filled slots are the buttons - the powerup takes any one of
+              their players, so the roster is what you aim it at. */}
+          <RosterStrip them roster={state.roster[side === "host" ? "guest" : "host"]}
+            label={stealing ? "Take one of theirs" : `${name(match, side === "host" ? "guest" : "host")}'s roster`}
+            onSteal={stealing ? grab : null} />
           {theirs ? <PowerupTrack left={theirs} label={name(match, side === "host" ? "guest" : "host")} /> : null}
+          {stealing ? (
+            <p className="vs-note vs-grabnote">
+              Tap whoever you want. <button className="linkbtn" onClick={() => setStealing(false)}>Cancel</button>
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -916,12 +963,14 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
                 const n = mine[pu.id];
                 const wrongTurn = !myTurn;
                 const illegal = (pu.id === "dip" && state.boardIdx >= MATCH_BOARDS - 1)
-                  || (pu.id === "steal" && state.turn.first);
+                  || (pu.id === "steal" && !VERSUS_SLOTS.some((sl) => state.roster[side === "host" ? "guest" : "host"][sl]));
                 return (
                   <button key={pu.id} className="btn vs-pu" disabled={busy || n < 1 || illegal || wrongTurn}
                     title={`${pu.blurb} ${n} left.`}
                     aria-label={`${pu.label}. ${pu.blurb} ${n} left.`}
-                    onClick={() => send(pu.id === "team" ? { respin: "team" } : pu.id === "era" ? { respin: "era" } : { [pu.id]: true })}>
+                    onClick={() => (pu.id === "steal"
+                      ? setStealing((on) => !on)
+                      : send(pu.id === "team" ? { respin: "team" } : pu.id === "era" ? { respin: "era" } : { [pu.id]: true }))}>
                     <span className="vs-pi" aria-hidden="true">{pu.icon}</span>
                     <span className="rs-long">{pu.label} <span className="left">({n})</span></span>
                     <span className="rs-short" aria-hidden="true">{pu.short} <b>{n}</b></span>
@@ -1011,7 +1060,8 @@ const ERRORS = {
   no_room: "You can't double here — you need two open slots and two picks on the board to fill them.",
   last_board: "There's no next pick to give up.",
   would_strand: "That would leave the other player with nothing to pick.",
-  nothing_to_steal: "There's nothing to steal yet.",
+  nothing_to_steal: "They don't have that player.",
+  already_stolen: "That player has already changed hands once — he can't be taken again.",
   already_dipped: "Somebody has already doubled up on this board.",
   respin_too_late: "A re-spin goes before your first pick on a board.",
   conflict: "That pick just went — try again.",

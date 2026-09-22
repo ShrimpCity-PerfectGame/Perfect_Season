@@ -147,7 +147,7 @@ await runTest("the opponent's screen shows the same board, and a pick lands on i
   await openMatch("beta@x.test", code);
 
   assert(versus()?.dataset.view === "draft", `the draft is on screen, got ${versus()?.dataset.view}`);
-  const state = replayMatch({ code, picks: [], respins: [], dips: [] });
+  const state = replayMatch({ code, picks: [], respins: [], dips: [], steals: [] });
   // It draws the single-player draft's own reel, so the team and era come from the board the server dealt.
   const [team, w] = state.boardKey.split("|");
   assert(container.querySelector(".reel .team")?.textContent === TEAMS[team][0],

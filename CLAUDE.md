@@ -137,7 +137,9 @@ parts that are unlike every other mode:
 - **Defenses and kickers are a duel's alone.** `data/versus-pool.json` (859 of each, 1999-2025, built by
   `tools/data/build-versus-pool.mjs` from nflverse) is read by `versus.jsx` and the Edge Function and nothing
   else; `POS` and `SLOTS` are untouched, and no existing score or board moves.
-- **Three powerups, all spent on your own turn**: two re-spins, a steal and a double dip. A fourth, Steal the
+- **Three powerups, all spent on your own turn**: two re-spins, a **steal** (any one player off the other
+  roster - you spend your turn on it and they get that turn to replace him; a player can only change hands
+  once) and a double dip. A fourth, Steal the
   pick, was cut after playtesting along with the ten-second window that existed to make it spendable - see
   VERSUS.md 7 for what went with them and what it cost. A board opens the moment it is dealt.
 - **The football final is a table of real scorelines**, not a loser's total plus a margin drawn separately -

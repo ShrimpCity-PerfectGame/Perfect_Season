@@ -40,6 +40,10 @@ CLAUDE.md.
   opponent as well, so it is a real decision. A **steal**, which takes the pick they just made and sends them
   back to the board for another. And a **double dip**, two off one board in exchange for giving up your next
   pick, which leaves them the board after to themselves.
+- **Steal takes anyone off their roster**, not just the player they picked last. Tap Steal, then tap whoever
+  you want - he is yours, and they get your pick to replace him. Under the old rule ten of the sixteen picks in
+  a match could never be stolen at all, because of the way the order snakes. A player can only change hands
+  once, so nobody spends their steal taking back what was taken from them.
 - **A powerup takes the whole screen.** Spend one and both players see it: the icon, the powerup in letters
   the size of the screen — RE-SPIN, DOUBLE DIP, STOLEN — and who did what underneath. It used to be a line of
   small text above the board that was easy to miss entirely.

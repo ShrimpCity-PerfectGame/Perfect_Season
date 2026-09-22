@@ -83,6 +83,7 @@ that stops.
 | `turn_deadline` | timestamptz null | when the player on the clock loses the pick |
 | `respins` | jsonb not null default `[]` | every re-spin spent, `{ pickNo, kind, by, key }` (section 7) — enough for a reconnecting client to rebuild the same boards |
 | `dips` | jsonb not null default `[]` | every double dip spent, `{ boardIdx, by }` (section 7) — which board was drafted three times, and which one after it only once |
+| `steals` | jsonb not null default `[]` | every steal spent, `{ at, by, pickNo, slot }` (section 7) — the turn it cost, who spent it, the pick it took and where he landed. `at` is why this is a record rather than an edit to the pick |
 | `result` | jsonb null | both sides' scores and the three parts each was built from (section 6), written once, by the server |
 | `winner_id` | uuid null | set with `result`; null for a draw |
 | `created_at` / `ended_at` | timestamptz | |
@@ -359,27 +360,40 @@ lives in `versus-logic.mjs` — 1v1's own number, so single player's `REROLL_BUD
 
 ### Steal
 
-Take the pick the other player has just made. Spent by the **follower**, in place of their own pick: the leader
-takes someone off the board, you take him instead of drafting, and the leader goes straight back to the same
-board and picks again. One per match, each.
+Take **any one player off the other roster**, on your turn, in place of your own pick. He moves to a slot of
+yours that he fits; you spend your turn on it, so that turn becomes **theirs** — they pick again from the board
+in front of you both, to replace what was taken. One per match, each. They lose the player, not the turn.
 
-That shape is chosen over the alternatives because it keeps the draft's arithmetic exactly as it was — the board
-still yields one pick each, sixteen picks over eight boards — and because the victim chooses their own
-replacement rather than being handed one. It also means a steal is only available on the four boards where you
-pick second, and only for the pick just made: there is nothing to steal before the leader has picked, and a
-roster raided three boards later would be a different game.
+**It used to be "the pick just made", and that was the mistake.** The old rule was tied to the last pick on the
+current board, because the victim had to be sent back to that board to pick again — and the snake means ten of
+the sixteen picks in a match could then never be stolen at all. Each player takes two turns in a row across a
+board boundary, so the second of that pair is followed by their *own* turn: there is never a moment when it is
+the other player's turn and that pick is the last one made. Enumerated against the real rules, the stealable
+picks were 1, 3, 5, 7, 11 and 15 and nothing else. Somebody who watched their man get taken simply could not
+answer it, which is what the owner hit in the first real playtest.
 
-**A pick that has changed hands cannot change hands again.** That is what keeps a steal a decision rather than a
-reflex: nobody spends theirs simply taking back what was taken from them. The robbed player picks again instead,
-and if they want their own steal it has to be for something new.
+Taking any player is also a simpler rule to say, and it costs the victim nothing structural: they pick from the
+board already in front of them with one *more* slot open than before. Which is why `would_strand` is gone —
+there is no board left to strand anybody on, and `bad_slot` (he fits nothing you have open) is the only refusal
+left on the target.
 
-Two more things refuse a steal, both costing nothing:
+**A player who has changed hands cannot change hands again** (`already_stolen`). That is what keeps a steal a
+decision rather than a reflex: nobody spends theirs simply taking back what was taken from them. The robbed
+player picks again instead, and if they want their own steal it has to be for something new.
 
-1. the player fits nothing you still have open — you have to have somewhere to put him;
-2. **it would strand the leader.** A steal empties their slot and sends them back to the board, and the board
-   may have nothing left they can use. Section 8's rule does not cover this: it guarantees the *follower* an
-   option after the leader picks, not the leader an option after being robbed. A one-quarterback board dealt to
-   a leader who needs only a quarterback is exactly that case, so `stealableSlots` checks it directly.
+**A steal is a record on the match, not an edit to a pick** — `matches.steals`, holding `{ at, by, pickNo, slot }`
+— and that is what makes any of this expressible. It used to UPDATE the victim's row to the thief's `user_id`
+and `slot`, the only write in the game that rewrote who a row belonged to, and a row has nowhere to say *when*
+it changed hands. It has to say when: every board is dealt against the open slots the two rosters had at the
+time, so a steal applied back at the stolen pick's own turn would replay different boards from the ones the
+match was really played on. `at` is the turn it cost.
+
+`match_picks` is therefore append-only again, and consequently **not** unique on `(match_id, user_id, slot)`: a
+robbed player may well put the replacement in the slot the stolen man came out of, which is two rows with the
+same user and the same slot, both correct.
+
+On the screen it is a two-step: the Steal button arms it, the other roster's filled slots become the buttons,
+and tapping one sends it. The roster has to be the target, because the roster is what you are choosing from.
 
 In the database a steal **updates the pick's row** rather than writing a second one: `user_id` and `slot` become
 the thief's and `stolen_by` records who did it. That is what keeps the two unique constraints in section 3

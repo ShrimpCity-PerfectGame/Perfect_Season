@@ -7,7 +7,7 @@
 import { assert, runTest, makeMockAuth, setupDom, loadModule } from "./helpers.mjs";
 import { playMove } from "../storage.js";
 import {
-  replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS,
+  replayMatch, optionsOn, optionId, optionFits, openSlots, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, pickId,
 } from "../versus-logic.mjs";
 
 // Two accounts, and a way to be either of them.
@@ -24,6 +24,18 @@ async function twoPlayers() {
 }
 
 const call = async (sb, name, args) => (await sb.rpc(name, args)).data;
+// A steal names the pick it takes, so a driver has to find one on the other roster - the same lookup the
+// screen does when you tap somebody.
+const theirPick = (state, picks, side) => {
+  const them = side === "host" ? "guest" : "host";
+  for (const sl of VERSUS_SLOTS) {
+    const o = state.roster[them][sl];
+    if (!o) continue;
+    const row = picks.find((x) => pickId(x) === optionId(o));
+    if (row) return row;
+  }
+  return null;
+};
 // A refusal arrives as supabase-js delivers one - an `error` with the body behind it - so this reads it the
 // way storage-versus.js's playMove has to.
 // A clock that moves on with each move, so a turn never runs out mid-test.
@@ -112,11 +124,12 @@ await runTest("a guest may not play, on either side of the link", async () => {
 async function playOut(sb, as, A, B, code, spend = () => null) {
   const sides = { host: A, guest: B };
   for (let guard = 0; guard < 60; guard++) {
-    const state = replayMatch(await asReplay(sb, code));
+    const rows = await asReplay(sb, code);
+    const state = replayMatch(rows);
     if (state.done) return state;
     const side = state.turn.side;
     await as(sides[side]);
-    const powerup = spend(state);
+    const powerup = spend(state, rows.picks);
     if (powerup) {
       // A powerup may say whose turn it belongs to; everything else is the current player's.
       const asSide = powerup.as === "other" ? (side === "host" ? "guest" : "host") : side;
@@ -144,7 +157,7 @@ async function playOut(sb, as, A, B, code, spend = () => null) {
 // The match as versus-logic sees it, rebuilt from what match_state returns - which is all a real client has.
 async function asReplay(sb, code) {
   const m = await call(sb, "match_state", { p_code: code });
-  return { code: m.code, picks: m.picks, respins: m.respins, dips: m.dips };
+  return { code: m.code, picks: m.picks, respins: m.respins, dips: m.dips, steals: m.steals };
 }
 
 await runTest("sixteen picks, two full rosters, and a winner the server chose", async () => {
@@ -234,10 +247,19 @@ await runTest("a pick the clock made can be stolen like any other", async () => 
   assert(m1.picks.length === 1 && m1.picks[0].auto === true, `and it is marked as the clock's: ${JSON.stringify(m1.picks[0])}`);
 
   // Now steal it.
-  const stolen = await move(sb, { code, steal: true }, deadline + 2000);
+  // The player who was NOT on the clock steals what the clock took for the other one.
+  const rows = await asReplay(sb, code);
+  const mid = replayMatch(rows);
+  const target = theirPick(mid, rows.picks, waiting);
+  assert(target, "the clock's pick is on the other roster to take");
+  await as(waiting === "host" ? A : B);
+  const stolen = await move(sb, { code, steal: true, pickNo: target.pickNo }, deadline + 2000);
   assert(!stolen.error && !stolen.reason, `the clock's pick can be stolen: ${JSON.stringify(stolen)}`);
   const m2 = await call(sb, "match_state", { p_code: code });
-  assert(m2.picks[0].stolenBy === waiting, `it changed hands: ${JSON.stringify(m2.picks[0].stolenBy)}`);
+  assert(m2.steals.length === 1 && m2.steals[0].by === waiting,
+    `it changed hands, recorded on the match: ${JSON.stringify(m2.steals)}`);
+  assert(m2.steals[0].pickNo === 1, "naming the pick it took");
+  assert(m2.picks[0].auto === true && m2.picks[0].pickNo === 1, "and the pick row itself is untouched");
   assert(m2.picks[0].auto === true, "and still says the clock made it");
   const after = replayMatch(await asReplay(sb, code));
   assert(after.turn.side === onClock, "the robbed player is back on the clock");
@@ -251,11 +273,14 @@ await runTest("powerups spent through the client land in the match", async () =>
   await call(sb, "join_match", { p_code: code });
 
   const spent = { respin: false, dip: false, steal: false };
-  const end = await playOut(sb, as, A, B, code, (state) => {
+  const end = await playOut(sb, as, A, B, code, (state, rows) => {
     if (!spent.respin) { spent.respin = true; return { respin: "team" }; }
     // The steal before the dip, and the dip waits for it: a dip gives the dipper two turns back to back, and on
     // the second of them the pick just made is their own, which is not a thing anyone may steal.
-    if (!spent.steal && !state.turn.first) { spent.steal = true; return { steal: true }; }
+    if (!spent.steal) {
+      const t = theirPick(state, rows.picks || rows, state.turn.side);
+      if (t) { spent.steal = true; return { steal: true, pickNo: t.pickNo }; }
+    }
     if (spent.steal && !spent.dip) { spent.dip = true; return { dip: true }; }
     return null;
   });
@@ -263,7 +288,7 @@ await runTest("powerups spent through the client land in the match", async () =>
   const m = await call(sb, "match_state", { p_code: code });
   assert(m.respins.length === 1 && m.respins[0].kind === "team", `the re-spin is on the match: ${JSON.stringify(m.respins)}`);
   assert(m.dips.length === 1, `and the dip: ${JSON.stringify(m.dips)}`);
-  assert(m.picks.some((p) => p.stolenBy), "and a pick that changed hands");
+  assert(m.steals.length === 1, `and a player that changed hands: ${JSON.stringify(m.steals)}`);
   assert(m.picks.length === MATCH_PICKS, `still sixteen picks, got ${m.picks.length}`);
   for (const side of ["host", "guest"]) {
     for (const slot of VERSUS_SLOTS) assert(end.roster[side][slot], `${side} still filled ${slot}`);
@@ -287,9 +312,12 @@ await runTest("robbed, then doubling up on the same board, still finishes a matc
   await call(sb, "join_match", { p_code: code });
 
   const seq = { stolen: false, dipped: false };
-  const end = await playOut(sb, as, A, B, code, (state) => {
+  const end = await playOut(sb, as, A, B, code, (state, rows) => {
     // The follower is on the clock the moment the board's first pick has landed.
-    if (!seq.stolen && !state.turn.first) { seq.stolen = true; return { steal: true }; }
+    if (!seq.stolen) {
+      const t = theirPick(state, rows.picks || rows, state.turn.side);
+      if (t) { seq.stolen = true; return { steal: true, pickNo: t.pickNo }; }
+    }
     // ...which sends the robbed player straight back to the same board. That is where they double up.
     if (seq.stolen && !seq.dipped) { seq.dipped = true; return { dip: true }; }
     return null;
@@ -298,7 +326,7 @@ await runTest("robbed, then doubling up on the same board, still finishes a matc
 
   const m = await call(sb, "match_state", { p_code: code });
   assert(m.picks.length === MATCH_PICKS, `sixteen picks, not fourteen: got ${m.picks.length}`);
-  assert(m.picks.some((p) => p.stolenBy), "with one that changed hands");
+  assert(m.steals.length === 1, `with a player that changed hands: ${JSON.stringify(m.steals)}`);
   assert(m.dips.length === 1, "and the dip on the match");
   for (const side of ["host", "guest"]) {
     for (const slot of VERSUS_SLOTS) assert(end.roster[side][slot], `${side} filled ${slot}`);

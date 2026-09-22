@@ -44,11 +44,11 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     return !!p && !p.guest;
   };
 
-  // The picks as versus-logic wants them. `stolen_by` is stored as a user id, as in the table, so which side
-  // that is has to be resolved against this match - exactly as index.ts does it.
+  // The picks as versus-logic wants them. match_picks is append-only, so this is a spelling change and nothing
+  // more - a steal lives on the match, in m.steals.
   const asPicks = (m) => picksOf(m.id).map((r) => ({
     pickNo: r.pick_no, kind: r.kind, playerId: r.player_id, team: r.team, season: r.season,
-    slot: r.slot, auto: r.auto, stolenBy: r.stolen_by ? sideOf(m, r.stolen_by) : null,
+    slot: r.slot, auto: r.auto,
   }));
 
   function matchState({ p_code } = {}) {
@@ -58,14 +58,11 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       id: m.id, code: m.code, hostId: m.host_id, guestId: m.guest_id,
       hostName: nameOf(m.host_id), guestName: nameOf(m.guest_id),
       format: m.format, status: m.status, turnDeadline: m.turn_deadline,
-      respins: m.respins, dips: m.dips,
+      respins: m.respins, dips: m.dips, steals: m.steals,
       result: m.result, winnerId: m.winner_id, createdAt: m.created_at,
       picks: picksOf(m.id).map((p) => ({
         pickNo: p.pick_no, userId: p.user_id, boardIdx: p.board_idx, kind: p.kind,
         playerId: p.player_id, team: p.team, season: p.season, slot: p.slot, auto: p.auto,
-        // As a side, not an id - this is what a client replays the match from, and replayMatch thinks in
-        // host/guest. Mirrors the same case expression in match_state's SQL.
-        stolenBy: sideOf(m, p.stolen_by),
       })),
     };
   }
@@ -85,7 +82,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     matches.set(code, {
       id: `match-${nextId++}`, code, host_id: uid, guest_id: null,
       format: p_format === "standard" ? "standard" : "fantasy", status: "open",
-      turn_deadline: null, respins: [], dips: [],
+      turn_deadline: null, respins: [], dips: [], steals: [],
       result: null, winner_id: null, created_at: new Date().toISOString(), ended_at: null,
     });
     return matchState({ p_code: code });
@@ -148,7 +145,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
 
     const decided = V.decideMove({
       code, format: m.format, side, move: body, now,
-      picks: asPicks(m), respins: m.respins, dips: m.dips,
+      picks: asPicks(m), respins: m.respins, dips: m.dips, steals: m.steals,
       deadline: m.turn_deadline ? Date.parse(m.turn_deadline) : 0,
     });
     // A refusal comes back the way the real one does: supabase-js reports any non-2xx as an `error` and puts
@@ -169,11 +166,8 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       return changed({ data: { ok: true } });
     }
     if (decided.action === "steal") {
-      // The row changes hands rather than a second one being written - what keeps "drafted exactly once" true.
-      const row = matchPicks.get(`${m.id}|${decided.pickNo}`);
-      row.user_id = uid;
-      row.slot = decided.slot;
-      row.stolen_by = uid;
+      // Appended to the match, as a dip is. Nothing rewrites a pick row: match_picks is append-only.
+      m.steals = [...m.steals, { at: decided.at, by: decided.side, pickNo: decided.pickNo, slot: decided.slot }];
       restartClock();
       return changed({ data: { ok: true, slot: decided.slot } });
     }
@@ -185,11 +179,11 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       match_id: m.id, pick_no: decided.pickNo, user_id: idOf(m, decided.side), board_idx: decided.boardIdx,
       kind: o.kind, player_id: o.kind === "player" ? o.id : null,
       team: o.kind === "player" ? null : o.team, season: o.season,
-      slot: decided.slot, auto: decided.auto, stolen_by: null, created_at: new Date(now).toISOString(),
+      slot: decided.slot, auto: decided.auto, created_at: new Date(now).toISOString(),
     });
 
     // Asked, never counted to sixteen: a double dip and a steal both move where the end of a match is.
-    const after = V.replayMatch({ code, picks: asPicks(m), respins: m.respins, dips: m.dips });
+    const after = V.replayMatch({ code, picks: asPicks(m), respins: m.respins, dips: m.dips, steals: m.steals });
     if (!after.done) { restartClock(); return changed({ data: { ok: true } }); }
 
     const result = V.matchResult({ code, format: m.format, host: after.roster.host, guest: after.roster.guest });
@@ -223,7 +217,7 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     // Test-only: the state of a match as versus-logic sees it, for setting one up or asserting on it.
     _replay: (code) => {
       const m = matches.get(String(code || "").toUpperCase());
-      return m ? V.replayMatch({ code: m.code, picks: asPicks(m), respins: m.respins, dips: m.dips }) : null;
+      return m ? V.replayMatch({ code: m.code, picks: asPicks(m), respins: m.respins, dips: m.dips, steals: m.steals }) : null;
     },
     _matches: matches,
   };

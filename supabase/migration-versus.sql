@@ -61,10 +61,8 @@ create table if not exists public.match_picks (
   slot       text not null check (slot in ('QB', 'RB', 'WR', 'TE', 'FLEX1', 'FLEX2', 'DST', 'K')),
   -- The clock made this one, not the player.
   auto       boolean not null default false,
-  -- Set when the other player STOLE this pick (VERSUS.md 7): user_id and slot are then the thief's, and this
-  -- says who did it. The row is updated rather than a second one written, which is deliberate - the option is
-  -- still drafted exactly once, so the two unique constraints below go on meaning what they say.
-  stolen_by  uuid references auth.users(id) on delete set null,
+  -- Append-only: nothing ever rewrites a row here. A steal is recorded on the match (matches.steals), not by
+  -- changing who this pick belonged to - see the note beside that column.
   created_at timestamptz not null default now(),
   primary key (match_id, pick_no),
   -- One identity or the other, never both and never neither.
@@ -75,31 +73,38 @@ create table if not exists public.match_picks (
   -- null never conflicts in a unique index. `kind` is in the second so a team's defense and its kicker from the
   -- same year are not read as the same thing.
   unique (match_id, kind, player_id, season),
-  unique (match_id, kind, team, season),
-  -- And one player never fills the same slot twice. The two above stop an OPTION being drafted twice; this
-  -- stops a roster being overwritten, which is a different write: a steal is the only thing in the game that
-  -- rewrites user_id and slot on a row that already exists, so it is the only thing that could put two picks
-  -- of one player's in one slot and leave them a slot short at the end - which grades as null and wedges the
-  -- match. The rules refuse that already; this is the database refusing it too. Named, because it is added
-  -- again below for databases that already have this table.
-  constraint match_picks_one_per_slot unique (match_id, user_id, slot)
+  unique (match_id, kind, team, season)
+  -- Deliberately NOT unique on (match_id, user_id, slot). A robbed player picks again, and may well put the
+  -- replacement in the same slot the stolen man came out of - two rows, same user, same slot, both correct.
 );
 
 -- Added after the fact for a table that may already exist, since this file is re-run rather than replaced.
-alter table public.match_picks add column if not exists stolen_by uuid references auth.users(id) on delete set null;
 alter table public.matches add column if not exists dips  jsonb not null default '[]'::jsonb;
 -- Steal the pick was cut, and its column goes with it. Dropped rather than left behind: 1v1 has never shipped,
 -- so no real match ever wrote to it, and an unexplained empty jsonb column is the kind of thing the next reader
 -- spends twenty minutes proving was never wired to anything.
 alter table public.matches drop column if exists swaps;
--- The same for the one-slot-per-player constraint, which is in the create above and so would never reach a
--- database that already has the table. Postgres has no `add constraint if not exists`, hence the block.
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'match_picks_one_per_slot') then
-    alter table public.match_picks add constraint match_picks_one_per_slot unique (match_id, user_id, slot);
-  end if;
-end $$;
+
+-- Every steal spent: { at, by, pickNo, slot } - the turn it was spent on, who spent it, which pick they took,
+-- and the slot it landed in on their roster. A record on the match, like the dips, rather than an edit to the
+-- pick itself.
+--
+-- It used to be the latter: a steal UPDATEd the victim's row to the thief's user_id and slot. That kept
+-- "drafted exactly once" true, but it was also the only write in the whole game that rewrote who a row
+-- belonged to - and it could not express a steal of anything except the pick just made, because the row had
+-- nowhere to say WHEN it changed hands. It has to say when: every board is dealt against the open slots the
+-- two rosters had at the time, so a steal applied at the stolen pick's own turn would deal different boards
+-- from the ones the match was really played on.
+alter table public.matches add column if not exists steals jsonb not null default '[]'::jsonb;
+
+-- ...which puts match_picks back to append-only, so stolen_by has nothing left to say.
+alter table public.match_picks drop column if exists stolen_by;
+
+-- And one_per_slot goes with it, because it is no longer true. A robbed player picks again, and may well put
+-- the replacement in the same slot the stolen man came out of - two rows, same user, same slot, both correct.
+-- The invariant it protected (a roster is never overwritten) is now structural rather than enforced: nothing
+-- rewrites a pick row at all, so there is no write left that could overwrite a roster.
+alter table public.match_picks drop constraint if exists match_picks_one_per_slot;
 
 alter table public.matches enable row level security;
 alter table public.match_picks enable row level security;
@@ -168,16 +173,14 @@ returns jsonb language sql stable security definer set search_path = public, pg_
     'hostName', (select username from public.profiles where id = m.host_id),
     'guestName', (select username from public.profiles where id = m.guest_id),
     'format', m.format, 'status', m.status, 'turnDeadline', m.turn_deadline,
-    'respins', m.respins, 'dips', m.dips,
+    -- All three powerup records carry their side as 'host'/'guest' already, because that is what
+    -- versus-logic.mjs's replayMatch thinks in; nothing here has to be translated.
+    'respins', m.respins, 'dips', m.dips, 'steals', m.steals,
     'result', m.result, 'winnerId', m.winner_id, 'createdAt', m.created_at,
     'picks', coalesce((
       select jsonb_agg(jsonb_build_object(
         'pickNo', p.pick_no, 'userId', p.user_id, 'boardIdx', p.board_idx, 'kind', p.kind,
-        'playerId', p.player_id, 'team', p.team, 'season', p.season, 'slot', p.slot, 'auto', p.auto,
-        -- As a SIDE, not an id: this is what a client replays the match from (versus-logic.mjs's replayMatch),
-        -- and it thinks in host/guest. Everything else about who is who it can read off the match row.
-        'stolenBy', case when p.stolen_by = m.host_id then 'host'
-                         when p.stolen_by = m.guest_id then 'guest' end
+        'playerId', p.player_id, 'team', p.team, 'season', p.season, 'slot', p.slot, 'auto', p.auto
       ) order by p.pick_no)
       from public.match_picks p where p.match_id = m.id), '[]'::jsonb)
   ) end

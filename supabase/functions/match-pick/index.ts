@@ -14,7 +14,7 @@
 //   POST { code, boardIdx, kind, playerId | team, season, slot }   make a pick
 //   POST { code, claim: "clock" }                                  the clock ran out; checked against the row
 //   POST { code, respin: "team" | "era" }                          a re-spin (VERSUS.md 7)
-//   POST { code, steal: true, slot }                               take the pick just made
+//   POST { code, steal: true, pickNo, slot }                      take any one player off their roster
 //   POST { code, dip: true }                                       take two off this board, give up the next
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as GL from "../../../game-logic.mjs";
@@ -45,12 +45,11 @@ const sideOf = (match: any, userId: string) =>
 const idOf = (match: any, side: string) => (side === "host" ? match.host_id : match.guest_id);
 const nextDeadline = () => new Date(Date.now() + V.TURN_SECONDS * 1000).toISOString();
 
-// The picks as versus-logic wants them, in pick order. The database spells them in snake_case, and a steal is
-// stored as the user who made it - which side that is only this match knows - so the translation lives here.
-const rowsToPicks = (match: any, rows: any[]) => (rows || []).map((r: any) => ({
+// The picks as versus-logic wants them, in pick order - snake_case to camelCase and nothing else. match_picks
+// is append-only, so a row means exactly what it said when it was written; a steal is a record on the match.
+const rowsToPicks = (_match: any, rows: any[]) => (rows || []).map((r: any) => ({
   pickNo: r.pick_no, kind: r.kind, playerId: r.player_id, team: r.team,
   season: r.season, slot: r.slot, auto: r.auto,
-  stolenBy: r.stolen_by ? sideOf(match, r.stolen_by) : null,
 }));
 
 // Throws rather than returning [] on a failed read, and the handler answers 500. A dropped select used to
@@ -91,7 +90,7 @@ Deno.serve(async (req) => {
   const decided = V.decideMove({
     code, format: match.format, side, move,
     picks: await readPicks(service, match),
-    respins: match.respins || [], dips: match.dips || [],
+    respins: match.respins || [], dips: match.dips || [], steals: match.steals || [],
     deadline: match.turn_deadline ? Date.parse(match.turn_deadline) : 0,
   });
   if (!decided.ok) return json({ error: decided.reason, reason: decided.reason }, decided.status);
@@ -109,14 +108,13 @@ Deno.serve(async (req) => {
     return error ? json({ error: "failed to save" }, 500) : json({ ok: true });
   }
   if (decided.action === "steal") {
-    // The pick's row changes hands rather than a second row being written, which is what keeps match_picks'
-    // "drafted exactly once" constraints meaning what they say (VERSUS.md 3).
-    const { error } = await service.from("match_picks")
-      .update({ user_id: user.id, slot: decided.slot, stolen_by: user.id })
-      .eq("match_id", match.id).eq("pick_no", decided.pickNo);
-    if (error) return json({ error: "failed to save" }, 500);
-    await service.from("matches").update({ turn_deadline: nextDeadline() }).eq("id", match.id);
-    return json({ ok: true, slot: decided.slot });
+    // Appended to the match, exactly as a re-spin or a dip is. It used to UPDATE the victim's pick row to the
+    // thief's user_id and slot - the only write in the game that rewrote who a row belonged to - which could
+    // not express a steal of anything but the pick just made, because a row has nowhere to say WHEN it changed
+    // hands. `at` is that when: the turn the thief spent on it.
+    const steals = [...(match.steals || []), { at: decided.at, by: decided.side, pickNo: decided.pickNo, slot: decided.slot }];
+    const { error } = await service.from("matches").update({ steals, turn_deadline: nextDeadline() }).eq("id", match.id);
+    return error ? json({ error: "failed to save" }, 500) : json({ ok: true, slot: decided.slot });
   }
 
   const option = decided.option;
@@ -140,7 +138,7 @@ Deno.serve(async (req) => {
   // steal both move where the end of a match is, so counting to sixteen here would be wrong.
   const after = V.replayMatch({
     code, picks: await readPicks(service, match),
-    respins: match.respins || [], dips: match.dips || [],
+    respins: match.respins || [], dips: match.dips || [], steals: match.steals || [],
   });
   if (!after.done) {
     await service.from("matches").update({ turn_deadline: nextDeadline() }).eq("id", match.id);

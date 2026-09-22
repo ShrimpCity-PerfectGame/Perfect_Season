@@ -202,13 +202,15 @@ export const openSlots = (roster) => VERSUS_SLOTS.filter((s) => !roster[s]);
 // anything a client said - only the picks and re-spins the database holds.
 //
 // `picks` are match_picks rows in pick_no order; `respins` are matches.respins entries.
-export function replayMatch({ code, picks = [], respins = [], dips = [] }) {
+export function replayMatch({ code, picks = [], respins = [], dips = [], steals = [] }) {
   const seq = seededSequence(code);
   const roster = { host: emptyRoster(), guest: emptyRoster() };
   const taken = new Set();
   const used = new Set();
   const boards = []; // one per board index; `key` is null for a board nobody was left to draft
   const spins = new Map(respins.map((r) => [`${r.pickNo}|${r.kind}`, r]));
+  // Keyed by the turn the thief spent, not by the pick they took: that is where it changes the match.
+  const stealAt = new Map((steals || []).map((x) => [x.at, x]));
   const openOf = (side) => openSlots(roster[side]);
   let pickNo = 0;
 
@@ -237,8 +239,16 @@ export function replayMatch({ code, picks = [], respins = [], dips = [] }) {
     const keyFor = (side) => (side === order[0] ? board.key : board.followKey);
 
     for (let i = 0; i < order.length; i++) {
-      const side = order[i];
       pickNo++;
+      // A steal is a turn spent taking somebody off the other roster instead of off the board. So the thief
+      // does not pick here - the player they robbed does, to replace what was taken. One line, where the old
+      // "steal the pick just made" rule needed the thief's next turn found on this very board.
+      const grab = stealAt.get(pickNo);
+      if (grab && order[i] === grab.by) {
+        applySteal(grab, picks, roster);
+        order[i] = grab.by === "host" ? "guest" : "host";
+      }
+      const side = order[i];
       // A re-spin is spent before a player's FIRST pick on a board. The board's opening pick moves the board for
       // everyone on it; anyone else's moves only their own, since the board has already been picked over.
       if (order.indexOf(side) === i) {
@@ -260,21 +270,7 @@ export function replayMatch({ code, picks = [], respins = [], dips = [] }) {
           done: false,
         };
       }
-      // A stolen pick is on the thief's roster, in the slot they chose. Stealing was their whole turn, so the
-      // turn that was theirs becomes another one for the player they robbed.
-      //
-      // It has to be the thief's OWN next turn, found by looking for them, not whatever sits at i + 1. On a
-      // board somebody has also double dipped, i + 1 is the dip's extra turn - belonging to the victim - and
-      // overwriting it swallowed the dip: the victim picked once where they had paid for twice, and still
-      // forfeited the next board. That left both rosters short and the match ended at fourteen picks with no
-      // result, unfinishable and ungradeable (VERSUS.md 7).
-      const thief = pick.stolenBy;
-      take(pick, keyFor(side), roster[thief || side], taken);
-      if (thief) {
-        const theirs = order.indexOf(thief, i + 1);
-        if (theirs >= 0) order[theirs] = side;
-        else order.splice(i + 1, 0, side); // no turn of theirs left to take: give the replacement back here
-      }
+      take(pick, keyFor(side), roster[side], taken);
     }
   }
   return {
@@ -447,27 +443,37 @@ export function respinsLeft(respins, side) {
 
 export const MATCH_STEALS = 1; // one each per match
 
-// Whether the follower may take the pick the leader has just made, and which of their slots it could fill.
-// Returns the open slots it fits, or null if it can't be stolen.
+// Where a stolen player can go on the thief's roster: their open slots that he fits.
 //
-// Two ways it can't. The obvious one is that it fits nothing they still have open. The other is the reason this
-// function exists at all: a steal empties the leader's slot and sends them back to the same board, and the board
-// might have nothing left they can use. A board with one quarterback, dealt to a leader who needs only a
-// quarterback, is exactly that - the serve-both rule (section 8) guaranteed the FOLLOWER an option after the
-// leader picked, not the leader an option after being robbed. So it is checked here, and a steal that would
-// strand them is refused and costs nothing.
-export function stealableSlots({ key, taken, option, stealerRoster, leaderRoster, leaderSlot }) {
+// Simpler than it was, because the rule is simpler. A steal used to take only the pick just made, which meant
+// it emptied a slot and sent the victim back to the SAME board - so it had to check that board still held
+// something they could use, and refuse as `would_strand` when it didn't. A steal now takes any one player off
+// the other roster and the victim picks again from the board in front of them, with one MORE slot open than
+// before, so there is no board left to strand anybody on.
+export function stealableSlots({ option, stealerRoster }) {
   const slots = openSlots(stealerRoster).filter((s) => optionFits(option, s));
-  if (!slots.length) return { reason: "bad_slot" };
-  const leaderOpen = [...openSlots(leaderRoster), leaderSlot];
-  const left = optionsOn(key).some((o) => !taken.has(optionId(o)) && leaderOpen.some((s) => optionFits(o, s)));
-  // Told apart on purpose: "he fits nothing you have open" and "it would strand them" are different problems
-  // with different answers, and one message for both says something untrue about the board in half the cases.
-  return left ? { slots } : { reason: "would_strand" };
+  return slots.length ? { slots } : { reason: "bad_slot" };
 }
 
-export function stealsLeft(picks, side) {
-  return MATCH_STEALS - picks.filter((p) => p.stolenBy === side).length;
+// Counted from the match's own record of steals rather than from the picks, now that a steal no longer rewrites
+// a pick row - `match_picks` is append-only again, which is what it was always meant to be.
+export function stealsLeft(steals, side) {
+  return MATCH_STEALS - (steals || []).filter((x) => x.by === side).length;
+}
+
+// The player a steal took, moved from the roster it was on to the one that took it, at the moment the steal was
+// spent. Moved at that moment and not earlier, which matters: every board is dealt against the open slots the
+// two rosters had at the time, so applying a steal back at the stolen pick's own turn would deal different
+// boards from the ones the match was actually played on. `taken` never changes - the option is still drafted
+// exactly once, just by somebody else now.
+function applySteal(grab, picks, roster) {
+  const victim = grab.by === "host" ? "guest" : "host";
+  const row = picks.find((p) => p.pickNo === grab.pickNo);
+  if (!row) return;
+  const from = VERSUS_SLOTS.find((sl) => roster[victim][sl] && optionId(roster[victim][sl]) === pickId(row));
+  if (!from) return;
+  roster[grab.by][grab.slot] = roster[victim][from];
+  roster[victim][from] = null;
 }
 
 // ---------- Double dip (VERSUS.md 7) ----------
@@ -524,8 +530,8 @@ export function dipsLeft(dips, side) {
 //   move  { claim: "clock" } | { respin } | { dip } | { steal, slot } | { boardIdx, kind, ... }
 const refuse = (reason, status = 409) => ({ ok: false, reason, status });
 
-export function decideMove({ code, format, picks = [], respins = [], dips = [], side, move = {}, now = Date.now(), deadline = 0 }) {
-  const state = replayMatch({ code, picks, respins, dips });
+export function decideMove({ code, format, picks = [], respins = [], dips = [], steals = [], side, move = {}, now = Date.now(), deadline = 0 }) {
+  const state = replayMatch({ code, picks, respins, dips, steals });
   if (state.done) return refuse("already_finished");
   const onClock = state.turn.side;
   const key = state.boardKey;
@@ -576,24 +582,30 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     return { ok: true, action: "dip", boardIdx: state.boardIdx, side, state };
   }
 
+  // ANY one player off their roster, named by the pick that put him there - not only the pick just made. The
+  // old rule was tied to "the last pick, on this board" because the victim had to be sent back to that board
+  // to pick again. Ten of the sixteen picks in a match could therefore never be stolen at all: the snake gives
+  // each player two turns in a row across a board boundary, so the second of that pair is followed by their
+  // OWN turn and there is never a moment when it is the other player's turn and that pick is the last one made.
+  // A steal now spends your turn and hands it to the player you robbed, so they pick again from the board in
+  // front of you both - which works wherever the stolen player came from.
   if (move.steal) {
-    if (stealsLeft(picks, side) < 1) return refuse("no_steals_left");
-    const last = picks[picks.length - 1];
-    // Nothing to steal until they have taken something, and only ever the pick just made.
-    if (!last || state.turn.first || last.stolenBy) return refuse("nothing_to_steal");
-    // ...and never your own. On a board you double dipped, the pick before yours is your first one, and
-    // everything below reads it as the other player's: it would move your own player between your own slots,
-    // spend the steal, and grade `would_strand` against the wrong roster entirely.
-    if (mine[last.slot] && optionId(mine[last.slot]) === pickId(last)) return refuse("nothing_to_steal");
-    const option = optionsOn(key).find((o) => optionId(o) === pickId(last));
-    if (!option) return refuse("nothing_to_steal");
-    const slots = stealableSlots({
-      key, taken: state.taken, option, stealerRoster: mine,
-      leaderRoster: state.roster[side === "host" ? "guest" : "host"], leaderSlot: last.slot,
-    });
+    if (stealsLeft(steals, side) < 1) return refuse("no_steals_left");
+    const target = picks.find((p) => p.pickNo === Number(move.pickNo));
+    if (!target) return refuse("nothing_to_steal");
+    // It has to be on their roster right now - which rules out your own players, an option that was never
+    // drafted, and anything already taken off them.
+    const from = VERSUS_SLOTS.find((sl) => theirs[sl] && optionId(theirs[sl]) === pickId(target));
+    if (!from) return refuse("nothing_to_steal");
+    // And never a player who has already changed hands once. Without this the steal is a tug of war: whoever
+    // spends theirs second simply takes the man back, and two powerups have bought nobody anything. The owner
+    // asked for this rule the first time it came up.
+    if ((steals || []).some((x) => x.pickNo === target.pickNo)) return refuse("already_stolen");
+    const slots = stealableSlots({ option: theirs[from], stealerRoster: mine });
     if (slots.reason) return refuse(slots.reason);
     const slot = slots.slots.includes(move.slot) ? move.slot : slots.slots[0];
-    return { ok: true, action: "steal", pickNo: last.pickNo, slot, side, state };
+    // `at` is the turn being spent, which is what replayMatch keys the steal on.
+    return { ok: true, action: "steal", at: state.pickNo, pickNo: target.pickNo, slot, side, state };
   }
 
   // An ordinary pick. A board opens the moment it is dealt: nothing can be spent in its first seconds any

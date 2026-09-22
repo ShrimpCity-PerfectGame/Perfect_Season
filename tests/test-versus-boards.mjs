@@ -314,7 +314,7 @@ await runTest("a leader's re-spin is a board they hand over too; a follower's is
     "and the follower one era re-spin");
 });
 
-await runTest("a steal takes the pick just made, and sends the leader back to the board", async () => {
+await runTest("a steal moves a player between rosters and costs the thief their turn", async () => {
   const code = "STEAL1";
   const lead = leadOn(0), follow = lead === "host" ? "guest" : "host";
   const opening = replayMatch({ code, picks: [] });
@@ -332,14 +332,12 @@ await runTest("a steal takes the pick just made, and sends the leader back to th
   assert(afterLead.roster[lead][leadTook.slot], "the leader has his pick");
   assert(afterLead.turn.side === follow, "and it is the follower's turn");
 
-  // The follower steals it instead of picking.
-  const can = stealableSlots({
-    key, taken: afterLead.taken, option: leadTook.option,
-    stealerRoster: afterLead.roster[follow], leaderRoster: afterLead.roster[lead], leaderSlot: leadTook.slot,
-  });
+  // The follower steals it instead of picking. A steal is a record on the match now, not an edit to the pick:
+  // `at` is the turn it cost, which is the turn the follower was about to use.
+  const can = stealableSlots({ option: leadTook.option, stealerRoster: afterLead.roster[follow] });
   assert(can.slots && can.slots.length, `the follower can take it, into ${JSON.stringify(can)}`);
-  const theft = [row(1, leadTook.option, can.slots[0], follow)];
-  const stolen = replayMatch({ code, picks: theft });
+  const theft = { at: 2, by: follow, pickNo: 1, slot: can.slots[0] };
+  const stolen = replayMatch({ code, picks: honest, steals: [theft] });
 
   assert(stolen.roster[follow][can.slots[0]], "the stolen pick is on the follower's roster");
   assert(!VERSUS_SLOTS.some((sl) => stolen.roster[lead][sl]), "and off the leader's entirely");
@@ -352,38 +350,25 @@ await runTest("a steal takes the pick just made, and sends the leader back to th
   // The leader takes again; the board moves on normally.
   const again = autoPick(key, stolen.taken, stolen.roster[lead], "fantasy");
   assert(optionId(again.option) !== optionId(leadTook.option), "he can't take back what was taken");
-  const done = replayMatch({ code, picks: [...theft, row(2, again.option, again.slot)] });
+  const done = replayMatch({ code, picks: [...honest, row(2, again.option, again.slot, lead)], steals: [theft] });
   assert(done.roster[lead][again.slot] && done.boardIdx === 1, "the board is finished and the match moves on");
   assert(done.turn.side === leadOn(1), "with the next board's leader on the clock");
 
-  assert(stealsLeft(theft, follow) === MATCH_STEALS - 1 && stealsLeft(theft, lead) === MATCH_STEALS,
+  assert(stealsLeft([theft], follow) === MATCH_STEALS - 1 && stealsLeft([theft], lead) === MATCH_STEALS,
     "one steal spent, and only by the one who spent it");
 });
 
-await runTest("a steal that would leave the leader nothing is refused", async () => {
-  // The case the serve-both rule does NOT cover: it guarantees the follower an option after the leader picks,
-  // not the leader an option after being robbed. A board one deep at the only position he needs is exactly that.
-  const key = ONE_QB;
-  const qb = optionsOn(key).find((o) => o.kind === "player" && o.pos === "QB");
-  // Everything gone but the quarterback, whom the leader has just taken.
-  const taken = new Set(optionsOn(key).map(optionId));
-  const leaderRoster = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, sl === "QB" ? qb : { kind: "player" }]));
-  const stealer = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, sl === "QB" ? null : { kind: "player" }]));
-  assert(stealableSlots({ key, taken, option: qb, stealerRoster: stealer, leaderRoster, leaderSlot: "QB" }).reason === "would_strand",
-    "it would send the leader back to a board with nothing on it for him, so it is refused - and says which problem it is");
-
-  // With something left he can use, the same steal is fine.
-  const spare = optionsOn(key).find((o) => o.kind === "player" && o.pos === "RB");
-  const roomy = new Set(taken); roomy.delete(optionId(spare));
-  const openLeader = { ...leaderRoster, FLEX1: null };
-  assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: stealer, leaderRoster: openLeader, leaderSlot: "QB" }).slots,
-    "with a running back still on the board for his flex, the steal goes through");
-
-  // And it is refused outright when the stealer has nowhere to put him.
-  const noRoom = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, { kind: "player" }]));
-  // A different problem, and it now says so rather than claiming something untrue about the board.
-  assert(stealableSlots({ key, taken: roomy, option: qb, stealerRoster: noRoom, leaderRoster: openLeader, leaderSlot: "QB" }).reason === "bad_slot",
-    "a full roster can't steal anything, and is told it has nowhere to put him");
+await runTest("a full roster cannot steal anybody", async () => {
+  // The only way a steal is refused on the target now. The old rule also had `would_strand`, because it sent the
+  // victim back to the SAME board and that board might hold nothing they could use; a steal takes any player
+  // now and the victim picks from the board in front of them with one MORE slot open than before, so there is
+  // no board left to strand anybody on.
+  const qb = optionsOn(ONE_QB).find((o) => o.kind === "player" && o.pos === "QB");
+  const full = Object.fromEntries(VERSUS_SLOTS.map((sl) => [sl, { kind: "player" }]));
+  assert(stealableSlots({ option: qb, stealerRoster: full }).reason === "bad_slot",
+    "nowhere to put him, and it says so");
+  const room = { ...full, QB: null };
+  assert(stealableSlots({ option: qb, stealerRoster: room }).slots?.includes("QB"), "with the slot open, he fits it");
 });
 
 // Plays a whole match with powerups in it, and returns the state at the end. `events` is called before each
