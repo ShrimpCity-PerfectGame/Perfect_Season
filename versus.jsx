@@ -1076,7 +1076,9 @@ const ERRORS = {
   no_candidate: "There's no other board to spin to.",
   no_room: "You can't double here — you need two open slots and two picks on the board to fill them.",
   last_board: "There's no next pick to give up.",
-  would_strand: "That would leave the other player with nothing to pick.",
+  would_strand: "You can't take him — it would leave this board with nothing for somebody to pick.",
+  stolen_this_turn: "A steal has already been spent on this turn.",
+  one_at_a_time: "One powerup a turn — you've already re-spun this board.",
   nothing_to_steal: "They don't have that player.",
   already_stolen: "That player has already changed hands once — he can't be taken again.",
   already_dipped: "Somebody has already doubled up on this board.",
@@ -1095,4 +1097,4 @@ const ERRORS = {
   signed_out: "Sign in to play.",
   network: "Couldn't reach the server. Try again.",
 };
-const errorText = (reason) => ERRORS[reason] || "That didn't work.";
+export const errorText = (reason) => ERRORS[reason] || "That didn't work.";

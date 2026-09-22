@@ -322,8 +322,8 @@ await runTest("a steal moves a player between rosters and costs the thief their 
 
   // The leader takes the best thing on the board.
   const leadTook = autoPick(key, opening.taken, opening.roster[lead], "fantasy");
-  const row = (pickNo, taken, slot, stolenBy = null) => ({
-    pickNo, slot, stolenBy, kind: taken.kind,
+  const row = (pickNo, taken, slot) => ({
+    pickNo, slot, kind: taken.kind,
     playerId: taken.kind === "player" ? taken.id : null,
     team: taken.kind === "player" ? null : taken.team, season: taken.season,
   });
@@ -393,7 +393,7 @@ function playWithDips(code, dipAt, format = "fantasy") {
     const got = autoPick(state.boardKey, state.taken, state.roster[side], format);
     assert(got, `pick ${state.pickNo} (${side}, board ${boardIdx}): something was available`);
     picks.push({
-      pickNo: state.pickNo, kind: got.option.kind, slot: got.slot, stolenBy: null,
+      pickNo: state.pickNo, kind: got.option.kind, slot: got.slot,
       playerId: got.option.kind === "player" ? got.option.id : null,
       team: got.option.kind === "player" ? null : got.option.team, season: got.option.season,
     });

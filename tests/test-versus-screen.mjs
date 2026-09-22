@@ -5,10 +5,11 @@
 // the wiring lives, and the only place a screen that renders nothing would show up.
 import {
   setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, clickMode,
-  assert, runTest, waitForCrypto, makeMockAuth,
+  assert, runTest, waitForCrypto, makeMockAuth, loadModule,
 } from "./helpers.mjs";
 import { replayMatch, optionId, autoPick, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS } from "../versus-logic.mjs";
 import { TEAMS, WINDOWS } from "../game-logic.mjs";
+import fs from "node:fs";
 
 setupDom();
 // This screen is driven by a Realtime subscription: a change to the match arrives, the screen re-reads, and
@@ -414,4 +415,27 @@ await runTest("a steal through the buttons moves the player on both screens", as
 // The draft keeps a clock ticking and a Realtime channel open, both of which would hold the process open
 // after the last assertion - so the screen comes down the way a player leaving it would take it down.
 reactRoot.unmount();
+// Every refusal the rules can give has words on the screen, and every set of words belongs to a refusal the
+// rules can still give. Both halves have been wrong: `would_strand` stayed in the map for a release after the
+// rule that raised it was deleted, and two new refusals went in before their copy did - which reaches a player
+// as "That didn't work" over a board that looks perfectly fine.
+await runTest("every refusal the server can give has words, and no words are orphaned", async () => {
+  setupDom();
+  const { errorText } = await loadModule("versus.jsx");
+  const src = (f) => fs.readFileSync(new URL(f, import.meta.url), "utf8");
+  const rules = src("../versus-logic.mjs");
+  const raised = [...rules.matchAll(/refuse\(\s*"([a-z_]+)"/g)].map((x) => x[1]);
+  assert(raised.length > 15, `found the refusals in versus-logic.mjs: ${raised.length}`);
+  const mute = [...new Set(raised)].filter((r) => errorText(r) === "That didn't work.");
+  assert(mute.length === 0, `each one has words: ${JSON.stringify(mute)}`);
+
+  // The other way round, searched rather than listed: a refusal reaches the screen from the rules, from the
+  // Edge Function's own answers, or from the client's own storage layer, so a set of words is orphaned only
+  // when the string appears in none of the three.
+  const sources = [rules, src("../supabase/functions/match-pick/index.ts"), src("../storage-versus.js")];
+  const screen = [...src("../versus.jsx").matchAll(/^  ([a-z_]+): "/gm)].map((x) => x[1]);
+  const orphans = screen.filter((r) => !sources.some((s) => s.includes(JSON.stringify(r))));
+  assert(orphans.length === 0, `no words for a refusal nothing can raise: ${JSON.stringify(orphans)}`);
+});
+
 console.log("test-versus-screen.mjs done");

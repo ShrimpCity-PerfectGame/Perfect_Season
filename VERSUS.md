@@ -33,7 +33,8 @@ prefixed class names, and nothing reaches production without going through stagi
   (section 8), so no draft order can strand either of them.
 - Each player carries the same **powerups** (section 7): two re-spins, a **steal** and a **double dip**, all
   spent on your own turn. A leader's re-spin deals a board to *both* of them; a follower's is a board of their
-  own. A steal takes the pick the other player just made and sends them back to the board for another. A double
+  own. A steal takes any one player off the other roster: you spend your turn on it and they get that turn to
+  replace him, and nobody changes hands twice. A double
   dip takes two off one board and gives up the next, which the other player then has to themselves.
 - Each pick has a **clock**. When it runs out the pick is made for you: the most valuable available option that
   fits an open slot. A dropped connection loses you a pick, not the match.
@@ -65,7 +66,8 @@ browsers cannot each hold the truth. So a match is the first thing in Gridspin w
 two seconds, for the whole match — the lobby included, and **including your own turn**. Both of those were
 learned the hard way. A lobby that doesn't read never learns anybody joined. And a screen that stops reading
 whenever it believes it is its turn never learns it has stopped being: the other player can act *during* your
-turn, because a steal takes the pick you just made. A draft that only moves when a socket delivers is a draft
+turn: their clock can run out, and a steal hands you the turn they were on. A draft that only moves when a
+socket delivers is a draft
 that stops.
 
 ## 3. Database (`supabase/migration-versus.sql`)
@@ -371,10 +373,35 @@ the other player's turn and that pick is the last one made. Enumerated against t
 picks were 1, 3, 5, 7, 11 and 15 and nothing else. Somebody who watched their man get taken simply could not
 answer it, which is what the owner hit in the first real playtest.
 
-Taking any player is also a simpler rule to say, and it costs the victim nothing structural: they pick from the
-board already in front of them with one *more* slot open than before. Which is why `would_strand` is gone —
-there is no board left to strand anybody on, and `bad_slot` (he fits nothing you have open) is the only refusal
-left on the target.
+Taking any player is also a simpler rule to say. It is *not*, as this document claimed for a release, free of
+the old rule's problem. The claim was that the victim picks from the board already in front of them with one
+*more* slot open than before, so nothing can be stranded, and `would_strand` was deleted on the strength of it.
+That is true of the victim's **roster** and false of the **board**. Their other slots may all be filled, so the
+slot the stolen man came out of has to be filled *from this board* — and he may have been the only thing on it
+that fitted, or the steal may have reordered the turns the board was cleared for so that somebody else took what
+they needed first. `boardServes` guarantees an **order**; a steal rewrites the order after the fact.
+
+**So the check is back, generalised** (`boardCompletable`, beside `boardServes` because it is the same
+question). After the steal, can the turns the board now has *always* be completed, whatever the players choose?
+Adversarial, for the same reason `boardServes` is: a board that could serve everyone in *some* order is not good
+enough, because the players choose and we do not. It stays cheap — a board has at most three turns left, and
+every option on it behaves as one of six things, so two options fitting the same slots are one choice. Under a
+millisecond in the worst shape the game can present.
+
+Two shapes did this, and both bricked the match **for good**: nothing on the board fitted, `autoPick` returned
+null so the clock answered 500 for ever, no result was ever computed, neither player got a record, and the only
+way out was the runbook. About one duel in two hundred once both players were holding powerups for the endgame,
+which is how they will really be spent. `tests/test-versus-rules.mjs` pins both codes, because the seeded board
+sequence is what makes them reproducible and a fuzzer that found them once would not find them again:
+
+- **QZAC4B, the last turn of the match, no other powerup.** `PIT|2` is one of only two boards in the game with a
+  single tight end on it. The host arrives with TE as their last open slot, so turn 15 is forced; the guest, on
+  the clock at 16 with a flex open, takes that tight end — the most attractive use of the powerup there is,
+  since it turns your last pick into their best player and they cannot answer. The host's TE reopens onto a
+  board with nothing for it.
+- **JVBP26, a dip and a steal on one board** — the common one. The board was cleared to serve the dipper twice
+  and the other player once, *in that order*; the steal moves the dipper down the order, the other player picks
+  first, and takes what the dipper needed.
 
 **A player who has changed hands cannot change hands again** (`already_stolen`). That is what keeps a steal a
 decision rather than a reflex: nobody spends theirs simply taking back what was taken from them. The robbed
@@ -394,10 +421,20 @@ same user and the same slot, both correct.
 On the screen it is a two-step: the Steal button arms it, the other roster's filled slots become the buttons,
 and tapping one sends it. The roster has to be the target, because the roster is what you are choosing from.
 
-**One steal per turn.** A steal does not advance the pick number — it hands the same turn to the player it
-robbed — so without that rule the victim, now on the clock at that turn, could steal straight back at the same
-`at`. `replayMatch` keys steals by `at`, so the second overwrote the first and the survivor was then discarded
-as well: both players spent their one steal and nothing moved at all. Refused as `already_stolen`.
+**One powerup a turn.** Two rules, both learned the same way — a second powerup on a turn a steal is spent on
+is thrown away, silently, and the counter still ticks down.
+
+- **No second steal on the turn** (`stolen_this_turn`). A steal does not advance the pick number — it hands the
+  same turn to the player it robbed — so without this the victim, now on the clock at that turn, could steal
+  straight back at the same `at`. `replayMatch` keys steals by `at`, so the second overwrote the first and the
+  survivor was then discarded as well: both players spent their one steal and nothing moved at all. Its own
+  refusal, not `already_stolen`, because that message ("he can't be taken again") is untrue when the victim is
+  retaliating against a *different* player.
+- **No steal on a turn already re-spun** (`one_at_a_time`). `replayMatch` reads a re-spin only on its spender's
+  own first turn (`order.indexOf(side) === i`); the steal then rewrites that turn to the victim, the test stops
+  being true, and the re-spin is never read again. The board springs back to what it was, the counter stays
+  spent, and `used` loses the entry, so a later re-spin can land on that board a second time. It is the same
+  shape as `respin_too_late` above, and the answer is the same: refuse, and both powerups stay yours.
 
 ### Double dip
 

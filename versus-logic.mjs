@@ -174,6 +174,56 @@ export function boardServes(key, taken, openFirst, openSecond, firstPicks = 1) {
   return exclusive.length >= 1 || forSecond.length - exclusive.length > firstPicks;
 }
 
+// The same question again, for an order that is no longer the one the board was dealt for.
+//
+// boardServes answers "one each" and "n then one", which is every order the DEAL can produce. A steal produces
+// others: it converts a turn - the thief spends theirs taking somebody off the other roster, and the player
+// they robbed picks in their place - so a board cleared for [lead, follow] is played as [follow, follow], and
+// with a dip in it as [follow, follow, lead] or [victim, victim, victim]. Nothing re-asked whether the board
+// could still serve that, and matches died of it: the last option a player could use went to somebody else,
+// nothing on the board fitted a slot they had open, `autoPick` returned null, and the match sat at fourteen
+// no way out but the runbook. Two shapes did it - a dip and a steal on one board, and a steal of the one man on
+// the board who fitted the victim's last open slot - at about one duel in two hundred once powerups are being
+// held for the endgame.
+//
+// Adversarial, exactly like boardServes and for the same reason: a board that COULD serve everyone in SOME
+// order is not good enough, because the players choose and we do not. Every choice on every turn has to leave
+// the rest completable, so this is a worst-case search rather than a count.
+//
+// It stays cheap because both numbers are small: a board has at most three turns left, and every option on it
+// behaves as one of six things (a quarterback, a running back, ... a kicker), so two options that fit the same
+// slots are the same choice and only one of each is tried.
+export function boardCompletable(key, taken, left, open) {
+  const groups = [];
+  for (const o of optionsOn(key)) {
+    const id = optionId(o);
+    if (taken.has(id)) continue;
+    const fits = VERSUS_SLOTS.filter((sl) => optionFits(o, sl));
+    const held = groups.find((g) => g.fits.length === fits.length && g.fits.every((s, i) => s === fits[i]));
+    if (held) held.n++; else groups.push({ fits, n: 1 });
+  }
+  const step = (i, openNow) => {
+    if (i >= left.length) return true;
+    const side = left[i];
+    let any = false;
+    for (const g of groups) {
+      if (g.n < 1) continue;
+      for (const sl of openNow[side]) {
+        if (!g.fits.includes(sl)) continue;
+        any = true;
+        // Taking the group's representative is taking one of that shape, which is what a real pick does. Put
+        // back on the way out, so the next branch sees the board as it was.
+        g.n--;
+        const ok = step(i + 1, { ...openNow, [side]: openNow[side].filter((x) => x !== sl) });
+        g.n++;
+        if (!ok) return false;
+      }
+    }
+    return any; // no legal pick at all is the plainest way to fail
+  };
+  return step(0, open);
+}
+
 // The next board that can serve the players about to draft it, walking the sequence the way boardAt does in
 // single player. `used` is every board already dealt or spun in, so nothing repeats. `openSecond` is null on a
 // board the other player has forfeited to a double dip - then it only has to serve the one.
@@ -234,7 +284,11 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], steals 
     const dip = dips.find((d) => d.boardIdx === boardIdx);
     if (dip && order.includes(dip.by)) order.splice(order.indexOf(dip.by) + 1, 0, dip.by);
 
-    const board = { key, followKey: key, order: [...order] };
+    // `order` itself, not a copy of it: a steal converts a turn in place, and a copy taken here shows the
+    // order the board was dealt for rather than the one it was played in. decideMove's dip branch reads this
+    // to work out whether anybody picks after the dipper, and off a pre-steal copy it can answer no when the
+    // truth is yes - which would skip the dip's own serve-both check.
+    const board = { key, followKey: key, order };
     boards.push(board);
     const keyFor = (side) => (side === order[0] ? board.key : board.followKey);
 
@@ -244,8 +298,7 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], steals 
       // does not pick here - the player they robbed does, to replace what was taken. One line, where the old
       // "steal the pick just made" rule needed the thief's next turn found on this very board.
       const grab = stealAt.get(pickNo);
-      if (grab && order[i] === grab.by) {
-        applySteal(grab, picks, roster);
+      if (grab && order[i] === grab.by && applySteal(grab, picks, roster)) {
         order[i] = grab.by === "host" ? "guest" : "host";
       }
       const side = order[i];
@@ -266,7 +319,12 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], steals 
           // `first` is the board's opening pick. `ownFirst` is THIS player's first turn on it, which is not the
           // same thing once a dip or a steal has given somebody two turns on one board - and it is the exact
           // condition the spin lookup above uses, so decideMove has to be able to ask it too.
-          turn: { boardIdx, first: i === 0, side, ownFirst: order.indexOf(side) === i, turns: order.length },
+          // `left` is every turn still to be played on this board, this one first. Only boardCompletable wants
+          // it, and only it can answer the question, because the order is not derivable from the board index
+          // once a steal has converted a turn. All of them are on `boardKey`: a re-spin lands on a player's
+          // own first turn, so one still ahead has not moved anything yet, and one already spent belongs to a
+          // player who has already picked and is not in here.
+          turn: { boardIdx, first: i === 0, side, ownFirst: order.indexOf(side) === i, left: order.slice(i) },
           done: false,
         };
       }
@@ -445,11 +503,13 @@ export const MATCH_STEALS = 1; // one each per match
 
 // Where a stolen player can go on the thief's roster: their open slots that he fits.
 //
-// Simpler than it was, because the rule is simpler. A steal used to take only the pick just made, which meant
-// it emptied a slot and sent the victim back to the SAME board - so it had to check that board still held
-// something they could use, and refuse as `would_strand` when it didn't. A steal now takes any one player off
-// the other roster and the victim picks again from the board in front of them, with one MORE slot open than
-// before, so there is no board left to strand anybody on.
+// Only which slots he fits. Whether the steal leaves the BOARD able to serve the turns it now has is a
+// separate question, asked by boardCompletable in decideMove - and it has to be asked. This comment used to
+// argue it away: a steal takes any one player off the other roster and the victim picks again with one MORE
+// slot open than before, so nothing can be stranded. That is true of the victim's roster and false of the
+// board. Their other slots may all be filled, so the emptied one has to be filled from THIS board, and the man
+// who was taken may have been the only thing on it that fitted - or the steal reordered the turns the board was
+// cleared for and somebody else took what they needed first.
 export function stealableSlots({ option, stealerRoster }) {
   const slots = openSlots(stealerRoster).filter((s) => optionFits(option, s));
   return slots.length ? { slots } : { reason: "bad_slot" };
@@ -466,14 +526,20 @@ export function stealsLeft(steals, side) {
 // two rosters had at the time, so applying a steal back at the stolen pick's own turn would deal different
 // boards from the ones the match was actually played on. `taken` never changes - the option is still drafted
 // exactly once, just by somebody else now.
+// Answers whether it moved anybody, because the caller hands the turn over on the strength of it. The turn
+// transfer is what pays for the stolen player: give it away for a steal that moved nobody and the thief is a
+// turn down with nothing to show, the victim a turn up, and the match ends with rosters of seven and nine and
+// no result. Nothing decideMove accepts gets here empty-handed - but `matches.steals` is jsonb the runbook
+// edits by hand, and one row naming a pick on the thief's own roster was enough to do it.
 function applySteal(grab, picks, roster) {
   const victim = grab.by === "host" ? "guest" : "host";
   const row = picks.find((p) => p.pickNo === grab.pickNo);
-  if (!row) return;
+  if (!row) return false;
   const from = VERSUS_SLOTS.find((sl) => roster[victim][sl] && optionId(roster[victim][sl]) === pickId(row));
-  if (!from) return;
+  if (!from) return false;
   roster[grab.by][grab.slot] = roster[victim][from];
   roster[victim][from] = null;
+  return true;
 }
 
 // ---------- Double dip (VERSUS.md 7) ----------
@@ -599,7 +665,13 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     // survivor was then discarded too (its `by` no longer matched the order it was checked against): both
     // players spent their one steal, and nothing moved at all. Retaliating is the obvious human response to
     // being robbed, and the button is right there.
-    if ((steals || []).some((x) => x.at === state.pickNo)) return refuse("already_stolen");
+    if ((steals || []).some((x) => x.at === state.pickNo)) return refuse("stolen_this_turn");
+    // And not a steal on a turn a re-spin has already been spent on. replayMatch reads a re-spin only on its
+    // spender's own first turn (`order.indexOf(side) === i`); the steal then rewrites that turn to the victim,
+    // the test stops being true, and the re-spin is never read again - the board springs back to what it was,
+    // the counter stays spent, and `used` loses the entry so a later re-spin can land on that board a second
+    // time. It is the same shape as respin_too_late two branches up. One powerup a turn, and both stay yours.
+    if ((respins || []).some((r) => r.pickNo === state.pickNo)) return refuse("one_at_a_time");
     const target = picks.find((p) => p.pickNo === Number(move.pickNo));
     if (!target) return refuse("nothing_to_steal");
     // It has to be on their roster right now - which rules out your own players, an option that was never
@@ -613,6 +685,15 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     const slots = stealableSlots({ option: theirs[from], stealerRoster: mine });
     if (slots.reason) return refuse(slots.reason);
     const slot = slots.slots.includes(move.slot) ? move.slot : slots.slots[0];
+    // And never one that leaves the board unable to serve the turns the steal gives it. The thief is down the
+    // slot the stolen man lands in; the victim is up the one he came out of, and is on the clock at this same
+    // turn in the thief's place.
+    const after = {
+      [side]: openSlots(mine).filter((sl) => sl !== slot),
+      [side === "host" ? "guest" : "host"]: VERSUS_SLOTS.filter((sl) => !theirs[sl] || sl === from),
+    };
+    const left = [side === "host" ? "guest" : "host", ...(state.turn.left || [side]).slice(1)];
+    if (!boardCompletable(state.boardKey, state.taken, left, after)) return refuse("would_strand");
     // `at` is the turn being spent, which is what replayMatch keys the steal on.
     return { ok: true, action: "steal", at: state.pickNo, pickNo: target.pickNo, slot, side, state };
   }

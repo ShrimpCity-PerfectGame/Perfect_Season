@@ -11,7 +11,7 @@ import { assert, runTest } from "./helpers.mjs";
 import { initGameData, SLOTS } from "../game-logic.mjs";
 import {
   initVersusData, decideMove, replayMatch, optionsOn, optionId, optionFits, openSlots,
-  VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, matchResult, pickId,
+  VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, matchResult, pickId, optionValue,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -30,13 +30,13 @@ function newMatch(code, format = "fantasy") {
     const decided = decideMove({ ...m, side, move, now, deadline: m.deadline });
     if (!decided.ok) return decided;
     if (decided.action === "respin") m.respins.push({ pickNo: decided.pickNo, kind: decided.kind, by: side, key: decided.key });
-    else if (decided.action === "dip") m.dips.push({ boardIdx: decided.boardIdx, by: side });
+    else if (decided.action === "dip") m.dips.push({ boardIdx: decided.boardIdx, at: decided.at, by: side });
     // Appended to the match, as the Edge Function does it: match_picks is append-only.
     else if (decided.action === "steal") m.steals.push({ at: decided.at, by: side, pickNo: decided.pickNo, slot: decided.slot });
     else {
       const o = decided.option;
       m.picks.push({
-        pickNo: decided.pickNo, kind: o.kind, slot: decided.slot, auto: decided.auto, stolenBy: null,
+        pickNo: decided.pickNo, kind: o.kind, slot: decided.slot, auto: decided.auto,
         playerId: o.kind === "player" ? o.id : null, team: o.kind === "player" ? null : o.team, season: o.season,
       });
     }
@@ -58,6 +58,26 @@ function newMatch(code, format = "fantasy") {
   return m;
 }
 const otherSide = (s) => (s === "host" ? "guest" : "host");
+// Fills slots in the order given, taking the best option for the first of them the board can serve. The two
+// reproductions below need a particular draft, not any draft: what strands somebody is the board having been
+// picked over in a particular way, so takeSomething's "first thing that fits" cannot reach them.
+const takeInOrder = (m, want) => {
+  const st = m.state();
+  const open = openSlots(st.roster[st.turn.side]);
+  const legal = [];
+  for (const o of optionsOn(st.boardKey)) {
+    if (st.taken.has(optionId(o))) continue;
+    for (const slot of open) if (optionFits(o, slot)) legal.push({ o, slot });
+  }
+  legal.sort((x, y) => (want.indexOf(x.slot) - want.indexOf(y.slot))
+    || (optionValue(y.o, y.slot, m.format) - optionValue(x.o, x.slot, m.format)));
+  const best = legal[0];
+  return m.move(st.turn.side, {
+    boardIdx: st.boardIdx, kind: best.o.kind, slot: best.slot,
+    playerId: best.o.kind === "player" ? best.o.id : undefined,
+    team: best.o.kind === "player" ? undefined : best.o.team, season: best.o.season,
+  });
+};
 // A steal names the pick it takes, so a test has to say which - the same lookup the screen does.
 const pickOn = (m, side, slot) => {
   const o = m.state().roster[side][slot];
@@ -173,7 +193,7 @@ await runTest("a powerup that would do nothing is refused, not spent", async () 
   // The board AFTER a dip belongs to one player alone, because the dipper forfeited it.
   assert(m.takeSomething().ok, "the other player finishes the dipped board");
   const solo = m.state();
-  assert(solo.turn.turns === 1, `the forfeited board has one picker: ${JSON.stringify(solo.turn)}`);
+  assert(solo.turn.left.length === 1, `the forfeited board has one turn left on it: ${JSON.stringify(solo.turn)}`);
 });
 
 // A steal takes ANY one player off the other roster, not only the pick just made. Under the old rule ten of the
@@ -218,11 +238,91 @@ await runTest("a steal takes any one of their players, from any board", async ()
   assert(after.boardIdx === mid.boardIdx, "on the same board the steal was spent on");
   assert(took.at === mid.pickNo, `the steal is recorded against the turn it cost: ${took.at} vs ${mid.pickNo}`);
 
-  // One each, and never the same player twice - otherwise the steal is a tug of war and two powerups buy
-  // nobody anything. The owner asked for that rule the first time it came up.
-  assert(m.move(victim, { steal: true, pickNo: oldest.pickNo }).reason === "already_stolen",
-    "the robbed player cannot simply take him back");
+  // Retaliating on the spot is refused for the turn, not for the player: a steal does not advance the pick
+  // number, so the victim is on the clock at the same turn and both records would carry the same `at` -
+  // replayMatch keys them by it, so the second overwrote the first and both powerups bought nothing at all.
+  assert(m.move(victim, { steal: true, pickNo: oldest.pickNo }).reason === "stolen_this_turn",
+    "the robbed player cannot steal back on the same turn");
   assert(m.takeSomething(victim).ok, "they take something else instead");
+
+  // And never the same player twice, on any later turn - otherwise the steal is a tug of war and two powerups
+  // buy nobody anything. The owner asked for that rule the first time it came up.
+  let asked = null;
+  for (let guard = 0; guard < 6 && !m.state().done; guard++) {
+    const now = m.state();
+    if (now.turn.side === victim) { asked = m.move(victim, { steal: true, pickNo: oldest.pickNo }); break; }
+    assert(m.takeSomething().ok, "playing on to the victim's next turn");
+  }
+  assert(asked && asked.reason === "already_stolen",
+    `a turn later, he has already changed hands: ${asked && asked.reason}`);
+});
+
+// The steal rewrites the order a board was cleared for, and for one release nothing re-asked whether the board
+// could still serve it. Both of these bricked the match for good: legalPicks empty, autoPick null, so the clock
+// answered 500 for ever, no result was ever computed, neither player got a record, and the only way out was the
+// runbook's `update matches set status = 'abandoned'`. Roughly one duel in two hundred once both players were
+// holding their powerups for the endgame, which is how they will really be spent.
+//
+// Both codes are the ones the two shapes were found on. They are pinned deliberately: the seeded board sequence
+// is what makes them reproducible, and a fuzzer that happened to find them once would not find them again.
+await runTest("a steal that would leave the board with nothing to pick is refused", async () => {
+  // One: the last turn of the whole match, no other powerup involved. PIT|2 is one of only two boards in the
+  // game holding a single tight end. The host reaches it with TE as their last open slot, so turn 15 is
+  // forced; the guest, on the clock at turn 16 with a flex open, takes that tight end - the most attractive
+  // use of the powerup there is, since it converts your last pick into their best player. The host's TE slot
+  // reopens, the man is taken, and there is nothing else on the board that fits it.
+  const a = newMatch("QZAC4B");
+  const want = {
+    host: ["QB", "RB", "WR", "FLEX1", "FLEX2", "DST", "K", "TE"],
+    guest: ["QB", "RB", "WR", "TE", "FLEX2", "DST", "K", "FLEX1"],
+  };
+  for (let guard = 0; guard < 20; guard++) {
+    const st = a.state();
+    if (st.done || st.pickNo === MATCH_PICKS) break;
+    assert(takeInOrder(a, want[st.turn.side]).ok, `pick ${st.pickNo} went through`);
+  }
+  const last = a.state();
+  assert(last.pickNo === MATCH_PICKS && last.turn.side === "guest", `turn 16, guest: ${last.pickNo} ${last.turn?.side}`);
+  assert(openSlots(last.roster.host).length === 0, "the host's roster is full");
+  const heath = a.picks.find((p) => p.pickNo === 15);
+  assert(a.move("guest", { steal: true, pickNo: 15 }).reason === "would_strand",
+    "the last pick of the match cannot be stolen out from under a board that cannot replace it");
+  // And the match still finishes, because a refusal costs nothing: the guest keeps their steal and picks.
+  assert(takeInOrder(a, want.guest).ok, "the guest picks instead");
+  const endA = a.state();
+  assert(endA.done, "sixteen picks");
+  assert(matchResult({ code: a.code, format: a.format, host: endA.roster.host, guest: endA.roster.guest }),
+    "and a result");
+  void heath;
+
+  // Two: a dip and a steal on one board, which is the common one. The board was cleared to serve the dipper
+  // twice and the other player once, IN THAT ORDER; the steal moves the dipper down the order, so the other
+  // player picks first and takes what the dipper needed.
+  const b = newMatch("JVBP26", "standard");
+  const order = {
+    host: ["TE", "FLEX1", "WR", "FLEX2", "DST", "RB", "QB", "K"],
+    guest: ["FLEX1", "RB", "WR", "DST", "FLEX2", "QB", "TE", "K"],
+  };
+  for (let guard = 0; guard < 20; guard++) {
+    const st = b.state();
+    if (st.done || st.boardIdx >= 6) break;
+    assert(takeInOrder(b, order[st.turn.side]).ok, `pick ${st.pickNo} went through`);
+  }
+  const board6 = b.state();
+  assert(board6.boardIdx === 6, `on board 6: ${board6.boardIdx}`);
+  const dipper = board6.turn.side;
+  assert(b.move(dipper, { dip: true }).ok, "they take two off this board and give up the next");
+  const theirs = anyOf(b, otherSide(dipper));
+  const asked = b.move(dipper, { steal: true, pickNo: theirs.pickNo });
+  assert(!asked.ok, `and cannot also steal on the same turn: ${asked.reason}`);
+  // Playing on from there finishes, which is the whole point - the dip stands and the steal is still theirs.
+  for (let guard = 0; guard < 20 && !b.state().done; guard++) {
+    assert(takeInOrder(b, order[b.state().turn.side]).ok, "playing the dipped board out");
+  }
+  assert(b.state().done, "sixteen picks");
+  const endB = b.state();
+  assert(matchResult({ code: b.code, format: b.format, host: endB.roster.host, guest: endB.roster.guest }),
+    "and a result");
 });
 
 await runTest("a match plays to the end, powerups and all, and the server grades it", async () => {

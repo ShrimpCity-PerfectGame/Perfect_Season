@@ -63,10 +63,20 @@ CLAUDE.md.
 Everything below was found by a review pass over the whole feature before it shipped, so none of it ever reached
 a player — but it is written down because the shapes are worth remembering.
 
-- **Three ways a match could end with no result**, all of which left it unfinishable, ungradeable and impossible
+- **Four ways a match could end with no result**, all of which left it unfinishable, ungradeable and impossible
   to leave: a steal spent on a board somebody had also double dipped, which swallowed the dip and ended the
-  match at fourteen picks; stealing your own pick; and both players stealing on the same turn, which cancelled
-  out and spent both powerups for nothing. Seven of four hundred fuzzed matches broke the first way; none do now.
+  match at fourteen picks; stealing your own pick; both players stealing on the same turn, which cancelled
+  out and spent both powerups for nothing; and a steal that left the board with nothing for somebody to pick.
+  Seven of four hundred fuzzed matches broke the first way; none do now.
+- **A steal can't take the last man on the board who fits a slot you are about to reopen.** A steal converts a
+  turn — you spend yours taking somebody, and the player you robbed picks in your place — and that rewrites the
+  order the board was cleared for. Nothing re-asked whether it could still serve everyone, so about one duel in
+  two hundred died on it once both players were holding powerups for the endgame: no result, no record for
+  either of them, and nothing to do but abandon the match. The check is back, and it is adversarial — a board
+  that *could* serve everyone in some order is not enough, because the players choose the order.
+- **One powerup a turn.** A double dip or a re-spin spent on the same turn as a steal was thrown away silently,
+  with the counter still ticking down: the board sprang back to what it was and the powerup was simply gone.
+  Both are refused now, and both stay yours.
 - **A steal the other player could not see.** The screen never received the record of it, so the two of you
   disagreed about whose turn it was and neither could move until the clock ran out.
 - **Who leads the first board is a coin flip on the match code**, not whoever created the lobby. Leading a board
