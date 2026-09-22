@@ -1541,7 +1541,7 @@ function PickName({ email, onClaimed, onSignOut }) {
 // streak stays where it is - so this is an email going onto it and then the one name change a guest is
 // allowed (migration-profiles.sql's claim_username). The email goes first: if that address is taken,
 // nothing has happened yet and they can try another.
-function KeepSeasons({ name, onKept }) {
+function KeepSeasons({ name, onKept, onUseAnother }) {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [u, setU] = useState("");
@@ -1563,7 +1563,12 @@ function KeepSeasons({ name, onKept }) {
       const { error } = await authAddEmail(address, pw);
       if (error) {
         setBusy(false);
-        return setErr(/already|exists|registered/i.test(error.message || "") ? "An account with that email already exists." : "That didn't work. Try again.");
+        // Almost always their OWN account, on a device they hadn't signed in on yet - so this is the
+        // one error that needs a door rather than an apology. Without it they were stuck: a guest has
+        // `user` set, which hid every sign-in and sign-out control in the app at once.
+        return setErr(/already|exists|registered/i.test(error.message || "")
+          ? "An account with that email already exists. If it's yours, log in to it instead."
+          : "That didn't work. Try again.");
       }
       // Done once: asking Supabase to set the same address twice is an error, and a name that was taken
       // is worth another try without starting over.
@@ -1593,6 +1598,15 @@ function KeepSeasons({ name, onKept }) {
         </div>
       </form>
       <p className="fine">{USERNAME_RULE} Your seasons, coins and streak all carry over.</p>
+      {/* The way back to an account you already have. A guest has `user` set, so the header's Log in chip,
+          the result screen's save panel and the profile's Log out are all hidden at once - which left
+          somebody who played one season before signing in with no way into their own account but clearing
+          their site data. This is that way. */}
+      <p className="fine">
+        Already have an account?{" "}
+        <button type="button" className="linkbtn" onClick={onUseAnother}>Log in to it instead</button>
+        {" "}— this guest's seasons stay on the board under <b>{name}</b>.
+      </p>
     </div>
   );
 }
@@ -4216,7 +4230,7 @@ export default function PerfectSeason() {
         {/* A guest's own tab: not a profile - there's nothing on it they could set - but the way to keep
             what they've played. Visiting someone else's profile still shows that profile. */}
         {view === "profile" && shownProfile && isGuest && !profileOf && (
-          <KeepSeasons name={user} onKept={onSeasonsKept} />
+          <KeepSeasons name={user} onKept={onSeasonsKept} onUseAnother={logOut} />
         )}
 
         {view === "profile" && shownProfile && !(isGuest && !profileOf) && (() => {

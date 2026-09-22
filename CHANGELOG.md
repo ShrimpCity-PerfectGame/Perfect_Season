@@ -34,6 +34,11 @@ CLAUDE.md.
   wrote last, and the finished season was simply gone, while the code it was played on stayed used up. The
   retry then said "already recorded". A personal best could not be recovered. Every write now carries the
   version of the record it was based on, so the second one is applied on top of the first instead of over it.
+- **Playing one season before signing in could lock you out of your own account.** Open the site on a new
+  phone, play an Unlimited season without signing in first, and the game takes a guest account for you — which
+  hid every sign-in and sign-out control at once, because as far as the app was concerned you were signed in.
+  The only thing left, "Keep my seasons", then refused your own email and your own username. Keep your seasons
+  now offers "Log in to it instead", and says so outright when the email you typed already has an account.
 - **And the same tap charged you an abandoned draft for the season you had just won** — a DNF and fifty ladder
   points — and could hand the finished draft back as "Pick 6 of 6". Four paths read the saved draft without
   waiting for the clear that finishing it had already started.

@@ -174,4 +174,27 @@ await runTest("a guest keeps its seasons: same account, own name, everything car
   assert(!/Keep your seasons/i.test(text(c)), "and stops asking");
 });
 
+// A guest has `user` set, so the header's Log in chip, the result screen's save panel and the
+// profile's Log out are all hidden at once. That is fine until it is somebody who already HAS an
+// account and simply played a season before signing in - on a new phone, say - at which point the app
+// held no sign-in control anywhere, and the one thing left, Keep my seasons, refused their own email
+// and their own username. The only ways out were clearing site data or guessing at their own /u/ address.
+await runTest("a guest who already has an account can still reach it", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+
+  await click(accountTab(c));
+  await until(() => findButtonByText(c, "Keep my seasons"), "the keep panel");
+  const out = [...c.querySelectorAll("button")].find((b) => /log in to it instead/i.test(b.textContent));
+  assert(out, `the keep panel offers a way into an existing account, got: ${text(c).slice(0, 300)}`);
+
+  // Taking it leaves the guest and lands on the ordinary sign-in, with a password field to use.
+  await click(out);
+  await flush(6);
+  assert(!signedInAs(c), `no longer signed in as the guest, got ${signedInAs(c)}`);
+  const inputs = [...c.querySelectorAll(".panel input")];
+  assert(inputs.some((i) => i.type === "password"), `and the login form is up, got ${inputs.length} fields`);
+});
+
 await close();
