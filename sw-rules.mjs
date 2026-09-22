@@ -23,8 +23,9 @@ const ASSET = /^\/(?:icon(?:-\d+|-maskable-\d+)?\.(?:png|svg)|favicon-\d+\.png|a
 // Injected by build.mjs from site-pages.mjs's own list, not written out here: kept by hand, adding the
 // per-format leaderboard or the Daily archive CLAUDE.md names as the next step would store that page's HTML
 // under "/", and offline the home page, every challenge link and every profile would serve it instead of
-// the game. site-paths.mjs holds nothing but the addresses, so importing it here doesn't drag every word
-// of the How to play steps and the privacy policy into the worker's bundle.
+// the game. It is imported from site-paths.mjs, which holds nothing but the addresses - site-pages.mjs
+// also carries every word of the How to play steps and the privacy policy, and none of that belongs in a
+// service worker. tests/test-pwa.mjs holds the two lists to each other.
 const PAGE_PATHS = new Set(["/", ...SITE_PAGE_PATHS]);
 
 // Whether a path names one of our own files rather than a screen. Usernames are [A-Za-z0-9_] and challenge
@@ -69,7 +70,9 @@ export function planFor(request, origin) {
   // But only if it IS one. Somebody opening /icon.svg or /page.js in a tab of its own is a navigation too,
   // and since pages are stored under their path with the shell as the fallback, that put an image under the
   // "/" key - after which, offline, the home page and every challenge link and profile served the image
-  // instead of the game. Our own files are left to the browser here and fetched as themselves below.
+  // instead of the game. Such a request is left to the browser entirely (null, not "bundle" or "asset"):
+  // it is a top-level navigation, so answering it from the store would be answering the wrong question,
+  // and offline it is the browser's own error page rather than the shell.
   if (request.mode === "navigate") return isFile(url.pathname) ? null : "page";
   if (url.pathname === BUNDLE) return "bundle";
   if (ASSET.test(url.pathname)) return "asset";

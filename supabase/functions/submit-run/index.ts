@@ -366,16 +366,26 @@ Deno.serve(async (req) => {
       service.from("profile_details").select("favorite_team").eq("user_id", user.id).maybeSingle(),
     ]);
     if (creditError) throw new Error(`credit_coins: ${creditError.message}`);
-    if (statsError) throw new Error(`player_stats: ${statsError.message}`);
-    if (detailsError) throw new Error(`profile_details: ${detailsError.message}`);
-    const progress = badgeProgress({
-      stats: updated, extra: mapPlayerStats(stats), details: { favoriteTeam: details?.favorite_team ?? null }, joined: existingRow.created_at,
-    });
-    const { data: awards, error: awardError } = await service.rpc("award_badges", { p_user: user.id, p_badges: badgeRewards(progress) });
-    if (awardError) throw new Error(`award_badges: ${awardError.message}`);
-
-    coins = coinsSummary({ ...credit, lines: reward.lines }, awards);
-    newBadges = Array.isArray(awards?.awarded) ? awards.awarded : [];
+    // The season's credit has landed. From here the badges are their own concern: a failure in that half
+    // used to take this down with it - one Promise.all, one catch, `coins = null` - so the player was shown
+    // NOTHING (SeasonCoins renders null when there are no new badges) over money that had actually moved,
+    // and an open profile card kept a stale balance. Badges recover by themselves, because badgeRewards
+    // sends every earned badge every season; the season's own credit never can, its ledger key being this
+    // one code.
+    coins = coinsSummary({ ...credit, lines: reward.lines }, null);
+    try {
+      if (statsError) throw new Error(`player_stats: ${statsError.message}`);
+      if (detailsError) throw new Error(`profile_details: ${detailsError.message}`);
+      const progress = badgeProgress({
+        stats: updated, extra: mapPlayerStats(stats), details: { favoriteTeam: details?.favorite_team ?? null }, joined: existingRow.created_at,
+      });
+      const { data: awards, error: awardError } = await service.rpc("award_badges", { p_user: user.id, p_badges: badgeRewards(progress) });
+      if (awardError) throw new Error(`award_badges: ${awardError.message}`);
+      coins = coinsSummary({ ...credit, lines: reward.lines }, awards);
+      newBadges = Array.isArray(awards?.awarded) ? awards.awarded : [];
+    } catch (e) {
+      console.error("badges failed:", e instanceof Error ? e.message : e);
+    }
   } catch (e) {
     console.error("coins failed:", e instanceof Error ? e.message : e);
     coins = null;

@@ -108,13 +108,16 @@ export async function fetchProfile(userId) {
 // game-logic.mjs's replayDraft/simulateSeason and supabase/functions/submit-run.
 // On success, the function's answer: { ok: true, run, coins, newBadges } (SHOP.md 4.2 - coins is null when
 // the season counted but its coins couldn't be paid). A refusal comes back as an HTTP error whose body names
-// a reason; the only one the app treats differently is "duplicate" (this draft already counted).
+// a reason. Two are carried through, because for both of them "it will be saved next time" is a lie:
+// "duplicate" (this draft already counted) and "reserved_code" (the code is the daily's own draft, so
+// it will never be accepted, however many times it is sent).
 export async function submitRun(trace) {
   const { data, error } = await getClient().functions.invoke("submit-run", { body: trace });
   if (error) {
     let body = null;
     try { body = await error.context?.json?.(); } catch (e) { /* no readable body */ }
-    return body?.reason === "duplicate" ? { ok: false, reason: "duplicate" } : { ok: false };
+    const reason = body?.reason;
+    return reason === "duplicate" || reason === "reserved_code" ? { ok: false, reason } : { ok: false };
   }
   return data;
 }
@@ -129,7 +132,11 @@ export async function submitDnf(picks, mode) {
 
 export async function fetchLeaderboardTop(limit = 10, format = "fantasy") {
   const col = bestCol(format);
-  const { data, error } = await getClient().from("profiles").select("*").not(col, "is", null).order(col, { ascending: false }).limit(limit);
+  // Tiebroken on username, or two players on the same score swap places between page loads - and the row
+  // that drops off the bottom of the top ten changes with them. Every ordering in the Stats SQL was given
+  // a tiebreak for this reason; this one is in the browser and was missed.
+  const { data, error } = await getClient().from("profiles").select("*").not(col, "is", null)
+    .order(col, { ascending: false }).order("username", { ascending: true }).limit(limit);
   if (error || !data) return [];
   return data.map(rowToProfile);
 }
@@ -186,7 +193,9 @@ export async function fetchSiteTotals() {
 export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
   const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).eq("format", format).order("score", { ascending: false }).limit(limit);
   if (error || !data) return [];
-  return data.map((r) => ({ username: r.username, w: r.w, l: r.l, score: r.score, outcome: r.outcome }));
+  // `guest` travels with the name everywhere a name is shown, and this render site already asks for it.
+  // A guest cannot play the daily today, so this is the flag being in place, not a live bug.
+  return data.map((r) => ({ username: r.username, w: r.w, l: r.l, score: r.score, outcome: r.outcome, guest: !!r.guest }));
 }
 export async function fetchSouTop(date, limit = 10) {
   const { data, error } = await getClient().from("sou_runs").select("*").eq("date", date).order("score", { ascending: false }).limit(limit);

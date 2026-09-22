@@ -104,10 +104,23 @@ export function makeMockAuth() {
     const table = store === profiles ? "profiles" : store === souRuns ? "sou_runs" : store === builds ? "builds" : store === runs ? "runs" : store === dailyRuns ? "daily_runs" : "other";
     return {
       select(_cols, opts) {
-        const state = { filters: [], order: null, limit: null };
+        const state = { filters: [], order: [], limit: null };
         const run = () => {
           let out = [...store.values()].filter((r) => state.filters.every((f) => f(r)));
-          if (state.order) out = out.sort((a, b) => (state.order.asc ? a[state.order.col] - b[state.order.col] : b[state.order.col] - a[state.order.col]));
+          // Orders apply in the sequence they were asked for, as PostgREST does - a second .order() is a
+          // TIEBREAK, not a replacement. Overwriting made a two-key query come back sorted by the second key
+          // alone, which is how adding a username tiebreak to the leaderboard silently reordered it here.
+          // Numbers subtract; anything else compares as text, which is what a column like username needs.
+          if (state.order.length) {
+            out = out.slice().sort((a, b) => {
+              for (const { col, asc } of state.order) {
+                const x = a[col], y = b[col];
+                let d = typeof x === "number" && typeof y === "number" ? x - y : String(x ?? "") < String(y ?? "") ? -1 : String(x ?? "") > String(y ?? "") ? 1 : 0;
+                if (d) return asc ? d : -d;
+              }
+              return 0;
+            });
+          }
           if (state.limit != null) out = out.slice(0, state.limit);
           return out;
         };
@@ -125,7 +138,7 @@ export function makeMockAuth() {
           // keeps a NaN build off the board now that fetchTopBuilds filters in the query.
           lt(col, val) { state.filters.push((r) => r[col] != null && !(Number.isNaN(Number(r[col]))) && Number(r[col]) < val); return builder; },
           in(col, vals) { state.filters.push((r) => vals.includes(r[col])); return builder; },
-          order(col, opts) { state.order = { col, asc: opts?.ascending !== false }; return builder; },
+          order(col, opts) { state.order.push({ col, asc: opts?.ascending !== false }); return builder; },
           limit(n) { state.limit = n; return builder; },
           // `.maybeSingle()` is `.single()` without the "no rows" error - the row, or null.
           maybeSingle() {
@@ -457,16 +470,21 @@ export function makeMockAuth() {
       const credit = callFunction(wallet.server.credit_coins, { p_user: userId, p_amount: reward.amount, p_kind: reward.kind, p_ref: reward.ref, p_daily_cap: reward.dailyCap });
       if (credit.error) throw new Error(`credit_coins: ${credit.error.message}`);
 
-      // player_stats reads the runs log, which logRun above has just added this season to.
-      const stats = callFunction(rpcs.player_stats, { p_user_id: userId });
-      if (stats.error) throw new Error(`player_stats: ${stats.error.message}`);
-      const favoriteTeam = profileData.tables.profile_details.get(userId)?.favorite_team ?? null;
-      const progress = badgeProgress({ stats: updated, extra: mapPlayerStats(stats.data), details: { favoriteTeam }, joined: existingRow.created_at });
-      const awards = callFunction(wallet.server.award_badges, { p_user: userId, p_badges: badgeRewards(progress) });
-      if (awards.error) throw new Error(`award_badges: ${awards.error.message}`);
-
-      coins = coinsSummary({ ...credit.data, lines: reward.lines }, awards.data);
-      newBadges = Array.isArray(awards.data?.awarded) ? awards.data.awarded : [];
+      // The credit has landed, so the season is paid whatever the badges do - mirrors index.ts, where a
+      // failure in the badge half used to take the season's own coins down with it and show the player
+      // nothing at all over money that had moved.
+      coins = coinsSummary({ ...credit.data, lines: reward.lines }, null);
+      try {
+        // player_stats reads the runs log, which logRun above has just added this season to.
+        const stats = callFunction(rpcs.player_stats, { p_user_id: userId });
+        if (stats.error) throw new Error(`player_stats: ${stats.error.message}`);
+        const favoriteTeam = profileData.tables.profile_details.get(userId)?.favorite_team ?? null;
+        const progress = badgeProgress({ stats: updated, extra: mapPlayerStats(stats.data), details: { favoriteTeam }, joined: existingRow.created_at });
+        const awards = callFunction(wallet.server.award_badges, { p_user: userId, p_badges: badgeRewards(progress) });
+        if (awards.error) throw new Error(`award_badges: ${awards.error.message}`);
+        coins = coinsSummary({ ...credit.data, lines: reward.lines }, awards.data);
+        newBadges = Array.isArray(awards.data?.awarded) ? awards.data.awarded : [];
+      } catch (e) { /* badges recover on the next season; the credit does not */ }
     } catch (e) {
       coins = null;
       newBadges = [];

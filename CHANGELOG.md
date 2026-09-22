@@ -74,6 +74,26 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **"Today's daily" says it's waiting instead of ignoring you** while your account loads.
 - **Two boards ordered tied names differently from every other board.**
 - **Nothing is under 12px any more** — the roster chips on the boards and the "You" marker were the last two.
+- **A duel doesn't end because one request dropped.** A single failed read told both players their match
+  didn't exist, over a live board with the clock still running — and if the clock's own update failed, the
+  next player started their turn on the last one's time, which an opponent could then run out on their
+  behalf.
+- **A draft that can't be continued says so.** If no board is left that fits what you still need, the game
+  used to leave the board on screen with its buttons live — and the season you then finished was refused
+  at the end, with nothing you could do about it. It closes the board and tells you now, and nothing is
+  charged for it.
+- **A season's coins can't vanish because a badge failed.** They were paid and then not shown, so there
+  was no way to tell.
+- **Keeping your seasons works even if you reload halfway through.** Setting the email and choosing the
+  name are two steps; reloading between them used to lock you out of keeping that account for good.
+- **A message about one season stops following you around the site**, the way other messages already do.
+- **Your own profile is yours whatever case you type it in.**
+- **The Stats boards stop showing your old guest name** once you've kept your seasons.
+- **Yesterday's daily doesn't greet you in the morning.** A tab left open overnight kept offering the day
+  before — its result, its "already played", and a tile that did nothing when tapped.
+- **Two players on the same score stop swapping places** between page loads.
+- **Guests can't be reported**, and a moderator renaming one no longer turns a throwaway account into a
+  real one while removing the only way its owner could have kept it.
 - **Duels grade the best players properly again.** A limit meant for the 17-game season had reached duel
   scoring, where it made the two best Flex seasons in the game worth exactly the same — in the one mode
   where the better roster is supposed to win outright.

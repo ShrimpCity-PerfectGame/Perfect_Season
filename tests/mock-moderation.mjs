@@ -41,7 +41,13 @@ export function makeModeration(state, profileData) {
     report_player({ p_username, p_reason, p_note = "" } = {}) {
       const uid = state.currentUserId();
       if (!uid || !state.profiles.has(uid)) fail("not_signed_in");
+      // A guest may not report: the account costs nothing to make, so six throwaways would put 24 open
+      // reports on somebody.
+      if (state.profiles.get(uid)?.guest) fail("guest_not_allowed");
       const target = byName(p_username) || fail("no_such_player");
+      // ...and a guest is not a thing to report: no bio, no picture, no name they chose - and renaming one
+      // used to promote it to a full account. Checked in the SQL's own order, straight after the lookup.
+      if (target.guest) fail("guest_not_allowed");
       if (target.id === uid) fail("self");
       if (!REPORT_REASONS.includes(p_reason)) fail("bad_reason");
       const note = trimNote(p_note);

@@ -522,7 +522,7 @@ export function botPar(boardKeys, { format, gm } = {}) {
   // that the middle of it is a fairer stand-in than either extreme. The cheapest walk still sets the
   // floor, so a rescue is never scored as worse than the one roster we know completes.
   const cheap = botWalk(boardKeys, { format, gm, cheapest: true });
-  const best = bestPossible(boardKeys, format);
+  const best = bestPossible(boardKeys, format, { gm });
   if (best == null) return cheap;
   return Math.max(cheap ?? 0, PAR_TYPICAL_SHARE * best) || null;
 }
@@ -531,25 +531,41 @@ export function botPar(boardKeys, { format, gm } = {}) {
 // botPar. Only the rescue path reads it, so an ordinary draft's par is exactly what it always was.
 const PAR_TYPICAL_SHARE = 0.83;
 
-// The best weighted score those boards can give, handicap and cap aside - a greedy walk with no reserve
-// and nothing held back, which is the ceiling the share above is a share of.
-function bestPossible(boardKeys, format) {
+// The best weighted score those boards can give: a greedy walk with no handicap and nothing held back,
+// which is the ceiling the share above is a share of.
+//
+// It spends under the cap when there is one. Ignoring it put the rescue par ABOVE what any roster could
+// actually field on those boards - 17 of 79,931 GM drafts, worst case a par of 110.5 where the true
+// cap-constrained maximum was 108.9, so a perfect roster earned 68 points against a par worth 75 and
+// nobody could clear it. That is the same unfairness the rescue exists to prevent, pointing the other way.
+//
+// Ties are broken on player id, not left to whichever comes first in BOARDS[key]. That array is sorted by
+// an unlocalized localeCompare, so its order is the runtime's: 16 of 160 boards hold an exact same-slot
+// rating tie, and reversing board order moved this by up to 18.57 points on 6.2% of board sets. Nothing
+// here feeds the seeded stream, so it was never a live bug - but this module's whole contract is that the
+// browser and the Edge Function compute the same answer, and "same runtime collation" is not that.
+function bestPossible(boardKeys, format, { gm = false } = {}) {
   const roster = {};
   const drafted = new Set();
+  let spent = 0;
   for (const key of boardKeys) {
     const open = SLOTS.filter((s) => !roster[s]);
     let best = null;
     for (const p of BOARDS[key] || []) {
       if (drafted.has(p.id)) continue;
+      const cost = gm ? playerSalary(p, format) : 0;
+      // The same reserve the draft screen holds back: every slot after this one costs at least MIN_SALARY.
+      if (gm && spent + cost > GM_CAP - (open.length - 1) * MIN_SALARY) continue;
       for (const s of open) {
         if (!fits(p.pos, s)) continue;
         const r = effectiveRating(s, p, format);
-        if (!best || r > best.r) best = { p, s, r };
+        if (!best || r > best.r || (r === best.r && p.id < best.p.id)) best = { p, s, r, cost };
       }
     }
     if (!best) return null;
     roster[best.s] = best.p;
     drafted.add(best.p.id);
+    spent += best.cost;
   }
   let total = 0, weight = 0;
   for (const s of SLOTS) {

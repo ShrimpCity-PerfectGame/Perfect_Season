@@ -98,6 +98,15 @@ begin
   if v_target is null then
     raise exception 'no_such_player' using errcode = 'P0001';
   end if;
+  -- Nor a guest as the TARGET. There is nothing about one to report: no bio and no picture (save_profile
+  -- and set_avatar refuse a guest since v2.0.0) and no name they chose - new_guest_name gives it. And the
+  -- one action that answers a username report, mod_act's rename, sets `guest = false`, which handed a
+  -- throwaway account the daily, the shop, Duel and a profile screen. Worse for the player on the other
+  -- end: KeepSeasons is gated on `isGuest`, so the rename took away their only way to keep the account,
+  -- leaving an anonymous session holding a real username with no email and no password.
+  if exists (select 1 from profiles where id = v_target and guest) then
+    raise exception 'guest_not_allowed' using errcode = 'P0001';
+  end if;
   if v_target = v_uid then
     raise exception 'self' using errcode = 'P0001';
   end if;
@@ -134,7 +143,7 @@ begin
     raise exception 'not_moderator' using errcode = 'P0001';
   end if;
   return coalesce((
-    select jsonb_agg(q.entry order by q.oldest, q.username)
+    select jsonb_agg(q.entry order by q.oldest, q.username collate "C")
       from (
         select p.username, min(r.created_at) as oldest,
                jsonb_build_object(

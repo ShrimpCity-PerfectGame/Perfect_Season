@@ -288,7 +288,11 @@ await runTest("a reward that fails still counts the season, answering coins: nul
   }
   assert(res.ok === true && res.coins === null, `a refused credit: ${show(res.coins)}`);
 
-  // Failing after the season's credit keeps the credit; the badge that didn't pay pays with the next season.
+  // Failing after the season's credit keeps the credit, AND still tells the player about it. This used to
+  // answer coins: null, which the result screen renders as nothing at all - so a player who had just been
+  // paid was shown no coins, no total and no note, over money that had really moved. The badge that didn't
+  // pay pays with the next season (badgeRewards sends every earned badge every time); the season's own
+  // credit never can, its ledger key being this one code.
   server.award_badges = () => {
     throw new Error("award_badges timed out");
   };
@@ -297,7 +301,9 @@ await runTest("a reward that fails still counts the season, answering coins: nul
   } finally {
     server.award_badges = realAward;
   }
-  assert(res.ok === true && res.coins === null && same(res.newBadges, []), `a failed award: ${show(res.coins)}`);
+  assert(res.ok === true && res.coins && res.coins.earned > 0 && same(res.newBadges, []),
+    `a failed award still reports the season's own coins: ${show(res.coins)}`);
+  assert(res.coins.lines.some((l) => l.key === "season"), `and the season's line is there: ${show(res.coins.lines)}`);
   assert(ledgerOf(unlucky.id).some((l) => l.kind === "season" && l.ref === "UNLUCKY-3") && awardedOf(unlucky.id).size === 0, "the season's credit stays paid, and no badge is recorded");
   res = await season("UNLUCKY-4");
   assert(res.ok && res.coins && res.newBadges.includes("first-down"), `the next season pays the badge: ${show(res.newBadges)}`);

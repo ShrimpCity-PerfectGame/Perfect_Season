@@ -1567,13 +1567,22 @@ function KeepSeasons({ name, onKept, onUseAnother }) {
     if (!emailDone.current) {
       const { error } = await authAddEmail(address, pw);
       if (error) {
-        setBusy(false);
-        // Almost always their OWN account, on a device they hadn't signed in on yet - so this is the
-        // one error that needs a door rather than an apology. Without it they were stuck: a guest has
-        // `user` set, which hid every sign-in and sign-out control in the app at once.
-        return setErr(/already|exists|registered/i.test(error.message || "")
-          ? "An account with that email already exists. If it's yours, log in to it instead."
-          : "That didn't work. Try again.");
+        const taken = /already|exists|registered/i.test(error.message || "");
+        // "Already registered" has two very different causes, and one of them is this account's own
+        // address: the email half of the trade-up succeeded, the name was taken, and they reloaded rather
+        // than trying another name inline. The ref below only lives as long as this panel, so the second
+        // attempt sent the address again, was refused, and returned before claim_username was ever
+        // reached - every retry failed, and the message told them to log in to the account they were
+        // already on. Asking who is signed in tells the two apart.
+        const mine = taken && (await authGetSession()).data?.session?.user?.email;
+        if (!mine || mine.toLowerCase() !== address.toLowerCase()) {
+          setBusy(false);
+          // Their own account on a device they hadn't signed in on yet is the common case, so this needs
+          // a door rather than an apology: a guest has `user` set, which hides every sign-in control.
+          return setErr(taken
+            ? "An account with that email already exists. If it's yours, log in to it instead."
+            : "That didn't work. Try again.");
+        }
       }
       // Done once: asking Supabase to set the same address twice is an error, and a name that was taken
       // is worth another try without starting over.
@@ -2218,9 +2227,19 @@ export default function PerfectSeason() {
   // that has to respect it (finishing a season) does not re-render when it changes.
   const sessionUnread = useRef(null);
 
+  // Set when the sequence runs out with slots still open: there is no board left this roster can pick
+  // from, so the draft cannot be finished. (`stuck` above is the sticky bar's, nothing to do with this.)
+  const [noBoardLeft, setNoBoardLeft] = useState(false);
+
   // What the SIGNED_OUT handler reads to tell a draft in progress from a season already played.
   const resultRef = useRef(null);
   useEffect(() => { resultRef.current = result; }, [result]);
+
+  // Usernames are compared case-insensitively everywhere the database does it: parseProfilePath and
+  // player_profile's loose branch both accept any case, so an exact === sent a guest who typed their own
+  // address in lower case down the VISITOR path - where player_profile refuses guests and answers "no such
+  // player" for their own account, with no route to Keep my seasons on that screen.
+  const sameName = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
   const readProfileTwice = async (id) => {
     try {
@@ -2322,13 +2341,9 @@ export default function PerfectSeason() {
     });
     loadLeaderboard();
     (async () => {
-      const today = todayKey();
-      const [fanDone, stdDone, savedFormat] = await Promise.all([
-        sget(DAILY_KEY(today, "fantasy"), false), sget(DAILY_KEY(today, "standard"), false), sget(FORMAT_KEY, false),
-      ]);
-      setDailyDone({ fantasy: fanDone, standard: stdDone });
+      const savedFormat = await sget(FORMAT_KEY, false);
       if (savedFormat) setFormat(normFormat(savedFormat));
-      setSouDone(await sget(SOU_DONE_KEY(todayKey()), false));
+      await readDay.current();
       const saved = await sget(DRAFT_KEY, false);
       const ok = saved && saved.spin && BOARDS[`${saved.spin.team}|${saved.spin.w}`] && Array.isArray(saved.history)
         && saved.history.every((h) => findPlayer(h.key, h.id, h.season));
@@ -2346,6 +2361,37 @@ export default function PerfectSeason() {
     return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); siteActivity.current?.unsubscribe(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // What today's daily and Over/Under have already been played, and which day that answer is about.
+  //
+  // Read once at mount, a tab left open across midnight kept yesterday's answers: the daily tile still said
+  // "See how it went", tapping it fell past both guards into a draft for the NEW day while the screen showed
+  // yesterday's record and no board, and a phantom progress key was written for a day the player could not
+  // reach. Over/Under likewise offered yesterday's score and dealt nothing. Only a reload fixed either.
+  const dayRead = useRef(null);
+  const readDay = useRef(null);
+  readDay.current = async () => {
+    const today = todayKey();
+    const [fanDone, stdDone, sou] = await Promise.all([
+      sget(DAILY_KEY(today, "fantasy"), false), sget(DAILY_KEY(today, "standard"), false), sget(SOU_DONE_KEY(today), false),
+    ]);
+    dayRead.current = today;
+    setDailyDone({ fantasy: fanDone, standard: stdDone });
+    setSouDone(sou);
+  };
+
+  // Checked whenever the player comes back to the app, and on the screens those answers are shown on. A
+  // sleeping tab fires no timers, so the moment that matters is the one where somebody looks at it again.
+  useEffect(() => {
+    const check = () => { if (dayRead.current && dayRead.current !== todayKey()) readDay.current(); };
+    check();
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", check);
+    if (typeof window !== "undefined") window.addEventListener("focus", check);
+    return () => {
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", check);
+      if (typeof window !== "undefined") window.removeEventListener("focus", check);
+    };
+  }, [view]);
 
   // Google sent them back without signing them in. Said once, and the address tidied so a reload doesn't
   // repeat it.
@@ -2384,6 +2430,16 @@ export default function PerfectSeason() {
     if (noticeAt.current === null) { noticeAt.current = view; return; }
     if (noticeAt.current !== view) { noticeAt.current = null; setNotice(""); }
   }, [notice, view]);
+
+  // The same for saveError, which is rendered in the same place and had no such mechanism: one failed save
+  // left "Your last season couldn't be saved" above every screen for the rest of the session, including
+  // screens with no season on them and drafts played afterwards.
+  const saveErrorAt = useRef(null);
+  useEffect(() => {
+    if (!saveError) { saveErrorAt.current = null; return; }
+    if (saveErrorAt.current === null) { saveErrorAt.current = view; return; }
+    if (saveErrorAt.current !== view) { saveErrorAt.current = null; setSaveError(false); }
+  }, [saveError, view]);
 
   const historyScreen = useRef(null);
   const leftAt = useRef(0);
@@ -2573,7 +2629,7 @@ export default function PerfectSeason() {
     if (req !== profileReq.current) return;
     // Your own name not found: a moderator may have renamed you since you signed in. Your account is read
     // by id instead, and the profile opens again under the name it has now.
-    if (res.status === "missing" && userId && name === user) {
+    if (res.status === "missing" && userId && sameName(name, user)) {
       const fresh = await fetchProfile(userId).catch(() => null);
       if (req !== profileReq.current) return;
       if (fresh?.username && fresh.username !== user) {
@@ -2639,6 +2695,11 @@ export default function PerfectSeason() {
   // Keep the draft in progress on this device so a reload doesn't lose it
   useEffect(() => {
     if (!draftReady || result || !spin || !mode) return;
+    // Not while a clear of this slot is still in flight. pendingClears has guarded the READERS since the
+    // "5 of 6 picked" bug; the writer had no such guard, so finishing a season and tapping Run it back
+    // inside the clear's flight wrote the NEW draft's snapshot and then had the old clear delete it - a
+    // dealt draft lost on a reload, with no DNF, which is the free redo 1.8.1 closed.
+    if (pendingClears.current[slotId(mode)]) return;
     const snap = { history, spin: spinTarget.current || spin, used, rerolls, mode, seq, seqIdx, rules: DRAFT_RULES };
     sset(DRAFT_KEY, snap, false);
     sset(mode.kind === "daily" ? DAILY_PROGRESS(mode.date, mode.format) : FREE_PROGRESS, snap, false);
@@ -2739,7 +2800,9 @@ export default function PerfectSeason() {
         }
       }
       // A draft that had already counted isn't a failed save: the result screen says so instead (SHOP.md 8).
-      setSaveError(!res.ok && res.reason !== "duplicate");
+      // The string, not just true, when the refusal is final - the panel says something different for one
+      // that will never succeed. A draft that had already counted isn't a failed save at all (SHOP.md 8).
+      setSaveError(res.ok || res.reason === "duplicate" ? false : (res.reason === "reserved_code" ? "reserved_code" : true));
       // `fresh` is the server's profile after this run, so the result screen can show the streak
       // it actually extended rather than a locally guessed one. `uid` is who the answer belongs to.
       return { ...res, fresh, uid };
@@ -2816,6 +2879,10 @@ export default function PerfectSeason() {
     setStats((s) => fresh || (s ? { ...s, username, guest: false } : s));
     setNotice(`Your seasons are yours, ${fresh?.username || username}.`);
     loadLeaderboard();
+    // ...and the Stats boards, which load once and then cache. Without this they kept showing the retired
+    // Guest_XXXXX name, chip and all, under an account that no longer exists - until the player happened
+    // to find Refresh. Every other board reloads when its tab opens; this is the one that doesn't.
+    setSiteStats((v) => ({ ...v, loaded: false }));
   }
 
   // The name claimed: from here it's an account like any other, so it goes through the same path a new
@@ -2962,6 +3029,7 @@ export default function PerfectSeason() {
     setSpinning(false);
     const r = {};
     saved.history.forEach((h) => { r[h.slot] = findPlayer(h.key, h.id, h.season); });
+    setNoBoardLeft(false);
     setRoster(r); setHistory(saved.history); setUsed(saved.used || []);
     setRerolls(saved.rerolls || { team: REROLL_BUDGET, years: REROLL_BUDGET });
     setMode(saved.mode); setSeq(saved.seq || []); setSeqIdx(saved.seqIdx || 0);
@@ -3016,20 +3084,18 @@ export default function PerfectSeason() {
   // A board a guest only looked at on this device isn't charged to whoever signs in afterwards.
   const chargeableDraft = (s) => s.history.length > 0 || s.mode.owner === (userId || null);
 
-  // presetRoster (Build-a-player) pre-fills one slot before the sequence is walked, so boardAt
-  // correctly treats that position as already spoken for from the very first board.
-  function startDraft(m, presetRoster) {
+  function startDraft(m) {
     const fmt = normFormat(m.format);
     // The two formats' dailies are deliberately different drafts, so playing one doesn't spoil
     // the other's boards. Free-mode seeds are unchanged - boards there don't depend on format,
     // and an existing challenge code must keep dealing the same boards it always did.
     const seed = m.kind === "daily" ? dailySeed(m.date, fmt) : m.code;
     const list = seededSequence(seed);
-    const initialRoster = presetRoster || {};
+    const initialRoster = {};
     // owner: the account (or guest, null) that dealt this draft - see chargeableDraft.
     setMode({ ...m, format: fmt, seed, owner: userId || null }); setSeq(list);
     setRoster(initialRoster); setHistory([]); setUsed([]); setSelected(null); setResult(null);
-    setShown(0); setPo({ idx: 0, stage: "pre" }); setRerolls({ team: REROLL_BUDGET, years: REROLL_BUDGET });
+    setShown(0); setPo({ idx: 0, stage: "pre" }); setRerolls({ team: REROLL_BUDGET, years: REROLL_BUDGET }); setNoBoardLeft(false);
     setPending(null); setNotice(""); setResumed(false); setConfirmReset(false);
     setShare({ state: "idle", text: "" });
     const i = boardAt(list, 0, initialRoster, capLeftFor(initialRoster, m));
@@ -3090,7 +3156,13 @@ export default function PerfectSeason() {
     const el = draftTop.current;
     if (el && el.scrollIntoView && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: "start" });
     if (SLOTS.every((s) => next[s])) finish(next, undefined, newHistory);
-    else advance(next, seqIdx + 1);
+    // advance() answers false when no board is left that this roster can pick from. Discarding that left
+    // seqIdx and spin where they were, so the SAME board re-rendered with its Lock in buttons live - and a
+    // second pick off it made the trace unreplayable ("not every submitted pick was consumed"), because
+    // replayDraft takes at most one pick per sequence entry. Six legal picks, under the cap, refused with no
+    // retry that could ever work. Rare - 9 in 96,000 GM drafts - and silent, which is the worse half.
+    // `stuck` closes the board and says so; Reset is then an honest exit rather than a mystery.
+    else if (!advance(next, seqIdx + 1)) setNoBoardLeft(true);
   }
 
   // forcedScenario (admin-only) skips the real simulation for a scripted ending, and skips
@@ -3656,11 +3728,10 @@ export default function PerfectSeason() {
     const saved = await readFreeDraft();
     if (validDraft(saved) && saved.mode.kind === "free") {
       if (sameVariant(saved.mode)) { restoreDraft(saved); return; }
-      // Use the saved draft (not live state) so the DNF is recorded correctly - its picks and its own
-      // ladder - even if it was started in an earlier session and never loaded back into memory.
-      if (chargeableDraft(saved)) recordDnf(saved.history.length, saved.mode);
-      clearDraftTracked("free", FREE_PROGRESS);
-      setWip((w) => ({ ...w, free: null }));
+      // Charged through the same guard the other three callers use, or two taps on a mode tile read the
+      // snapshot twice across this await and charge two DNFs for one draft. This was the one path that
+      // did its own thing - and the mode tiles are exactly what the guard was written for.
+      await abandonCurrent();
     }
     clearDraft(DRAFT_KEY);
     startDraft({ kind: "free", code: newCode(), ...want });
@@ -3904,7 +3975,7 @@ export default function PerfectSeason() {
 
   // The Profile tab is lit on your own profile, its Reports queue and the shop (or a guest's login), not on someone else's.
   const tabOn = (k) => (k === "profile"
-    ? view === "reports" || view === "shop" || (view === "profile" && (!profileOf || profileOf === user || ownProfileShown))
+    ? view === "reports" || view === "shop" || (view === "profile" && (!profileOf || sameName(profileOf, user) || ownProfileShown))
     : view === k);
 
   return (
@@ -3947,7 +4018,10 @@ export default function PerfectSeason() {
           </div>
         )}
 
-        {saveError && <div className="panel"><p style={{ margin: 0 }}>Your last season couldn't be saved. It will be included the next time a save goes through.</p></div>}
+        {/* A reserved code is refused for good, so it must not be told it will be picked up later. */}
+        {saveError && <div className="panel"><p style={{ margin: 0 }}>{saveError === "reserved_code"
+          ? "That code is the daily's own draft, so this season can't be counted. Play the daily itself from Modes."
+          : "Your last season couldn't be saved. It will be included the next time a save goes through."}</p></div>}
         {notice && <div className="panel"><p style={{ margin: 0 }}>{notice}</p></div>}
         {howTo && <HowTo onClose={closeHowTo} />}
         {needsName && <PickName email={needsName.email} onClaimed={onNameClaimed} onSignOut={logOut} />}
@@ -4268,6 +4342,12 @@ export default function PerfectSeason() {
 
                 {/* Only a truly-done position (state 2) sinks to the bottom - a filled named
                     slot that's still flex-eligible (state 1) stays put next to open ones. */}
+                {noBoardLeft && !spinning && (
+                  <p className="note" role="status" style={{ marginTop: 0 }}>
+                    There's no board left that fits what you still need, so this draft can't be finished.
+                    Reset it and start a new one - nothing you've drafted here counts against you.
+                  </p>
+                )}
                 {!spinning && (
                   <h2 className="vh">
                     {TEAMS[disp.team][0]} {WINDOWS[disp.w][0]}–{WINDOWS[disp.w][1]}, pick {pickNo} of {SLOTS.length}
@@ -4327,7 +4407,7 @@ export default function PerfectSeason() {
                                   // is a different problem with a different answer: pick somebody cheaper.
                                   const leavesNothing = mode.gm && !tooExpensive && cost > capRemaining - capHold;
                                   return (
-                                    <button key={s} className="btn solid" disabled={tooExpensive || leavesNothing} onClick={() => draft(p, s)}>
+                                    <button key={s} className="btn solid" disabled={tooExpensive || leavesNothing || noBoardLeft} onClick={() => draft(p, s)}>
                                       🔒 Lock in · {SLOT_LABEL[s]}{mode.gm && ` - $${cost}M${tooExpensive ? " (over cap)" : leavesNothing ? ` (leaves under $${MIN_SALARY}M a slot)` : ""}`}
                                     </button>
                                   );
@@ -4512,11 +4592,11 @@ export default function PerfectSeason() {
             refuses: Edit profile, the avatar picker, the Shop button and Log out, with save_profile and
             set_avatar behind them accepting the writes. Unlimited disposable accounts that could post a
             public bio and upload to the avatars bucket. Somebody else's profile still opens normally. */}
-        {view === "profile" && shownProfile && isGuest && (!profileOf || profileOf === user) && (
+        {view === "profile" && shownProfile && isGuest && (!profileOf || sameName(profileOf, user)) && (
           <KeepSeasons name={user} onKept={onSeasonsKept} onUseAnother={logOut} />
         )}
 
-        {view === "profile" && shownProfile && !(isGuest && (!profileOf || profileOf === user)) && (() => {
+        {view === "profile" && shownProfile && !(isGuest && (!profileOf || sameName(profileOf, user))) && (() => {
           const status = shownData ? shownData.status : "loading";
           const profile = shownData?.profile || null;
           return (

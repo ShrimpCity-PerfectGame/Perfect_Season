@@ -5,7 +5,7 @@
 //   - the test mock (tests/mock-moderation.mjs, as tests/mock-supabase.mjs wires it) against that SQL for one
 //     shared sequence of calls, so every jsdom test that reports or moderates is testing what the database does;
 //   - storage-moderation.js's handling of real PostgREST answers, and the screens (moderation.jsx) in jsdom.
-import { freshDb, addAccount, asUser, asAnon, uuid, sql } from "./pg-fixture.mjs";
+import { freshDb, addAccount, addGuestAccount, asUser, asAnon, uuid, sql } from "./pg-fixture.mjs";
 import { assert, runTest, setupDom, makeMockAuth, loadModule, renderComponent, click, type, flush } from "./helpers.mjs";
 
 // A made-up word for the word filter to refuse, added to the real blocked_words list (and the mock's).
@@ -378,6 +378,30 @@ function firstDiff(a, b, path = "") {
   }
   return `${path || "(top)"}: sql=${JSON.stringify(a)?.slice(0, 300)} mock=${JSON.stringify(b)?.slice(0, 300)}`;
 }
+
+// Neither end of a report may be a guest, and both halves of that are new. The reporter half shipped in
+// v2.0.0 phase 2; the target half is v2.0.0 as well, because mod_act's rename - the one action that answers a
+// username report - set `guest = false`, which handed a throwaway account the daily, the shop, Duel and a
+// profile screen, while taking away the Keep-my-seasons route that was its only way to become a real one.
+// There is nothing about a guest to report in any case: save_profile and set_avatar refuse them, so no bio
+// and no picture, and new_guest_name gives them the name.
+await runTest("a guest can neither report nor be reported", async () => {
+  await fresh(db);
+  const GUEST = uuid(80);
+  await addGuestAccount(db, GUEST);
+  const guestName = (await db.query("select username from profiles where id = $1", [GUEST])).rows[0].username;
+
+  const asGuest = await report(db, GUEST, "carol", "bio", "from a guest");
+  assert(asGuest.error === "guest_not_allowed", `a guest reporting: ${describe(asGuest)}`);
+
+  const atGuest = await report(db, ID.dave, guestName, "username", "about a guest");
+  assert(atGuest.error === "guest_not_allowed", `reporting a guest: ${describe(atGuest)}`);
+
+  // ...and a report between two real accounts still goes through, so these are rules and not a blanket refusal.
+  assert(!(await report(db, ID.dave, "carol", "bio", "a real one")).error, "a real report still works");
+  const n = (await db.query("select count(*)::int as n from reports")).rows[0].n;
+  assert(n === 1, `only the real report is stored: ${n}`);
+});
 
 await runTest("the mock gives the same answers as the SQL for one shared sequence of calls, and leaves the same data", async () => {
   await fresh(db);

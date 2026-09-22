@@ -10,5 +10,6 @@ export const HOWTO_PATH = "/how-to-play";
 export const BOARD_PATH = "/leaderboard";
 export const PRIVACY_PATH = "/privacy";
 
-// In the order SITE_PAGES lists them; tests/test-site-pages.mjs holds the two to each other.
+// In the order SITE_PAGES lists them. tests/test-pwa.mjs holds the two lists to each other, because a page
+// missing from here is stored under the shell's key and served in place of the game offline.
 export const SITE_PAGE_PATHS = [HOWTO_PATH, BOARD_PATH, PRIVACY_PATH];

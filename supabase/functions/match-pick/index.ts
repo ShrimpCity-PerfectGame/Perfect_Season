@@ -62,11 +62,23 @@ const readPicks = async (service: any, match: any) => {
   return rowsToPicks(match, data ?? []);
 };
 
+// Everything below runs inside handle(), so an unexpected throw still answers with the CORS headers. Without
+// that wrapper readPicks' deliberate throw came back headerless, which a browser reports as a network failure -
+// so the screen said "That didn't work." instead of the refusal, undoing the hardening it was written for.
 Deno.serve(async (req) => {
   const cors = corsHeaders(req);
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors } });
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+  try {
+    return await handle(req, json);
+  } catch (e) {
+    console.error("match-pick:", e);
+    return json({ error: "failed to save" }, 500);
+  }
+});
+
+async function handle(req: Request, json: (body: unknown, status?: number) => Response) {
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization");
@@ -77,11 +89,19 @@ Deno.serve(async (req) => {
 
   let move: any;
   try { move = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+  // `slot` reaches fits() -> slot.startsWith(), so anything that isn't a string threw a TypeError. Every
+  // other field is already coerced safely (boardIdx strict-compares, the numbers go through Number() and
+  // refuse as NaN), and the steal branch whitelists its own slot - this is the pick branch catching up.
+  if ("slot" in move && typeof move.slot !== "string") return json({ error: "bad move", reason: "not_your_turn" }, 400);
   const code = typeof move?.code === "string" ? move.code.toUpperCase() : "";
   if (!code) return json({ error: "no match", reason: "not_found" }, 400);
 
   const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-  const { data: match } = await service.from("matches").select("*").eq("code", code).single();
+  // The error is read, not discarded - the same distinction readPicks above is careful about. Told
+  // `not_found`, versus.jsx puts "That match doesn't exist." over a live board while the turn clock keeps
+  // running; the match is fine, only the read failed. PGRST116 is the one error that means "no such row".
+  const { data: match, error: matchError } = await service.from("matches").select("*").eq("code", code).maybeSingle();
+  if (matchError) return json({ error: "could not read the match" }, 500);
   if (!match) return json({ error: "no match", reason: "not_found" }, 404);
   if (match.status !== "drafting") return json({ error: "not playing", reason: "not_your_match" }, 409);
   const side = sideOf(match, user.id);
@@ -141,7 +161,11 @@ Deno.serve(async (req) => {
     respins: match.respins || [], dips: match.dips || [], steals: match.steals || [],
   });
   if (!after.done) {
-    await service.from("matches").update({ turn_deadline: nextDeadline() }).eq("id", match.id);
+    // Checked, like every other write in this handler. Silently failing leaves the PREVIOUS player's
+    // deadline in place, so the next one starts their turn with whatever was left of it - and an opponent
+    // posting `claim: "clock"` can have autoPick spend that turn before their screen has even drawn.
+    const { error: deadlineError } = await service.from("matches").update({ turn_deadline: nextDeadline() }).eq("id", match.id);
+    if (deadlineError) return json({ error: "failed to save" }, 500);
     return json({ ok: true });
   }
 
@@ -160,4 +184,4 @@ Deno.serve(async (req) => {
   });
   if (finishError || done?.error) return json({ error: "failed to save" }, 500);
   return json({ ok: true, result });
-});
+}

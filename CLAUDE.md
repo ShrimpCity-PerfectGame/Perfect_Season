@@ -31,8 +31,13 @@ production's canonical address is `https://www.gridspin.app` (Vercel forwards th
 still share gridspin.app), with a generated `robots.txt` and one-URL `sitemap.xml`, a search title
 ("Gridspin – Football Draft Game: Can You Go 20–0?"; home screens get the short name via
 `apple-mobile-web-app-title`) and JSON-LD structured data. Staging builds add `noindex`, and
-`vercel.json` sends `X-Robots-Tag: noindex` on every `*.vercel.app` host, so staging and the old
-production addresses never compete with gridspin.app. Keep staging's robots.txt crawlable - a crawler
+`vercel.json` sends `X-Robots-Tag: noindex` on every `*.vercel.app` host **except the two original
+production addresses**, so staging and preview builds never compete with gridspin.app. Those two are exempt
+because they serve production's own HTML, whose canonical points at www.gridspin.app - and a noindex on a
+page that points at another is the one signal pair Google can carry across to the page it points at. The
+exemption is a negative lookahead in the `has.value` host regex, and its anchor has to sit at the end of the
+whole host: written `(?!perfect-season-t9sk$|...)` it can never match, which is how it shipped inert for a
+release. `tests/test-build-seo.mjs` checks both halves. Keep staging's robots.txt crawlable - a crawler
 has to fetch a page to see its noindex. The bundle is minified. The owner holds Google Search Console
 for the domain; `tests/test-build-seo.mjs` checks all of the above.
 

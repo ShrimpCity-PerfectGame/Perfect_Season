@@ -140,6 +140,32 @@ const hostRe = rule && new RegExp(`^${rule.has.find((c) => c.type === "host").va
 check("staging and other *.vercel.app copies send noindex", !!hostRe && hostRe.test("perfect-season-staging.vercel.app") && hostRe.test("some-preview-xyz.vercel.app"));
 check("the two legacy production addresses do not", !!hostRe && !hostRe.test("perfect-season-t9sk.vercel.app") && !hostRe.test("perfect-season-beta.vercel.app"));
 check("gridspin.app itself is never noindexed", !!hostRe && !hostRe.test("gridspin.app") && !hostRe.test("www.gridspin.app"));
+// The redirects and the security headers, neither of which anything read until now: you could delete the
+// whole "redirects" array, or all five headers, and the suite stayed green. Worse, adding a redirect whose
+// source is "/" would make the home page an infinite 308 - a total outage that no test would notice.
+const redirects = vercel.redirects || [];
+const clean = { "/page.html": "/", "/how-to-play.html": "/how-to-play", "/leaderboard.html": "/leaderboard", "/privacy.html": "/privacy" };
+for (const [from, to] of Object.entries(clean)) {
+  check(`${from} redirects to ${to}`, redirects.some((r) => r.source === from && r.destination === to && r.permanent === true));
+}
+// A redirect whose source is also a rewrite DESTINATION is fine (the rewrite is internal and resolves
+// against the filesystem). A redirect whose source is a rewrite SOURCE is a loop: the address redirects,
+// and the address it redirects to rewrites straight back to it.
+const rewriteSources = new Set((vercel.rewrites || []).map((r) => r.source));
+const looping = redirects.filter((r) => rewriteSources.has(r.source));
+check("no redirect points at an address that rewrites back to it", looping.length === 0, looping);
+check("nothing redirects the home page", !redirects.some((r) => r.source === "/"), redirects);
+
+const always = (vercel.headers || []).find((h) => h.source === "/(.*)" && !h.has);
+const sent = Object.fromEntries((always?.headers || []).map((x) => [x.key, x.value]));
+check("every response sends nosniff", sent["X-Content-Type-Options"] === "nosniff", sent);
+check("...a referrer policy", /^strict-origin/.test(sent["Referrer-Policy"] || ""), sent);
+check("...and refuses to be framed", /frame-ancestors 'none'/.test(sent["Content-Security-Policy"] || "") && sent["X-Frame-Options"] === "DENY", sent);
+// Only frame-ancestors, deliberately: a real policy has to allow inline styles (the stylesheet is injected
+// as a string), Supabase over REST and websockets, and data:/blob: images for the avatars.
+check("the CSP is frame-ancestors alone, so it can't break the app", (sent["Content-Security-Policy"] || "").split(";").filter(Boolean).length === 1, sent);
+check("the hardware the game never asks for is turned off", /camera=\(\)/.test(sent["Permissions-Policy"] || "") && /geolocation=\(\)/.test(sent["Permissions-Policy"] || ""), sent);
+
 check("challenge links (/c/CODE) serve the app", (vercel.rewrites || []).some((r) => r.source === "/c/:code" && r.destination === "/page.html"));
 check("challenge links with a trailing slash serve the app too", (vercel.rewrites || []).some((r) => r.source === "/c/:code/" && r.destination === "/page.html"));
 check("challenge links are kept out of search results", (vercel.headers || []).some((h) => h.source === "/c/(.*)" && h.headers.some((x) => x.key === "X-Robots-Tag" && x.value === "noindex")));

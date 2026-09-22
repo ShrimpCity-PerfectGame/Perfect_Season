@@ -9,6 +9,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setupDom, makeStorage, mount, flush, click, text, assert, runTest, makeMockAuth } from "./helpers.mjs";
 import { planFor, pageKey, BUNDLE, FONT_HOSTS } from "../sw-rules.mjs";
+import { SITE_PAGE_PATHS } from "../site-paths.mjs";
+import { SITE_PAGES } from "../site-pages.mjs";
 import { THEME } from "../theme.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -44,6 +46,18 @@ await runTest("the worker touches this site's own files and nothing else", async
   assert(planFor(req(`https://cdn.example.com${BUNDLE}`), SITE) === null, "someone else's page.js is not our bundle");
   assert(planFor(req("https://cdn.example.com/icon-192.png"), SITE) === null, "someone else's icon is not our icon");
   assert(planFor(req(`${supabase}/icon-192.png`), SITE) === null, "and nothing under the database's own address");
+});
+
+// site-paths.mjs is a second list of the pages, and the worker is the only thing that reads it - so a page
+// added to SITE_PAGES and forgotten here would be stored under the shell's key, and offline the home page,
+// every challenge link and every profile would serve that page instead of the game. Nothing else notices.
+await runTest("the worker knows exactly the pages that have a file of their own", async () => {
+  assert(JSON.stringify(SITE_PAGE_PATHS) === JSON.stringify(SITE_PAGES.map((p) => p.path)),
+    `site-paths.mjs and site-pages.mjs list the same addresses, in the same order:\n  paths ${JSON.stringify(SITE_PAGE_PATHS)}\n  pages ${JSON.stringify(SITE_PAGES.map((p) => p.path))}`);
+  // ...and each really does get its own key rather than collapsing onto the shell.
+  for (const p of SITE_PAGE_PATHS) {
+    assert(pageKey(req(SITE + p, { mode: "navigate" }), SITE) === SITE + p, `${p} is its own entry`);
+  }
 });
 
 await runTest("a page is stored under its path, never its query, and never one entry per link", async () => {
