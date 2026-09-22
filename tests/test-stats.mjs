@@ -167,4 +167,30 @@ await runTest("created players count and the highest-OVR leaderboard come from t
   assert(section.includes("QB") && section.includes("132.4"), "expected carol's build details, got: " + section.slice(0, 300));
 });
 
+
+// The builds board took the top ten and THEN dropped the rows it can't show, so a handful of bad
+// legacy rows left it showing fewer than ten - and enough of them left it reading "No builds yet"
+// over a full table. A NaN numeric sorts above every real number in Postgres, which is exactly what
+// put them at the top; check_new_build only guards new rows, so the old ones are permanent.
+await runTest("the builds board shows ten real builds, however many bad rows sit above them", async () => {
+  const auth = makeMockAuth();
+  window.__ps_supabase__ = auth;
+  const { fetchTopBuilds } = await import("../storage.js");
+  const id = () => `b${auth._builds.size + 1}`;
+  // Four rows the screen can never show, above twelve it can.
+  for (const bad of [NaN, NaN, NaN, 1e13]) {
+    auth._builds.set(id(), { id: id(), user_id: "u1", username: "legacy", pos: "QB", overall: bad, filled: {}, created_at: new Date().toISOString() });
+  }
+  auth._builds.set(id(), { id: id(), user_id: "u1", username: "legacy", pos: "DEF", overall: 200, filled: {}, created_at: new Date().toISOString() });
+  for (let i = 0; i < 12; i++) {
+    const k = id();
+    auth._builds.set(k, { id: k, user_id: "u2", username: "real", pos: "QB", overall: 100 + i, filled: {}, created_at: new Date().toISOString() });
+  }
+
+  const top = await fetchTopBuilds(10);
+  assert(top.length === 10, `ten rows, not ${top.length}`);
+  assert(top.every((b) => Number.isFinite(b.overall) && b.pos !== "DEF"), "all of them showable");
+  assert(top[0].overall === 111, `the best real build leads: ${top[0].overall}`);
+});
+
 console.log("test-stats.mjs done");

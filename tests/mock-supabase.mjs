@@ -121,8 +121,18 @@ export function makeMockAuth() {
           gt(col, val) { state.filters.push((r) => (r[col] ?? 0) > val); return builder; },
           // NULL never satisfies a comparison in Postgres, so an unset column is excluded here.
           lte(col, val) { state.filters.push((r) => r[col] != null && r[col] <= val); return builder; },
+          // NaN is greater than every real number in Postgres, so `< x` excludes it - which is what
+          // keeps a NaN build off the board now that fetchTopBuilds filters in the query.
+          lt(col, val) { state.filters.push((r) => r[col] != null && !(Number.isNaN(Number(r[col]))) && Number(r[col]) < val); return builder; },
+          in(col, vals) { state.filters.push((r) => vals.includes(r[col])); return builder; },
           order(col, opts) { state.order = { col, asc: opts?.ascending !== false }; return builder; },
           limit(n) { state.limit = n; return builder; },
+          // `.maybeSingle()` is `.single()` without the "no rows" error - the row, or null.
+          maybeSingle() {
+            const failed = readError(table);
+            if (failed) return Promise.resolve({ data: null, error: failed });
+            return Promise.resolve({ data: run()[0] ?? null, error: null });
+          },
           single() {
             const failed = readError(table);
             if (failed) return Promise.resolve({ data: null, error: failed });
@@ -348,6 +358,9 @@ export function makeMockAuth() {
     } else if (mode.kind === "free") {
       // Over 32 characters is refused like a missing code, as index.ts does: finished_codes can't hold it.
       if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return { data: { error: "missing challenge code" } };
+      // ...and not the daily's own seed, which is short enough to pass as a code and would make a free
+      // run a bit-exact rehearsal of that day's daily - same boards, same season, recorded and paid.
+      if (/^daily-/i.test(mode.code)) return { data: { error: "that code is reserved", reason: "reserved_code" } };
       seed = mode.code;
     } else {
       return { data: { error: "unknown mode" } };

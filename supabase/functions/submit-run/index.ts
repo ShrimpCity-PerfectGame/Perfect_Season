@@ -209,6 +209,16 @@ Deno.serve(async (req) => {
     // finished_codes holds a code of at most 32 characters (the app's own are 4 to 8), so a longer
     // one is refused here, before the replay, rather than by that insert after it.
     if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return json({ error: "missing challenge code" }, 400);
+    // ...and not the daily's own seed. A free code is used verbatim AS the seed, and dailySeed is
+    // "daily-<date>" or "daily-<date>-std" - 16 and 20 characters, comfortably inside the limit above.
+    // The season is seeded "<seed>#<lineup>" in both branches, so such a code is not merely the same
+    // boards: it is the same season, bit for bit, played through the real verified path, recorded and
+    // paid. isPlausibleDailyDate accepts UTC+1, so tomorrow's worked too. Rehearse a day's daily
+    // against different rosters, then submit the real one with whichever went 20-0.
+    //
+    // The app's own box can't send one (it strips to [A-Z0-9]{4,8}), so this is for a modified client -
+    // but CLAUDE.md and schema.sql both say the Daily is "fully closed", and it was not.
+    if (/^daily-/i.test(mode.code)) return json({ error: "that code is reserved", reason: "reserved_code" }, 400);
     seed = mode.code;
   } else {
     return json({ error: "unknown mode" }, 400);

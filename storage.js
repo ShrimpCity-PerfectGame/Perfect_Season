@@ -193,6 +193,16 @@ export async function fetchSouTop(date, limit = 10) {
   if (error || !data) return [];
   return data.map((r) => ({ username: r.username, score: r.score, guest: !!r.guest }));
 }
+// Whether this account has already played a given day. The primary key (date, user_id) is what really
+// enforces "one run a day"; the app's own flag is in PERSONAL, per-device storage, so a phone after a
+// laptop knew nothing about it - and dealt a whole second run, showed the score, and dropped it with no
+// error and no coins, because upsertSouRun is a plain insert whose answer nobody read.
+export async function fetchMySouRun(date, userId) {
+  if (!userId) return null;
+  const { data, error } = await getClient().from("sou_runs").select("*").eq("date", date).eq("user_id", userId).maybeSingle();
+  if (error || !data) return null;
+  return { score: data.score };
+}
 export async function upsertSouRun(date, userId, row) {
   const { error } = await getClient().from("sou_runs").insert({ date, user_id: userId, username: row.username, score: row.score });
   return !error;
@@ -211,7 +221,18 @@ export async function logBuild(userId, { username, pos, overall, filled }) {
 // back, as a number.
 const BUILD_POSITIONS = ["QB", "RB", "WR", "TE"];
 export async function fetchTopBuilds(limit = 10) {
-  const { data, error } = await getClient().from("builds").select("*").order("overall", { ascending: false }).limit(limit);
+  // Filtered in the QUERY, not after it. `limit` runs in Postgres, so taking the top ten and then
+  // dropping the rows the screen can't show left fewer than ten - or, with enough of them, "No builds
+  // yet" over a full table. A NaN numeric sorts above every real number in Postgres, which is what put
+  // them at the top in the first place, and `overall < 1e12` is false for NaN, so this excludes them.
+  // check_new_build only guards new rows ("nothing updates a build but a rename"), so the old bad ones
+  // are permanent and this is what keeps them off the board.
+  const { data, error } = await getClient().from("builds").select("*")
+    .in("pos", BUILD_POSITIONS)
+    .lt("overall", 1e12)
+    .gt("overall", -1e12)
+    .order("overall", { ascending: false })
+    .limit(limit);
   if (error || !Array.isArray(data)) return [];
   return data
     .map((r) => ({ username: r.username, guest: !!r.guest, pos: r.pos, overall: Number(r.overall), filled: r.filled }))

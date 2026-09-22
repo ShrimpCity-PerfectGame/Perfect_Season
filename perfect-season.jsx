@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
@@ -3279,6 +3279,20 @@ export default function PerfectSeason() {
     setView("statsou");
     if (souDone) { loadSouBoard(todayKey()); return; }
     const date = todayKey();
+    // The day's own row is what really decides whether you have played: the flag above lives in
+    // personal, per-device storage, so a phone after a laptop knew nothing about it and dealt a whole
+    // second run - which was then dropped on the way out, because the table's (date, user_id) key
+    // refuses it and nobody read the answer. Asked before anything is dealt, so nobody plays a round
+    // that cannot count. A read that fails just leaves the device's own answer standing.
+    if (userId) {
+      const already = await fetchMySouRun(date, userId);
+      if (already) {
+        await sset(SOU_DONE_KEY(date), { score: already.score }, false);
+        setSouDone({ score: already.score });
+        loadSouBoard(date);
+        return;
+      }
+    }
     const wip = await sget(SOU_PROGRESS(date), false);
     setSou(null);
     // A round abandoned on the last life (page closed or reloaded) leaves no lives to resume with.
@@ -3322,8 +3336,12 @@ export default function PerfectSeason() {
     // the write and show a board missing the score that was just saved. Today's coins are claimed after
     // it too, since the claim pays only for a saved run.
     if (user && userId) {
-      await upsertSouRun(date, userId, { username: user, score });
-      claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
+      // A refusal here means the day is already recorded - from another device, or a tab that got
+      // there first - so the score on the board is the one that counts and this run is not it. Either
+      // way the day is done; what must not happen is the silence it used to answer with.
+      const saved = await upsertSouRun(date, userId, { username: user, score });
+      if (saved) claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
+      else setNotice("Today's Over/Under was already recorded on another device, so this one didn't count.");
     }
     loadSouBoard(date);
   }

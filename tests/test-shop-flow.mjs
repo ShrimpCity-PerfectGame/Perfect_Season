@@ -378,13 +378,22 @@ await runTest("Over/Under pays +15 coins once a day, on its end screen", async (
   assert(spoken(container.querySelector(".gamecoins")) === "+15 coins", `expected "+15 coins", got "${spoken(container.querySelector(".gamecoins"))}"`);
   assert(rows().length === 1 && rows()[0].amount === 15, "one 15-coin claim in the ledger");
 
-  // The same account on another device, the same day: the day plays, and pays nothing more.
+  // The same account on another device, the same day. It used to deal a whole second run - the
+  // "already played" flag is per-device - play it out, show the score, and then drop it, because the
+  // table's (date, user_id) key refuses the insert and nobody read the answer. openSou asks the table
+  // before it deals anything now, so the day simply reads as done.
   container = await open("http://localhost/", auth);
   await until(() => container.querySelector(".whoami"), "signed in on the other device");
-  await playOverUnder(container);
+  await click(tab(container, "Modes"));
+  await flush(2);
+  await clickMode(container, "Over/Under");
+  await until(() => /TODAY'S LEADERBOARD|Today's Over\/Under/i.test(text(container)),
+    () => `the day reads as already played, got: ${text(container).slice(-300)}`);
+  assert(!findButtonByText(container, "I'm ready"),
+    "no second run is offered on the other device");
   await flush(8);
-  assert(!container.querySelector(".gamecoins"), "a second Over/Under the same day shows no coins");
-  assert(rows().length === 1, "and claims nothing more");
+  assert(!container.querySelector(".gamecoins"), "and no coins are shown again");
+  assert(rows().length === 1, "and nothing more is claimed");
 });
 
 await runTest("Build-a-player pays +15 coins once a day, on the build and its verdict", async () => {

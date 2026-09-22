@@ -51,6 +51,14 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   no chip.
 - **The daily waits until the game knows who you are.** On a slow connection a returning guest could start
   it before their session loaded, draft all six, and have it refused at the end — with the day marked used.
+- **Over/Under knows you've played, whichever device you played on.** The "already played today" note
+  lived only in the browser you played in, so opening it on your phone after your laptop dealt you a whole
+  second set — which was then quietly thrown away, because the day was already recorded. It checks the day
+  before dealing anything now.
+- **The highest-OVR board shows ten builds again.** A few malformed rows from before the game checked them
+  were sorting above everything and taking up slots, so the board showed fewer than ten — or nothing at all.
+- **A challenge code can't be the daily's own.** Used as a code, it dealt that day's daily boards and played
+  out that day's exact season, which is a rehearsal the daily is supposed to make impossible.
 - **GM mode can't deal you a board you can't afford anybody on.** It used to, and the only way out was
   abandoning the draft — which counts against you, for a player who'd made a legal pick every round. A
   greedy spender hit it in nearly a quarter of drafts. You also can't spend so much that the slots you have

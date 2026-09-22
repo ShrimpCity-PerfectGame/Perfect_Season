@@ -359,4 +359,25 @@ await runTest("a Daily ignores GM and Genius flags: it's recorded, scored and pa
   assert(logged.length === 1 && logged[0].gm === false && logged[0].genius === false && logged[0].ladder === "daily", `logged as a plain Daily: ${show(logged)}`);
 });
 
+// A free code is used verbatim AS the seed, and dailySeed is "daily-<date>" (16 characters) or
+// "daily-<date>-std" (20) - both comfortably inside the 32-character limit. The season is seeded
+// "<seed>#<lineup>" in both branches, so such a code is not merely the same boards: it is the same
+// season, bit for bit, played through the real verified path, recorded and paid. Rehearse a day's
+// daily against different rosters, then submit the real one with whichever went 20-0.
+//
+// The app's own box can't send one (it strips to [A-Z0-9]{4,8}), so this needs a modified client -
+// but CLAUDE.md and schema.sql both say the Daily is "fully closed", and it was not.
+await runTest("a free code cannot be the daily's own seed", async () => {
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  for (const code of [GL.dailySeed(TODAY, "fantasy"), GL.dailySeed(TODAY, "standard"),
+                      GL.dailySeed(tomorrow, "fantasy"), "DAILY-2026-09-22"]) {
+    const res = await season(code);
+    assert(/reserved/i.test(JSON.stringify(res)), `"${code}" is refused: ${JSON.stringify(res).slice(0, 160)}`);
+  }
+  // A code that merely starts with the same letters is anybody's - the rule is the prefix "daily-",
+  // which is the shape dailySeed produces, not the word.
+  const fine = await season("DAILYBOY");
+  assert(!/reserved/i.test(JSON.stringify(fine)), `an ordinary code still works: ${JSON.stringify(fine).slice(0, 160)}`);
+});
+
 console.log("test-submit-coins.mjs done");
