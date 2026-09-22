@@ -38,6 +38,10 @@ create table if not exists public.profiles (
   daily_streak       integer default 0,
   daily_last         text,
   daily_best_streak  integer default 0,
+  -- Bumped by every submit-run write, which carries the revision it read. See the note in
+  -- migration-profiles.sql: the new row is computed in JavaScript, so the database cannot lock it for
+  -- the duration and two overlapping submissions used to lose one.
+  rev           integer not null default 0,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );

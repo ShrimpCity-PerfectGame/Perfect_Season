@@ -24,6 +24,20 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
+## [1.19.1] — unreleased
+
+### Fixed
+
+- **Tapping "Run it back" could destroy the season you had just finished.** Two things went wrong at once on
+  that one tap. The server applies a season by reading your whole record, working out the new one and writing
+  it back, and the abandoned-draft request that "Run it back" fires is much quicker — so it read first and
+  wrote last, and the finished season was simply gone, while the code it was played on stayed used up. The
+  retry then said "already recorded". A personal best could not be recovered. Every write now carries the
+  version of the record it was based on, so the second one is applied on top of the first instead of over it.
+- **And the same tap charged you an abandoned draft for the season you had just won** — a DNF and fifty ladder
+  points — and could hand the finished draft back as "Pick 6 of 6". Four paths read the saved draft without
+  waiting for the clear that finishing it had already started.
+
 ## [1.19.0] — 2026-09-21
 
 ### Added

@@ -2137,6 +2137,16 @@ export default function PerfectSeason() {
     pendingClears.current[slot] = (pendingClears.current[slot] || 0) + 1;
     clearDraft(key).finally(() => { pendingClears.current[slot]--; });
   }
+  // Every read of the Unlimited slot goes through this, not just refreshWip's. A clear in flight means
+  // the draft it belongs to has finished, so the honest answer is "there is no draft" - and the answer
+  // the shim would give is whatever it last managed to write, which may still be the finished draft.
+  //
+  // refreshWip has had that guard since the "5 of 6 picked" bug; the other four readers trusted their
+  // read, and all four are reached by the same tap. Finishing a season and pressing Run it back
+  // charged a DNF and fifty ladder points against the season you had just won, and the Unlimited tile
+  // handed the finished draft back as "Pick 6 of 6". Entering a code or taking a challenge link
+  // straight after a season did the same, through abandonCurrent.
+  const readFreeDraft = async () => (pendingClears.current.free ? null : sget(FREE_PROGRESS, false));
   const sentinel = useRef(null);
   const draftTop = useRef(null);
   const [stuck, setStuck] = useState(false);
@@ -3043,7 +3053,7 @@ export default function PerfectSeason() {
   // It is also the single place a DNF is charged for an abandoned free draft - resetDraft used to
   // charge one itself and then call restart(), which charged a second one for the same draft.
   async function abandonCurrent() {
-    const saved = await sget(FREE_PROGRESS, false);
+    const saved = await readFreeDraft();
     if (validDraft(saved) && saved.mode.kind === "free" && chargeableDraft(saved)) recordDnf(saved.history.length, saved.mode);
     clearDraftTracked("free", FREE_PROGRESS);
     setWip((w) => ({ ...w, free: null }));
@@ -3053,7 +3063,7 @@ export default function PerfectSeason() {
   // variant, or a fresh one if there isn't one. It used to call restart(), which threw a saved
   // draft away and charged a DNF for one tap.
   async function resumeFree() {
-    const saved = await sget(FREE_PROGRESS, false);
+    const saved = await readFreeDraft();
     if (validDraft(saved) && saved.mode.kind === "free") { setView("play"); restoreDraft(saved); return; }
     openFree();
   }
@@ -3080,7 +3090,7 @@ export default function PerfectSeason() {
   async function playUnlimited() {
     const fmt = normFormat(format);
     if (mode?.kind === "free" && !result && normFormat(mode.format) === fmt) { setView("play"); return; }
-    const saved = await sget(FREE_PROGRESS, false);
+    const saved = await readFreeDraft();
     if (validDraft(saved) && saved.mode.kind === "free" && normFormat(saved.mode.format) === fmt) { setView("play"); restoreDraft(saved); return; }
     openFree();
   }
@@ -3364,7 +3374,7 @@ export default function PerfectSeason() {
       && normFormat(m?.format) === want.format;
     // The draft on screen, picks or not: once a board is dealt, leaving and tapping back in is a resume.
     if (mode && mode.kind === "free" && sameVariant(mode) && !result) return;
-    const saved = await sget(FREE_PROGRESS, false);
+    const saved = await readFreeDraft();
     if (validDraft(saved) && saved.mode.kind === "free") {
       if (sameVariant(saved.mode)) { restoreDraft(saved); return; }
       // Use the saved draft (not live state) so the DNF is recorded correctly - its picks and its own

@@ -281,6 +281,8 @@ node tests/test-daily.mjs         # seeded boards, daily lock, challenge codes
 node tests/test-nav.mjs           # landing page, mode switching, draft resume
 node tests/test-mode-switch.mjs   # switching Unlimited/Genius/GM mid-draft starts fresh, doesn't resume the wrong variant
 node tests/test-wip-race.mjs      # end-of-draft storage race (see pendingClears below)
+node tests/test-finish-race.mjs   # the same race through the four readers that write to the record: Run it back must not charge a DNF
+node tests/test-submit-race.mjs   # two submissions that overlap both land - profiles is a read-modify-write and carries a `rev`
 node tests/test-board-order.mjs   # board section reordering timing
 node tests/test-reroll-pool.mjs   # reroll can't repeat an already-used team+era
 node tests/test-flex-scoring.mjs  # Flex grades on raw production, not position
@@ -507,6 +509,18 @@ overwrite each other.
 - **Cosmetic artwork uses fixed colors**, like the avatar drawings: frame and card-theme paints are data in
   `cosmetics.jsx` (`COLORS`), not theme tokens, because an item looks the same wherever it's worn. Text on a card
   still takes its scope's tokens, and `tests/test-cosmetics.mjs` checks those against every paint behind text.
+
+**`profiles` is a read-modify-write, so every write carries the revision it read.** submit-run applies a
+season by reading the whole row, working out the new one with `applyRun`/`applyDnf`, and writing it back - the
+rules live in game-logic.mjs and must not have a second copy in SQL, which is exactly why the database can't
+hold a lock across the decision the way `wallet_lock` does for the wallet. So the update is guarded on
+`profiles.rev` and bumps it, and `applyToProfile` re-reads and re-applies when it has moved. Without that, two
+overlapping requests silently lost one, and it needed no attacker: `finish()` doesn't await the submission, so
+the result screen is live while the season is in flight, and "Run it back" fires a DNF as its own request -
+shorter, since it has no replay, sim or `botPar` - which read first and wrote last. The season vanished from
+`profiles` while `finished_codes` kept the code and the ledger kept the coins, so the retry answered "already
+recorded" and a personal best was unrecoverable. `tests/test-submit-race.mjs` holds both shapes; the mock
+mirrors the retry, and `_pauseBeforeProfileWrite` is what lets a test stand in the gap.
 
 **The runs log is the complete history; `profiles.recent` is not.** `recent` keeps only an
 account's last 10 runs. Every finished draft and DNF is also appended to the `runs` table

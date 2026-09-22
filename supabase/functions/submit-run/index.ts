@@ -69,6 +69,40 @@ function rowToProfile(row: any) {
     dailyBestStreak: row?.daily_best_streak || 0,
   };
 }
+// Read the profile, work out the new one, write it back - and lose to nobody who was doing the same
+// thing at the same time. `applyRun`/`applyDnf` decide the new row in JavaScript (game-logic.mjs owns
+// those rules and must not have a second copy in SQL), so the database cannot hold a lock across the
+// decision the way wallet_lock does. Instead every write carries the `rev` it was computed from and
+// bumps it: a write whose revision has moved matches no row, and we read and re-apply.
+//
+// Without this, two overlapping requests silently lost one. The common way in needed no attacker at
+// all: `finish()` does not await the submission, so the result screen is live while the season is
+// still in flight, and "Run it back" fires a DNF as its own request - much shorter, since it has no
+// replay, no sim and no botPar - which read first and wrote last. The finished season vanished from
+// `profiles` while `finished_codes` kept the code and the ledger kept the coins, so the retry
+// answered "already recorded" and a new personal best was gone for good.
+async function applyToProfile(
+  service: any,
+  userId: string,
+  change: (p: any, row: any) => any,
+): Promise<{ ok: boolean; reason?: string; profile?: any; username?: string }> {
+  // Enough attempts to outlast a realistic pile-up (two tabs, a stale phone) without ever spinning.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: row } = await service.from("profiles").select("*").eq("id", userId).single();
+    if (!row) return { ok: false, reason: "no_profile" };
+    const updated = change(rowToProfile(row), row);
+    if (!updated) return { ok: false, reason: "refused", username: row.username };
+    const { data: written, error } = await service.from("profiles")
+      .update({ ...profileToRow(updated), rev: (row.rev || 0) + 1 })
+      .eq("id", userId).eq("rev", row.rev || 0).select("id");
+    if (error) return { ok: false, reason: "write_failed", username: row.username };
+    // Rows back means ours landed. None means somebody else wrote between our read and our write,
+    // so their season is in the row now and ours has to be applied on top of it, not instead of it.
+    if (written && written.length) return { ok: true, profile: updated, username: row.username };
+  }
+  return { ok: false, reason: "contended" };
+}
+
 function profileToRow(s: any) {
   return {
     runs: s.runs, dnf: s.dnf, wins: s.wins, losses: s.losses,
@@ -129,15 +163,14 @@ Deno.serve(async (req) => {
   // A fabricated DNF count only makes an account's own stats look worse, not a leaderboard
   // integrity issue, but profiles still isn't client-writable at all, so this goes through here too.
   if (bodyRaw?.dnf) {
-    const { data: row } = await service.from("profiles").select("*").eq("id", user.id).single();
-    if (!row) return json({ error: "no profile for this account" }, 400);
     // The mode is a tag, not a claim about a roster - it only decides which ladder eats the
     // penalty, and lying about it can only move your own penalty sideways, never erase it.
     // applyDnf falls back to unlimited for anything unrecognized.
-    const updated = GL.applyDnf(rowToProfile(row), Number(bodyRaw.picks) || 0, bodyRaw.mode);
-    const { error: writeError } = await service.from("profiles").update(profileToRow(updated)).eq("id", user.id);
-    if (writeError) return json({ error: "failed to save" }, 500);
-    await logRun(service, GL.runLogRow(user.id, row.username, updated.recent[0]));
+    const done = await applyToProfile(service, user.id, (p) =>
+      GL.applyDnf(p, Number(bodyRaw.picks) || 0, bodyRaw.mode));
+    if (done.reason === "no_profile") return json({ error: "no profile for this account" }, 400);
+    if (!done.ok) return json({ error: "failed to save" }, 500);
+    await logRun(service, GL.runLogRow(user.id, done.username, done.profile.recent[0]));
     return json({ ok: true });
   }
 
@@ -257,17 +290,22 @@ Deno.serve(async (req) => {
     if (codeInsertError) return json({ error: "failed to save" }, 500);
   }
 
-  const existing = rowToProfile(existingRow);
-  // The best-of-the-day window is keyed on THIS function's own UTC date, never the client's, so
-  // the window can't be widened by claiming a different day.
-  let updated = GL.applyRun(existing, run, utcDateKey(new Date()));
-  if (mode.kind === "daily") {
-    const streak = GL.nextStreak(existing, mode.date);
-    updated = { ...updated, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
-  }
-
-  const { error: writeError } = await service.from("profiles").update(profileToRow(updated)).eq("id", user.id);
-  if (writeError) {
+  // Applied to the row as it stands at the moment of writing, not to the copy read above - the
+  // duplicate guard between the two is a whole round trip, and another submission can land inside it.
+  // Everything the season itself decided (the replay, the score, the sim) is already settled; this
+  // only folds it into whatever counters the row holds now.
+  const applied = await applyToProfile(service, user.id, (existing) => {
+    // The best-of-the-day window is keyed on THIS function's own UTC date, never the client's, so
+    // the window can't be widened by claiming a different day.
+    let next = GL.applyRun(existing, run, utcDateKey(new Date()));
+    if (mode.kind === "daily") {
+      const streak = GL.nextStreak(existing, mode.date);
+      next = { ...next, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
+    }
+    return next;
+  });
+  const updated = applied.profile;
+  if (!applied.ok) {
     // The season didn't count, so give back what the duplicate guard took - the challenge code, or
     // this Daily's daily_runs row - and let a retry count it. Best effort: if this fails as well, a
     // retry answers "already recorded" (as a failed Daily save always did before v1.12.0).

@@ -305,6 +305,24 @@ begin
 end;
 $$;
 
+-- ---------- One writer at a time (submit-run) ----------
+
+-- submit-run applies a season by reading the whole profile row, working out the new one in JavaScript
+-- (game-logic.mjs's applyRun/applyDnf - the rules live in one place and must not be copied into SQL),
+-- and writing it all back. That is a read-modify-write with two awaits in the middle and, until this
+-- column existed, nothing to stop a second request reading the same row and writing last.
+--
+-- It needed no attacker. `finish()` does not await the submission, so the result screen is live while
+-- the season is still in flight, and "Run it back" fires a DNF as its own request - shorter than a
+-- finish, because it has no replay, no sim and no botPar - which read first and wrote last. The season
+-- was gone from `profiles` while `finished_codes` kept the code and the ledger kept the coins, so the
+-- retry answered "already recorded" and a personal best was unrecoverable.
+--
+-- Every write now carries the revision it was computed from, and bumps it. A write whose revision has
+-- moved matches no row, and submit-run reads again and re-applies. The wallet solves the same problem
+-- with wallet_lock; this table can't, because its new value is computed outside the database.
+alter table public.profiles add column if not exists rev integer not null default 0;
+
 -- ---------- Guests (v1.17.0) ----------
 
 -- A visitor who finishes a season is signed in anonymously (Supabase's own anonymous sign-in) so that

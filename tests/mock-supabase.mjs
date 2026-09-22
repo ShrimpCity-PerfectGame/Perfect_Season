@@ -34,7 +34,7 @@ export function makeMockAuth() {
   // A profile as the database makes one, and what happens around it: migration-wallet.sql's trigger on
   // profiles pays the welcome coins. Both ways in - the signup trigger and claim_username - come through here.
   const createProfile = (id, username, guest = false) => {
-    profiles.set(id, { id, username, guest, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
+    profiles.set(id, { id, username, guest, rev: 0, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
     wallet.welcome(id);
     return profiles.get(id);
   };
@@ -149,7 +149,7 @@ export function makeMockAuth() {
           if ([...profiles.values()].some((r) => r.username === row.username)) {
             return Promise.resolve({ error: { code: "23505", message: 'duplicate key value violates unique constraint "profiles_username_key"' } });
           }
-          profiles.set(row.id, { runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, ...row });
+          profiles.set(row.id, { rev: 0, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, ...row });
           wallet.welcome(row.id); // migration-wallet.sql's create_wallet trigger
         } else if (table === "builds") {
           // migration-profiles.sql's builds triggers: a real position and a finite overall, or bad_build; and
@@ -263,6 +263,11 @@ export function makeMockAuth() {
   // violation), to reach index.ts's failure branches - e.g. auth._failWrites.add("profiles").
   const failWrites = new Set();
   const writeError = (table) => (failWrites.has(table) ? { code: "08006", message: `could not write ${table}` } : null);
+  // Test-only: something to await between reading a profile and writing it back, so a test can land a
+  // second submission in that gap. The real function has two whole round trips there (the guest check
+  // and the duplicate guard) and no way to hold a lock across them, which is the whole reason
+  // applyToProfile compares revisions - see the note above it in index.ts.
+  let beforeProfileWrite = null;
   const UNIQUE_VIOLATION = "23505";
   const uniqueViolation = (constraint) => ({ code: UNIQUE_VIOLATION, message: `duplicate key value violates unique constraint "${constraint}"` });
   // A database function called the way supabase-js calls one: { data, error }, never a throw. The mock's
@@ -278,12 +283,33 @@ export function makeMockAuth() {
     if (!session?.user) return { error: { message: "unauthorized" } };
     const userId = session.user.id;
 
+    // index.ts's applyToProfile: read, decide in game-logic.mjs, write back only if the revision has
+    // not moved - and if it has, read and decide again on top of whatever landed. The rules are decided
+    // outside the database, so the database cannot lock the row across the decision the way wallet_lock
+    // does, and two overlapping submissions used to lose one outright.
+    const applyToProfile = async (change) => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const row = profiles.get(userId);
+        if (!row) return { ok: false, reason: "no_profile" };
+        const readRev = row.rev || 0;
+        const next = change(mockRowToProfile(row), row);
+        if (beforeProfileWrite) { const wait = beforeProfileWrite; beforeProfileWrite = null; await wait(); }
+        const now = profiles.get(userId);
+        // The update itself failing, the way _failWrites simulates one - before anything is written,
+        // as a real failed UPDATE leaves the row untouched.
+        if (writeError("profiles")) return { ok: false, reason: "write_failed", username: now.username };
+        if ((now.rev || 0) !== readRev) continue;           // somebody wrote between our read and this
+        Object.assign(now, mockProfileToRow(next), { rev: readRev + 1 });
+        return { ok: true, profile: next, username: now.username };
+      }
+      return { ok: false, reason: "contended" };
+    };
+
     if (body?.dnf) {
-      const row = profiles.get(userId);
-      if (!row) return { error: { message: "no profile for this account" } };
-      const updatedDnf = GL.applyDnf(mockRowToProfile(row), Number(body.picks) || 0, body.mode);
-      Object.assign(row, mockProfileToRow(updatedDnf));
-      logRun(GL.runLogRow(userId, row.username, updatedDnf.recent[0]));
+      const done = await applyToProfile((p) => GL.applyDnf(p, Number(body.picks) || 0, body.mode));
+      if (done.reason === "no_profile") return { error: { message: "no profile for this account" } };
+      if (!done.ok) return refused(500, { error: "failed to save" });
+      logRun(GL.runLogRow(userId, done.username, done.profile.recent[0]));
       return { data: { ok: true } };
     }
 
@@ -363,21 +389,24 @@ export function makeMockAuth() {
       wallet.tables.finished_codes.set(codeKey, { user_id: userId, code: mode.code, created_at: new Date().toISOString() });
     }
 
-    const existing = mockRowToProfile(existingRow);
-    let updated = GL.applyRun(existing, run, utcDateKeyMock(new Date()));
-    if (mode.kind === "daily") {
-      const streak = GL.nextStreak(existing, mode.date);
-      updated = { ...updated, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
-    }
+    const applied = await applyToProfile((existing) => {
+      let next = GL.applyRun(existing, run, utcDateKeyMock(new Date()));
+      if (mode.kind === "daily") {
+        const streak = GL.nextStreak(existing, mode.date);
+        next = { ...next, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
+      }
+      return next;
+    });
+    const updated = applied.profile;
 
-    if (writeError("profiles")) {
+    if (!applied.ok) {
       // The season didn't count, so what the duplicate guard took - the code, or this Daily's daily_runs row - is
       // given back and a retry can count it.
       if (mode.kind === "daily") dailyRuns.delete(`${mode.date}:${format}:${userId}`);
       else wallet.tables.finished_codes.delete(codeKey);
       return refused(500, { error: "failed to save" });
     }
-    Object.assign(existingRow, mockProfileToRow(updated));
+
     logRun(GL.runLogRow(userId, existingRow.username, run, mode.kind === "daily" ? mode.date : null));
 
     // The season's coins, then the coins for any badge the player now has. The season already counted, so any
@@ -517,6 +546,8 @@ export function makeMockAuth() {
     _inventory: shop.tables.inventory,
     _wallet: wallet, // its server functions (credit_coins, award_badges) and helpers, for setting up a test
     _failWrites: failWrites, // test-only: tables whose writes inside submit-run fail (see invokeSubmitRun)
+    // test-only: a promise submit-run awaits between reading a profile and writing it back, used once.
+    _pauseBeforeProfileWrite: (fn) => { beforeProfileWrite = fn; },
     _versus: versus, // test-only: 1v1's matches, and the state of one as versus-logic sees it
     _googleSignIn: googleSignIn, // test-only: the session Google's return leaves behind, with no browser
     _profiles: profiles, // test-only escape hatch for setup/assertions
