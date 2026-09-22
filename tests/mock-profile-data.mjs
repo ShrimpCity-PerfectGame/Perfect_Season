@@ -238,7 +238,8 @@ export function makeProfileData(state, { playerStats }) {
     },
     player_profile({ p_username = null } = {}) {
       if (p_username == null) return null;
-      const all = [...state.profiles.values()];
+      // A guest has no profile screen at all, so its address answers like any other name nobody holds.
+      const all = [...state.profiles.values()].filter((r) => !r.guest);
       let row = all.find((r) => r.username === p_username);
       if (!row) {
         const lower = String(p_username).toLowerCase();

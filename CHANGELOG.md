@@ -45,7 +45,8 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   any of the eight Stats boards, Over/Under or the builds board, where they read as ordinary accounts you
   could click through to and report. And a guest who typed their own profile address got the full owner
   screen the Account tab refuses — bio, picture, shop and all — which made throwaway accounts that could
-  post a public bio and upload pictures.
+  post a public bio and upload pictures. A guest's address doesn't answer for anyone else either now — their
+  name was never a link, but typing it worked.
 - **Nobody else can have a name that looks like a guest's.** `Guest_ZZZZZ` was anybody's, and rendered with
   no chip.
 - **The daily waits until the game knows who you are.** On a slow connection a returning guest could start

@@ -242,6 +242,13 @@ await runTest("a guest's own address is the keep panel too, not the owner profil
   for (const forbidden of ["Edit profile", "Shop", "Log out"]) {
     assert(!findButtonByText(c, forbidden), `and not ${forbidden}`);
   }
+
+  // And nobody ELSE gets one either - "a guest has no profile screen" is the rule, which is why their
+  // name is not a link on any board. The address answered anyway, with badges and all, for an account
+  // that costs nothing to make. player_profile refuses it now, so a hand-rolled request gets the same.
+  const asVisitor = auth.rpc ? await auth.rpc("player_profile", { p_username: name }) : null;
+  assert(asVisitor && asVisitor.data == null,
+    `a guest's profile is not there to be looked up: ${JSON.stringify(asVisitor && asVisitor.data)?.slice(0, 120)}`);
 });
 
 // A draft belongs to the account that dealt it. `chargeableDraft` only checks whose it is when it has NO

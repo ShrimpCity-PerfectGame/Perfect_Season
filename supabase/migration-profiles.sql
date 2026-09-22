@@ -560,8 +560,12 @@ create index if not exists profiles_username_lower_idx on public.profiles (lower
 create or replace function public.player_profile(p_username text)
 returns jsonb language sql stable security invoker set search_path = public as $$
   with
-  exact as (select p.* from profiles p where p.username = p_username),
-  loose as (select p.* from profiles p where lower(p.username) = lower(p_username)),
+  -- A guest has no profile screen at all (v1.17.0) - which is why their name carries a chip on the
+  -- boards instead of being a link. The app stopped linking them, but the address still answered: typing
+  -- /u/Guest_XXXXX gave anybody the full screen, badges and all, for an account that costs nothing to
+  -- make. Refused here rather than only in the browser, so a hand-rolled request gets the same answer.
+  exact as (select p.* from profiles p where p.username = p_username and not p.guest),
+  loose as (select p.* from profiles p where lower(p.username) = lower(p_username) and not p.guest),
   target as (
     select * from exact
     union all
