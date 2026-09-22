@@ -86,13 +86,6 @@ export const VERSUS_CSS = `
   box-shadow:inset 0 3px 0 var(--pc,var(--muted)),0 0 0 2px color-mix(in srgb,var(--accent) 35%,transparent)}
 .vs-grab .sub{color:var(--accent-ink);font-weight:800}
 .vs-grabnote{margin:6px 0 0}
-/* The only way to spend a steal is one of these, so they answer to the same floor every other real control
-   does. They are not .btn, so @media (pointer:coarse) in perfect-season.jsx never reached them - and the
-   phone audit never flagged it, because nothing it drives had ever armed a steal. */
-@media (pointer:coarse){
-  .vs-rosters .vs-grab{min-height:44px;position:relative;z-index:1}
-  .vs-them .vs-grab .sub{display:block;font-size:11px}
-}
 @media (hover:hover){.vs-grab:hover{background:var(--surface2)}}
 /* position:relative so the confetti has something to fall inside, and overflow:hidden so it doesn't spill past
    the block - the same pair .cel uses, because this is the same celebration. */
@@ -175,7 +168,7 @@ export const VERSUS_CSS = `
   .vs-rosters .slot .v{font-size:12px;margin-top:1px}
   /* 12px is the floor tools/ui-harness/audit.mjs holds the whole app to; these were 10.5 and 10. */
   .vs-rosters .slot .k{font-size:12px}
-  .vs-side-hd{margin-bottom:3px;font-size:11px}
+  .vs-side-hd{margin-bottom:3px;font-size:12px}
   /* The other player's roster shows WHO, the same as yours. It was eight across with the names hidden, to buy
      vertical space - and that made the screen unreadable in the way that matters: you could not see what they
      had taken from you, or who was on their roster to steal. The names are the whole point of the strip. Same
@@ -188,6 +181,17 @@ export const VERSUS_CSS = `
   .vs-them .slot[data-filled="1"]{border-style:solid}
   .vs-them .vs-track{margin-top:4px}
   .vs-powers .btn{padding:7px 9px}
+}
+/* After the width blocks above, not before them - which is where this sat, and at the same specificity, so
+   .vs-them .slot's own 34px beat it on every phone and the floor only existed above 640px. The one
+   place a steal is ever spent is a phone. CLAUDE.md's ordering rule, learned the same way: base rules, then
+   responsive, then pointer:coarse.
+   The only way to spend a steal is one of these buttons, and they are not .btn, so the app's own coarse block
+   never reached them either. */
+@media (pointer:coarse){
+  .vs-rosters .vs-grab{min-height:44px;position:relative;z-index:1}
+  .vs-them .vs-grab{min-height:44px}
+  .vs-them .vs-grab .sub{display:block;font-size:11px}
 }
 `;
 
@@ -794,7 +798,12 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     );
   }
 
-  const link = typeof location !== "undefined" ? `${location.origin}${versusPath(match.code)}` : versusPath(match.code);
+  // The site's own address first, the way every other share path builds one. Read off `location.origin` this
+  // was `https://localhost/vs/ABC123` inside the Android app, whose web view is served from localhost - and the
+  // lobby link is the whole of matchmaking, so there was no other way to hand somebody a code from the app.
+  // The share card two hundred lines down already did this correctly with the same `siteUrl`.
+  const origin = siteUrl || (typeof location !== "undefined" ? location.origin : "");
+  const link = origin ? `${origin}${versusPath(match.code)}` : versusPath(match.code);
   const hostName = match.hostName || "Host";
   const guestName = match.guestName || "…";
 

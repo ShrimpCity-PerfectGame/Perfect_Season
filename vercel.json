@@ -19,7 +19,7 @@
   "headers": [
     {
       "source": "/(.*)",
-      "has": [{ "type": "host", "value": "(?<sub>.*)\\.vercel\\.app" }],
+      "has": [{ "type": "host", "value": "(?<sub>(?!perfect-season-t9sk$|perfect-season-beta$).*)\\.vercel\\.app" }],
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
     },
     {

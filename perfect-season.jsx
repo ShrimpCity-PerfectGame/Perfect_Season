@@ -2229,6 +2229,9 @@ export default function PerfectSeason() {
   // left a screen (a tab or a name), so Back can return to that spot.
   const historyScreen = useRef(null);
   const leftAt = useRef(0);
+  // The screen the page opened in. Only leaveVersus reads it, to tell an entry it pushed from the one that was
+  // already there when the tab loaded - going back from the latter leaves the site.
+  const openedOn = useRef(null);
 
   // Opening a profile or the shop pushes an entry for it, after recording the screen being left in the current
   // entry, so Back returns there and Forward works. Leaving one for any other screen pushes "/". Moving between
@@ -2243,6 +2246,7 @@ export default function PerfectSeason() {
       // The entry the page opened in, at the address its screen lives at (pathFor): a profile's address
       // loses any trailing slash, and an address that names no screen - an address under /u/ that isn't a
       // username, a challenge link - goes back to "/". /how-to-play keeps its address until the rules close.
+      openedOn.current = next;
       writeHistory("replaceState", next, atHowTo.current ? null : pathFor(next));
     } else if (sameScreen(prev, next)) {
       // Already written: Back or Forward landed here, or nothing that has an entry changed.
@@ -2361,10 +2365,21 @@ export default function PerfectSeason() {
     setVersusCode(null);
     openTab("versus");
   }
+  // Nothing here may change state before the traversal. `setVersusCode(null)` did, and that was enough to make
+  // Back a push that oscillated for ever: the history effect saw "versus with a code" become "versus without
+  // one", decided that was a new screen it owns, replaced the code back into the current entry and pushed a
+  // new one - so the back() already queued walked straight into the entry it had just stamped. Every duel ends
+  // on a screen whose Back is this function. The popstate handler sets the code and the view from whatever
+  // entry we land on, so there is nothing to clear on the way out.
   function leaveVersus() {
+    const here = window.history.state;
+    const onVersusEntry = here?.ps === "view" && here.view === "versus";
+    // ...and an entry we pushed, not the one the page opened in. Somebody who arrived on /vs/CODE has only
+    // that one, so going back from it leaves the site rather than reaching Modes - which is exactly the
+    // player an invite brings, on the screen their match just ended on.
+    if (onVersusEntry && !sameScreen(openedOn.current || {}, here)) { window.history.back(); return; }
     setVersusCode(null);
-    if (window.history.state?.ps === "view" && window.history.state.view === "versus") window.history.back();
-    else openTab("home");
+    openTab("home");
   }
   // The shop (SHOP.md 8), from your profile card or a season's coins. Signed in only.
   function openShop() {

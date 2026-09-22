@@ -389,6 +389,14 @@ begin
   if not public.text_is_clean(p_username) then return 'blocked'; end if;
   if v_old is null then
     insert into public.profiles (id, username) values (v_uid, p_username);
+    -- And move anything already written under this account, the way the guest branch below does. With the
+    -- use_account_username fix above there should be nothing to move - an account with no profile can no
+    -- longer write these tables at all - but a database that ran the old trigger may hold rows from before
+    -- it, and this is what turns them back into the account's real name.
+    update public.runs set username = p_username where user_id = v_uid;
+    update public.daily_runs set username = p_username where user_id = v_uid;
+    update public.sou_runs set username = p_username where user_id = v_uid;
+    update public.builds set username = p_username where user_id = v_uid;
   else
     -- A guest keeping what it has played: the same account, under its own name from now on. The name
     -- snapshots on the boards follow it, exactly as a moderator's rename moves them (mod_act).
@@ -463,8 +471,20 @@ $$;
 -- mod_act's rename updates these rows after profiles, so this reads the new name.
 create or replace function public.use_account_username()
 returns trigger language plpgsql security invoker set search_path = public, pg_temp as $$
+declare v_name text;
 begin
-  new.username := coalesce((select p.username from public.profiles p where p.id = new.user_id), new.username);
+  select p.username into v_name from public.profiles p where p.id = new.user_id;
+  -- No profile, no board. This was `coalesce(that subquery, new.username)`, which handed the browser's own
+  -- value back whenever the account had no profile row - and since v1.16.0 that state is reachable and holds
+  -- a valid token: an account signed in with Google has no profile at all until claim_username runs. The
+  -- dialog that blocks the screen until it picks a name does not block the REST API, so one POST put any text
+  -- at all - 'admin' included - at the top of the Over/Under and Build-a-player boards, rendered as a link to
+  -- the REAL profile of that name, with no profile behind it for the Reports queue to act on. It outlived the
+  -- account claiming a clean name, too, because claim_username only rewrote the snapshots for a guest.
+  if v_name is null then
+    raise exception 'no_profile' using errcode = 'P0001';
+  end if;
+  new.username := v_name;
   return new;
 end;
 $$;

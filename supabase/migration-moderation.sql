@@ -70,6 +70,13 @@ begin
   if v_uid is null or not exists (select 1 from profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
   end if;
+  -- And not a guest. The ten-reports-a-day cap is per account, and since v1.17.0 an account costs nothing:
+  -- an anonymous sign-in gets a profile row immediately, so six throwaway guests put 24 open reports on
+  -- somebody. Every other guest-sensitive surface got this check when guests shipped (submit-run's
+  -- guest_daily, can_play_versus) - the queue did not.
+  if exists (select 1 from profiles where id = v_uid and guest) then
+    raise exception 'guest_not_allowed' using errcode = 'P0001';
+  end if;
   select id into v_target from profiles where username = p_username;
   if v_target is null then
     raise exception 'no_such_player' using errcode = 'P0001';
@@ -174,7 +181,9 @@ begin
     end if;
     begin
       -- The username column only: nothing else about the account changes.
-      update profiles set username = p_new_name where id = p_user_id;
+      -- `guest` goes with the name: claim_username's one exception fires on it, so a guest a moderator
+      -- had just renamed could turn round and rename itself again, over the moderator's decision.
+      update profiles set username = p_new_name, guest = false where id = p_user_id;
     exception when unique_violation then
       raise exception 'taken' using errcode = 'P0001';
     end;
