@@ -223,4 +223,46 @@ await runTest("a guest tapping Duel is told why, and the message does not follow
     `and it is gone once they move on, got: ${text(c).slice(0, 240)}`);
 });
 
+// The "a guest has no profile screen" rule was `isGuest && !profileOf` - and an ADDRESS sets profileOf,
+// so typing their own /u/ name handed a guest the whole owner screen the tab refuses: Edit profile, the
+// avatar picker, the Shop button and Log out, with save_profile and set_avatar behind them accepting the
+// writes. Unlimited disposable accounts that could post a public bio and upload to the avatars bucket.
+await runTest("a guest's own address is the keep panel too, not the owner profile screen", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+  const name = signedInAs(c);
+
+  window.history.pushState({}, "", `/u/${name}`);
+  window.dispatchEvent(new window.PopStateEvent("popstate", { state: {} }));
+  await until(() => window.location.pathname === `/u/${name}`, "their own address");
+  await flush(6);
+
+  assert(findButtonByText(c, "Keep my seasons"), `their own address shows the keep panel, got: ${text(c).slice(-260)}`);
+  for (const forbidden of ["Edit profile", "Shop", "Log out"]) {
+    assert(!findButtonByText(c, forbidden), `and not ${forbidden}`);
+  }
+});
+
+// A draft belongs to the account that dealt it. `chargeableDraft` only checks whose it is when it has NO
+// picks, so one with picks was charged to whoever signed in next - Alice makes three picks and logs out,
+// Bob signs up on the same device, and the DNF for abandoning her board lands on him.
+await runTest("a draft does not follow the device to the next account", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+  // A draft with picks in it, left in the Unlimited slot the way walking away from one leaves it.
+  await window.storage.set("ps-free-wip", JSON.stringify({
+    mode: { kind: "free", code: "LEFTOVER", format: "fantasy", owner: "someone-else" },
+    spin: { team: "KC", w: 2 }, history: [{ key: "KC|2", id: 1, season: 2018, slot: "QB" }], seq: [],
+  }), false);
+
+  await auth.auth.signOut();
+  await flush(8);
+
+  const after = await window.storage.get("ps-free-wip", false);
+  const picks = after && JSON.parse(after.value)?.history?.length;
+  assert(!picks, `it leaves with them rather than waiting for the next account, got ${picks} picks`);
+});
+
 await close();

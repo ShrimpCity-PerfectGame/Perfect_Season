@@ -191,7 +191,7 @@ export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
 export async function fetchSouTop(date, limit = 10) {
   const { data, error } = await getClient().from("sou_runs").select("*").eq("date", date).order("score", { ascending: false }).limit(limit);
   if (error || !data) return [];
-  return data.map((r) => ({ username: r.username, score: r.score }));
+  return data.map((r) => ({ username: r.username, score: r.score, guest: !!r.guest }));
 }
 export async function upsertSouRun(date, userId, row) {
   const { error } = await getClient().from("sou_runs").insert({ date, user_id: userId, username: row.username, score: row.score });
@@ -214,7 +214,7 @@ export async function fetchTopBuilds(limit = 10) {
   const { data, error } = await getClient().from("builds").select("*").order("overall", { ascending: false }).limit(limit);
   if (error || !Array.isArray(data)) return [];
   return data
-    .map((r) => ({ username: r.username, pos: r.pos, overall: Number(r.overall), filled: r.filled }))
+    .map((r) => ({ username: r.username, guest: !!r.guest, pos: r.pos, overall: Number(r.overall), filled: r.filled }))
     .filter((b) => Number.isFinite(b.overall) && BUILD_POSITIONS.includes(b.pos));
 }
 export async function fetchBuildCount() {

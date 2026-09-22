@@ -462,8 +462,14 @@ export function makeMockAuth() {
   // tests/test-runs-sql.mjs runs the real SQL in PGlite against the same fixture and requires the
   // two to return identical JSON, so this can't quietly drift from what the database does.
   const byName = (a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0);
-  const card = (p) => Object.fromEntries(
-    ["id", "username", "runs", "dnf", "wins", "losses", "champs", "perfect", "playoffs", "daily_best_streak"].map((k) => [k, p[k] ?? null]));
+  // `guest` rides along with the name on every board, the way stats_card does it - a guest's name
+  // carries a chip and is not a link, because there is no profile screen behind it.
+  const card = (p) => ({
+    ...Object.fromEntries(
+      ["id", "username", "runs", "dnf", "wins", "losses", "champs", "perfect", "playoffs", "daily_best_streak"].map((k) => [k, p[k] ?? null])),
+    guest: !!p.guest,
+  });
+  const guestOf = (userId) => !!profiles.get(userId)?.guest;
   function siteTotals() {
     const rows = [...profiles.values()];
     return {
@@ -487,10 +493,10 @@ export function makeMockAuth() {
           .map((p) => ({ ...card(p), best_score: p.best_score ?? null, best_run: p.best_run ?? null, best_score_std: p.best_score_std ?? null, best_run_std: p.best_run_std ?? null })),
         best_gm: logged.filter((r) => r.gm && r.format === f && r.score != null)
           .sort((a, b) => b.score - a.score || (a.created_at < b.created_at ? -1 : 1)).slice(0, limit)
-          .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l })),
+          .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l, guest: guestOf(r.user_id) })),
         biggest_upsets: logged.filter((r) => r.champ && r.format === f && r.score != null)
           .sort((a, b) => a.score - b.score || (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0)).slice(0, limit)
-          .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l, perfect: !!r.perfect, ladder: r.ladder, roster: r.roster ?? null })),
+          .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l, perfect: !!r.perfect, ladder: r.ladder, roster: r.roster ?? null, guest: guestOf(r.user_id) })),
       };
     }
 

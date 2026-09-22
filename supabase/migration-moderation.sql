@@ -190,7 +190,8 @@ begin
     -- Every board reads these snapshots rather than joining profiles, so they follow the new name.
     update runs set username = p_new_name where user_id = p_user_id;
     update daily_runs set username = p_new_name where user_id = p_user_id;
-    update sou_runs set username = p_new_name where user_id = p_user_id;
+    -- `guest` goes with the name here too: mod_act above has just cleared it on the profile.
+    update sou_runs set username = p_new_name, guest = false where user_id = p_user_id;
     update builds set username = p_new_name where user_id = p_user_id;
     v_reason := 'username';
   elsif p_action = 'dismiss' then

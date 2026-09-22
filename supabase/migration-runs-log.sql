@@ -124,17 +124,26 @@ $$;
 
 -- The fields a Stats board shows for an account - career counters only, so a board of ten rows
 -- doesn't carry ten best-run rosters. Takes jsonb so it accepts any row shape built on profiles.
+-- `guest` rides along with the name, because every name on a board is rendered by the same NameLink and
+-- a guest's must not be a link: it carries a chip instead, and there is no profile screen behind it
+-- (v1.17.0). The Leaderboard got this right by selecting the whole row; these boards built their own
+-- objects and left the column out, so for eight of them a throwaway account rendered as an ordinary one -
+-- clickable, reportable, and answering /u/<name> with a full profile.
 create or replace function public.stats_card(p jsonb)
 returns jsonb language sql immutable set search_path = public as $$
   select jsonb_build_object(
     'id', p->'id', 'username', p->'username', 'runs', p->'runs', 'dnf', p->'dnf',
     'wins', p->'wins', 'losses', p->'losses', 'champs', p->'champs', 'perfect', p->'perfect',
-    'playoffs', p->'playoffs', 'daily_best_streak', p->'daily_best_streak'
+    'playoffs', p->'playoffs', 'daily_best_streak', p->'daily_best_streak',
+    'guest', coalesce(p->'guest', 'false'::jsonb)
   );
 $$;
 
 -- Every Stats-screen board in one round trip. Every order has a final tiebreak, so results are
--- deterministic.
+-- deterministic - and every username tiebreak sorts `collate "C"`, by code point, for the same reason
+-- player_stats below does: the database's default collation differs between installs, so without it the
+-- SQL and tests/helpers.mjs's JS reimplementation disagree about which of two equal accounts comes first.
+-- PGlite reports datcollate = C, so the parity test could never have seen the difference.
 create or replace function public.site_stats(p_limit integer default 10)
 returns jsonb language sql stable security invoker set search_path = public as $$
   with
@@ -151,27 +160,31 @@ returns jsonb language sql stable security invoker set search_path = public as $
     'by_format', (
       select jsonb_object_agg(f.format, jsonb_build_object(
         'best_lineups', (
-          select coalesce(jsonb_agg(stats_card(to_jsonb(p)) || jsonb_build_object('best_score', p.best_score, 'best_run', p.best_run, 'best_score_std', p.best_score_std, 'best_run_std', p.best_run_std) order by p.s desc, p.username), '[]'::jsonb)
+          select coalesce(jsonb_agg(stats_card(to_jsonb(p)) || jsonb_build_object('best_score', p.best_score, 'best_run', p.best_run, 'best_score_std', p.best_score_std, 'best_run_std', p.best_run_std) order by p.s desc, p.username collate "C"), '[]'::jsonb)
             from (select *, case when f.format = 'standard' then best_score_std else best_score end as s
                     from profiles
                    where case when f.format = 'standard' then best_score_std else best_score end is not null
-                   order by s desc, username limit 15) p
+                   order by s desc, username collate "C" limit 15) p
         ),
         'best_gm', (
-          select coalesce(jsonb_agg(jsonb_build_object('username', g.username, 'score', g.score, 'w', g.w, 'l', g.l)
+          select coalesce(jsonb_agg(jsonb_build_object('username', g.username, 'score', g.score, 'w', g.w, 'l', g.l,
+                                                       'guest', coalesce(pr.guest, false))
                                     order by g.score desc, g.created_at), '[]'::jsonb)
             from (select * from runs where gm and not dnf and format = f.format and score is not null
                    order by score desc, created_at limit p_limit) g
+            left join profiles pr on pr.id = g.user_id
         ),
         -- Title-winning runs, lowest team score first: the lower the score, the bigger the upset.
         -- Every mode counts. The season sim only looks at team score, so a title at a given score is
         -- exactly as unlikely from GM, Genius or a daily as from Unlimited.
         'biggest_upsets', (
           select coalesce(jsonb_agg(jsonb_build_object('username', u.username, 'score', u.score, 'w', u.w, 'l', u.l,
-                                                       'perfect', coalesce(u.perfect, false), 'ladder', u.ladder, 'roster', u.roster)
+                                                       'perfect', coalesce(u.perfect, false), 'ladder', u.ladder, 'roster', u.roster,
+                                                       'guest', coalesce(pr.guest, false))
                                     order by u.score, u.created_at), '[]'::jsonb)
             from (select * from runs where champ and not dnf and format = f.format and score is not null
                    order by score, created_at limit p_limit) u
+            left join profiles pr on pr.id = u.user_id
         )
       )) from fmt f
     ),
@@ -183,20 +196,20 @@ returns jsonb language sql stable security invoker set search_path = public as $
                order by n desc, name, season, team limit 15) d
     ),
     'most_wins', (
-      select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.wins desc, p.username), '[]'::jsonb)
-        from (select * from played order by wins desc, username limit p_limit) p
+      select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.wins desc, p.username collate "C"), '[]'::jsonb)
+        from (select * from played order by wins desc, username collate "C" limit p_limit) p
     ),
     'most_champs', (
-      select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.champs desc, p.username), '[]'::jsonb)
-        from (select * from played where champs > 0 order by champs desc, username limit p_limit) p
+      select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.champs desc, p.username collate "C"), '[]'::jsonb)
+        from (select * from played where champs > 0 order by champs desc, username collate "C" limit p_limit) p
     ),
     'most_playoffs', (
-      select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.playoffs desc, p.username), '[]'::jsonb)
-        from (select * from played where playoffs > 0 order by playoffs desc, username limit p_limit) p
+      select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.playoffs desc, p.username collate "C"), '[]'::jsonb)
+        from (select * from played where playoffs > 0 order by playoffs desc, username collate "C" limit p_limit) p
     ),
     'longest_streaks', (
-      select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.daily_best_streak desc, p.username), '[]'::jsonb)
-        from (select * from profiles where daily_best_streak > 0 order by daily_best_streak desc, username limit p_limit) p
+      select coalesce(jsonb_agg(stats_card(to_jsonb(p)) order by p.daily_best_streak desc, p.username collate "C"), '[]'::jsonb)
+        from (select * from profiles where daily_best_streak > 0 order by daily_best_streak desc, username collate "C" limit p_limit) p
     ),
     -- A minimum sample so a 1-0 account can't top a percentage board.
     'best_win_pct', (

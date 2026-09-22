@@ -41,6 +41,17 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **A message about one thing stops following you around the whole site.**
 - **Tapping Duel or the Shop as a guest tells you why** instead of doing nothing at all.
 - **Escape closes the thing you opened last**, not everything that happens to be open.
+- **Guests look like guests everywhere.** Their names carried the guest chip on the Leaderboard but not on
+  any of the eight Stats boards, Over/Under or the builds board, where they read as ordinary accounts you
+  could click through to and report. And a guest who typed their own profile address got the full owner
+  screen the Account tab refuses — bio, picture, shop and all — which made throwaway accounts that could
+  post a public bio and upload pictures.
+- **Nobody else can have a name that looks like a guest's.** `Guest_ZZZZZ` was anybody's, and rendered with
+  no chip.
+- **The daily waits until the game knows who you are.** On a slow connection a returning guest could start
+  it before their session loaded, draft all six, and have it refused at the end — with the day marked used.
+- **A draft in progress leaves with the account that dealt it.** Log out with one on the go and the next
+  person to sign in on that device inherited it, and was charged the abandoned draft when they moved on.
 
 ## [1.19.1] — unreleased
 

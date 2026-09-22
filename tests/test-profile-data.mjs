@@ -299,14 +299,17 @@ await runTest("a guest is given a name, keeps what it plays, and can trade the n
 });
 
 await runTest("nobody else may wear a guest's name", async () => {
-  const shapes = ["Guest_1A2B3", "guest_1a2b3", "GUEST_ABCDE"];
+  // Any Guest_-shaped name, not only the hex ones new_guest_name happens to produce. The point of the
+  // rule is that nobody else may LOOK like a guest: `Guest_ZZZZZ` was anybody's, and an account holding
+  // it rendered with no chip and a working profile link, which is the inverse of what the chip is for.
+  const shapes = ["Guest_1A2B3", "guest_1a2b3", "GUEST_ABCDE", "Guest_ZZZZZ", "Guest_12", "guest_z"];
   for (const name of shapes) {
     assert((await call(BOB, "check_username", { p_username: name })).data === "taken", `${name} is held back from the signup form`);
     const err = await failure(db, "insert into auth.users values ($1, $2)", [uuid(90), { username: name }]);
     assert(err === "username_reserved", `${name} is refused by the signup trigger, got ${JSON.stringify(err)}`);
   }
-  // Names that only look a bit like one are still anybody's.
-  for (const fine of ["Guest_ZZZZZ", "Guest_12", "Guests_1A2B3", "My_Guest_1"]) {
+  // A name that merely contains the word is still anybody's - the rule is the shape, not the substring.
+  for (const fine of ["Guests_1A2B3", "My_Guest_1", "Guesthouse"]) {
     assert((await call(BOB, "check_username", { p_username: fine })).data === "ok", `${fine} is a name anyone can have`);
   }
 });

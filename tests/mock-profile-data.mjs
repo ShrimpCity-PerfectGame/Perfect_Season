@@ -15,7 +15,9 @@ import {
 } from "../profile-rules.mjs";
 
 // The shape of a name a guest is given (migration-profiles.sql's new_guest_name), which no client may pick.
-export const GUEST_NAME_RE = /^guest_[0-9a-f]{5}$/i;
+// Broader than what the generator produces, deliberately: the rule is that nobody else may LOOK like a
+// guest, and `Guest_ZZZZZ` used to be anybody's while rendering with no chip and a working profile link.
+export const GUEST_NAME_RE = /^guest_[a-z0-9]{1,10}$/i;
 export const newGuestName = (taken = new Set()) => {
   for (let i = 0; i < 20; i++) {
     const name = `Guest_${Math.random().toString(16).slice(2, 7).toUpperCase()}`;

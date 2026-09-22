@@ -2228,7 +2228,16 @@ export default function PerfectSeason() {
       setAuthReady(true);
     })();
     const { data: authSub } = authOnChange((event, session) => {
-      if (event === "SIGNED_OUT") { setUserId(null); setUser(null); setStats(null); setNeedsName(null); clearAccountExtras(); }
+      if (event === "SIGNED_OUT") {
+        setUserId(null); setUser(null); setStats(null); setNeedsName(null); clearAccountExtras();
+        // The Unlimited slot goes with them. `chargeableDraft` only checks whose draft it is when it has
+        // NO picks, so one with picks was charged to whoever signed in next: Alice makes three picks and
+        // logs out, Bob signs up on the same device, taps Unlimited and resumes Alice's board - and the
+        // DNF for abandoning it lands on Bob. It is their draft, and it leaves when they do. Here rather
+        // than in logOut because every way out of an account comes through this event.
+        clearDraftTracked("free", FREE_PROGRESS);
+        setWip((w) => ({ ...w, free: null }));
+      }
       // Coming back from Google lands here, not in the read above: supabase-js takes the session out of
       // the address after the page has already mounted.
       else if (event === "SIGNED_IN") adoptSession.current(session);
@@ -3430,6 +3439,12 @@ export default function PerfectSeason() {
   async function startDaily(f) {
     // One draft a day is per account, and a guest account can be made again and again - so the daily is
     // for accounts. submit-run refuses one from a guest too; this is only how the app says so.
+    // `isGuest` is derived from `stats`, which is null until the profile read lands - so on a slow
+    // connection a returning guest could tap the tile before the app knew what they were, be dealt a real
+    // daily board, draft all six, and have submit-run refuse it (guest_daily). The device marked the day
+    // done anyway, so the tile turned into "See how it went" for a season that was never saved, and
+    // keeping their seasons afterwards did not give the day back. `authReady` exists for exactly this.
+    if (!authReady) return;
     if (isGuest) {
       setNotice("The daily is one draft a day per account. Keep your seasons on the Account tab and it's yours.");
       openTab("profile");
@@ -4303,11 +4318,16 @@ export default function PerfectSeason() {
 
         {/* A guest's own tab: not a profile - there's nothing on it they could set - but the way to keep
             what they've played. Visiting someone else's profile still shows that profile. */}
-        {view === "profile" && shownProfile && isGuest && !profileOf && (
+        {/* ...and at their own /u/<name> too, not only on the tab. The rule was `!profileOf`, which an
+            address sets - so typing their own address handed a guest the full owner screen the tab
+            refuses: Edit profile, the avatar picker, the Shop button and Log out, with save_profile and
+            set_avatar behind them accepting the writes. Unlimited disposable accounts that could post a
+            public bio and upload to the avatars bucket. Somebody else's profile still opens normally. */}
+        {view === "profile" && shownProfile && isGuest && (!profileOf || profileOf === user) && (
           <KeepSeasons name={user} onKept={onSeasonsKept} onUseAnother={logOut} />
         )}
 
-        {view === "profile" && shownProfile && !(isGuest && !profileOf) && (() => {
+        {view === "profile" && shownProfile && !(isGuest && (!profileOf || profileOf === user)) && (() => {
           const status = shownData ? shownData.status : "loading";
           const profile = shownData?.profile || null;
           return (
@@ -4567,7 +4587,7 @@ export default function PerfectSeason() {
                       return (
                         <div key={q.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
                           <div style={{ fontWeight: 700 }}>
-                            #{i + 1} <NameLink name={q.username} />{" "}
+                            #{i + 1} <NameLink name={q.username} guest={q.guest} />{" "}
                             <span style={{ color: "var(--muted)", fontWeight: 400 }}>
                               — {scoreOf(q, boardFormat).toFixed(1)}{best ? `, ${best.w}–${best.l}` : ""}
                             </span>
@@ -4606,7 +4626,7 @@ export default function PerfectSeason() {
                     {fmtStats.biggestUpsets.map((u, i) => (
                       <div key={i} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
                         <div style={{ fontWeight: 700 }}>
-                          #{i + 1} <NameLink name={u.username} />{" "}
+                          #{i + 1} <NameLink name={u.username} guest={u.guest} />{" "}
                           <span style={{ color: "var(--muted)", fontWeight: 400 }}>
                             — {Number(u.score).toFixed(1)}, {u.w}–{u.l}{u.perfect ? " 🏆 perfect season" : " 🏆"}{u.ladder !== "unlimited" ? ` · ${LADDER_LABEL[u.ladder] || u.ladder}` : ""}
                           </span>
@@ -4879,7 +4899,7 @@ export default function PerfectSeason() {
                 <tbody>
                   {souBoard.rows.map((q, i) => (
                     <tr key={i} className={user && q.username === user ? "me" : ""}>
-                      <td className="rk">{i + 1}</td><td><NameLink name={q.username} /></td><td className="r">{q.score}</td>
+                      <td className="rk">{i + 1}</td><td><NameLink name={q.username} guest={q.guest} /></td><td className="r">{q.score}</td>
                     </tr>
                   ))}
                 </tbody>

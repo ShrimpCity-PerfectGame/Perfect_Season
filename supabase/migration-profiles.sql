@@ -361,7 +361,10 @@ revoke execute on function public.new_guest_name() from public, anon, authentica
 -- the runs log, a moderator's queue - and not only where the chip is drawn, so nobody else may wear it.
 create or replace function public.username_is_reserved(p_username text)
 returns boolean language sql stable security invoker set search_path = public, pg_temp as $$
-  select coalesce(p_username, '') ~* '^guest_[0-9a-f]{5}$'
+  -- Any Guest_-shaped name, not only the hex ones the generator happens to produce: the point is that
+  -- nobody else may look like a guest, and `Guest_zzzzz` looked exactly like one while rendering with no
+  -- chip and a working profile link.
+  select coalesce(p_username, '') ~* '^guest_[a-z0-9]{1,10}$'
       or (lower(coalesce(p_username, '')) in ('admin')
           and exists (select 1 from profiles where lower(username) = lower(p_username)));
 $$;
@@ -413,16 +416,16 @@ begin
     -- it, and this is what turns them back into the account's real name.
     update public.runs set username = p_username where user_id = v_uid;
     update public.daily_runs set username = p_username where user_id = v_uid;
-    update public.sou_runs set username = p_username where user_id = v_uid;
-    update public.builds set username = p_username where user_id = v_uid;
+    update public.sou_runs set username = p_username, guest = false where user_id = v_uid;
+    update public.builds set username = p_username, guest = false where user_id = v_uid;
   else
     -- A guest keeping what it has played: the same account, under its own name from now on. The name
     -- snapshots on the boards follow it, exactly as a moderator's rename moves them (mod_act).
     update public.profiles set username = p_username, guest = false where id = v_uid;
     update public.runs set username = p_username where user_id = v_uid;
     update public.daily_runs set username = p_username where user_id = v_uid;
-    update public.sou_runs set username = p_username where user_id = v_uid;
-    update public.builds set username = p_username where user_id = v_uid;
+    update public.sou_runs set username = p_username, guest = false where user_id = v_uid;
+    update public.builds set username = p_username, guest = false where user_id = v_uid;
   end if;
   return 'ok';
 exception when unique_violation then
@@ -479,6 +482,14 @@ end;
 $$;
 
 -- ---------- The minigame boards ----------
+
+-- Whose row this is, in the one word every board needs: a guest's name carries a chip and is not a link,
+-- because there is no profile screen behind it (v1.17.0). `username` is already denormalised onto these two
+-- tables for exactly the same reason - every name on a board opens a profile, so it cannot be the browser's
+-- word - and `guest` is the other half of that. Without it the Over/Under and Build-a-player boards rendered
+-- a throwaway account as an ordinary one.
+alter table public.sou_runs add column if not exists guest boolean not null default false;
+alter table public.builds add column if not exists guest boolean not null default false;
 -- The browser still writes sou_runs (Over/Under) and builds (Build-a-player) itself: schema.sql's policies
 -- only check that the row's user_id is the caller's. Scores there are taken on trust (CLAUDE.md), but what
 -- the boards and profiles show as text must not be.
@@ -503,6 +514,8 @@ begin
     raise exception 'no_profile' using errcode = 'P0001';
   end if;
   new.username := v_name;
+  -- The same read, so the two can never disagree about whose row this is.
+  select p.guest into new.guest from public.profiles p where p.id = new.user_id;
   return new;
 end;
 $$;

@@ -38,6 +38,10 @@ create table if not exists public.profiles (
   daily_streak       integer default 0,
   daily_last         text,
   daily_best_streak  integer default 0,
+  -- A visitor who finished a season without signing up (v1.17.0). Defined here rather than only in
+  -- migration-profiles.sql because site_stats, which migration-runs-log.sql defines FIRST, carries it onto
+  -- every Stats board - a guest's name has to render with a chip instead of a link wherever it appears.
+  guest         boolean not null default false,
   -- Bumped by every submit-run write, which carries the revision it read. See the note in
   -- migration-profiles.sql: the new row is computed in JavaScript, so the database cannot lock it for
   -- the duration and two overlapping submissions used to lose one.
@@ -71,6 +75,8 @@ create index if not exists daily_runs_date_format_score_idx on public.daily_runs
 -- Stats O/U's daily leaderboard: one seeded sequence of rounds per day, shared by everyone
 -- (mode.seed = "sou-<date>", same pattern as the roster daily's "daily-<date>"), three lives,
 -- score = correct guesses before your third miss.
+-- `guest` is stamped beside `username` by migration-profiles.sql's use_account_username trigger: every
+-- name on a board is rendered the same way, and a guest's must carry a chip rather than be a link.
 create table if not exists public.sou_runs (
   date        text not null,
   user_id     uuid not null references auth.users(id) on delete cascade,

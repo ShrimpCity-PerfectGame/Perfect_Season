@@ -109,7 +109,13 @@ that function is allowed to change an existing name. Everything played, earned a
 is leaderboard pressure: one person can make guests freely, so **turn on a CAPTCHA for anonymous sign-ins** in
 each Supabase project before this is busy, and remember anonymous users count toward Supabase's monthly actives.
 `tests/test-guest-accounts.mjs` covers the game's side; the naming and the trade-up are held to the real SQL in
-`tests/test-profile-data.mjs`.
+`tests/test-profile-data.mjs`. **`guest` travels with the name everywhere a name is shown**: `stats_card`,
+`best_gm` and `biggest_upsets` carry it, and `sou_runs`/`builds` hold it as a column of their own, stamped by
+the same `use_account_username` trigger that stamps the name and cleared wherever the name is rewritten
+(`claim_username`'s trade-up, `mod_act`'s rename). Every board renders names through one `NameLink`, so a
+board that drops the flag silently turns a throwaway account into a clickable, reportable one - which eight
+of them did. The guest-name shape is reserved broadly (`^guest_[a-z0-9]{1,10}$`), because the rule is that
+nobody else may LOOK like a guest, not just that nobody may take a generated name.
 
 **Duels (v1.19.0).** Two players draft against each other from the same boards and the better roster wins.
 Players see **Duel**; everything internal stays `versus` / `vs-` / `/vs/`, the same split the Gridspin rename
