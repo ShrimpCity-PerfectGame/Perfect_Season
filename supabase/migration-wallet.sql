@@ -51,6 +51,46 @@ create table if not exists public.badge_awards (
   primary key (user_id, badge)
 );
 
+-- What each badge pays. award_badges used to take this from its caller, which made the amount a season's badges
+-- are worth a thing decided outside the database: the function checked that the number was a whole 0-10,000 and
+-- then credited it. Nothing could reach it - it is the service role's alone, and submit-run builds the list from
+-- rewards.mjs - but "the only caller is honest" is not the same as "the wallet cannot be told what to pay", and
+-- this is the wallet. The caller now says which badges a player has earned and the database says what they cost.
+--
+-- badges.mjs is the source; tests/test-wallet-sql.mjs holds this seed to it, the way it already holds the welcome
+-- coins and the minigame's 15. Unlike shop_items, whose seed only adds missing rows so a runbook price change
+-- survives a re-run, this one overwrites: the browser prints each badge's line from rewards.mjs, so an amount
+-- changed here alone would credit one number and show another.
+create table if not exists public.badge_rewards (
+  badge  text primary key check (badge ~ '^[a-z0-9-]{1,40}$'),
+  coins  bigint not null check (coins >= 0 and coins <= 10000)
+);
+
+insert into public.badge_rewards (badge, coins) values
+  ('first-down', 100),
+  ('starter', 100),
+  ('veteran', 300),
+  ('hall-of-famer', 1000),
+  ('ring-bearer', 100),
+  ('dynasty', 300),
+  ('undefeated', 1000),
+  ('playoff-regular', 300),
+  ('big-brain', 300),
+  ('front-office', 300),
+  ('daily-champion', 300),
+  ('old-school', 300),
+  ('hot-streak', 100),
+  ('week-warrior', 300),
+  ('every-single-day', 1000),
+  ('cinderella', 1000),
+  ('scout', 300),
+  ('daily-winner', 1000),
+  ('loyal-fan', 100),
+  ('stat-nerd', 0),
+  ('mad-scientist', 0),
+  ('day-one', 500)
+on conflict (badge) do update set coins = excluded.coins;
+
 -- The challenge codes an account has finished a season on. submit-run inserts here before it counts a free-mode
 -- season, so the same draft can't count twice.
 create table if not exists public.finished_codes (
@@ -63,9 +103,10 @@ create table if not exists public.finished_codes (
 alter table public.wallets enable row level security;
 alter table public.wallet_ledger enable row level security;
 alter table public.badge_awards enable row level security;
+alter table public.badge_rewards enable row level security;
 alter table public.finished_codes enable row level security;
 -- No policies, and no privileges either, so a client's read is refused outright rather than coming back empty.
-revoke all on table public.wallets, public.wallet_ledger, public.badge_awards, public.finished_codes from anon, authenticated;
+revoke all on table public.wallets, public.wallet_ledger, public.badge_awards, public.badge_rewards, public.finished_codes from anon, authenticated;
 -- The ledger's id sequence too. Supabase's default privileges give anon and authenticated every sequence made in
 -- public, and whoever holds this one can set it to its last value - after which no ledger row can be written, so
 -- no signup (its welcome coins fail, and the new account with them), no season's coins, no claim and no purchase,
@@ -186,6 +227,7 @@ declare
   v_entry jsonb;
   v_id text;
   v_coins numeric;
+  v_pays bigint;
   v_rows integer;
   v_awarded jsonb := '[]'::jsonb;
   v_credited bigint := 0;
@@ -208,14 +250,25 @@ begin
       raise exception 'bad_request' using errcode = 'P0001';
     end if;
   end loop;
+  -- The caller's 'coins' is checked for shape above and then ignored: badge_rewards decides what is paid. The
+  -- field stays in the payload because badgeRewards() in rewards.mjs is what builds the list, and the coin
+  -- line the player is shown is printed from badges.mjs in the browser. tests/test-wallet-sql.mjs holds the
+  -- seed above to that same list, which is what keeps the number credited and the number shown equal.
   perform public.wallet_lock(p_user);
   for v_entry in select t.e from jsonb_array_elements(p_badges) with ordinality as t(e, n) order by t.n loop
-    insert into public.badge_awards (user_id, badge) values (p_user, v_entry->>'id') on conflict (user_id, badge) do nothing;
+    v_id := v_entry->>'id';
+    -- A badge this database has never heard of is passed over whole, and deliberately not recorded either, so it
+    -- still pays the first time a season finishes after the migration that adds it has been run. Raising here
+    -- instead would mean a release that deployed the Edge Function before running the migration - an ordering
+    -- this repo has got wrong before - failed every player's submission outright.
+    select coins into v_pays from public.badge_rewards where badge = v_id;
+    if v_pays is null then continue; end if;
+    insert into public.badge_awards (user_id, badge) values (p_user, v_id) on conflict (user_id, badge) do nothing;
     get diagnostics v_rows = row_count;
     if v_rows > 0 then
-      v_awarded := v_awarded || to_jsonb(v_entry->>'id');
+      v_awarded := v_awarded || to_jsonb(v_id);
       -- wallet_apply moves nothing for 0 coins, so a badge that pays nothing leaves no ledger row.
-      v_credited := v_credited + public.wallet_apply(p_user, (v_entry->>'coins')::numeric::bigint, 'badge', v_entry->>'id');
+      v_credited := v_credited + public.wallet_apply(p_user, v_pays, 'badge', v_id);
     end if;
   end loop;
   return jsonb_build_object('awarded', v_awarded, 'credited', v_credited, 'balance', (select balance from public.wallets where user_id = p_user));

@@ -7,7 +7,7 @@
 // What is never stored is in sw-rules.mjs: everything that isn't this site's own files, which is every call to
 // Supabase. The pages and the bundle are always fetched when there is a network, and what's stored is only ever
 // the fallback, so a player is never left running last week's game against this week's server.
-import { BUNDLE, planFor } from "./sw-rules.mjs";
+import { BUNDLE, pageKey, planFor } from "./sw-rules.mjs";
 
 const CACHE = `gridspin-${BUILD_ID}`;
 // Enough to open the game with no network at all, from the first visit: the page, the bundle, and what a
@@ -35,12 +35,16 @@ self.addEventListener("activate", (event) => {
 const worthStoring = (response, plan) =>
   response && (response.ok || (plan === "font" && response.type === "opaque"));
 
+// A page is stored under its path with the query dropped (sw-rules.mjs's pageKey, which explains why);
+// everything else under the request it came from.
+const keyFor = (request, plan) => (plan === "page" ? pageKey(request, self.location.origin) || "/" : request);
+
 // Storing happens on a copy and off to one side, through event.waitUntil, so the page is never kept waiting
 // for it and the browser doesn't stop the worker halfway through.
 async function store(request, response, plan) {
   if (!worthStoring(response, plan)) return;
   const cache = await caches.open(CACHE);
-  await cache.put(request, response).catch(() => {});
+  await cache.put(keyFor(request, plan), response).catch(() => {});
 }
 
 // The network, with what's stored as the fallback. A page falls back to the shell as well, so a profile or a
@@ -52,8 +56,10 @@ async function fromNetwork(event, plan) {
     event.waitUntil(store(request, response.clone(), plan));
     return response;
   } catch (e) {
-    const stored = await caches.match(request);
+    const stored = await caches.match(keyFor(request, plan));
     if (stored) return stored;
+    // A page nobody has opened before - /privacy, say - still starts the game from the shell rather than
+    // showing the browser's dinosaur.
     if (plan === "page") {
       const shell = await caches.match("/");
       if (shell) return shell;

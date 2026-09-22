@@ -377,6 +377,12 @@ SVG in Gridspin's style (cream/ink/lime/blue/orange/violet, ink strokes, like th
 
 ### 6.2 `avatar-picker.jsx` + `avatar-image.mjs` (agent D)
 
+**Accepted, and deliberate (v2.0.0):** the 25 MB limit is on the file's *bytes*, and nothing checks its
+*pixels* before decoding it. A two-page PNG can declare 30,000 x 30,000 and decode to ~3.6 GB, which ends the
+tab. It is left open because the only way to reach it is to choose such a file from your own file picker, the
+only thing harmed is your own tab, nothing has been uploaded by then, and no server in this game ever decodes
+an image. The full reasoning, and what a fix would cost, is at `MAX_INPUT_BYTES` in `avatar-image.mjs`.
+
 ```jsx
 <AvatarPicker username current={{ photoUrl, preset }} busy error
   onPhoto={(blob) => Promise} onPreset={(key) => Promise} onRemove={() => Promise} onCancel={() => {}} />

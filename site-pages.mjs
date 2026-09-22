@@ -101,11 +101,19 @@ const PRIVACY_SECTIONS = [
   ]],
 ];
 
+// Each page carries the day its own words last changed, for the sitemap's <lastmod>. It used to be the build
+// date on every URL, and Vercel rebuilds the site on every push - so all four claimed to have been modified
+// today whenever anything in the game changed, which is exactly the signal Google says it stops believing.
+// "/" is the app itself and genuinely does change with every release, so that one keeps the build date.
+//
+// Bump the date beside a page when you change its copy, the same way PRIVACY_UPDATED is bumped - and
+// tests/test-build-seo.mjs checks the sitemap says what these say.
 export const SITE_PAGES = [
   {
     id: "howto",
     path: HOWTO_PATH,
     file: "how-to-play.html",
+    updated: "2026-09-20",
     nav: "How to play",
     title: "How to play Gridspin – football draft game rules",
     description: "How Gridspin works: spin a random NFL team and a five-year era, draft six real player seasons, then play 17 games and the playoffs. The rules, the scoring and the re-spins.",
@@ -121,6 +129,7 @@ export const SITE_PAGES = [
     id: "board",
     path: BOARD_PATH,
     file: "leaderboard.html",
+    updated: "2026-09-20",
     nav: "Leaderboards",
     title: "Gridspin leaderboards – the best football drafts",
     description: "What Gridspin's leaderboards rank: the best Fantasy and Championship team scores ever drafted, each day's Daily standings, the points ladders and career records.",
@@ -134,6 +143,8 @@ export const SITE_PAGES = [
     id: "privacy",
     path: "/privacy",
     file: "privacy.html",
+    // PRIVACY_UPDATED in words, and this in the sitemap: change both together.
+    updated: "2026-09-21",
     nav: "Privacy",
     title: "Gridspin privacy policy - what the game keeps",
     description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no analytics, nothing sold.",

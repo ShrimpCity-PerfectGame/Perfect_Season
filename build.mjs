@@ -130,9 +130,13 @@ for (const page of SITE_PAGES) {
 // lives at "/", so the sitemap lists that plus the pages that answer for themselves (site-pages.mjs).
 if (appEnv === "production" && canonicalUrl) {
   writeFileSync("public/robots.txt", `User-agent: *\nAllow: /\n\nSitemap: ${canonicalUrl}/sitemap.xml\n`);
+  // The app changes with every release, so "/" really was modified today. The other three are words, and say
+  // for themselves when they last changed (site-pages.mjs's `updated`) - stamping the build date on those told
+  // a crawler all four change daily, which is how lastmod stops being believed.
   const today = new Date().toISOString().slice(0, 10);
-  const urls = [`${canonicalUrl}/`, ...SITE_PAGES.map((p) => `${canonicalUrl}${p.path}`)];
-  writeFileSync("public/sitemap.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${u}</loc><lastmod>${today}</lastmod></url>`).join("\n")}\n</urlset>\n`);
+  const urls = [[`${canonicalUrl}/`, today], ...SITE_PAGES.map((p) => [`${canonicalUrl}${p.path}`, p.updated])];
+  for (const [u, when] of urls) if (!/^\d{4}-\d{2}-\d{2}$/.test(when || "")) throw new Error(`no lastmod for ${u}`);
+  writeFileSync("public/sitemap.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(([u, when]) => `  <url><loc>${u}</loc><lastmod>${when}</lastmod></url>`).join("\n")}\n</urlset>\n`);
 } else {
   writeFileSync("public/robots.txt", "User-agent: *\nAllow: /\n");
   rmSync("public/sitemap.xml", { force: true });

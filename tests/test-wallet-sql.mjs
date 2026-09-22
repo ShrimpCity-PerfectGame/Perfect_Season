@@ -16,6 +16,7 @@ import { assert, runTest } from "./helpers.mjs";
 import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql, PROFILE_MIGRATIONS } from "./pg-fixture.mjs";
 import { makeWallet } from "./mock-wallet.mjs";
 import { COIN_RULES, startingBalance } from "../rewards.mjs";
+import { BADGES } from "../badges.mjs";
 import { mulberry32, hashStr } from "../game-logic.mjs";
 
 // Sorted keys, so JSON from Postgres and from the mock compare equal regardless of key order.
@@ -339,23 +340,38 @@ await runTest("award_badges pays each badge once, in the order sent, and records
   assert(same(r.data, { awarded: [], credited: 0, balance: 1450 }), `nothing new pays nothing: ${show(r)}`);
   r = await award(FAY, []);
   assert(same(r.data, { awarded: [], credited: 0, balance: 1450 }), `an empty list: ${show(r)}`);
-  r = await award(FAY, badges(["dynasty", 300], ["dynasty", 300], ["zz-last", 5], ["aa-first", 5]));
-  assert(same(r.data, { awarded: ["dynasty", "zz-last", "aa-first"], credited: 310, balance: 1760 }), `a repeated id counts once, and the order is the list's: ${show(r)}`);
-  // What a badge pays is settled when it's first awarded.
+  // The order is the list's, not the alphabet's - day-one would come first. And an id badge_rewards has no
+  // price for is passed over whole: the last two leave no award, no ledger row and no coins.
+  r = await award(FAY, badges(["dynasty", 300], ["dynasty", 300], ["hot-streak", 100], ["day-one", 500], ["zz-last", 5], ["aa-first", 5]));
+  assert(same(r.data, { awarded: ["dynasty", "hot-streak", "day-one"], credited: 900, balance: 2350 }), `a repeated id counts once, and the order is the list's: ${show(r)}`);
+  assert(!(await awardsOf(FAY)).some((b) => b === "zz-last" || b === "aa-first"),
+    "a badge with no price isn't recorded either, so it still pays the day the database learns about it");
+  // Already recorded, so nothing more - and 100 was never what stat-nerd pays in any case. The caller's
+  // number is checked for shape and then thrown away; badge_rewards is what decides.
   r = await award(FAY, badges(["stat-nerd", 100]));
-  assert(same(r.data, { awarded: [], credited: 0, balance: 1760 }), `a badge recorded at 0 coins doesn't pay later: ${show(r)}`);
+  assert(same(r.data, { awarded: [], credited: 0, balance: 2350 }), `a badge recorded at 0 coins doesn't pay later: ${show(r)}`);
   // A badge pays once even if its badge_awards row is deleted: the ledger still holds its payment.
   await owner("delete from badge_awards where user_id = $1 and badge = 'undefeated'", [FAY]);
   r = await award(FAY, badges(["undefeated", 1000]));
-  assert(same(r.data, { awarded: ["undefeated"], credited: 0, balance: 1760 }), `re-awarded, not re-paid: ${show(r)}`);
+  assert(same(r.data, { awarded: ["undefeated"], credited: 0, balance: 2350 }), `re-awarded, not re-paid: ${show(r)}`);
   // A whole number written with a fraction or an exponent is still a whole number.
   r = await attempt(SERVICE, `select award_badges($1::uuid, '[{"id": "veteran", "coins": 300.0}, {"id": "starter", "coins": 1e2}]'::jsonb)`, [FAY]);
-  assert(same(r.data, { awarded: ["veteran", "starter"], credited: 400, balance: 2160 }), `300.0 and 1e2: ${show(r)}`);
-  // Fifty is the most one call takes.
+  assert(same(r.data, { awarded: ["veteran", "starter"], credited: 400, balance: 2750 }), `300.0 and 1e2: ${show(r)}`);
+  // Fifty is the most one call takes - and fifty ids this database has never heard of buy exactly nothing.
+  // Before badge_rewards these paid 49 coins between them, because the caller said they were worth that.
   const GUS = await account("gus");
   r = await award(GUS, Array.from({ length: 50 }, (_, i) => ({ id: `b-${i}`, coins: i % 3 })));
-  assert(r.data?.awarded.length === 50 && r.data.credited === 49 && r.data.balance === 299, `50 badges: ${show(r)}`);
-  assert((await ledgerOf(GUS)).filter((l) => l.kind === "badge").length === 33, "the 17 that pay nothing have no ledger row");
+  assert(same(r.data, { awarded: [], credited: 0, balance: 250 }), `fifty badges nobody has priced: ${show(r)}`);
+  assert(same(await awardsOf(GUS), []), "none of them recorded either");
+  assert((await ledgerOf(GUS)).filter((l) => l.kind === "badge").length === 0, "and nothing in the ledger");
+  // A real badge in amongst them is still paid, and still paid the catalog's price rather than the caller's.
+  r = await award(GUS, [{ id: "b-0", coins: 9 }, { id: "veteran", coins: 10000 }, { id: "b-1", coins: 9 }]);
+  assert(same(r.data, { awarded: ["veteran"], credited: 300, balance: 550 }), `veteran is worth 300, whatever the caller says: ${show(r)}`);
+  // The badges that pay nothing are still recorded, which is what makes their shop items yours.
+  const GEM = await account("gem");
+  r = await award(GEM, badges(["stat-nerd", 500], ["mad-scientist", 500]));
+  assert(same(r.data, { awarded: ["stat-nerd", "mad-scientist"], credited: 0, balance: 250 }), `both recorded, neither paid: ${show(r)}`);
+  assert(same(await awardsOf(GEM), ["mad-scientist", "stat-nerd"]), "both are on the account");
 });
 
 await runTest("award_badges refuses a malformed list outright (bad_request) and an unknown player (no_such_player), writing nothing", async () => {
@@ -401,7 +417,10 @@ await runTest("award_badges refuses a malformed list outright (bad_request) and 
     assert(r.error === "bad_request", `${literal} should be bad_request, got ${show(r)}`);
   }
   assert(same(await totals(), before), "a refused award writes nothing");
-  assert((await award(HAL, Array.from({ length: 50 }, (_, i) => ({ id: `b-${i}`, coins: 0 })))).data?.awarded.length === 50, "exactly 50 is fine");
+  // 51 is refused above; 50 is taken. None of them is a real badge, so the answer is an empty list rather
+  // than an error - the length limit is about the payload, not about what is in it.
+  const fifty = await award(HAL, Array.from({ length: 50 }, (_, i) => ({ id: `b-${i}`, coins: 0 })));
+  assert(!fifty.error && same(fifty.data?.awarded, []), `exactly 50 is fine: ${show(fifty)}`);
 });
 
 // ---------- claim_minigame ----------
@@ -628,6 +647,18 @@ await runTest("the tables refuse a double payment, a balance that doesn't add up
 
 // ---------- New accounts ----------
 
+// The one thing badge_rewards cannot check for itself. Its rows are a copy of badges.mjs - the same kind of
+// copy as the welcome coins and the minigame's 15, and there for the same reason: the number has to exist in
+// SQL, because the database is what pays it, while the browser prints its own line from the catalog in the
+// repo. If the two drift, a player is shown one figure and credited another, and nothing else in this suite
+// would notice, because both sides of every mock-vs-SQL comparison read the same list.
+await runTest("badge_rewards is badges.mjs, badge for badge and coin for coin", async () => {
+  const rows = await owner("select badge, coins from badge_rewards order by badge");
+  const want = BADGES.map((b) => ({ badge: b.id, coins: b.coins })).sort((a, b) => (a.badge < b.badge ? -1 : 1));
+  assert(rows.length === BADGES.length, `every badge is priced: ${rows.length} rows for ${BADGES.length} badges`);
+  assert(same(rows, want), `badge_rewards differs from badges.mjs: sql ${show(rows)} vs repo ${show(want)}`);
+});
+
 await runTest("a new account starts with its welcome coins, exactly once", async () => {
   const QUIN = await account("quin");
   assert(same(await ledgerOf(QUIN), [{ amount: COIN_RULES.welcome, kind: "welcome", ref: "welcome" }]), `the welcome row: ${show(await ledgerOf(QUIN))}`);
@@ -759,6 +790,8 @@ await runTest("the mock gives the same answers as the SQL for one shared list of
     ["server", "award_badges", { p_user: "@eve", p_badges: badges(["stat-nerd", 100]) }],
     ["server", "award_badges", { p_user: "@eve", p_badges: badges(["big-brain", 10000]) }],
     ["server", "award_badges", { p_user: "@ben", p_badges: Array.from({ length: 50 }, (_, i) => ({ id: `b-${i}`, coins: i % 3 })) }],
+    // Real ones, at prices the caller has made up, mixed in with ids that have none.
+    ["server", "award_badges", { p_user: "@ben", p_badges: badges(["veteran", 1], ["zz-last", 5], ["day-one", 9999], ["mad-scientist", 700], ["hall-of-famer", 0]) }],
     // claim_minigame
     ["ghost", "claim_minigame", { p_game: "over_under" }],
     ["ghost", "claim_minigame", { p_game: "nope" }],
@@ -855,7 +888,9 @@ await runTest("the mock gives the same answers as the SQL for one shared list of
   }
   const sqlAwards = mine(await owner("select user_id, badge from badge_awards"));
   const mockAwards = mine([...mock.tables.badge_awards.values()].map(({ user_id, badge }) => ({ user_id, badge })));
-  assert(same(sorted(sqlAwards), sorted(mockAwards)) && sqlAwards.length > 50, `badge awards differ: ${sqlAwards.length} vs ${mockAwards.length}`);
+  // Ten: eve's six and ben's four. It used to be sixty, fifty of which were ids made up by the test - those
+  // are skipped now, on both sides, which is the point.
+  assert(same(sorted(sqlAwards), sorted(mockAwards)) && sqlAwards.length === 10, `badge awards differ: ${sqlAwards.length} vs ${mockAwards.length}`);
 });
 
 // ---------- Across everything above ----------
@@ -905,6 +940,14 @@ await runTest("running the migration again pays only an account with neither wel
   await db.exec(sql("migration-wallet.sql"));
   const twice = await snapshot();
   for (const key of Object.keys(once)) assert(same(twice[key], once[key]), `a third run changed ${key}: ${show(twice[key]).slice(0, 200)}`);
+
+  // badge_rewards is the one seed in these files that OVERWRITES rather than only adding missing rows: a badge's
+  // price is not a runbook setting, because the browser prints the amount from badges.mjs and only the repo can
+  // change both. So re-running the migration is how a changed price reaches a database that has the old one.
+  await owner("update badge_rewards set coins = 7 where badge = $1", [BADGES[0].id]);
+  await db.exec(sql("migration-wallet.sql"));
+  const priced = await owner("select coins from badge_rewards where badge = $1", [BADGES[0].id]);
+  assert(priced[0].coins === BADGES[0].coins, `re-running the migration puts a hand-edited price back: ${show(priced)}`);
 
   const RAE = await account("rae");
   assert(same(await ledgerOf(RAE), [{ amount: 250, kind: "welcome", ref: "welcome" }]), "a new account still gets its welcome, once");

@@ -1,6 +1,12 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "public",
+  "redirects": [
+    { "source": "/page.html", "destination": "/", "permanent": true },
+    { "source": "/how-to-play.html", "destination": "/how-to-play", "permanent": true },
+    { "source": "/leaderboard.html", "destination": "/leaderboard", "permanent": true },
+    { "source": "/privacy.html", "destination": "/privacy", "permanent": true }
+  ],
   "rewrites": [
     { "source": "/", "destination": "/page.html" },
     { "source": "/how-to-play", "destination": "/how-to-play.html" },
@@ -17,6 +23,16 @@
     { "source": "/vs/:code/", "destination": "/page.html" }
   ],
   "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Content-Security-Policy", "value": "frame-ancestors 'none'" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=()" }
+      ]
+    },
     {
       "source": "/(.*)",
       "has": [{ "type": "host", "value": "(?<sub>(?!perfect-season-t9sk$|perfect-season-beta$).*)\\.vercel\\.app" }],

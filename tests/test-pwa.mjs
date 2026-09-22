@@ -7,7 +7,7 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setupDom, makeStorage, mount, flush, click, text, assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { planFor, BUNDLE, FONT_HOSTS } from "../sw-rules.mjs";
+import { planFor, pageKey, BUNDLE, FONT_HOSTS } from "../sw-rules.mjs";
 import { THEME } from "../theme.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,6 +43,34 @@ await runTest("the worker touches this site's own files and nothing else", async
   assert(planFor(req(`https://cdn.example.com${BUNDLE}`), SITE) === null, "someone else's page.js is not our bundle");
   assert(planFor(req("https://cdn.example.com/icon-192.png"), SITE) === null, "someone else's icon is not our icon");
   assert(planFor(req(`${supabase}/icon-192.png`), SITE) === null, "and nothing under the database's own address");
+});
+
+await runTest("a page is stored under its path, never its query, and never one entry per link", async () => {
+  const key = (url) => pageKey(req(url, { mode: "navigate" }), SITE);
+  // The one that matters: Google sign-in comes back to /?code=<authorization code> (Supabase's PKCE flow).
+  // Keyed by the request, the worker filed that code in Cache Storage until the next deploy replaced the
+  // store. It is single-use and short-lived and it is in the history anyway, but this site should not be the
+  // one keeping a copy.
+  assert(key(`${SITE}/?code=4%2F0AY0e-g7-rWEVWUV`) === `${SITE}/`, "an authorization code never reaches the store");
+  assert(!key(`${SITE}/?code=SECRET`).includes("SECRET"), "nothing from a query does");
+  assert(key(`${SITE}/?error=access_denied&error_description=x`) === `${SITE}/`, "nor what came back instead of one");
+
+  // And one entry, not one per link. Nothing empties the store until a release replaces it, so every
+  // challenge link, profile and duel a player opened used to stay in it.
+  const many = [`${SITE}/c/ABC123?beat=20-0`, `${SITE}/c/ZZZ999`, `${SITE}/u/laddertest`, `${SITE}/vs/QWE456`, `${SITE}/anything-else`];
+  assert(new Set(many.map(key)).size === 1 && key(many[0]) === `${SITE}/`, `every shell address is one entry: ${[...new Set(many.map(key))].join(', ')}`);
+
+  // The pages that are their own file keep their own, or /privacy offline would be the game and /how-to-play
+  // would answer for "/". A trailing slash is the same page; vercel.json rewrites both.
+  for (const p of ["/how-to-play", "/leaderboard", "/privacy"]) {
+    assert(key(SITE + p) === SITE + p, `${p} is its own entry`);
+    assert(key(`${SITE}${p}/`) === SITE + p, `${p}/ is the same entry`);
+    assert(key(`${SITE}${p}?utm_source=x`) === SITE + p, `${p} with a query is the same entry`);
+  }
+  // Anything that resolves lands on the shell, which is the safe answer for an address this build has never
+  // heard of; the few that do not parse at all are left alone, and service-worker.js falls back to "/".
+  assert(key(`${SITE}/some-page-a-later-release-adds`) === `${SITE}/`, "an address nobody recognises is the shell");
+  assert(key("http://") === null, "and one that will not parse is nobody's business");
 });
 
 await runTest("build.mjs writes a worker stamped with this exact build", async () => {

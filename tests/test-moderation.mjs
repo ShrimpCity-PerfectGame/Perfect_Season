@@ -429,13 +429,19 @@ await runTest("the mock gives the same answers as the SQL for one shared sequenc
     ["carol", "report_player", { p_username: "bob", p_reason: "spam" }],
     ["carol", "report_player", { p_username: "bob" }],
     ["carol", "report_player", { p_username: "bob", p_reason: "bio", p_note: "x".repeat(201) }],
-    // The database trims spaces, tabs and line breaks only, so non-breaking spaces still count.
+    // The whitespace the database collapses and trims is the ASCII set Postgres's \s matches, so a
+    // non-breaking space is an ordinary character and these two still count toward the 200.
     ["carol", "report_player", { p_username: "bob", p_reason: "bio", p_note: `\u00a0${"x".repeat(199)}\u00a0` }],
     ["carol", "report_player", { p_username: "bob", p_reason: "bio", p_note: ` \t${"x".repeat(200)}\r\n` }],
     ["carol", "report_player", { p_username: "bob", p_reason: "bio", p_note: "again" }],
     ["carol", "report_player", { p_username: "bob", p_reason: "picture", p_note: "😀".repeat(200) }],
     ["dave", "report_player", { p_username: "bob", p_reason: "username", p_note: "  rude name \n" }],
     ["dave", "report_player", { p_username: "carol", p_reason: "picture", p_note: null }],
+    // A note is the only free text one player writes for a moderator to read, so it is cleaned the way a
+    // bio is: the bell character and the zero-width space go, the right-to-left override that would make
+    // the rest of the sentence read backwards goes, and the line break between the two lines becomes a
+    // space. What survives is "his bio says gnihtemos else" - the letters as typed, in the order typed.
+    ["dave", "report_player", { p_username: "carol", p_reason: "bio", p_note: "his bio\nsays \u202egnihtemos\u202c\u200b\u0007 else" }],
     ["erin", "report_player", { p_username: "bob", p_reason: "other", p_note: "spam account?" }],
     ["alice", "is_moderator", {}],
     ["bob", "is_moderator", {}],
@@ -501,7 +507,19 @@ await runTest("the mock gives the same answers as the SQL for one shared sequenc
   const sqlReports = (await db.query("select * from reports")).rows;
   let d = firstDiff(reportRows(sqlReports, S), reportRows([...mock._reports.values()], M));
   assert(!d, `reports differ: ${d}`);
-  assert(sqlReports.length === 15, `expected 15 reports in all, got ${sqlReports.length}`);
+  assert(sqlReports.length === 16, `expected 16 reports in all, got ${sqlReports.length}`);
+
+  // The two sides agreeing is not the same as either being right, and both of them writing the note down
+  // verbatim would agree perfectly. So: what does a moderator actually read? The report_player above was
+  // sent a bell character, a zero-width space, a right-to-left override that turns the rest of the
+  // sentence around in any renderer that honours it, and a line break. None of them can reach the queue.
+  const dirty = sqlReports.find((r) => r.note && r.note.includes("gnihtemos"));
+  assert(dirty, "the note with the hidden characters was stored at all");
+  assert(dirty.note === "his bio says gnihtemos else",
+    `the queue reads the letters as typed and nothing else: ${JSON.stringify(dirty.note)}`);
+  const mockDirty = [...mock._reports.values()].find((r) => r.note && r.note.includes("gnihtemos"));
+  assert(mockDirty && mockDirty.note === dirty.note,
+    `and the mock stores the same: ${JSON.stringify(mockDirty && mockDirty.note)}`);
 
   const usernames = (rows, side) => sorted(rows.map((r) => canonical({ who: r.user_id ?? r.id, username: r.username }, side.labels)));
   for (const [table, rows] of [["profiles", [...mock._profiles.values()]], ["runs", [...mock._runs.values()]], ["daily_runs", [...mock._dailyRuns.values()]], ["sou_runs", [...mock._souRuns.values()]], ["builds", [...mock._builds.values()]]]) {

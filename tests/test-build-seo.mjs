@@ -107,6 +107,14 @@ for (const page of SITE_PAGES) {
     (html.match(/<script[^>]*>/g) || []).join(" "));
 }
 check("the sitemap lists every page of its own", SITE_PAGES.every((p) => (prod.sitemap || "").includes(`<loc>https://www.gridspin.app${p.path}</loc>`)), prod.sitemap);
+// Each page says when its own words last changed, and only "/" - the app, which really does change every
+// release - carries the build date. Stamping today on all four told a crawler the whole site changes daily,
+// which is how lastmod stops being believed, and it is a claim that was simply untrue of three of them.
+const stamp = (path) => ((prod.sitemap || "").match(new RegExp(`<loc>https://www\.gridspin\.app${path.replace("/", "\/")}</loc><lastmod>([0-9-]+)</lastmod>`)) || [])[1];
+check("the home page's lastmod is this build", stamp("/") === new Date().toISOString().slice(0, 10), stamp("/"));
+check("every other page says when its own words last changed",
+  SITE_PAGES.every((p) => stamp(p.path) === p.updated),
+  SITE_PAGES.map((p) => `${p.path} sitemap=${stamp(p.path)} declared=${p.updated}`).join(" | "));
 
 console.log("staging build");
 const stg = build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app" });

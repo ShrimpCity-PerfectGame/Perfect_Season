@@ -224,7 +224,7 @@ await runTest("1b. every table, column, sequence and view they add: the coin tab
   const oldNames = new Set((await v111.query(TABLE_ROWS)).rows.map((t) => t.name));
   const added = rows.filter((t) => !oldNames.has(t.name));
   const CLOSED = { kind: "r", rls: true, policies: [], anon: [], authenticated: [] };
-  const want = { badge_awards: CLOSED, finished_codes: CLOSED, inventory: CLOSED, wallet_ledger: CLOSED, wallets: CLOSED };
+  const want = { badge_awards: CLOSED, badge_rewards: CLOSED, finished_codes: CLOSED, inventory: CLOSED, wallet_ledger: CLOSED, wallets: CLOSED };
   assert(same(added.map((t) => t.name).sort(), [...Object.keys(want), "shop_items"].sort()), `tables the new migrations add: ${show(added.map((t) => t.name))}`);
   for (const t of added.filter((x) => want[x.name])) {
     assert(same({ kind: t.kind, rls: t.rls, policies: t.policies, anon: t.anon, authenticated: t.authenticated }, want[t.name]), `${t.name}: RLS on, no policies, no client privilege of any kind - got ${show(t)}`);
@@ -773,16 +773,20 @@ await runTest("6b. the service functions' numbers at their edges - bigint and in
     ["select public.credit_coins($1::uuid, 0::bigint, 'season', 'ZERO', 20) as r", { credited: 0, capped: false, duplicate: false }],
     ["select public.credit_coins($1::uuid, 20::bigint, 'season', 'CAP-MIN', -2147483648) as r", { credited: 0, capped: true, duplicate: false }],
     ["select public.credit_coins($1::uuid, 20::bigint, 'season', 'CAP-MAX', 2147483647) as r", { credited: 20, capped: false, duplicate: false }],
-    [`select public.award_badges($1::uuid, '[{"id": "first-down", "coins": -0}, {"id": "starter", "coins": 10000.000}]'::jsonb) as r`, { awarded: ["first-down", "starter"], credited: 10000 }],
+    // -0 and 10000.000 are whole numbers and pass the shape check, and then neither of them is what is paid:
+    // badge_rewards says first-down is 100 and starter is 100. Until v2.0.0 this line credited 10,000 coins,
+    // because award_badges believed its caller. It is the service role's function and submit-run builds the
+    // list from rewards.mjs, so nothing could reach it - but the wallet now decides what a badge is worth.
+    [`select public.award_badges($1::uuid, '[{"id": "first-down", "coins": -0}, {"id": "starter", "coins": 10000.000}, {"id": "stat-nerd", "coins": 10000}]'::jsonb) as r`, { awarded: ["first-down", "starter", "stat-nerd"], credited: 200 }],
   ];
   for (const [statement, want] of paid) {
     const r = await svc(statement);
     const got = r.rows?.[0]?.r;
     assert(got && Object.entries(want).every(([k, v]) => same(got[k], v)), `${statement.slice(0, 100)}: expected ${show(want)}, got ${show(r)}`);
   }
-  assert(same((await ledgerOf(P)).map((l) => l.ref), ["welcome", "2026-09-15:fantasy", "CAP-MAX", "starter"]), `only the paying ones left ledger rows: ${show(await ledgerOf(P))}`);
+  assert(same((await ledgerOf(P)).map((l) => l.ref), ["welcome", "2026-09-15:fantasy", "CAP-MAX", "first-down", "starter"]), `only the paying ones left ledger rows: ${show(await ledgerOf(P))}`);
   const [sum] = await owner("select (select balance from wallets where user_id = $1)::bigint as balance, (select sum(amount) from wallet_ledger where user_id = $1)::bigint as total", [P]);
-  assert(Number(sum.balance) === Number(sum.total) && Number(sum.balance) === 250 + 10000 + 20 + 10000, `the balance is the ledger's sum: ${show(sum)}`);
+  assert(Number(sum.balance) === Number(sum.total) && Number(sum.balance) === 250 + 10000 + 20 + 100 + 100, `the balance is the ledger's sum: ${show(sum)}`);
 });
 
 await runTest("6c. a badge pays once, however award_badges is repeated, reordered, duplicated inside a list or sent a new amount", async () => {

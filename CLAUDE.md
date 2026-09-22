@@ -58,6 +58,17 @@ standings. `tests/test-site-pages.mjs` covers the app's side. **Brand search:** 
 name "Gridspin", so brand queries need off-site mentions (social profiles and community posts linking here) more
 than markup - that part is the owner's to do.
 
+**One address per page, and the headers (v2.0.0).** `vercel.json` sends every response
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,
+`Content-Security-Policy: frame-ancestors 'none'` with `X-Frame-Options: DENY` behind it, and a
+`Permissions-Policy` turning off the hardware the game never asks for. The CSP is **only** `frame-ancestors`
+on purpose: a real policy would have to allow `'unsafe-inline'` styles (the stylesheet is injected as a
+string), Supabase over REST and websockets, and `data:`/`blob:` images for the avatars - worth doing, but not
+as a "small fix". `/page.html`, `/how-to-play.html`, `/leaderboard.html` and `/privacy.html` now 308 to the
+address the canonical tag already named; the rewrites are `afterFiles`, so the filesystem answers the `.html`
+first and its rewrite is internal, which is why this doesn't loop. **Check that on staging with `curl`, not a
+browser** - a 308 is cached hard.
+
 **Installable, and playable without a signal (v1.15.0).** The site is a real app when someone wants it to be:
 `static/site.webmanifest` (standalone, a maskable icon) plus a service worker, which is what a browser wants before
 it offers "Install app" at all. `service-worker.js` and `sw-rules.mjs` are bundled by `build.mjs` into
@@ -68,8 +79,14 @@ fall back to the store only when there isn't (a player must never run last week'
 submit-run); the icons, the manifest and the Google fonts are served from the store and refreshed behind the
 player. **Nothing that isn't this site's own files is ever stored**: every account, leaderboard, wallet and
 submit-run call goes to Supabase on another origin and is passed straight through (`planFor`) - a stored answer to
-any of them would be a stale leaderboard, a balance already spent, or a season saved twice. `entry.jsx` registers
-the worker after load, and never inside the Android app, which serves the same files from the phone already. The
+any of them would be a stale leaderboard, a balance already spent, or a season saved twice.
+
+A page is stored under its **path**, with the query dropped and every address that is served the shell
+collapsed onto `/` (`pageKey`, v2.0.0). Keyed by the request itself, two things went wrong: signing in with
+Google comes back to `/?code=<authorization code>` and the worker filed that code in Cache Storage until the
+next deploy replaced the store, and every challenge link, profile and duel opened was an entry of its own in a
+store nothing ever prunes. `entry.jsx` registers the worker after load, and never inside the Android app, which
+serves the same files from the phone already. The
 offer to install is the game's own: Chrome's `beforeinstallprompt` is held back and shown as an "Install Gridspin"
 pill beside the live counts (iOS has no such event - it installs by hand through Share > Add to Home Screen).
 `tests/test-pwa.mjs` covers the rules, what the build writes and the offer; the offline half was checked in real
@@ -442,6 +459,14 @@ overwrite each other.
   security boundary - a modified browser can call them directly - so every limit and the word filter
   live in SQL, and the browser's checks exist only for friendlier messages. `blocked_words` isn't
   readable by clients at all, and `text_is_clean` isn't callable by them.
+- **Free text is one line of plain text, in SQL as well as in the browser.** A bio and a report's note both
+  drop control characters, the line and paragraph separators, and the invisible or direction-changing format
+  characters that hide a word or flip how a sentence reads (`profile-rules.mjs`'s `cleanBio`/`cleanNote`, the
+  same set `save_profile` and `report_player` apply). `cleanNote` is **not** `cleanBio`: `report_player` does
+  the cleaning in SQL, so `cleanNote` matches Postgres character for character - it collapses only the ASCII
+  whitespace `\s` matches there (JS's `\s` also takes a non-breaking space) and trims plain spaces, which is
+  `btrim`. `tests/test-moderation.mjs` runs one sequence through the mock and the real SQL and is how that
+  difference was found.
 - **The word filter** (`text_is_clean`) checks bios, new usernames (the signup trigger, plus
   `check_username` for a friendly message first) and moderator renames. Its matching rules are in
   PROFILES.md 3.4 and migration-profiles.sql. `tests/test-word-filter.mjs` requires every player name in
@@ -482,10 +507,19 @@ overwrite each other.
   first, before it touches the ledger, so simultaneous purchases and credits take turns and can't deadlock.
   The read-only `wallet_state` and `shop_state` don't lock: they're called as GET, which PostgREST runs
   read-only.
-- **Amounts live in `rewards.mjs`** (`COIN_RULES`), which submit-run and the browser share. The three things the
-  database pays by itself - 250 welcome coins (the `profiles_create_wallet` trigger), 15 per minigame, and the
-  one-time starting balance at the bottom of `migration-wallet.sql` - are copies that `tests/test-wallet-sql.mjs`
-  holds to it. Prices, rarities and what's on sale are `shop_items` rows; names and looks live in the browser
+- **Amounts live in `rewards.mjs`** (`COIN_RULES`), which submit-run and the browser share. The four things the
+  database pays by itself - 250 welcome coins (the `profiles_create_wallet` trigger), 15 per minigame, the
+  one-time starting balance at the bottom of `migration-wallet.sql`, and since v2.0.0 **`badge_rewards`**, what
+  each badge pays - are copies that `tests/test-wallet-sql.mjs` holds to it.
+- **`award_badges` says which badges; `badge_rewards` says what they cost** (v2.0.0). It used to credit the
+  number its caller handed it, which made the amount a badge is worth a thing decided outside the wallet.
+  Nothing could reach it - service role only, and submit-run builds the list from `rewards.mjs` - but the
+  database is the wallet and now answers for itself. Two consequences worth knowing: a badge id the table has
+  no row for is **skipped and not recorded**, so it pays the first season after the migration that adds it
+  (raising instead would fail every submission if the function shipped before the migration); and the seed
+  **overwrites** rather than only adding missing rows, unlike `shop_items`, because a badge's price is not a
+  runbook setting - the browser prints it from `badges.mjs` and only the repo can change both. A new badge is
+  therefore a `badges.mjs` entry **and** a re-run of `migration-wallet.sql`. Prices, rarities and what's on sale are `shop_items` rows; names and looks live in the browser
   (`shop-catalog.mjs`, `cosmetics.jsx`).
 - **A finished draft counts once.** submit-run inserts `finished_codes (user, code)` before any other write: one
   finished season per account per challenge code, in any variant or format. If the profile update then fails it
@@ -772,6 +806,18 @@ suite and still broke the live Leaderboard for every existing account.
   **Any match in flight has to be abandoned first** (`update matches set status = 'abandoned' where status =
   'drafting';`) - who leads which board is now seeded on the match code, so a match already under way would
   replay to a different board order than it was drafted from.
+  v2.0.0's (the public release): re-run **`migration-profiles.sql`**, **`migration-runs-log.sql`**,
+  **`migration-moderation.sql`** and **`migration-wallet.sql`**, in that order, then **deploy the Edge
+  Functions**, then the client. profiles goes first, unlike v1.11.0's order: `site_stats` and `best_gm` in
+  runs-log now read `profiles.guest`, and profiles is what adds the column. All four only add or replace
+  objects, so the site keeps working between them.
+  What is in each: profiles/runs-log carry the guest column, the name snapshots and the `collate "C"` tiebreaks
+  from phase 2, and `profiles.rev`, which is what stops a finished season being overwritten by the abandoned
+  draft that "Run it back" fires - **the Edge Function will not save a season without it**, so that one is not
+  optional and not last. moderation cleans a report's note. wallet adds `badge_rewards`. The functions change
+  because `game-logic.mjs` did (the GM cap reserve, the bot's par, Championship's Flex ceiling) and because
+  submit-run refuses a challenge code that is the daily's own seed - every one of those is a rule the browser
+  and the function have to agree on, and the scoring half decides what a season is worth.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging

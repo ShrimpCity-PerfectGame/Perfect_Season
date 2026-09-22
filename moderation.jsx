@@ -7,7 +7,7 @@
 // call those directly), so the checks here only make the messages friendlier.
 import { useEffect, useId, useRef, useState } from "react";
 import { reportPlayer, fetchModQueue, modAction } from "./storage.js";
-import { REPORT_REASONS, REPORT_REASON_LABEL, REPORT_NOTE_MAX, REPORTS_PER_DAY, USERNAME_RE, bioLength } from "./profile-rules.mjs";
+import { REPORT_REASONS, REPORT_REASON_LABEL, REPORT_NOTE_MAX, REPORTS_PER_DAY, USERNAME_RE, bioLength, cleanNote } from "./profile-rules.mjs";
 import { cssVars } from "./theme.mjs";
 import { Avatar } from "./avatars.jsx";
 import { fmtDate, useCloseOnBack, keepFocusInside } from "./ui-common.jsx";
@@ -155,7 +155,9 @@ export function ReportSheet({ username, onClose }) {
   }, []);
   useEffect(() => { if (sent) closeButton.current?.focus({ preventScroll: true }); }, [sent]);
 
-  const trimmed = note.trim();
+  // Cleaned, not merely trimmed: the same one-line-of-plain-text rule a bio gets, and the same one
+  // report_player applies in SQL - so the counter below counts what the database will store.
+  const trimmed = cleanNote(note);
   const length = bioLength(trimmed); // code points, the way the database counts
   const tooLong = length > REPORT_NOTE_MAX;
 

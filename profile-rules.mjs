@@ -63,6 +63,27 @@ export function cleanBio(text) {
 // Length the way the database counts it: char_length counts code points, where String.length counts
 // UTF-16 units (an emoji is 1 there and 2 here).
 export const bioLength = (text) => [...String(text ?? "")].length;
+// A report's note gets the same one-line-of-plain-text treatment, for a sharper version of the same
+// reason: it is free text written by one player and read by a moderator deciding what to do about
+// another. It was the one field on the site that took anything at all - a right-to-left override (U+202E)
+// makes the note a moderator reads say something other than what the reporter typed, and the zero-width
+// characters hide words from the eye completely.
+//
+// Unlike a bio, report_player does the cleaning in SQL as well, because the note reaches a moderator
+// whatever client sent it - so this has to be what Postgres does, character for character, and it is NOT
+// cleanBio. Two differences, both found by the sequence tests/test-moderation.mjs runs through the mock
+// and the real SQL side by side:
+//   - the whitespace collapsed is the ASCII set Postgres's \s matches. JS's \s also takes a non-breaking
+//     space and the other Unicode spaces; Postgres's does not, so collapsing them here would let a note
+//     the database counts as 201 characters through at 199.
+//   - the ends are trimmed of plain spaces only, which is what btrim does.
+const NOTE_SPACE = /[ \t\n\r\f\v]+/g;
+export function cleanNote(text) {
+  return String(text ?? "")
+    .replace(NOTE_SPACE, " ")
+    .replace(new RegExp(`[${DISALLOWED}]`, "g"), "")
+    .replace(/^ +| +$/g, "");
+}
 
 // ---------- Profile addresses ----------
 export const profilePath = (username) => `/u/${encodeURIComponent(username)}`;

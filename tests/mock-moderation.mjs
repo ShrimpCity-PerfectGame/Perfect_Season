@@ -4,13 +4,13 @@
 //
 // tests/test-moderation.mjs runs one sequence of calls through this and through the real SQL and requires
 // the same results, so every check below is made in the same order as the SQL makes it.
-import { REPORT_REASONS, REPORT_NOTE_MAX, REPORTS_PER_DAY, USERNAME_RE } from "../profile-rules.mjs";
+import { REPORT_REASONS, REPORT_NOTE_MAX, REPORTS_PER_DAY, USERNAME_RE, cleanNote } from "../profile-rules.mjs";
 
 const fail = (code) => { throw new Error(code); };
 const DAY_MS = 24 * 60 * 60 * 1000;
-// btrim(note, E' \t\n\r'): the database trims only these, where String.trim() would also take
-// non-breaking and other Unicode spaces.
-const trimNote = (text) => String(text ?? "").replace(/^[ \t\n\r]+|[ \t\n\r]+$/g, "");
+// What report_player stores, whole: profile-rules.mjs's cleanNote is written to be exactly what the SQL
+// does, down to which spaces count as whitespace, so there is nothing to add here.
+const trimNote = cleanNote;
 // char_length counts code points; String.length counts UTF-16 units.
 const charLength = (text) => [...text].length;
 const time = (t) => Date.parse(t);

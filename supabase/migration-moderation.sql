@@ -64,8 +64,19 @@ returns jsonb language plpgsql security definer set search_path = public, pg_tem
 declare
   v_uid uuid := auth.uid();
   v_target uuid;
-  -- Trimmed of spaces, tabs and line breaks; tests/mock-moderation.mjs trims the same set.
-  v_note text := btrim(coalesce(p_note, ''), E' \t\n\r');
+  -- One line of plain text: runs of whitespace (line breaks included) become one space, the characters a bio
+  -- may not carry go, and the ends are trimmed. profile-rules.mjs's cleanNote is written to match this
+  -- exactly - a bio's rule, but with THIS function's idea of whitespace, which is Postgres's and takes no
+  -- non-breaking space where JS's does. tests/mock-moderation.mjs calls that same function.
+  --
+  -- The note is the one free-text field that took anything at all, and it is read by a moderator deciding
+  -- what to do about somebody. A right-to-left override (U+202E) makes it read as something other than what
+  -- was typed, and the zero-width characters hide words from the eye entirely. Stripped rather than refused,
+  -- because turning down a report over a character nobody can see means the thing being reported goes
+  -- unreported - and the report sheet has already shown the reporter the cleaned text.
+  v_note text := btrim(regexp_replace(
+                   regexp_replace(coalesce(p_note, ''), '\s+', ' ', 'g'),
+                   U&'[\0001-\001F\007F-\009F\061C\200B\200E\200F\2028\2029\202A-\202E\2060-\2064\2066-\206F\FEFF]', '', 'g'));
 begin
   if v_uid is null or not exists (select 1 from profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';

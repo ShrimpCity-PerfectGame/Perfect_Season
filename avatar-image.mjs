@@ -10,6 +10,24 @@
 //   releaseImage(source)        frees a source's memory once the picker is done with it
 import { AVATAR_SIZE, AVATAR_MAX_BYTES, AVATAR_TYPES } from "./profile-rules.mjs";
 
+// The biggest file the picker will take. This is the file's SIZE, and it is the only size checked before
+// the picture is decoded - which is a known, accepted hole, deliberately left open.
+//
+// A picture's pixels are not its bytes. An image format compresses flat colour to almost nothing, so a PNG or
+// WebP of a page or two can declare 30,000 x 30,000 and decode to about 3.6 GB of pixels - a "decompression
+// bomb". Neither route below can see that coming: createImageBitmap decodes and then reports a size, and the
+// <img> fallback does the same. Nothing in a browser reliably reads an image's dimensions without decoding it
+// (WebCodecs' ImageDecoder can, and is not everywhere), so closing this would mean parsing the headers of
+// PNG, JPEG, WebP, GIF and AVIF by hand, in every build, for a picture the player chose themselves.
+//
+// What it costs if someone does it: their own tab runs out of memory and the browser ends it. Theirs and
+// nobody else's, and they have to go and make the file first. There is no other way in - a picture reaches
+// this only through the player's own file picker; no address, no link and no other player can hand one over,
+// nothing has been uploaded at the point it would happen (prepareAvatar has not run), and no server anywhere
+// in this game decodes an image at all. Reloading the page is the whole of the recovery.
+//
+// So: accepted and written down, rather than fixed. If it ever needs fixing, ImageDecoder's track size is
+// the cheap half and the header parsers are the rest.
 export const MAX_INPUT_BYTES = 25 * 1024 * 1024;
 export { AVATAR_SIZE, AVATAR_MAX_BYTES, AVATAR_TYPES };
 

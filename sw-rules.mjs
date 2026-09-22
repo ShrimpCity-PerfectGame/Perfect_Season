@@ -14,6 +14,30 @@ export const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
 // artwork. Everything else of ours (robots.txt, the sitemap) is the crawlers' business, not the app's.
 const ASSET = /^\/(?:icon(?:-\d+|-maskable-\d+)?\.(?:png|svg)|favicon-\d+\.png|apple-touch-icon\.png|og\.png|site\.webmanifest)$/;
 
+// The four pages build.mjs writes. Which one answers an address is decided by its PATH alone - everything
+// else (a profile, a challenge link, a duel) is served the app's own shell - so that is what a page is stored
+// under, with the query string dropped. See pageKey.
+const PAGE_PATHS = new Set(["/", "/how-to-play", "/leaderboard", "/privacy"]);
+
+// Where a page is kept in the store. Keyed by the request itself, as it was, two things went wrong.
+//
+// The serious one: signing in with Google comes back to "/?code=<authorization code>" - Supabase's PKCE flow -
+// and the worker wrote that address into Cache Storage, where it stayed until the next deploy threw the store
+// away. The code is single-use, short-lived, and in the address bar and the history anyway; it is still a
+// credential, and this site should not be the one filing a copy of it. The same goes for anything else that
+// ever arrives in a query.
+//
+// The other: every distinct address was an entry of its own. Twenty shared challenge links meant twenty copies
+// of the same shell, and nothing ever removed one - the store is only emptied when a new release replaces it.
+//
+// So: the path, without its query, if it is one of the four pages; the shell otherwise.
+export function pageKey(request, origin) {
+  let url;
+  try { url = new URL(request.url, origin); } catch (e) { return null; }
+  const path = url.pathname.replace(/\/+$/, "") || "/";
+  return new URL(PAGE_PATHS.has(path) ? path : "/", origin).href;
+}
+
 // The bundle. Its name never changes between releases, so it is fetched fresh whenever there is a network:
 // a season played on last week's bundle can be scored differently by submit-run, which ships with the current
 // one (CLAUDE.md, "the client and the Edge Function must ship together").

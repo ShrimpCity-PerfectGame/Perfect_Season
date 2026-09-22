@@ -7,6 +7,11 @@
 // A database function refusing something throws new Error("<code>"), like the other mock modules;
 // tests/mock-supabase.mjs's rpc() turns that into the error a real PostgREST call returns.
 import { COIN_RULES } from "../rewards.mjs";
+import { BADGES } from "../badges.mjs";
+
+// The badge_rewards table: what each badge pays, which is the database's answer and not its caller's. Seeded
+// from badges.mjs in migration-wallet.sql, and tests/test-wallet-sql.mjs holds that seed to this same list.
+const BADGE_COINS = new Map(BADGES.map((b) => [b.id, b.coins]));
 
 const fail = (code) => {
   throw new Error(code);
@@ -82,12 +87,17 @@ export function makeWallet(state) {
       lock(p_user);
       const awarded = [];
       let credited = 0;
-      for (const { id, coins } of p_badges) {
+      for (const { id } of p_badges) {
+        // badge_rewards decides what a badge pays, not the caller; an id it doesn't hold is skipped and left
+        // unrecorded, so it pays whenever the database learns about it. The caller's `coins` is shape-checked
+        // above and then ignored - see migration-wallet.sql.
+        const pays = BADGE_COINS.get(id);
+        if (pays === undefined) continue;
         const key = `${p_user}|${id}`;
         if (badgeAwards.has(key)) continue;
         badgeAwards.set(key, { user_id: p_user, badge: id, awarded_at: now() });
         awarded.push(id);
-        credited += apply(p_user, coins, "badge", id);
+        credited += apply(p_user, pays, "badge", id);
       }
       return { awarded, credited, balance: balanceOf(p_user) };
     },

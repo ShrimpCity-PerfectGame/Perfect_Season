@@ -51,6 +51,20 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
   no chip.
 - **The daily waits until the game knows who you are.** On a slow connection a returning guest could start
   it before their session loaded, draft all six, and have it refused at the end — with the day marked used.
+- **A report reaches a moderator saying what was typed.** The note was the one box on the site that took
+  anything at all, including the invisible characters that hide a word and the one that turns the rest of a
+  sentence backwards — in a message whose whole job is to be read by somebody deciding what to do about
+  another player.
+- **A badge is worth what the game says it is worth.** The part of the database that pays them was taking
+  the amount from whoever asked instead of from its own list. Nothing could ask but the game itself, and
+  every badge has always paid the right amount — but the wallet decides now.
+- **Signing in with Google no longer leaves its one-time code in the browser's offline store**, and that
+  store keeps one copy of the page rather than one for every challenge link, profile and duel you open.
+- **Every page has one address.** The `.html` versions now send you to the real one.
+- **Search engines are told when each page actually changed**, instead of all of them claiming to have
+  changed today because the site was rebuilt.
+- **The site can't be loaded inside a frame on someone else's page**, and browsers are now told not to
+  guess at file types and not to pass on more of the address than they need to.
 - **Over/Under reads its rounds out and keeps your place.** After every guess the verdict went unannounced
   and the keyboard lost its place entirely — which, against a seven-second clock where running out counts
   as a miss, made it close to unplayable without a mouse.
