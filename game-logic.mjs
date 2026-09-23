@@ -519,8 +519,16 @@ export function botPar(boardKeys, { format, gm } = {}) {
   // So when the bot can't finish, par is what a typical draft gets out of the boards it was dealt.
   // Measured over 7,300 drafts in both modes and both formats, par lands at 0.674-1.067 of the best
   // those six boards could give, median 0.836 without a cap and 0.828 with one - a tight enough band
-  // that the middle of it is a fairer stand-in than either extreme. The cheapest walk still sets the
-  // floor, so a rescue is never scored as worse than the one roster we know completes.
+  // that the middle of it is a fairer stand-in than either extreme. Re-measured over 16,000 board sets
+  // against the ceiling bestPossible searches for today, in both modes and both formats: median 0.831,
+  // so the share below is unchanged. It was always describing a real maximum.
+  //
+  // The cheapest walk still sets the floor, so a rescue is never scored as worse than the one roster we
+  // know completes. It can no longer be the ANSWER, though: bestPossible used to be a greedy walk, and a
+  // greedy walk strands itself in GM exactly like the greedy bot does. `best == null` then fell through
+  // to the spend-least walk with no ceiling applied at all - which is the 41.6-par collapse this whole
+  // branch exists to prevent, reached the long way round. Null now means no legal roster exists on these
+  // boards at all, and the cheapest walk is null too.
   const cheap = botWalk(boardKeys, { format, gm, cheapest: true });
   const best = bestPossible(boardKeys, format, { gm });
   if (best == null) return cheap;
@@ -531,50 +539,72 @@ export function botPar(boardKeys, { format, gm } = {}) {
 // botPar. Only the rescue path reads it, so an ordinary draft's par is exactly what it always was.
 const PAR_TYPICAL_SHARE = 0.83;
 
-// The best weighted score those boards can give: a greedy walk with no handicap and nothing held back,
-// which is the ceiling the share above is a share of.
+// The best weighted score those boards can give - the ceiling the share above is a share of. One pick per
+// board, all six slots filled, under the cap when there is one.
 //
-// It spends under the cap when there is one. Ignoring it put the rescue par ABOVE what any roster could
-// actually field on those boards - 17 of 79,931 GM drafts, worst case a par of 110.5 where the true
+// It SEARCHES rather than walking, and that is the whole point. A greedy walk with no handicap spends the
+// most it can on the earliest boards, so in GM it ran out of cap and answered null on 99 of 299 rescues -
+// handing par straight back to the spend-least walk with no ceiling on it. Measured on drafts a player can
+// really reach: code WXEKJ4 in GM + Fantasy deals a legal $148M roster scoring 104.3 a par of 61.2, worth
+// 427 ladder points instead of ~118 - and enough to clear SCOUT_MIN_POINTS, so a below-median season also
+// took the Scout badge and its coins. 48 of 20,000 board sets, and free-mode codes are the client's own
+// choice, so it was findable offline in seconds. The search answers null only when the boards cannot field
+// a legal roster at all: 0 of 299, where the greedy walk was null on 33% of them.
+//
+// Ignoring the cap is the same unfairness pointing the other way: it put the rescue par ABOVE what any
+// roster could actually field - 17 of 79,931 GM drafts, worst case a par of 110.5 where the true
 // cap-constrained maximum was 108.9, so a perfect roster earned 68 points against a par worth 75 and
-// nobody could clear it. That is the same unfairness the rescue exists to prevent, pointing the other way.
+// nobody could clear it. The search is cap-constrained throughout, so neither end can happen.
 //
-// Ties are broken on player id, not left to whichever comes first in BOARDS[key]. That array is sorted by
-// an unlocalized localeCompare, so its order is the runtime's: 16 of 160 boards hold an exact same-slot
-// rating tie, and reversing board order moved this by up to 18.57 points on 6.2% of board sets. Nothing
-// here feeds the seeded stream, so it was never a live bug - but this module's whole contract is that the
-// browser and the Edge Function compute the same answer, and "same runtime collation" is not that.
+// Only the rescue path calls it - 0.75% of GM drafts, and never outside GM.
+//
+// Determinism is this module's whole contract, and the two places it could leak in are both closed.
+// BOARDS[key] is sorted by an unlocalized localeCompare, so its order is the runtime's: every board is
+// walked in player-id order here instead. And a state is replaced only when a candidate STRICTLY beats it,
+// so on an exact tie the first roster reached wins, which the id order makes the same answer in both
+// engines. 16 of 160 boards hold an exact same-slot rating tie, and reversing board order used to move this
+// by up to 18.57 points on 6.2% of board sets.
+//
+// One state keeps one roster, so this is the best FOUND rather than a proof of the maximum: two rosters
+// filling the same slots for the same money can differ in which players they used, and only one is kept.
+// That can only understate the ceiling, which is the safe direction - par comes out lower, never higher.
 function bestPossible(boardKeys, format, { gm = false } = {}) {
-  const roster = {};
-  const drafted = new Set();
-  let spent = 0;
+  const full = (1 << SLOTS.length) - 1;
+  // Keyed by (slots filled, cap spent) packed into one integer. `ids` is what keeps one player off two
+  // boards at once - he can be on two of the six (one board set in five holds no such player, and the
+  // most ever seen was eight).
+  let states = new Map([[0, { tot: 0, ids: [] }]]);
   for (const key of boardKeys) {
-    const open = SLOTS.filter((s) => !roster[s]);
-    let best = null;
-    for (const p of BOARDS[key] || []) {
-      if (drafted.has(p.id)) continue;
-      const cost = gm ? playerSalary(p, format) : 0;
-      // The same reserve the draft screen holds back: every slot after this one costs at least MIN_SALARY.
-      if (gm && spent + cost > GM_CAP - (open.length - 1) * MIN_SALARY) continue;
-      for (const s of open) {
-        if (!fits(p.pos, s)) continue;
-        const r = effectiveRating(s, p, format);
-        if (!best || r > best.r || (r === best.r && p.id < best.p.id)) best = { p, s, r, cost };
+    const board = (BOARDS[key] || []).slice().sort((a, b) => a.id - b.id);
+    const next = new Map();
+    for (const [k, st] of states) {
+      const mask = Math.floor(k / (GM_CAP + 1));
+      const spent = k % (GM_CAP + 1);
+      for (const p of board) {
+        if (st.ids.includes(p.id)) continue;
+        const cost = gm ? playerSalary(p, format) : 0;
+        if (gm && spent + cost > GM_CAP) continue;
+        for (let i = 0; i < SLOTS.length; i++) {
+          if (mask & (1 << i)) continue;
+          if (!fits(p.pos, SLOTS[i])) continue;
+          const tot = st.tot + effectiveRating(SLOTS[i], p, format) * (SLOTS[i] === "QB" ? QB_WEIGHT : 1);
+          const nk = (mask | (1 << i)) * (GM_CAP + 1) + spent + cost;
+          const held = next.get(nk);
+          if (!held || tot > held.tot) next.set(nk, { tot, ids: [...st.ids, p.id] });
+        }
       }
     }
-    if (!best) return null;
-    roster[best.s] = best.p;
-    drafted.add(best.p.id);
-    spent += best.cost;
+    states = next;
   }
-  let total = 0, weight = 0;
-  for (const s of SLOTS) {
-    if (!roster[s]) return null;
-    const w = s === "QB" ? QB_WEIGHT : 1;
-    total += effectiveRating(s, roster[s], format) * w;
-    weight += w;
+  let best = null;
+  for (const [k, st] of states) {
+    if (Math.floor(k / (GM_CAP + 1)) !== full) continue;
+    if (best == null || st.tot > best) best = st.tot;
   }
-  return total / weight;
+  if (best == null) return null;
+  let weight = 0;
+  for (const s of SLOTS) weight += s === "QB" ? QB_WEIGHT : 1;
+  return best / weight;
 }
 
 function botWalk(boardKeys, { format, gm, cheapest } = {}) {

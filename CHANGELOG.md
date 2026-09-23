@@ -58,9 +58,18 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **GM mode can't re-spin you into a board you can't afford anybody on either.** The dealer learned about
   the cap and the re-spin button didn't, so the one control you reach for to escape a dead board could hand
   you another one.
+- **The salary cap is actually enforced while you draft.** Locking a player in from his card checked it;
+  tapping the roster slot next to him did not, and that had never checked anything. So in GM you could put
+  a $42M player into a $19M gap, watch the total go red, play the whole season out — and have it turned
+  down at the end as an illegal roster, while the screen said it would be saved next time. Both routes
+  now refuse the pick and say which reason it is.
 - **A season can't be worth six times what it should be.** When the bot you're scored against couldn't
   field a roster under the cap, the game fell back to measuring you against one that simply bought the
   cheapest man available — which isn't a benchmark, and paid up to 717 ladder points for a season worth 97.
+  The replacement worked out what the boards could really field, but by spending down the cap the same
+  greedy way — so on a third of those drafts it ran out of money too and handed the cheapest-man number
+  straight back. It searches the boards properly now. Worst case found was 804 points for a season worth
+  about 118, which also bought a badge on a below-average draft.
 - **A patchy connection can't cost you an account any more.** Three more places read your profile without
   allowing for the read failing: signing up could tell you it went wrong when it hadn't, a saved season
   could be reported as lost with its coins hidden, and a season played on a slow connection could quietly

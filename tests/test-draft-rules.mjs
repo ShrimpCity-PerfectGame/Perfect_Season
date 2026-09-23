@@ -170,4 +170,64 @@ await runTest("a rescued par is a benchmark, not a bad player", async () => {
     `and a strong season against it cannot run away with the ladder: ${GL.draftPoints(95, worst)} points`);
 });
 
+await runTest("a rescued par is a share of what the boards can field, not the cheapest walk", async () => {
+  // The test above could not see this one, and the reason is worth keeping: its own drafter strands on
+  // exactly the boards that trigger the rescue, so it skipped them rather than measuring them. The
+  // rescue multiplies PAR_TYPICAL_SHARE by a ceiling, and the ceiling was itself a greedy walk - which
+  // in GM spends the most it can on the earliest boards and runs out of cap just like the greedy bot.
+  // It came back null on 99 of 299 rescues, and botPar then fell straight through to the spend-least
+  // walk with no ceiling applied at all.
+  //
+  // Pinned on the draft that was found, because a measurement nobody can re-run is not a regression
+  // test: code WXEKJ4 in GM + Fantasy. replayDraft accepts this roster - it is a legal draft, not a
+  // forgery - it spends $148M of the $150M cap, and it scored 427 ladder points against a par of 61.2.
+  // That also cleared SCOUT_MIN_POINTS (220), so a below-median season took the Scout badge and its 300
+  // coins with it. Free-mode codes are the client's own choice, so it was findable offline in seconds.
+  const seed = "WXEKJ4", format = "fantasy";
+  const history = [
+    { key: "NYJ|1", id: 88, season: 2008, slot: "RB" },
+    { key: "CHI|2", id: 516, season: 2012, slot: "FLEX1" },
+    { key: "HOU|1", id: 744, season: 2009, slot: "QB" },
+    { key: "ATL|2", id: 38, season: 2012, slot: "TE" },
+    { key: "GB|4", id: 1272, season: 2024, slot: "FLEX2" },
+    { key: "SEA|3", id: 1326, season: 2020, slot: "WR" },
+  ];
+  const rep = GL.replayDraft(seed, history, GL.seededSequence(seed), { gm: true, format });
+  assert(rep.ok, `the exploit roster is a draft the server accepts: ${rep.reason}`);
+
+  const roster = {};
+  for (const h of history) roster[h.slot] = GL.BOARDS[h.key].find((p) => p.id === h.id && p.season === h.season);
+  const spent = GL.SLOTS.reduce((a, s) => a + GL.playerSalary(roster[s], format), 0);
+  assert(spent <= GL.GM_CAP, `and it is inside the cap: $${spent}M of $${GL.GM_CAP}M`);
+  let tot = 0, wt = 0;
+  for (const s of GL.SLOTS) { const k = s === "QB" ? GL.QB_WEIGHT : 1; tot += GL.effectiveRating(s, roster[s], format) * k; wt += k; }
+  const score = Math.round((tot / wt) * 10) / 10;
+
+  const par = GL.botPar(history.map((h) => h.key), { format, gm: true });
+  // 61.2 broken, 86.6 fixed. The floor sits just under the fixed value rather than halfway between,
+  // which is what makes this catch a partial revert and not just the whole one.
+  assert(par > 80, `par is a share of a real ceiling: ${par.toFixed(2)} for a board set fielding ${score}`);
+  const points = GL.draftPoints(score, par);
+  assert(points < 250, `so a ${score} season earns ${points} ladder points, not 427`);
+  // The badge rode on the same number. 220 is SCOUT_MIN_POINTS in badges.mjs.
+  assert(points < 220, `and does not clear the Scout badge on a below-median season: ${points}`);
+});
+
+await runTest("no board set a draft can be dealt has a collapsed par", async () => {
+  // The pinned case above is one seed. This sweeps the board sets themselves - not drafts a probe
+  // finished, which is the filter that hid the bug - and holds every par to the same floor.
+  let worst = Infinity, at = null, n = 0;
+  for (let i = 0; i < 1500; i++) {
+    const format = i % 2 ? "standard" : "fantasy";
+    const keys = GL.seededSequence(`PARSET${i}`).slice(0, 6);
+    const par = GL.botPar(keys, { format, gm: true });
+    if (par == null) continue;
+    n++;
+    if (par < worst) { worst = par; at = `PARSET${i} ${format}`; }
+  }
+  assert(n > 1400, `enough board sets to be measuring anything: ${n}`);
+  // A collapsed par came in around 42; an honestly low one has not been under 69.9.
+  assert(worst > 65, `the lowest par over ${n} board sets is still a benchmark: ${worst.toFixed(2)} at ${at}`);
+});
+
 console.log("test-draft-rules.mjs done");

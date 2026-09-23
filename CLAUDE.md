@@ -825,8 +825,10 @@ suite and still broke the live Leaderboard for every existing account.
   from phase 2, and `profiles.rev`, which is what stops a finished season being overwritten by the abandoned
   draft that "Run it back" fires - **the Edge Function will not save a season without it**, so that one is not
   optional and not last. moderation cleans a report's note. wallet adds `badge_rewards`. The functions change
-  because `game-logic.mjs` did (the GM cap in `boardAt`/`rerollCandidate`, the bot's par, Championship's Flex
-  ceiling - which **1v1 is exempt from**, see SCORING.md) and because
+  because `game-logic.mjs` did (the GM cap in `boardAt`/`rerollCandidate`, the bot's par - including the
+  rescue ceiling, which now searches the boards instead of walking them greedily, so an old function and a
+  new client disagree about points on the 0.75% of GM drafts that take it, in the old function's favour -
+  and Championship's Flex ceiling, which **1v1 is exempt from**, see SCORING.md) and because
   submit-run refuses a challenge code that is the daily's own seed - every one of those is a rule the browser
   and the function have to agree on, and the scoring half decides what a season is worth.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
@@ -871,6 +873,17 @@ that never strands itself), the draft screen disables a pick that would eat into
 nobody eligible is on. `replayDraft` takes `{ gm, format }` and applies the same test from the roster it
 rebuilds, or it would reject a draft for skipping a board the app was right to skip. Without all of it a
 greedy spender stranded itself in 23.8% of GM drafts with a DNF as the only exit; with it, 0.1%.
+
+**"The draft screen" is two buttons, and until v2.0.0 only one of them checked anything.** `draft()` is
+reached from the Lock in button under a player's card AND from the roster slot tile you tap to put him
+somewhere; the tile was `disabled={!target}` and enforced no rule at all, so **the cap had never actually
+been enforced in the UI** - $19M left, a $42M player, Lock in dead and the tile live, and submit-run
+refusing the finished season 400 "over the salary cap" under a screen promising it would be saved next
+time. All three rules now live in one `draftBlock(player)` that both doors ask and `draft()` re-checks
+itself, so a third door gets them for free. `tests/test-gm-mode.mjs` drives a real GM draft down to $20M
+and holds both doors; `tests/test-economy-security.mjs` 8c counts the doors, because the assertion that
+used to sit there matched one spelling of one line in one of them and passed for three releases. Do not
+put a rule in a handler or a `disabled=`; put it in `draftBlock`.
 
 **A re-spin may repeat a team the plan already holds, and changing that is harder than it looks.** It is
 `seededSequence`'s own rule and a re-spin ignores it, so about one completed draft in eight drafts the same

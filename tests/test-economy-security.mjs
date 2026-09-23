@@ -1023,9 +1023,24 @@ await runTest("8c. a GM season must fit under the salary cap: an uncapped roster
   const gmRun = await free(cappedCode, capped, { gm: true, mode: { gm: true } });
   assert(gmRun.ok && gmRun.run.gm === true && gmRun.run.capUsed === capOf(capped.roster) && gmRun.run.capUsed <= GL.GM_CAP, `a GM draft kept under the cap counts: ${show(gmRun.run?.capUsed)}`);
 
-  // The app's own rule is the same line: a pick costing more than what's left can't be locked in, so a GM roster is at most the cap.
+  // The app's own half of the rule is held behaviourally, by test-gm-mode.mjs: it drives a real GM draft
+  // to $20M left and shows a $38M player refused at both doors. What used to be here instead was
+  // `/const tooExpensive = mode\.gm && cost > capRemaining;/` - one spelling of one line in one of those
+  // doors - and it passed happily for three releases while the OTHER door, the roster slot tile, was
+  // `disabled={!target}` and enforced nothing at all. The cap had never been enforced in the UI and this
+  // assertion said it had.
+  //
+  // So what is worth asserting here is the shape that let that happen: how many ways there are into
+  // draft(). Three - the roster tile, the Lock in button, and the admin panel, which passes `force` and
+  // means it. A fourth is not forbidden; it just has to arrive with its own coverage in test-gm-mode.mjs
+  // rather than quietly, which is what this makes someone notice.
   const app = readFileSync(new URL("../perfect-season.jsx", import.meta.url), "utf8");
-  assert(/const tooExpensive = mode\.gm && cost > capRemaining;/.test(app) && /const capRemaining = GM_CAP - capUsed;/.test(app), "perfect-season.jsx refuses a pick costing more than the cap has left");
+  // Comments talk about draft() too, so they go before anything is counted.
+  const appCode = app.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const doors = [...appCode.matchAll(/\bdraft\(/g)].length - (/function draft\(/.test(appCode) ? 1 : 0);
+  assert(doors === 3, `three ways into draft(), each of which has to check draftBlock: found ${doors}`);
+  assert(/function draft\(player, slot, keyOverride, force\) \{\s*if \(!force && draftBlock\(player\)\) return;/.test(appCode),
+    "and draft() checks the rule itself, for whichever door forgets to");
   const index = readFileSync(new URL("../supabase/functions/submit-run/index.ts", import.meta.url), "utf8");
   const refusal = index.indexOf(`if (gm && finalCapUsed > GL.GM_CAP) return json({ error: "illegal roster", reason: "over the salary cap" }, 400);`);
   assert(refusal > 0 && refusal < index.indexOf('service.from("daily_runs").insert') && refusal < index.indexOf('service.from("finished_codes").insert'),

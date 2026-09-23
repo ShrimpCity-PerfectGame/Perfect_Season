@@ -2231,6 +2231,28 @@ export default function PerfectSeason() {
   // from, so the draft cannot be finished. (`stuck` above is the sticky bar's, nothing to do with this.)
   const [noBoardLeft, setNoBoardLeft] = useState(false);
 
+  // Why this player cannot be taken, or null. One function because there are two doors into draft() -
+  // the Lock in button under the player's card, and the roster slot tile you tap to put him somewhere -
+  // and until now only the button enforced any of this. The tile was `disabled={!target}` and nothing
+  // else, so in GM you could tap a $42M player into a $19M gap, watch the header turn red at
+  // $173M / $150M, finish the season, and be told it "will be included the next time a save goes
+  // through" - while submit-run refused it 400 "over the salary cap" and always had. The cap had never
+  // actually been enforced in the UI. It is a rule, so it belongs in one place that both doors ask.
+  //
+  // Nothing here depends on WHICH slot: a player costs the same in his named slot and in Flex, and the
+  // other two reasons are about the board, not the roster.
+  function draftBlock(player) {
+    if (noBoardLeft) return { why: "noboard", note: "", said: "there is no board left to draft from" };
+    if (!mode?.gm || !player) return null;
+    const cost = playerSalary(player, mode.format);
+    if (cost > capRemaining) return { why: "cap", note: " (over cap)", said: "over the salary cap" };
+    // ...and one you could afford but which leaves nothing for the slots you still have to fill. Said
+    // differently from "over cap", because it is a different problem with a different answer: pick
+    // somebody cheaper.
+    if (cost > capRemaining - capHold) return { why: "reserve", note: ` (leaves under $${MIN_SALARY}M a slot)`, said: `it leaves under $${MIN_SALARY}M a slot` };
+    return null;
+  }
+
   // What the SIGNED_OUT handler reads to tell a draft in progress from a season already played.
   const resultRef = useRef(null);
   useEffect(() => { resultRef.current = result; }, [result]);
@@ -3137,8 +3159,16 @@ export default function PerfectSeason() {
   }
 
   // keyOverride lets the admin panel force-draft a player from a board other than the one
-  // currently spinning, without waiting on setSpin() to commit first.
-  function draft(player, slot, keyOverride) {
+  // currently spinning, without waiting on setSpin() to commit first; `force` is that panel saying it
+  // means to ignore the rules, which is the whole point of it.
+  //
+  // Both doors ask draftBlock and go `disabled` on it, which is all a browser needs - React reads
+  // `disabled` off the fiber props, so a click never reaches either handler. That makes the line below
+  // unreachable today and therefore UNPINNED: no test can turn it red, and test-gm-mode.mjs says so
+  // rather than pretending. It is here for a third door - a drag, a shortcut, a new screen - which is
+  // exactly the failure this release kept finding: a rule applied at one call site and not its sibling.
+  function draft(player, slot, keyOverride, force) {
+    if (!force && draftBlock(player)) return;
     const key = keyOverride || `${spin.team}|${spin.w}`;
     const best = bestAvailable(key, [...drafted], open, mode.format);
     // Computed locally (not read back from state) because finish() below needs the complete,
@@ -3308,7 +3338,9 @@ export default function PerfectSeason() {
 
   function adminForcePlayer(player, slot) {
     adminForceBoard(player.team, player.w);
-    draft(player, slot, `${player.team}|${player.w}`);
+    // Forced on purpose: the admin account exists to check animations without fighting the RNG, and
+    // capRemaining/capHold in this closure are still the board we just left anyway.
+    draft(player, slot, `${player.team}|${player.w}`, true);
   }
 
   // Fills any still-open slots with the first eligible player found (admin doesn't need a
@@ -4281,12 +4313,16 @@ export default function PerfectSeason() {
               {SLOTS.map((s) => {
                 const p = roster[s];
                 const target = selSlots.includes(s);
+                // The same three rules the Lock in button under the card enforces - see draftBlock.
+                const block = target ? draftBlock(selected) : null;
                 return (
-                  <button key={s} className={`slot pos-${s.startsWith("FLEX") ? "FLEX" : s} ${p ? "filled" : ""} ${target ? "target" : ""}`}
-                    disabled={!target} onClick={() => target && draft(selected, s)}
-                    aria-label={p ? `${SLOT_LABEL[s]}: ${p.name}` : target ? `Draft ${selected.name} to ${SLOT_LABEL[s]}` : `${SLOT_LABEL[s]} open`}>
+                  <button key={s} className={`slot pos-${s.startsWith("FLEX") ? "FLEX" : s} ${p ? "filled" : ""} ${target && !block ? "target" : ""}`}
+                    disabled={!target || !!block} onClick={() => target && draft(selected, s)}
+                    aria-label={p ? `${SLOT_LABEL[s]}: ${p.name}`
+                      : block ? `${selected.name} cannot go to ${SLOT_LABEL[s]} - ${block.said}`
+                      : target ? `Draft ${selected.name} to ${SLOT_LABEL[s]}` : `${SLOT_LABEL[s]} open`}>
                     <div className="k">{SLOT_LABEL[s]}</div>
-                    <div className="v">{p ? p.name : target ? "Draft here" : <span style={{ color: "var(--muted)", fontWeight: 400 }}>Open</span>}</div>
+                    <div className="v">{p ? p.name : target && !block ? "Draft here" : <span style={{ color: "var(--muted)", fontWeight: 400 }}>Open</span>}</div>
                     {p && <div className="sub">{shortYr(p.season)} {TEAMS[p.team][0]}{s.startsWith("FLEX") ? `, ${p.pos}` : ""}</div>}
                   </button>
                 );
@@ -4401,14 +4437,10 @@ export default function PerfectSeason() {
                                     first open Flex slot) instead of two identical ones. */}
                                 {slotsFor.filter((s) => !s.startsWith("FLEX") || s === slotsFor.find((x) => x.startsWith("FLEX"))).map((s) => {
                                   const cost = mode.gm ? playerSalary(p, mode.format) : 0;
-                                  const tooExpensive = mode.gm && cost > capRemaining;
-                                  // ...and one you could afford but which leaves nothing for the slots
-                                  // you still have to fill. Said differently from "over cap", because it
-                                  // is a different problem with a different answer: pick somebody cheaper.
-                                  const leavesNothing = mode.gm && !tooExpensive && cost > capRemaining - capHold;
+                                  const block = draftBlock(p);
                                   return (
-                                    <button key={s} className="btn solid" disabled={tooExpensive || leavesNothing || noBoardLeft} onClick={() => draft(p, s)}>
-                                      🔒 Lock in · {SLOT_LABEL[s]}{mode.gm && ` - $${cost}M${tooExpensive ? " (over cap)" : leavesNothing ? ` (leaves under $${MIN_SALARY}M a slot)` : ""}`}
+                                    <button key={s} className="btn solid" disabled={!!block} onClick={() => draft(p, s)}>
+                                      🔒 Lock in · {SLOT_LABEL[s]}{mode.gm && ` - $${cost}M${block ? block.note : ""}`}
                                     </button>
                                   );
                                 })}
