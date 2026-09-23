@@ -634,12 +634,27 @@ $$;
 revoke execute on function public.avatar_folder_has_room() from public, anon;
 grant execute on function public.avatar_folder_has_room() to authenticated;
 
+-- Whether the caller is a guest, for the two policies below. set_avatar refuses a guest and the bucket did
+-- not, which made that gate cosmetic: an anonymous sign-in and ten direct inserts put ten files in a PUBLIC
+-- bucket, each with a working unauthenticated gridspin.app address, on an account that costs nothing to make
+-- again and has no profile screen for anyone to report - stopped only by the per-folder cap. A function
+-- rather than the same subquery twice, because a rule copied into two policies is a rule that gets changed
+-- in one of them. Security invoker: profiles is publicly selectable, so this needs nothing the caller
+-- doesn't already have.
+create or replace function public.caller_is_guest()
+returns boolean language sql stable security invoker set search_path = public, pg_temp as $$
+  select exists (select 1 from public.profiles p where p.id = auth.uid() and p.guest);
+$$;
+revoke execute on function public.caller_is_guest() from public, anon;
+grant execute on function public.caller_is_guest() to authenticated;
+
 -- A signed-in player works only inside their own folder, "<their id>/...". A file they add, or rename, must
 -- be named exactly as the app names uploads - "<their id>/<10-16 digits>.webp|jpg|png", one level and
 -- nothing else (profile-rules.mjs's isOwnAvatarPath) - and adding one needs room in the folder. Adding or
--- replacing a file also requires uploads not to be paused - replacing counts, or the kill switch could be
--- sidestepped by overwriting an existing picture. Reading and deleting cover the whole folder, so anything
--- already there can still be cleared out. Supabase needs select as well as delete to delete an object.
+-- replacing a file also requires uploads not to be paused, and the caller not to be a guest - replacing
+-- counts for both, or either rule could be sidestepped by overwriting a picture already there. Reading and
+-- deleting cover the whole folder, so anything already there can still be cleared out, by a former guest
+-- included. Supabase needs select as well as delete to delete an object.
 -- Moderators get their own policies in migration-moderation.sql.
 drop policy if exists "players read their own avatar files" on storage.objects;
 create policy "players read their own avatar files" on storage.objects
@@ -653,6 +668,7 @@ create policy "players upload avatar files to their own folder" on storage.objec
     bucket_id = 'avatars'
     and name ~ '^[^/]+/[0-9]{10,16}\.(webp|jpg|png)$' and split_part(name, '/', 1) = auth.uid()::text
     and not coalesce((select f.enabled from public.site_flags f where f.key = 'uploads_paused'), false)
+    and not public.caller_is_guest()
     and public.avatar_folder_has_room()
   );
 
@@ -664,6 +680,7 @@ create policy "players update their own avatar files" on storage.objects
     bucket_id = 'avatars'
     and name ~ '^[^/]+/[0-9]{10,16}\.(webp|jpg|png)$' and split_part(name, '/', 1) = auth.uid()::text
     and not coalesce((select f.enabled from public.site_flags f where f.key = 'uploads_paused'), false)
+    and not public.caller_is_guest()
   );
 
 drop policy if exists "players delete their own avatar files" on storage.objects;

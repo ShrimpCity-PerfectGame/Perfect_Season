@@ -42,10 +42,18 @@ money, coins for guests (v1.17.0 changed that - see below), a coin leaderboard, 
 
 ---
 
-**Guests (v1.17.0).** A guest account earns coins exactly as anyone else does - submit-run pays its seasons, and
-the profile insert pays the 250 welcome coins - but the app gives it no shop and no Shop button on the result
-screen, and the shop route sends it to Modes even from a history entry. The coins are waiting when it keeps its
-seasons (CLAUDE.md, "Guests"), on the same account, so nothing is lost or granted twice.
+**Guests (v1.17.0; refused in SQL from v2.0.0).** A guest account earns coins exactly as anyone else does -
+submit-run pays its seasons, and the profile insert pays the 250 welcome coins - but the app gives it no shop and
+no Shop button on the result screen, and the shop route sends it to Modes even from a history entry. The coins
+are waiting when it keeps its seasons (CLAUDE.md, "Guests"), on the same account, so nothing is lost or granted
+twice.
+
+Since v2.0.0 that is a rule rather than manners: **`shop_buy`, `equip_item` and `set_showcase` raise
+`guest_not_allowed`**, mapped to reason `"guest"` in `storage-shop.js`. They are the boundary - the app's own
+check is only how it says so nicely - and the two that wear things also wrote a `profile_details` row for an
+account that has no profile screen to wear them on. `shop_state` is a read and is **not** gated; neither is
+`claim_minigame`, for the reason above. The rule is the one every other guest-sensitive surface follows
+(PROFILES.md, "What a guest is refused").
 
 ## 2. How it fits together
 

@@ -111,6 +111,27 @@ has no profile screen or shop in the app. `claim_username` is the way out: it is
 name (once - the flag clears), and it rewrites the account's name snapshots in `runs`, `daily_runs`, `sou_runs`
 and `builds`, exactly as `mod_act`'s rename does.
 
+**What a guest is refused, and where the refusal lives.** Every one of these is in SQL, because these functions
+and policies are the boundary - a modified browser calls them directly, and the app's own version of the rule is
+only manners. `save_profile`, `set_avatar`, `report_player` (v2.0.0), `shop_buy`, `equip_item` and `set_showcase`
+(v2.0.0) raise **`guest_not_allowed`**; `submit-run` refuses a daily (`guest_daily`); `can_play_versus` refuses a
+duel. **The `avatars` bucket refuses one too** (v2.0.0) - its insert and update policies call
+`caller_is_guest()`, alongside the `uploads_paused` kill switch and for the same reason: gating only the
+function left the gate cosmetic, because an anonymous sign-in could skip `set_avatar` and insert straight into
+`storage.objects`, putting ten files in a **public** bucket - ten working unauthenticated addresses - on an
+account that costs nothing to make again, stopped only by the per-folder cap. Reading and deleting stay open, so
+anything already there can still be cleared out. What a guest is **not** refused is coins: `claim_minigame` and
+submit-run's rewards pay one like anyone else, and what it earns waits for the name it claims.
+
+`guest_not_allowed` has to be mapped in **every** client module that can receive it - `storage-profile.js`'s
+`SAVE_REASONS` and `AVATAR_REASONS`, `storage-shop.js`'s `BUY_REASONS`, `EQUIP_REASONS` and `SHOWCASE_REASONS`,
+`storage-moderation.js`'s `REPORT_REFUSALS` - or `rpcReason` falls through to `"network"` and the player is told
+to check their connection, forever, for a rule rather than a fault. That is not a thing to remember: the code
+tables are checked against the functions' own source by `tests/test-profile-data.mjs` and
+`tests/test-shop-sql.mjs`, so a new code cannot arrive without a decision. The upload has no code to read at all
+(RLS just refuses), so `storage-profile.js` asks `caller_is_guest()` - the same function the policy calls, not a
+second opinion.
+
 **An account with no profile row (v1.16.0).** Signing in with Google makes an `auth.users` row with no
 username, and `handle_new_user` writes no `profiles` row for it. That state is deliberate and is what the
 app watches for: a session whose `fetchProfile` comes back null is an account that hasn't picked a name.

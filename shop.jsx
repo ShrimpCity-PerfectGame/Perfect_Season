@@ -211,6 +211,9 @@ const TABS = [...SHOP_KINDS, "showcase"];
 const TAB_LABEL = { ...KIND_LABEL, showcase: "Showcase" };
 const FAILED = "That didn't go through. Try again.";
 const SIGNED_OUT = "You're logged out. Log in again.";
+// The shop refuses a guest in SQL, not only in the app, so this is what that refusal reads as if a guest
+// ever reaches this screen - the Modes tile turns them away first, with the same words.
+const GUEST_ONLY = "The shop is for accounts. Keep your seasons on the Account tab first.";
 
 const num = (n) => Number(n || 0).toLocaleString("en-US");
 const itemName = (id) => SHOP_ITEM_BY_ID[id]?.name || id;
@@ -441,6 +444,7 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
       setConfirming(false);
       // Owned, off sale or a badge's: the shop on screen is out of date, and the refresh shows why.
       if (res.reason === "not_enough") say(item.id, "You don't have enough coins for that.", true);
+      else if (res.reason === "guest") say(item.id, GUEST_ONLY, true);
       else if (res.reason === "signed_out") say(item.id, SIGNED_OUT, true);
       else if (!["owned", "unavailable", "badge_only"].includes(res.reason)) {
         say(item.id, FAILED, true);
@@ -472,7 +476,7 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
     const res = await equipItem(item.kind, itemId);
     if (!res.ok) {
       if (res.reason === "not_owned" || res.reason === "invalid") await load({ quiet: true });
-      else say(item.id, res.reason === "signed_out" ? SIGNED_OUT : FAILED, true);
+      else say(item.id, res.reason === "guest" ? GUEST_ONLY : res.reason === "signed_out" ? SIGNED_OUT : FAILED, true);
       return;
     }
     showDetails(res.details);
@@ -484,7 +488,7 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
   const saveShowcase = () => act(async () => {
     const res = await setShowcase(chosen);
     if (!res.ok) {
-      say("showcase", res.reason === "signed_out" ? SIGNED_OUT : FAILED, true);
+      say("showcase", res.reason === "guest" ? GUEST_ONLY : res.reason === "signed_out" ? SIGNED_OUT : FAILED, true);
       return;
     }
     showDetails(res.details);

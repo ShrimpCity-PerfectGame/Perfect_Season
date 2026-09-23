@@ -18,7 +18,7 @@
 // constraints behind it are checked directly. That the second of two racing purchases then reads the first one's
 // rows rests on reading the SQL (READ COMMITTED: each statement of a volatile function sees what committed before it).
 import { assert, runTest } from "./helpers.mjs";
-import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql, PROFILE_MIGRATIONS } from "./pg-fixture.mjs";
+import { freshDb, addAccount, addGuestAccount, asUser, asAnon, failure, uuid, sql, PROFILE_MIGRATIONS } from "./pg-fixture.mjs";
 import { makeProfileData } from "./mock-profile-data.mjs";
 import { playerStats } from "./mock-profile-stats.mjs";
 import { makeWallet } from "./mock-wallet.mjs";
@@ -175,6 +175,34 @@ await runTest("the seeds are shop-catalog.mjs's launch catalog (ids, kinds, rari
 });
 
 // ---------- Who can do what ----------
+
+await runTest("a guest may not spend or wear anything, in the SQL and in the mock", async () => {
+  // A guest has no profile screen to wear anything on, and an anonymous account costs nothing to make - so
+  // the shop is refused here rather than only hidden in the app, which is the rule every other
+  // guest-sensitive surface already followed (submit-run's guest_daily, can_play_versus, report_player,
+  // save_profile, set_avatar). These three did not, and equip_item and set_showcase wrote a profile_details
+  // row for a guest while they were at it. Coins are deliberately NOT gated: what a guest earns waits for
+  // the name it claims.
+  const GUEST = uuid(777);
+  await addGuestAccount(db, GUEST);
+  await give(GUEST, 50000);
+  const mock = mockWorld();
+  mock.state.profiles.set(GUEST, { id: GUEST, username: "Guest_ABCDE", guest: true });
+  for (const [fn, args] of [["shop_buy", { p_item: "frame-lime" }], ["equip_item", { p_slot: "frame", p_item: null }], ["set_showcase", { p_badges: [] }]]) {
+    const real = await call(GUEST, fn, args);
+    assert(real.error && /guest_not_allowed/.test(real.error), `${fn} from a guest: ${show(real).slice(0, 140)}`);
+    const mocked = mock.call(GUEST, fn, args);
+    assert(mocked.error === "guest_not_allowed", `and the mock agrees for ${fn}: ${show(mocked).slice(0, 140)}`);
+  }
+  // Nothing was bought, worn, or created on the way to being refused.
+  assert((await owner("select count(*)::int as n from inventory where user_id = $1", [GUEST]))[0].n === 0, "a refused guest owns nothing");
+  assert((await detailsOf(GUEST)) === null, "and leaves no profile_details row");
+  // shop_state is a read and stays open - the app needs it to say what is on offer.
+  assert(!(await call(GUEST, "shop_state", {})).error, "shop_state still answers a guest");
+  // The moment it keeps its seasons, everything works.
+  await owner("update profiles set guest = false, username = 'shoppostguest' where id = $1", [GUEST]);
+  assert(!(await call(GUEST, "shop_buy", { p_item: "frame-lime" })).error, "and a former guest buys like anyone");
+});
 
 await runTest("clients read shop_items but can't write it, can't read or write inventory, and can't put an item on without the functions", async () => {
   const P = await newPlayer("rls");
@@ -981,9 +1009,11 @@ await runTest("storage-shop.js maps every code the functions raise to its reason
   const raised = async (fn) => [...new Set([...(await owner("select prosrc from pg_proc where proname = $1", [fn]))[0].prosrc.matchAll(/raise exception '([a-z_]+)'/g)].map((m) => m[1]))].sort();
   const REASONS = {
     shop_state: { not_signed_in: null }, // fetchShop is null for any failure
-    shop_buy: { not_signed_in: "signed_out", unavailable: "unavailable", badge_only: "badge_only", owned: "owned", not_enough: "not_enough", purchase_conflict: "network" },
-    equip_item: { not_signed_in: "signed_out", bad_slot: "invalid", bad_item: "invalid", not_owned: "not_owned" },
-    set_showcase: { not_signed_in: "signed_out", bad_showcase: "invalid" },
+    // guest_not_allowed: the shop is refused to a guest in SQL, not only hidden in the app (SHOP.md). It has to
+    // be mapped wherever it is raised, or it reads as "network" - "check your connection", for a rule.
+    shop_buy: { not_signed_in: "signed_out", unavailable: "unavailable", badge_only: "badge_only", owned: "owned", not_enough: "not_enough", purchase_conflict: "network", guest_not_allowed: "guest" },
+    equip_item: { not_signed_in: "signed_out", bad_slot: "invalid", bad_item: "invalid", not_owned: "not_owned", guest_not_allowed: "guest" },
+    set_showcase: { not_signed_in: "signed_out", bad_showcase: "invalid", guest_not_allowed: "guest" },
   };
   for (const [fn, table] of Object.entries(REASONS)) {
     const codes = await raised(fn);

@@ -183,6 +183,13 @@ begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
   end if;
+  -- And not a guest: a guest has no profile screen and no shop (CLAUDE.md, Guests), and every rule that
+  -- matters is enforced here rather than in the browser, because these functions ARE the boundary. Coins
+  -- keep arriving - claim_minigame and submit-run's rewards are deliberately not gated, so what a guest
+  -- earns waits for them - and it is spending and wearing them that waits too.
+  if exists (select 1 from public.profiles where id = v_uid and guest) then
+    raise exception 'guest_not_allowed' using errcode = 'P0001';
+  end if;
   v_balance := public.wallet_lock(v_uid);
   select * into v_item from public.shop_items where id = p_item;
   if not found or not v_item.active then
@@ -227,6 +234,10 @@ declare
 begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
+  end if;
+  -- Not a guest, for the reason shop_buy gives.
+  if exists (select 1 from public.profiles where id = v_uid and guest) then
+    raise exception 'guest_not_allowed' using errcode = 'P0001';
   end if;
   if p_slot is null or p_slot not in ('frame', 'card', 'title') then
     raise exception 'bad_slot' using errcode = 'P0001';
@@ -275,6 +286,10 @@ declare
 begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
+  end if;
+  -- Not a guest, for the reason shop_buy gives.
+  if exists (select 1 from public.profiles where id = v_uid and guest) then
+    raise exception 'guest_not_allowed' using errcode = 'P0001';
   end if;
   if cardinality(v_badges) > 3
      or coalesce(array_ndims(v_badges), 1) > 1

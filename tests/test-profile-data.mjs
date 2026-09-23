@@ -36,6 +36,20 @@ const ALL_PRESETS = FREE_AVATAR_PRESETS.length + AVATAR_PACKS.reduce((n, p) => n
 const DETAILS_COLUMNS = ["avatar_path", "avatar_preset", "bio", "card_theme", "favorite_team", "frame", "showcase", "title", "updated_at", "user_id"];
 const EMPTY_DETAILS = { bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null, title: null, showcase: [], updatedAt: null };
 
+// What each refusal these two functions raise means to the app - storage-profile.js's SAVE_REASONS and
+// AVATAR_REASONS. Checked twice against two different things: below, that the SQL raises exactly these codes
+// and no others, and in the client section, that each one really comes out as this reason.
+//
+// guest_not_allowed was raised by both from the day guests shipped and mapped by neither, so it fell through
+// to "network" - "check your connection", forever, for a rule rather than a fault. Exactly the bug
+// storage-moderation.js's REPORT_REFUSALS carries a comment about, in the file next door. Read out of the
+// functions' own source rather than listed by hand, so a code added to the SQL with no reason decided here
+// fails; tests/test-shop-sql.mjs does the same for the shop's four.
+const PROFILE_REASONS = {
+  save_profile: { bio_too_long: "too_long", bio_blocked: "blocked", bio_invalid: "invalid", bad_team: "invalid", not_signed_in: "signed_out", guest_not_allowed: "guest" },
+  set_avatar: { bad_request: "invalid", bad_path: "invalid", bad_preset: "invalid", not_signed_in: "signed_out", guest_not_allowed: "guest" },
+};
+
 const db = await freshDb();
 const ALICE = uuid(1), BOB = uuid(2);
 const HEXY = "abcdef00-0000-4000-8000-0000000000ab"; // an id with letters in it, for case checks
@@ -544,6 +558,39 @@ await runTest("while uploads are paused nobody can add or replace a file, but ca
   assert(!(await insertFile(BOB, avatarFile(BOB, 7))).error, "uploads work again once unpaused");
 });
 
+await runTest("a guest cannot put a file in the avatars bucket, however it asks", async () => {
+  // set_avatar refused a guest from the day guests shipped and the six bucket policies did not, which made
+  // that gate cosmetic: sign in anonymously, skip the function, insert straight into storage.objects, and
+  // ten files land in a PUBLIC bucket - ten working unauthenticated gridspin.app addresses on an account
+  // that can be made again all day. Only the per-folder cap stopped it at ten.
+  const GUEST = uuid(77);
+  await addGuestAccount(db, GUEST);
+  const mine = avatarFile(GUEST, 1);
+  const added = await insertFile(GUEST, mine);
+  assert(/row-level security/.test(added.error || ""), `a guest cannot add a file, got ${JSON.stringify(added)}`);
+  // Nor by renaming one already there into place, which is the same write through the update policy - the
+  // rule has to sit on both, exactly as uploads_paused does, or it is sidestepped by overwriting.
+  await owner("insert into storage.objects (bucket_id, name) values ('avatars', $1)", [avatarFile(GUEST, 2)]);
+  const renamed = await attempt(GUEST, "update storage.objects set name = $2 where name = $1", [avatarFile(GUEST, 2), avatarFile(GUEST, 3)]);
+  assert(/row-level security/.test(renamed.error || ""), `nor replace one, got ${JSON.stringify(renamed)}`);
+  // Reading and deleting stay open: whatever is already there has to be clearable.
+  assert((await attempt(GUEST, "select name from storage.objects where name = $1", [avatarFile(GUEST, 2)])).rows.length === 1, "a guest can still see their own folder");
+  assert((await attempt(GUEST, "delete from storage.objects where name = $1", [avatarFile(GUEST, 2)])).affected === 1, "and clear it out");
+  // And the moment it stops being a guest, it uploads like anyone else.
+  await owner("update profiles set guest = false, username = 'expostguest' where id = $1", [GUEST]);
+  assert(!(await insertFile(GUEST, mine)).error, "a guest that has kept its seasons uploads like any account");
+  await owner("delete from storage.objects where name like $1", [`${GUEST}/%`]);
+});
+
+await runTest("save_profile and set_avatar raise exactly the codes storage-profile.js has a reason for", async () => {
+  const raised = async (fn) => [...new Set([...(await owner("select prosrc from pg_proc where proname = $1", [fn]))[0].prosrc
+    .matchAll(/raise exception '([a-z_]+)'/g)].map((m) => m[1]))].sort();
+  for (const [fn, table] of Object.entries(PROFILE_REASONS)) {
+    const codes = await raised(fn);
+    assert(same(codes, Object.keys(table).sort()), `${fn} raises ${JSON.stringify(codes)} - each needs its reason decided in PROFILE_REASONS`);
+  }
+});
+
 await runTest("the avatars bucket is public, 256 KB, WebP/JPEG/PNG only", async () => {
   const [bucket] = await owner("select public, file_size_limit, allowed_mime_types from storage.buckets where id = $1", [AVATAR_BUCKET]);
   assert(bucket?.public === true && Number(bucket.file_size_limit) === AVATAR_MAX_BYTES, `bucket public with a ${AVATAR_MAX_BYTES}-byte limit, got ${JSON.stringify(bucket)}`);
@@ -820,7 +867,7 @@ await runTest("saveProfile: saves and returns the details, or says too_long, blo
     res = await P.saveProfile(odd);
     assert(res.ok === true, `saveProfile(${JSON.stringify(odd)}) saves an empty profile instead of throwing, got ${JSON.stringify(res)}`);
   }
-  const serverSays = { bio_too_long: "too_long", bio_blocked: "blocked", bio_invalid: "invalid", bad_team: "invalid", not_signed_in: "signed_out", something_new: "network" };
+  const serverSays = { bio_too_long: "too_long", bio_blocked: "blocked", bio_invalid: "invalid", bad_team: "invalid", not_signed_in: "signed_out", guest_not_allowed: "guest", something_new: "network" };
   for (const [code, reason] of Object.entries(serverSays)) {
     install({ rpc: { save_profile: () => Promise.resolve({ data: null, error: { message: code, code: "P0001", details: null, hint: null } }) } });
     res = await P.saveProfile({ bio: "Fine", favoriteTeam: null });
@@ -1005,6 +1052,37 @@ await runTest("a full folder: saveAvatarPhoto clears out the leftovers, keeping 
   for (const path of objectsIn(ME)) auth._storageObjects.delete(`avatars/${path}`);
   await nextMs();
   assert((await P.saveAvatarPhoto(ME, blob(100), null)).ok, "a fresh photo to carry on with");
+});
+
+await runTest("each of those codes really comes out of storage-profile.js as its reason", async () => {
+  const run = { save_profile: () => P.saveProfile({ bio: "Fine", favoriteTeam: null }), set_avatar: () => P.setAvatarPreset("crown", null) };
+  for (const [fn, table] of Object.entries(PROFILE_REASONS)) {
+    for (const [code, reason] of Object.entries({ ...table, some_new_code: "network" })) {
+      install({ rpc: { [fn]: () => Promise.resolve({ data: null, error: { message: code, code: "P0001", details: null, hint: null }, status: 400 }) } });
+      const res = await run[fn]();
+      assert(!res.ok && res.reason === reason, `${fn}'s ${code} is ${reason}, got ${JSON.stringify(res)}`);
+    }
+  }
+  restore();
+});
+
+await runTest("a guest is told why, not told to check their connection", async () => {
+  // Every route a modified browser could take: the two functions, and the upload, which the bucket refuses
+  // with an RLS error carrying no code at all - so storage-profile.js asks caller_is_guest(), the same
+  // function the policy itself calls, rather than keeping a second opinion about who is a guest.
+  const { data } = await auth.auth.signInAnonymously();
+  const id = data.user.id;
+  assert(auth._profiles.get(id)?.guest === true, "signed in as a guest");
+  let res = await P.saveProfile({ bio: "Hello", favoriteTeam: "KC" });
+  assert(!res.ok && res.reason === "guest", `saveProfile from a guest, got ${JSON.stringify(res)}`);
+  res = await P.setAvatarPreset("crown", null);
+  assert(!res.ok && res.reason === "guest", `setAvatarPreset from a guest, got ${JSON.stringify(res)}`);
+  await nextMs();
+  res = await P.saveAvatarPhoto(id, blob(64));
+  assert(!res.ok && res.reason === "guest", `saveAvatarPhoto from a guest, got ${JSON.stringify(res)}`);
+  assert(auth._profileDetails.get(id) === undefined, "and none of it left a details row behind");
+  assert(objectsIn(id).length === 0, "nor a file");
+  await signIn(1);
 });
 
 await runTest("setAvatarPreset and removeAvatar switch the picture and delete the photo they replace", async () => {

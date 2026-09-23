@@ -36,6 +36,12 @@ export function makeShop(state, { wallet, profileData }) {
     if (!uid || !state.profiles.has(uid)) fail("not_signed_in");
     return uid;
   };
+  // A guest has no profile screen to wear anything on, so the three functions that spend or wear refuse one
+  // (SHOP.md). shop_state is a read and is not gated, which is why this is not inside player().
+  const notGuest = (uid) => {
+    if (state.profiles.get(uid)?.guest) fail("guest_not_allowed");
+    return uid;
+  };
   // Free items are everyone's; a badge item is whoever's badge_awards has its badge; the rest need a purchase.
   const owns = (uid, item) => item.rarity === "free" || inventory.has(`${uid}|${item.id}`)
     || (item.badge != null && wallet.tables.badge_awards.has(`${uid}|${item.badge}`));
@@ -54,7 +60,7 @@ export function makeShop(state, { wallet, profileData }) {
       };
     },
     shop_buy({ p_item = null } = {}) {
-      const uid = player();
+      const uid = notGuest(player());
       // The SQL takes wallet_lock here, before reading anything else. The lock only matters between two sessions,
       // which this mock never has, and the empty wallet it may create is rolled back with any refusal - so the
       // mock reads the balance without making one, and a refusal leaves no wallet behind either way.
@@ -75,7 +81,7 @@ export function makeShop(state, { wallet, profileData }) {
       return { ok: true, balance: wallet.balanceOf(uid), item: item.id };
     },
     equip_item({ p_slot = null, p_item = null } = {}) {
-      const uid = player();
+      const uid = notGuest(player());
       if (!EQUIP_SLOTS.includes(p_slot)) fail("bad_slot");
       if (p_item != null) {
         const item = items.get(p_item);
@@ -85,7 +91,7 @@ export function makeShop(state, { wallet, profileData }) {
       return profileData.upsertDetails(uid, { [SLOT_COLUMN[p_slot]]: p_item ?? null });
     },
     set_showcase({ p_badges = null } = {}) {
-      const uid = player();
+      const uid = notGuest(player());
       const ids = p_badges ?? [];
       if (!Array.isArray(ids) || ids.length > SHOWCASE_MAX || ids.some((id) => typeof id !== "string" || !ID.test(id))
         || new Set(ids).size !== ids.length) fail("bad_showcase");

@@ -219,6 +219,7 @@ const BIO_ERROR = {
   blocked: "That bio has a word we don't allow.",
   too_long: `Bios can be ${BIO_MAX} characters at most.`,
   invalid: "That couldn't be saved. Check your bio and try again.",
+  guest: "A bio is for accounts. Keep your seasons on the Account tab first.",
   signed_out: "You're logged out. Log in again to save.",
   network: "That didn't save. Check your connection and try again.",
 };
@@ -227,6 +228,7 @@ const PICTURE_ERROR = {
   too_large: "That picture is too big. Try a smaller one.",
   paused: "Picture uploads are paused right now. Try again later.",
   invalid: "That picture couldn't be saved. Try another one.",
+  guest: "A picture is for accounts. Keep your seasons on the Account tab first.",
   signed_out: "You're logged out. Log in again to change your picture.",
   network: "That didn't save. Check your connection and try again.",
 };

@@ -189,11 +189,19 @@ export function makeProfileData(state, { playerStats }) {
     if (!uid || !state.profiles.has(uid)) fail("not_signed_in");
     return uid;
   };
+  // ...and not a guest, for save_profile and set_avatar. Separate from player() because it is not every
+  // function's rule - shop_state is a read and player_profile is anyone's - and mirroring the SQL one
+  // refusal at a time is the only way this mock stays a mirror rather than a third rulebook.
+  const notGuest = (uid) => {
+    if (state.profiles.get(uid)?.guest) fail("guest_not_allowed");
+    return uid;
+  };
   const uploadsPaused = () => !!siteFlags.get("uploads_paused")?.enabled;
+  const isGuest = (uid) => !!state.profiles.get(uid)?.guest;
 
   const rpcs = {
     save_profile({ p_bio = null, p_favorite_team = null } = {}) {
-      const uid = player();
+      const uid = notGuest(player());
       const bio = String(p_bio ?? "").trim();
       if (bioLength(bio) > BIO_MAX) fail("bio_too_long");
       if (hasDisallowedChars(bio)) fail("bio_invalid");
@@ -202,8 +210,14 @@ export function makeProfileData(state, { playerStats }) {
       if (team !== null && !TEAM_CODES.includes(team)) fail("bad_team");
       return upsertDetails(uid, { bio, favorite_team: team });
     },
+    // What the bucket's insert and update policies call, and what storage-profile.js asks when an upload is
+    // refused with no code to read. Anyone signed in may ask about themselves; false for anyone else.
+    caller_is_guest() {
+      const uid = state.currentUserId();
+      return !!(uid && state.profiles.get(uid)?.guest);
+    },
     set_avatar({ p_path = null, p_preset = null } = {}) {
-      const uid = player();
+      const uid = notGuest(player());
       if (p_path != null && p_preset != null) fail("bad_request");
       if (p_path != null && !isOwnAvatarPath(uid, p_path)) fail("bad_path");
       // A paid pack's avatar needs the pack (SHOP.md 3.2); state.ownsAvatarPack is tests/mock-shop.mjs's, and
@@ -254,8 +268,10 @@ export function makeProfileData(state, { playerStats }) {
   // Supabase Storage with this migration's policies on storage.objects: a signed-in player may read,
   // replace and delete objects only inside their own folder; may add one only named exactly
   // "<their id>/<10-16 digits>.webp|jpg|png", while their folder holds fewer than AVATAR_FOLDER_LIMIT files;
-  // and may add or replace one only while uploads aren't paused. Moderators may also read and delete any
-  // avatar (migration-moderation.sql).
+  // and may add or replace one only while uploads aren't paused AND is not a guest. That last one is the
+  // policy, not the app: set_avatar refused a guest while the bucket did not, so ten direct inserts still
+  // put ten publicly addressable files on an account that costs nothing to make. Deleting stays open, so a
+  // former guest can still clear out anything left behind.
   const storage = {
     from(bucket) {
       const ownFolder = (uid, path) => !!uid && firstFolder(path) === uid;
@@ -267,7 +283,7 @@ export function makeProfileData(state, { playerStats }) {
           const type = opts.contentType || body?.type || "";
           const size = body?.size ?? body?.byteLength ?? body?.length ?? 0;
           const key = `${bucket}/${path}`;
-          if (!uid || !isOwnAvatarPath(uid, path) || uploadsPaused() || folderCount(uid) >= AVATAR_FOLDER_LIMIT) {
+          if (!uid || !isOwnAvatarPath(uid, path) || uploadsPaused() || isGuest(uid) || folderCount(uid) >= AVATAR_FOLDER_LIMIT) {
             return storageError(400, "403", "AccessDenied", "new row violates row-level security policy");
           }
           if (!AVATAR_TYPES.includes(type)) return storageError(415, "415", "InvalidMimeType", `mime type ${type} is not supported`);

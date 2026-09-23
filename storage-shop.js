@@ -55,12 +55,14 @@ export async function fetchShop() {
 
 // purchase_conflict means the ledger already records this purchase with no item to show for it - rows edited by
 // hand, nothing the player did or can fix - so it's the same "didn't go through" as a failed request.
+// guest_not_allowed: a guest has no profile screen to wear anything on, so the shop is refused in SQL rather
+// than only hidden in the app (SHOP.md). Unmapped it reads as "network" - "check your connection" for a rule.
 const BUY_REASONS = {
   not_enough: "not_enough", owned: "owned", unavailable: "unavailable", badge_only: "badge_only", not_signed_in: "signed_out",
-  purchase_conflict: "network",
+  purchase_conflict: "network", guest_not_allowed: "guest",
 };
 // Buys one item with coins.
-//   { ok: true, balance } | { ok: false, reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "signed_out" | "network" }
+//   { ok: true, balance } | { ok: false, reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "guest" | "signed_out" | "network" }
 export async function buyItem(id) {
   if (typeof id !== "string" || !id) return failed("unavailable");
   try {
@@ -72,9 +74,9 @@ export async function buyItem(id) {
   }
 }
 
-const EQUIP_REASONS = { not_owned: "not_owned", bad_slot: "invalid", bad_item: "invalid", not_signed_in: "signed_out" };
+const EQUIP_REASONS = { not_owned: "not_owned", bad_slot: "invalid", bad_item: "invalid", not_signed_in: "signed_out", guest_not_allowed: "guest" };
 // Wears an item you own in its slot ("frame" | "card" | "title"), or clears the slot with a null id.
-//   { ok: true, details } | { ok: false, reason: "not_owned" | "invalid" | "signed_out" | "network" }
+//   { ok: true, details } | { ok: false, reason: "not_owned" | "invalid" | "guest" | "signed_out" | "network" }
 export async function equipItem(slot, id) {
   try {
     const { data, error, status } = await getClient().rpc("equip_item", { p_slot: slot, p_item: id ?? null });
@@ -85,9 +87,9 @@ export async function equipItem(slot, id) {
   }
 }
 
-const SHOWCASE_REASONS = { bad_showcase: "invalid", not_signed_in: "signed_out" };
+const SHOWCASE_REASONS = { bad_showcase: "invalid", not_signed_in: "signed_out", guest_not_allowed: "guest" };
 // Chooses up to three badges for your card, in order.
-//   { ok: true, details } | { ok: false, reason: "invalid" | "signed_out" | "network" }
+//   { ok: true, details } | { ok: false, reason: "invalid" | "guest" | "signed_out" | "network" }
 export async function setShowcase(badgeIds) {
   if (!Array.isArray(badgeIds)) return failed("invalid");
   try {

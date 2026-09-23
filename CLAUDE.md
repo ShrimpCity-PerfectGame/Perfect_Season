@@ -124,7 +124,16 @@ an account for them (Supabase's anonymous sign-in), the database names it `Guest
 change at all. Their name carries a **guest** chip on the boards and isn't a link, because a guest has no profile
 screen, no shop, and **never the daily**: a guest account can be made again and again, so counting one would hand
 anybody as many goes at the day's board as they liked - `submit-run` refuses a daily from a guest (`guest_daily`),
-and the app doesn't offer it. They do earn coins, which wait for them. A guest stops being one from the Account
+and the app doesn't offer it. They do earn coins, which wait for them - `claim_minigame` and
+submit-run's rewards are deliberately not gated, while the shop is, so a guest banks and spends later. **Every
+one of a guest's refusals lives in SQL**, because those functions and policies are the boundary and the app's
+version is only manners: `guest_not_allowed` from `save_profile`, `set_avatar`, `report_player`, `shop_buy`,
+`equip_item` and `set_showcase`, `guest_daily` from submit-run, `can_play_versus` for a duel, and
+`caller_is_guest()` on the two `avatars` write policies. Each of those codes has to be mapped in the client
+module that receives it or `rpcReason` reads it as `"network"` - "check your connection", forever, for a rule
+rather than a fault; `tests/test-profile-data.mjs` and `tests/test-shop-sql.mjs` check the maps against the
+functions' own source, so a new code cannot arrive unmapped. PROFILES.md, "What a guest is refused", is the
+list. A guest stops being one from the Account
 tab (`KeepSeasons`): an email and password go onto the same account, then `claim_username` trades the given name
 for a real one and rewrites the name snapshots on the boards, the way a moderator's rename does - the one time
 that function is allowed to change an existing name. Everything played, earned and counted stays. The known cost

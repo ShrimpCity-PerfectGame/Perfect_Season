@@ -79,13 +79,17 @@ export async function fetchProfileDetails(userId) {
   }
 }
 
-const SAVE_REASONS = { bio_too_long: "too_long", bio_blocked: "blocked", bio_invalid: "invalid", bad_team: "invalid", not_signed_in: "signed_out" };
-const AVATAR_REASONS = { bad_path: "invalid", bad_preset: "invalid", bad_request: "invalid", not_signed_in: "signed_out" };
+// A guest may not put a bio or a picture on the site (PROFILES.md 3.1). Unmapped it fell through to
+// "network" and told them their connection had failed - forever, for a rule rather than a fault. The same
+// bug storage-moderation.js's REPORT_REFUSALS carries a comment about; it is raised in five functions now
+// and has to be mapped in all of them.
+const SAVE_REASONS = { bio_too_long: "too_long", bio_blocked: "blocked", bio_invalid: "invalid", bad_team: "invalid", not_signed_in: "signed_out", guest_not_allowed: "guest" };
+const AVATAR_REASONS = { bad_path: "invalid", bad_preset: "invalid", bad_request: "invalid", not_signed_in: "signed_out", guest_not_allowed: "guest" };
 
 const failed = (reason) => ({ ok: false, reason });
 
 // Saves your bio and favorite team together. Pass both: the current value of whichever isn't changing.
-//   { ok: true, details } | { ok: false, reason: "too_long" | "blocked" | "invalid" | "signed_out" | "network" }
+//   { ok: true, details } | { ok: false, reason: "too_long" | "blocked" | "invalid" | "guest" | "signed_out" | "network" }
 export async function saveProfile(input) {
   const { bio, favoriteTeam } = input || {};
   const clean = cleanBio(bio);
@@ -129,6 +133,19 @@ async function sessionUserId() {
     return undefined;
   }
 }
+// Whether the caller is a guest: true/false, or null if it can't be asked. The same function the bucket's
+// insert and update policies call, rather than a second opinion about who is a guest - a guest's upload is
+// refused by the policy with no code to read, and without this it read as "network", i.e. "check your
+// connection", forever, for a rule rather than a fault.
+async function callerIsGuest() {
+  try {
+    const { data, error } = await getClient().rpc("caller_is_guest", {}, { get: true });
+    if (error) return null;
+    return data === true;
+  } catch (e) {
+    return null;
+  }
+}
 // Whether the upload kill switch is on: true/false, or null if the flag can't be read.
 async function uploadsPaused() {
   try {
@@ -157,9 +174,11 @@ async function uploadReason(error, userId) {
   if (statusCode === "415" || code === "InvalidMimeType" || status === 415 || /mime type/i.test(message)) return "type";
   if (sessionRefused(error)) return "signed_out";
   if (refusedByPolicy(error)) {
-    // The path is always in the player's own folder and named as the policy asks, so it's the kill switch,
-    // or a session that went away since it was checked - or, with neither, a full folder that couldn't be
-    // cleared, which only a retry can fix.
+    // The path is always in the player's own folder and named as the policy asks, so it's being a guest,
+    // the kill switch, or a session that went away since it was checked - or, with none of those, a full
+    // folder that couldn't be cleared, which only a retry can fix. Guest first: it is the one of these
+    // that no amount of retrying changes.
+    if ((await callerIsGuest()) === true) return "guest";
     if ((await uploadsPaused()) !== false) return "paused";
     const session = await sessionUserId();
     return session === null || (session !== undefined && session !== userId) ? "signed_out" : "network";
@@ -187,8 +206,8 @@ async function clearLeftovers(userId, keepPath) {
 // Uploads an already-cropped picture (the avatar picker makes the blob) and makes it your picture.
 // The new file gets its own name with a one-year cache; set_avatar then makes it current, and only
 // then is the previous photo deleted. If set_avatar fails, the new file is deleted instead.
-//   { ok: true, details } | { ok: false, reason: "type" | "too_large" | "paused" | "invalid" | "signed_out" | "network" }
-// "paused" is the upload kill switch (PROFILES.md, Moderation).
+//   { ok: true, details } | { ok: false, reason: "type" | "too_large" | "paused" | "guest" | "invalid" | "signed_out" | "network" }
+// "paused" is the upload kill switch (PROFILES.md, Moderation); "guest" is an account with no name of its own.
 export async function saveAvatarPhoto(userId, blob, previousPath) {
   if (!userId) return failed("signed_out");
   if (!blob || typeof blob !== "object" || !AVATAR_TYPES.includes(blob.type) || !(blob.size > 0)) return failed("type");

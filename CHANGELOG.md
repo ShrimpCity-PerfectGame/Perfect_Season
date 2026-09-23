@@ -58,6 +58,14 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **GM mode can't re-spin you into a board you can't afford anybody on either.** The dealer learned about
   the cap and the re-spin button didn't, so the one control you reach for to escape a dead board could hand
   you another one.
+- **A throwaway account can't use the site as picture hosting.** Guests were told no when they tried to set a
+  picture or a bio, but nothing stopped one uploading the files themselves â€” ten per account, in a public
+  place, each with a working public address, on an account anyone can make again in a second. The upload is
+  refused now, and so are buying, wearing and showcasing anything, which a guest has nowhere to wear anyway.
+  Coins still add up while you play as a guest and are waiting when you keep your seasons.
+- **"Check your connection" no longer means "you can't do that".** Several refusals that are rules rather than
+  faults were reaching the screen as connection errors, so the only advice was to retry something that was
+  never going to work.
 - **The salary cap is actually enforced while you draft.** Locking a player in from his card checked it;
   tapping the roster slot next to him did not, and that had never checked anything. So in GM you could put
   a $42M player into a $19M gap, watch the total go red, play the whole season out — and have it turned
