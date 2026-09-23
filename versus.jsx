@@ -602,6 +602,9 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // asking again every 300ms. `claimAgain` is what re-arms the effect, since `match` is deliberately not a dep.
   const claim = useRef({ at: null, tries: 0 });
   const [claimAgain, setClaimAgain] = useState(0);
+  // How many times this screen has asked the server to finish a match whose picks are all in - see the effect
+  // below. Enough of them and the screen says so instead of spinning quietly forever.
+  const [finishTries, setFinishTries] = useState(0);
   // Whether the Realtime socket has actually confirmed itself. False until it says SUBSCRIBED, and false again
   // the moment it errors or closes - which is what decides how hard the poll below has to work.
   const [live, setLive] = useState(false);
@@ -751,6 +754,29 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     return () => clearTimeout(t);
   }, [left, match?.code, match?.status, side, myTurn, refresh, state?.pickNo, claimAgain]);
 
+  // Sixteen picks in and the row still says `drafting`: the server's grade, or the write recording it, did not
+  // go through. Somebody has to ask again, and it is this screen - the poll only READS, so before this nothing
+  // ever poked the server and both players sat on "Working out the result..." until one of them gave up. The
+  // match is not lost: any request now finishes it, because match-pick tries to finish before it does anything
+  // else. Either screen asking is enough and both asking is harmless - finish_match is idempotent and tells the
+  // second caller the first one got there.
+  //
+  // Backed off the way the clock claim is, and counted, because a match that cannot be graded at all must not
+  // become a loop: the server ends such a match itself, and the count is what lets the screen say so if it
+  // somehow does not.
+  useEffect(() => {
+    if (!match?.code || match.status !== "drafting" || !state?.done || finishTries > 5) return undefined;
+    const code = match.code;
+    const t = setTimeout(async () => {
+      // No move at all, deliberately: the request exists to be received. match-pick finishes a
+      // match whose picks are all in before it looks at what was asked for.
+      await playMove({ code });
+      setFinishTries((n) => n + 1);
+      await refresh(code);
+    }, finishTries === 0 ? 400 : 2000);
+    return () => clearTimeout(t);
+  }, [match?.code, match?.status, state?.done, finishTries, refresh]);
+
   const send = async (move) => {
     if (busy) return;
     setBusy(true);
@@ -856,7 +882,11 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     return (
       <section className="versus" data-view="grading" data-code={match.code}>
         <h2 className="h">That's sixteen</h2>
-        <p className="vs-note">Working out the result…</p>
+        {/* Asked for, not waited on: the effect above tells the server to finish, which is what it took to stop
+            this screen being where a duel went to die. After six tries something is wrong that asking again
+            will not fix, so it says so and offers the way out rather than spinning quietly. */}
+        <p className="vs-note">{finishTries > 5 ? "This one's taking longer than it should. Your picks are saved - come back in a moment." : "Working out the result…"}</p>
+        {finishTries > 5 && <button className="btn" onClick={onBack}>Back</button>}
       </section>
     );
   }

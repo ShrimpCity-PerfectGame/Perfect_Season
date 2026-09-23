@@ -198,6 +198,8 @@ await runTest("every function this migration adds is definer, searches pg_temp l
     "new_match_code()": [true, "public, pg_temp", false, false],
     "record_versus(p_winner uuid, p_loser uuid)": [true, "public, pg_temp", false, false],
     "finish_match(p_match uuid, p_result jsonb, p_winner uuid, p_loser uuid)": [true, "public, pg_temp", false, false],
+    "record_pick(p_match uuid, p_rev integer, p_pick jsonb, p_deadline timestamp with time zone)": [true, "public, pg_temp", false, false],
+    "abandon_match(p_match uuid)": [true, "public, pg_temp", false, false],
     "versus_top(p_limit integer)": [true, "public, pg_temp", true, true],
   };
   const rows = await owner(`select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig,
@@ -206,13 +208,87 @@ await runTest("every function this migration adds is definer, searches pg_temp l
       has_function_privilege('anon', p.oid, 'execute') as anon,
       has_function_privilege('authenticated', p.oid, 'execute') as authenticated
     from pg_proc p where p.pronamespace = 'public'::regnamespace
-      and p.proname in ('can_play_versus', 'create_match', 'finish_match', 'join_match', 'match_state', 'new_match_code', 'record_versus', 'versus_top') order by 1`);
+      and p.proname in ('abandon_match', 'can_play_versus', 'create_match', 'finish_match', 'join_match', 'match_state', 'new_match_code', 'record_pick', 'record_versus', 'versus_top') order by 1`);
   const actual = Object.fromEntries(rows.map((r) => [r.sig, [r.definer, r.search_path, r.anon, r.authenticated]]));
   assert(JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(Object.keys(expected).sort()),
     `a new function needs a deliberate entry here, got ${JSON.stringify(Object.keys(actual))}`);
   for (const [sig, want] of Object.entries(expected)) {
     assert(JSON.stringify(actual[sig]) === JSON.stringify(want), `${sig}: expected ${JSON.stringify(want)}, got ${JSON.stringify(actual[sig])}`);
   }
+});
+
+await runTest("a pick is written only if nothing has moved since the caller read the match", async () => {
+  // match-pick decides in JavaScript, outside any transaction (versus-logic.mjs owns every rule), so between
+  // reading the match and writing the pick there is a window - and two requests for one match are ordinary:
+  // the player on the clock can move at the very moment their opponent claims the expired clock. Unguarded,
+  // the loser of that race wrote its pick against a board the winner had already re-spun away, replayMatch
+  // could not find that player on the board it deals, and the roster came out with a hole in it.
+  await noMatches();
+  const code = (await call(HOST, "create_match", {})).data.code;
+  await call(GUEST, "join_match", { p_code: code });
+  const m = (await owner("select id, rev from matches where code = $1", [code]))[0];
+  assert(m.rev === 0, `a new match starts at revision 0, got ${m.rev}`);
+  const pick = (n) => ({ pick_no: n, user_id: HOST, board_idx: 0, kind: "player", player_id: 100 + n, team: null, season: 2020, slot: "QB", auto: false });
+  const rec = async (rev, p) => (await owner("select record_pick($1, $2, $3, now() + interval '45 seconds') as r", [m.id, rev, JSON.stringify(p)]))[0].r;
+
+  const first = await rec(0, pick(1));
+  assert(first.ok && first.rev === 1, `the first pick goes in and moves the revision: ${JSON.stringify(first)}`);
+  assert((await owner("select count(*)::int as n from match_picks where match_id = $1", [m.id]))[0].n === 1, "one pick row");
+
+  // The same revision again is a request that read the match before that pick landed.
+  const stale = await rec(0, { ...pick(2), slot: "RB" });
+  assert(stale.error === "stale", `a stale revision writes nothing: ${JSON.stringify(stale)}`);
+  assert((await owner("select count(*)::int as n from match_picks where match_id = $1", [m.id]))[0].n === 1, "still one pick row");
+
+  // The same pick number from a caller that IS up to date is the other client having got there first.
+  const dup = await rec(1, { ...pick(1), player_id: 999, slot: "RB" });
+  assert(dup.error === "conflict", `a taken pick number is a conflict, not a failure: ${JSON.stringify(dup)}`);
+  // ...and so is the same player twice, which the board's own uniqueness catches.
+  const same = await rec(1, { ...pick(2), player_id: 101, slot: "RB" });
+  assert(same.error === "conflict", `a player already taken is a conflict too: ${JSON.stringify(same)}`);
+  assert((await owner("select rev from matches where id = $1", [m.id]))[0].rev === 1, "and a refusal never moves the revision");
+
+  // The clock moves with the pick, in one write: a pick written with the previous player's deadline still on
+  // the row is a turn the next player starts already out of time.
+  const before = (await owner("select turn_deadline from matches where id = $1", [m.id]))[0].turn_deadline;
+  await rec(1, { ...pick(2), slot: "RB" });
+  const after = (await owner("select turn_deadline, rev from matches where id = $1", [m.id]))[0];
+  assert(after.rev === 2 && after.turn_deadline > before, `the deadline moved with the pick: ${JSON.stringify(after)}`);
+
+  // Nothing is written into a match that is not being drafted, whatever the revision says.
+  await owner("update matches set status = 'done' where id = $1", [m.id]);
+  assert((await rec(2, pick(3))).error === "not_drafting", "a finished match takes no more picks");
+  assert((await call(HOST, "record_pick", { p_match: m.id, p_rev: 0, p_pick: null, p_deadline: null })).error, "and a client cannot call it at all");
+});
+
+await runTest("a match that cannot be finished is ended, not left drafting", async () => {
+  // The last resort behind match-pick's finish(): a pick that was written but is not on the board the replay
+  // deals leaves a hole in the roster that no later move can fill, so retrying is forever. One match ends with
+  // no result and nothing recorded for either player - rather than both screens sitting on "Working out the
+  // result..." while create_match hands them back into it for every duel they try afterwards.
+  await noMatches();
+  await owner("update profiles set pvp_wins = 0, pvp_losses = 0");
+  const code = (await call(HOST, "create_match", {})).data.code;
+  await call(GUEST, "join_match", { p_code: code });
+  const id = (await owner("select id from matches where code = $1", [code]))[0].id;
+
+  assert((await owner("select abandon_match($1) as r", [id]))[0].r.ok, "it ends the match");
+  const m = (await owner("select status, ended_at, turn_deadline, result, winner_id from matches where id = $1", [id]))[0];
+  assert(m.status === "abandoned" && m.ended_at && m.turn_deadline === null, `ended, with no clock: ${JSON.stringify([m.status, m.turn_deadline])}`);
+  assert(m.result === null && m.winner_id === null, "and no result to show for it");
+  const recs = await owner("select pvp_wins, pvp_losses from profiles where id in ($1, $2)", [HOST, GUEST]);
+  assert(recs.every((r) => r.pvp_wins === 0 && r.pvp_losses === 0), `nothing recorded for either player: ${JSON.stringify(recs)}`);
+
+  // And the point of it: create_match stops handing that match back, so Duel works again.
+  const next = (await call(HOST, "create_match", {})).data;
+  assert(next.code !== code, `the next duel is a new one, got ${next.code}`);
+
+  // A match already finished is left exactly as it was - a late abandon must not erase a real result.
+  await owner("update matches set status = 'done', result = '{\"winner\": \"host\"}'::jsonb where code = $1", [next.code]);
+  const doneId = (await owner("select id from matches where code = $1", [next.code]))[0].id;
+  await owner("select abandon_match($1)", [doneId]);
+  assert((await owner("select status from matches where id = $1", [doneId]))[0].status === "done", "a finished match is untouched");
+  assert((await call(HOST, "abandon_match", { p_match: id })).error, "and a client cannot call it at all");
 });
 
 await runTest("the 1v1 board ranks by wins, fully tiebroken, and only counts people who played", async () => {

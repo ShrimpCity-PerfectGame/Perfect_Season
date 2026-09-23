@@ -265,6 +265,10 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], steals 
   // Keyed by the turn the thief spent, not by the pick they took: that is where it changes the match.
   const stealAt = new Map((steals || []).map((x) => [x.at, x]));
   const openOf = (side) => openSlots(roster[side]);
+  // Picks that were written but are not on the board the replay deals - see take(). A match with any of these
+  // can never be graded, because a roster with a hole in it has no score, so callers have to be able to SEE it
+  // rather than infer it from a null two functions later.
+  const missing = [];
   let pickNo = 0;
 
   for (let boardIdx = 0; boardIdx < MATCH_BOARDS; boardIdx++) {
@@ -318,7 +322,7 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], steals 
       const pick = picks.find((p) => p.pickNo === pickNo);
       if (!pick) {
         return {
-          seq, boards, roster, taken, used, boardIdx, pickNo, boardKey: keyFor(side),
+          seq, boards, roster, taken, used, missing, boardIdx, pickNo, boardKey: keyFor(side),
           // `first` is the board's opening pick. `ownFirst` is THIS player's first turn on it, which is not the
           // same thing once a dip or a steal has given somebody two turns on one board - and it is the exact
           // condition the spin lookup above uses, so decideMove has to be able to ask it too.
@@ -331,20 +335,29 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], steals 
           done: false,
         };
       }
-      take(pick, keyFor(side), roster[side], taken);
+      if (!take(pick, keyFor(side), roster[side], taken)) missing.push({ pickNo, slot: pick.slot, id: pickId(pick) });
     }
   }
   return {
-    seq, boards, roster, taken, used,
+    seq, boards, roster, taken, used, missing,
     boardIdx: MATCH_BOARDS, pickNo: MATCH_PICKS + 1, boardKey: null, turn: null, done: true,
   };
 }
 
+// Applies one stored pick, and says whether it could. False means the pick is not on the board this replay
+// deals for that turn, which is not a thing that should ever happen: the row was written from the option
+// decideMove chose off that very board. It happened anyway, because a powerup landing between a concurrent
+// request's read of the match and its insert moved the board out from under it - so the row named a player who
+// is not there any more. Dropping it quietly left a hole in the roster, matchResult returned null two calls
+// later, and the Edge Function 500'd with `matches.status` still `drafting` and all sixteen picks in: nothing
+// could post again (decideMove refuses a finished match) and create_match handed both players back into it
+// forever. The race is closed by matches.rev, and this is how the damage is now visible if it ever recurs.
 function take(pick, key, roster, taken) {
   const option = optionsOn(key).find((o) => optionId(o) === pickId(pick));
-  if (!option) return;
+  if (!option) return false;
   roster[pick.slot] = option;
   taken.add(optionId(option));
+  return true;
 }
 
 // A stored pick's identity, in the same spelling optionId gives an option.

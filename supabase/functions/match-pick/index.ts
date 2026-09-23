@@ -107,25 +107,50 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   const side = sideOf(match, user.id);
   if (!side) return json({ error: "not your match", reason: "not_your_match" }, 403);
 
+  const picks = await readPicks(service, match);
+  const powerups = { respins: match.respins || [], dips: match.dips || [], steals: match.steals || [] };
+
+  // Every sixteen picks are in but the row still says `drafting`: the grade, or the write that records it,
+  // did not go through last time. Finishing is therefore the FIRST thing this handler tries, on any request,
+  // from either player - which is what makes it retryable. It used to be reachable only as the tail of the
+  // sixteenth pick, so one failure there left the match `drafting` with nothing able to post again
+  // (decideMove refuses a match it replays as finished): both screens sat on "Working out the result...", and
+  // create_match handed both players back into the dead match for every duel they tried afterwards.
+  // Recovery was the runbook, by hand, per match.
+  const replayed = V.replayMatch({ code, ...powerups, picks });
+  if (replayed.done) return await finish(service, match, replayed, json);
+
   const decided = V.decideMove({
-    code, format: match.format, side, move,
-    picks: await readPicks(service, match),
-    respins: match.respins || [], dips: match.dips || [], steals: match.steals || [],
+    code, format: match.format, side, move, picks, ...powerups,
     deadline: match.turn_deadline ? Date.parse(match.turn_deadline) : 0,
   });
   if (!decided.ok) return json({ error: decided.reason, reason: decided.reason }, decided.status);
 
   // Each of these writes exactly what decideMove said to, and nothing else. The clock restarts on every one of
   // them: a powerup is a turn's worth of thinking too.
+  // Every one of these is conditional on the revision this request read, and bumps it - see `rev` in
+  // migration-versus.sql. Two requests for one match are ordinary, not exotic: the player on the clock can move
+  // at the moment their opponent claims the expired clock. Unguarded, the loser of that race wrote its decision
+  // anyway, against a board the winner had already changed underneath it.
+  const bump = async (fields: Record<string, unknown>) => {
+    const { data, error } = await service.from("matches")
+      .update({ ...fields, rev: (match.rev ?? 0) + 1, turn_deadline: nextDeadline() })
+      .eq("id", match.id).eq("rev", match.rev ?? 0).select("id");
+    if (error) return json({ error: "failed to save" }, 500);
+    // No row means somebody else moved the match between this request's read and its write. Not a failure: the
+    // client re-reads and plays the turn again against what is actually there, exactly as it does for a pick
+    // the other client got to first.
+    if (!data || !data.length) return json({ error: "already picked", reason: "conflict" }, 409);
+    return null;
+  };
+
   if (decided.action === "respin") {
     const respins = [...(match.respins || []), { pickNo: decided.pickNo, kind: decided.kind, by: decided.side, key: decided.key }];
-    const { error } = await service.from("matches").update({ respins, turn_deadline: nextDeadline() }).eq("id", match.id);
-    return error ? json({ error: "failed to save" }, 500) : json({ ok: true, board: decided.key });
+    return (await bump({ respins })) || json({ ok: true, board: decided.key });
   }
   if (decided.action === "dip") {
     const dips = [...(match.dips || []), { boardIdx: decided.boardIdx, at: decided.at, by: decided.side }];
-    const { error } = await service.from("matches").update({ dips, turn_deadline: nextDeadline() }).eq("id", match.id);
-    return error ? json({ error: "failed to save" }, 500) : json({ ok: true });
+    return (await bump({ dips })) || json({ ok: true });
   }
   if (decided.action === "steal") {
     // Appended to the match, exactly as a re-spin or a dip is. It used to UPDATE the victim's pick row to the
@@ -133,44 +158,68 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     // not express a steal of anything but the pick just made, because a row has nowhere to say WHEN it changed
     // hands. `at` is that when: the turn the thief spent on it.
     const steals = [...(match.steals || []), { at: decided.at, by: decided.side, pickNo: decided.pickNo, slot: decided.slot }];
-    const { error } = await service.from("matches").update({ steals, turn_deadline: nextDeadline() }).eq("id", match.id);
-    return error ? json({ error: "failed to save" }, 500) : json({ ok: true, slot: decided.slot });
+    return (await bump({ steals })) || json({ ok: true, slot: decided.slot });
   }
 
+  // The pick and the clock move together, under the match's own lock, and only if the revision has not moved -
+  // see record_pick in migration-versus.sql. A plain insert here could not be conditional on anything: the
+  // decision above is made in JavaScript, outside any transaction, so there was a window in which a powerup
+  // could land between this request's read of the match and its write. The row then named a player who was no
+  // longer on the board, replayMatch dropped it, and the match became ungradeable.
   const option = decided.option;
-  const { error: writeError } = await service.from("match_picks").insert({
-    match_id: match.id, pick_no: decided.pickNo, user_id: idOf(match, decided.side), board_idx: decided.boardIdx,
-    kind: option.kind, player_id: option.kind === "player" ? option.id : null,
-    team: option.kind === "player" ? null : option.team, season: option.season,
-    slot: decided.slot, auto: decided.auto,
+  const { data: written, error: writeError } = await service.rpc("record_pick", {
+    p_match: match.id,
+    p_rev: match.rev ?? 0,
+    p_pick: {
+      pick_no: decided.pickNo, user_id: idOf(match, decided.side), board_idx: decided.boardIdx,
+      kind: option.kind, player_id: option.kind === "player" ? option.id : null,
+      team: option.kind === "player" ? null : option.team, season: option.season,
+      slot: decided.slot, auto: decided.auto,
+    },
+    p_deadline: new Date(nextDeadline()).toISOString(),
   });
-  // A taken pick_no means the other client got there first - a client that is behind, not a failure worth a 500.
-  // It re-reads the match and sees the pick it missed. Only 23505 (unique_violation) means that, though: every
-  // other write failure was reported as "already picked" too, which told a player to try again over a check
-  // constraint that will refuse them forever, and hid the constraint from whoever had to debug it.
   if (writeError) {
-    if (writeError.code === "23505") return json({ error: "already picked", reason: "conflict" }, 409);
-    console.error("match_picks insert failed", writeError);
+    console.error("record_pick failed", writeError);
+    return json({ error: "failed to save" }, 500);
+  }
+  // `conflict` is the other client having got there first, and `stale` is a powerup having landed under this
+  // request - a client that is behind, either way, not a failure worth a 500. It re-reads and plays the turn
+  // again against what is actually there.
+  if (written?.error === "conflict" || written?.error === "stale") return json({ error: "already picked", reason: "conflict" }, 409);
+  if (written?.error) {
+    console.error("record_pick refused", written.error);
     return json({ error: "failed to save" }, 500);
   }
 
   // Re-read rather than assume, and let versus-logic say whether that was the last pick: a double dip and a
-  // steal both move where the end of a match is, so counting to sixteen here would be wrong.
-  const after = V.replayMatch({
-    code, picks: await readPicks(service, match),
-    respins: match.respins || [], dips: match.dips || [], steals: match.steals || [],
-  });
-  if (!after.done) {
-    // Checked, like every other write in this handler. Silently failing leaves the PREVIOUS player's
-    // deadline in place, so the next one starts their turn with whatever was left of it - and an opponent
-    // posting `claim: "clock"` can have autoPick spend that turn before their screen has even drawn.
-    const { error: deadlineError } = await service.from("matches").update({ turn_deadline: nextDeadline() }).eq("id", match.id);
-    if (deadlineError) return json({ error: "failed to save" }, 500);
-    return json({ ok: true });
-  }
+  // steal both move where the end of a match is, so counting to sixteen here would be wrong. record_pick has
+  // already set the next deadline, so an unfinished match needs no further write.
+  const after = V.replayMatch({ code, picks: await readPicks(service, match), ...powerups });
+  if (!after.done) return json({ ok: true });
+  return await finish(service, match, after, json);
+}
 
-  const result = V.matchResult({ code, format: match.format, host: after.roster.host, guest: after.roster.guest });
-  if (!result) return json({ error: "failed to grade" }, 500);
+// Grades a match whose picks are all in, and records it. Split out because it is reached from two places now:
+// the tail of the last pick, and the top of the handler for any later request - which is what makes a failure
+// here recoverable instead of permanent. `json` is handed in rather than closed over: it belongs to the
+// request, and this function sits outside the one that has it.
+async function finish(service: any, match: any, state: any, json: (body: unknown, status?: number) => Response) {
+  // A pick that was written but is not on the board the replay deals cannot be graded around: the roster has a
+  // hole in it, matchResult answers null, and no later move can fill it. Retrying forever would leave both
+  // players on "Working out the result..." and create_match handing them back into it, which is the brick this
+  // whole path exists to avoid - so the match ends instead, with no result and nothing recorded for either
+  // player. The screen for that already exists. It should now be unreachable (matches.rev closed the race that
+  // produced it), so it is logged loudly rather than quietly handled.
+  if (state.missing?.length) {
+    console.error("match cannot be replayed - abandoning", match.code, JSON.stringify(state.missing));
+    await service.rpc("abandon_match", { p_match: match.id });
+    return json({ error: "unplayable", reason: "unplayable" }, 409);
+  }
+  const result = V.matchResult({ code: match.code, format: match.format, host: state.roster.host, guest: state.roster.guest });
+  if (!result) {
+    console.error("failed to grade", match.code);
+    return json({ error: "failed to grade", reason: "grading" }, 500);
+  }
   const winnerId = result.winner ? idOf(match, result.winner) : null;
   // The result and both records land together, or neither does - one locked transaction in the database rather
   // than two writes here that nothing checked. See finish_match in migration-versus.sql for what each of the

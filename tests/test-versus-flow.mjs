@@ -203,6 +203,80 @@ await runTest("sixteen picks, two full rosters, and a winner the server chose", 
   assert((await move(sb, { code, claim: "clock" })).reason === "not_your_match", "the match is closed");
 });
 
+await runTest("a finish that fails is picked up by the next request, from either player", async () => {
+  // The brick: the sixteenth pick is written, grading (or the write recording it) fails, the handler answers
+  // 500, and `matches.status` is still `drafting` with all sixteen picks in. Nothing could post again -
+  // decideMove refuses a match it replays as finished - so both screens sat on "Working out the result..."
+  // for good, and create_match handed both players straight back into the dead match for every duel they
+  // tried afterwards. Recovery was the runbook, by hand, per match.
+  //
+  // Finishing is the first thing the handler tries now, on any request from either player, so any later
+  // request finishes it. Here the failure is staged the way it really happened: the picks are all in and the
+  // row is put back to `drafting` with no result, exactly the state a failed finish leaves behind.
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+  const state = await playOut(sb, as, A, B, code);
+  assert(state.done, "sixteen picks are in");
+  const m = [...sb._versus._matches.values()].find((x) => x.code === code);
+  assert(m.status === "done" && m.result, "and normally that finishes it");
+
+  // Put it back to the state a failed grade leaves: drafting, no result, nothing recorded.
+  const winner = sb._profiles.get(m.winner_id);
+  const beforeWins = winner ? winner.pvp_wins : null;
+  m.status = "drafting"; m.result = null; m.winner_id = null; m.ended_at = null;
+
+  // The next request - and it is the player who did NOT make the last pick, because either will do.
+  await as(A);
+  const res = await move(sb, { code });
+  assert(!res.error && !res.reason && res.result, `any later request finishes it: ${JSON.stringify(res).slice(0, 140)}`);
+  assert(m.status === "done" && m.result, "the match is finished");
+  // And exactly once: the records were already written before the row was rolled back by hand, and
+  // finish_match's status check is what stops a second pass counting them again.
+  if (winner) assert(winner.pvp_wins === beforeWins + 1, `one more win only, got ${winner.pvp_wins} from ${beforeWins}`);
+
+  // Which is also what lets Duel work again: create_match stops handing the dead match back.
+  const next = await call(sb, "create_match", {});
+  assert(next.code !== code, `the next duel is a new one, got ${next.code}`);
+});
+
+await runTest("a match that cannot be graded ends, instead of bricking Duel", async () => {
+  // The last resort. A pick that was written but is not on the board the replay deals leaves a hole in the
+  // roster, so matchResult answers null and no amount of retrying will ever change that - which would turn
+  // the recovery above into a loop. replayMatch reports what it could not apply (it used to drop it in
+  // silence), and the match ends with no result and nothing recorded, rather than Duel bricking for both.
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+  await playOut(sb, as, A, B, code);
+  const m = [...sb._versus._matches.values()].find((x) => x.code === code);
+  const before = { w: sb._profiles.get(m.host_id).pvp_wins, l: sb._profiles.get(m.host_id).pvp_losses };
+  m.status = "drafting"; m.result = null; m.winner_id = null; m.ended_at = null;
+
+  // Break one pick the way the race used to: a player who is not on that board at all.
+  const row = [...sb._versus.tables.match_picks.values()].find((p) => p.match_id === m.id && p.kind === "player");
+  row.player_id = 999999;
+  const replay = sb._versus._replay(code);
+  // One broken pick is more than one hole: what a player took is gone for both sides and decides which board
+  // comes next, so later picks land on boards that are no longer the ones they were made from. Which is why
+  // dropping even one of these in silence was never going to be recoverable.
+  assert(replay.missing.length >= 1 && replay.missing[0].id === "player|999999|2025",
+    `the replay says which picks it could not apply: ${JSON.stringify(replay.missing)}`);
+
+  const res = await move(sb, { code });
+  assert(res.reason === "unplayable" || res.error === "unplayable", `it says so rather than failing to grade: ${JSON.stringify(res)}`);
+  assert(m.status === "abandoned" && !m.result, `and the match is ended: ${m.status}`);
+  const after = { w: sb._profiles.get(m.host_id).pvp_wins, l: sb._profiles.get(m.host_id).pvp_losses };
+  assert(after.w === before.w && after.l === before.l, `with nothing recorded for either player: ${JSON.stringify([before, after])}`);
+  // The screen for an abandoned match already exists, and create_match hands nobody back into this one.
+  await as(A);
+  assert((await call(sb, "create_match", {})).code !== code, "Duel works again");
+});
+
 await runTest("a match survives an opponent who walks away", async () => {
   const { sb, as, A, B } = await twoPlayers();
   await as(A);

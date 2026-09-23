@@ -335,6 +335,17 @@ await runTest("the last pick lands on the other screen before the result does", 
   assert(screen.dataset.view === "grading", `and says what is happening: ${screen.dataset.view}`);
   assert(text(screen).includes("Working out the result"), `in words: ${text(screen).slice(0, 120)}`);
 
+  // And it does not just sit there. The poll only READS, so before this nothing ever poked the server: a
+  // finish that failed left the row on `drafting` with all sixteen picks in, and both screens waited on it
+  // forever while create_match handed them back into the dead match for every duel afterwards. The screen
+  // asks the server to finish, and any request does it.
+  for (let i = 0; i < 12 && auth._versus._matches.get(code).status !== "done"; i++) {
+    await new Promise((r) => setTimeout(r, 120));
+    await flush();
+  }
+  assert(auth._versus._matches.get(code).status === "done",
+    `the screen asked the server to finish, and it did: ${auth._versus._matches.get(code).status}`);
+
   // Then the status catches up, the way the poll finds it two seconds later, and the result is there.
   done.status = "done";
   done.result = auth._versus._matches.get(code).result

@@ -164,6 +164,20 @@ parts that are unlike every other mode:
 - **Nothing is stored twice.** `replayMatch` derives the boards, both rosters, what is gone and whose turn it is
   from the match's own rows, so a reconnecting client, a lying client and the server all compute from one place.
   Add state to the rows, never to a screen.
+- **A match must always be finishable, and every write carries the revision it read** (v2.0.0). Finishing is the
+  first thing `match-pick` tries on any request from either player, because it used to be reachable only as the
+  tail of the sixteenth pick: one failure there left `status` on `drafting` with every pick in, and nothing
+  could post again (`decideMove` refuses a match it replays as finished) - both screens on "Working out the
+  result...", and `create_match` handing both players back into the dead match for every later duel.
+  `matches.rev` guards the writes the way `profiles.rev` guards a season, because the on-clock player moving
+  while their opponent claims the expired clock is ordinary, not exotic - the loser of that race wrote its pick
+  against a board already re-spun away, `replayMatch` dropped it silently, and the roster came out with a hole
+  in it. A match that still cannot be graded is **abandoned by the function**, not retried forever: one match
+  instead of the feature.
+- **`match-pick` is executed by `tests/test-versus-edge.mjs`**, through a harness that bundles the real
+  `index.ts` and stubs only Deno and the query shapes it uses. Neither Edge Function was run by anything before
+  2.0; their source was read as text, and the first real run of this one found a `ReferenceError` no string
+  could have caught. Prefer adding to it over asserting on the file's characters.
 - **Eight boards, sixteen picks**, and every board offers that team's players, its defense in each year of the
   era and its kicker - a defense can go fifth and a kicker first. A board that cannot serve *both* players is
   skipped before it is dealt (VERSUS.md 8): 33 of the 160 boards hold one quarterback or one tight end, so two
@@ -190,7 +204,10 @@ parts that are unlike every other mode:
   It costs an email each and moves nothing but the PvP board; the answer if it is abused is a rate limit on
   `create_match` plus ignoring matches between accounts that only ever play each other.
 - **Runbook** (SQL editor): end a stuck match -
-  `update matches set status = 'abandoned', ended_at = now() where code = 'ABC123';`. Take a farmed result back -
+  `update matches set status = 'abandoned', ended_at = now() where code = 'ABC123';`. Since v2.0.0 a match stuck
+  on "Working out the result..." should finish itself the moment either player opens it, and one that truly
+  cannot be graded ends itself - so reaching for this means something new, and the function's log says which
+  picks it could not replay. Take a farmed result back -
   delete the match row (its picks follow) and decrement `pvp_wins` / `pvp_losses` on the two profiles by hand.
 
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
@@ -821,15 +838,19 @@ suite and still broke the live Leaderboard for every existing account.
   'drafting';`) - who leads which board is now seeded on the match code, so a match already under way would
   replay to a different board order than it was drafted from.
   v2.0.0's (the public release): re-run **`migration-runs-log.sql`**, **`migration-profiles.sql`**,
-  **`migration-moderation.sql`** and **`migration-wallet.sql`**, in that order, then **deploy the Edge
-  Functions**, then the client. All four only add or replace objects, so the site keeps working between
-  them. Runs-log goes first, as it did in v1.11.0, and it has to: `player_profile` in migration-profiles.sql
+  **`migration-moderation.sql`**, **`migration-wallet.sql`** and **`migration-versus.sql`**, in that order, then
+  **deploy the Edge Functions**, then the client. All five only add or replace objects, so the site keeps working
+  between them - versus included this time, since the drops it carried in v1.19.0 are all `if exists` and have
+  already run. Runs-log goes first, as it did in v1.11.0, and it has to: `player_profile` in migration-profiles.sql
   calls `player_stats(uuid)`, which only runs-log defines, and a `language sql` body is validated when it is
   created - so profiles-first fails outright on a database that doesn't already have it. It works on staging
   and production either way (both have had `player_stats` since v1.11.0) and fails on a new environment,
   which is the worst shape for a runbook to be in. The other direction is fine: runs-log reads
   `profiles.guest`, and every database this order will ever run against has had it since v1.17.0 or gets it
   from `schema.sql`.
+  **`migration-versus.sql` has to go before the functions, not after**: the new `match-pick` calls `record_pick`,
+  which that file creates. The gap the other way is safe - the deployed old function writes `match_picks`
+  directly and never touches `rev`, which starts at 0 and nothing reads until the new function lands.
   What is in each: profiles/runs-log carry the guest column, the name snapshots and the `collate "C"` tiebreaks
   from phase 2, and `profiles.rev`, which is what stops a finished season being overwritten by the abandoned
   draft that "Run it back" fires - **the Edge Function will not save a season without it**, so that one is not
@@ -839,7 +860,9 @@ suite and still broke the live Leaderboard for every existing account.
   new client disagree about points on the 0.75% of GM drafts that take it, in the old function's favour -
   and Championship's Flex ceiling, which **1v1 is exempt from**, see SCORING.md) and because
   submit-run refuses a challenge code that is the daily's own seed - every one of those is a rule the browser
-  and the function have to agree on, and the scoring half decides what a season is worth.
+  and the function have to agree on, and the scoring half decides what a season is worth. `match-pick` changes
+  on its own account too: it finishes a match before it looks at what was asked for, writes every change against
+  the revision it read, and ends a match it cannot grade (VERSUS.md 4).
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging

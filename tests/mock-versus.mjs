@@ -83,6 +83,10 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       id: `match-${nextId++}`, code, host_id: uid, guest_id: null,
       format: p_format === "standard" ? "standard" : "fantasy", status: "open",
       turn_deadline: null, respins: [], dips: [], steals: [],
+      // `rev` is a column with a default, not a field that appears when something writes it: every write the
+      // Edge Function makes is conditional on the value it read, and a row without one matches no such
+      // condition at all - which reads as "somebody moved the match" for a match nobody has touched.
+      rev: 0,
       result: null, winner_id: null, created_at: new Date().toISOString(), ended_at: null,
     });
     return matchState({ p_code: code });
@@ -124,6 +128,24 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     return { ok: true };
   }
 
+  // index.ts's finish(): grades a match whose picks are all in, and records it. Reached from two places, as
+  // there - the tail of the last pick, and the top of the handler for any later request - which is what makes
+  // a failure recoverable rather than permanent.
+  function finish(m, state, now, changed) {
+    // A pick written but not on the board the replay deals leaves a hole in the roster that no later move can
+    // fill, so the match ends rather than both players sitting on "Working out the result..." forever.
+    if (state.missing?.length) {
+      m.status = "abandoned";
+      m.ended_at = new Date(now).toISOString();
+      m.turn_deadline = null;
+      return changed(httpError("unplayable", 409));
+    }
+    const result = V.matchResult({ code: m.code, format: m.format, host: state.roster.host, guest: state.roster.guest });
+    if (!result) return changed(httpError("failed to grade", 500));
+    finishMatch(m, result, now);
+    return changed({ data: { ok: true, result } });
+  }
+
   // The match-pick Edge Function. `now` is a test hook, standing in for the server's clock so a test can let a
   // turn run out without waiting 45 seconds.
   async function invokeMatchPick(body, { now = Date.now() } = {}) {
@@ -143,6 +165,15 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     const side = sideOf(m, uid);
     if (!side) return httpError("not_your_match", 403);
 
+    const changed = (payload) => { onMatchChange(m.id); return payload; };
+    // Sixteen picks in and the row still says `drafting`: the grade, or the write recording it, did not go
+    // through last time. Finishing is the first thing tried, on any request from either player - which is what
+    // makes it retryable. Reachable only as the tail of the last pick, one failure there left nothing able to
+    // post again (decideMove refuses a match it replays as finished) and create_match handed both players back
+    // into the dead match for every duel afterwards.
+    const replayed = V.replayMatch({ code, picks: asPicks(m), respins: m.respins, dips: m.dips, steals: m.steals });
+    if (replayed.done) return finish(m, replayed, now, changed);
+
     const decided = V.decideMove({
       code, format: m.format, side, move: body, now,
       picks: asPicks(m), respins: m.respins, dips: m.dips, steals: m.steals,
@@ -153,8 +184,13 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     // player as "couldn't reach the server" while every test passed.
     if (!decided.ok) return httpError(decided.reason, decided.status || 409);
 
-    const restartClock = () => { m.turn_deadline = new Date(now + V.TURN_SECONDS * 1000).toISOString(); };
-    const changed = (payload) => { onMatchChange(m.id); return payload; };
+    // Every write bumps matches.rev and restarts the clock, as the real one does. The rev guard itself only
+    // shows between two requests read from the same state, which this mock never has - it is here so the shape
+    // stays the shape, and so a test that does interleave them by hand sees what the server would do.
+    const restartClock = () => {
+      m.turn_deadline = new Date(now + V.TURN_SECONDS * 1000).toISOString();
+      m.rev = (m.rev || 0) + 1;
+    };
     if (decided.action === "respin") {
       m.respins = [...m.respins, { pickNo: decided.pickNo, kind: decided.kind, by: side, key: decided.key }];
       restartClock();
@@ -182,14 +218,12 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       slot: decided.slot, auto: decided.auto, created_at: new Date(now).toISOString(),
     });
 
+    // record_pick sets the next deadline with the pick, so the clock moves whether or not this was the last one.
+    restartClock();
     // Asked, never counted to sixteen: a double dip and a steal both move where the end of a match is.
     const after = V.replayMatch({ code, picks: asPicks(m), respins: m.respins, dips: m.dips, steals: m.steals });
-    if (!after.done) { restartClock(); return changed({ data: { ok: true } }); }
-
-    const result = V.matchResult({ code, format: m.format, host: after.roster.host, guest: after.roster.guest });
-    if (!result) return changed(httpError("failed to grade", 500));
-    finishMatch(m, result, now);
-    return changed({ data: { ok: true, result } });
+    if (!after.done) return changed({ data: { ok: true } });
+    return finish(m, after, now, changed);
   }
 
   // versus_top: wins, then fewest losses, then name - fully tiebroken, like every other board.

@@ -136,6 +136,15 @@ and not the other is a rule that will drift, and this one would drift into "the 
 also means the rules are tested without a Deno runtime or a mock that mirrors them — `tests/test-versus-rules.mjs`
 drives the real thing.
 
+**The function itself is executed too, from v2.0.0** (`tests/test-versus-edge.mjs`, through
+`tests/edge-match-pick.mjs`). It used to be read as text and matched against strings, which is how two
+assertions came to pass while what they claimed to guard was broken — and the very first run of the real file
+found a `ReferenceError` in a change made minutes earlier that no string could have caught. The harness bundles
+`index.ts` with esbuild, points its `npm:@supabase/supabase-js@2` import at a small stub, gives it a `Deno` with
+`env` and `serve`, and runs it over `tests/mock-versus.mjs`'s own maps. Only the edges are stubbed; every
+decision is the shipped code. Add a query shape to the function and the stub throws by name rather than
+answering `undefined`.
+
 `decideMove` reads nothing but the rows. Whose turn it is, what is on the board, what is gone and what a roster
 is worth are all derived by `replayMatch`, so a client that reconnects, a client that lies and the server all
 compute from the same place. It returns either `{ ok: false, reason, status }` or an action to write.
@@ -182,6 +191,29 @@ On the last pick the function **computes the result** (section 6) and writes `ma
 all, because a win that didn't record the loss would be a board nobody could explain. Which pick is the last one
 is asked of `replayMatch`, never counted to sixteen here: a double dip and a steal both move where the end is.
 The clients are told by Realtime; they render, they don't decide.
+
+**Finishing is the first thing the handler tries, on any request, from either player** (v2.0.0). It replays the
+match before it looks at what was asked for, and finishes it if the picks are all in. That is what makes a
+failed finish recoverable: reachable only as the tail of the sixteenth pick, one failure left `status` on
+`drafting` with every pick in, and **nothing could post again** — `decideMove` refuses a match it replays as
+finished, so both screens sat on "Working out the result…" and `create_match`, which prefers a match in
+progress, handed both players back into the dead one for every duel they tried afterwards. Recovery was the
+runbook, by hand, per match. The screen asks for it too (`versus.jsx`): the poll only ever *read*, so before
+this nothing poked the server at all. `finish_match` is idempotent, so both screens asking is ordinary.
+
+**Every write carries the revision it read** (`matches.rev`, v2.0.0) — the same read-modify-write guard
+`profiles.rev` is. Two requests for one match are ordinary here: the player on the clock can move at the very
+moment their opponent claims the expired clock. Both read the match, and the loser of that race used to write
+its decision anyway, against a board the winner had already re-spun away. Its pick row then named a player who
+was not on the board, `replayMatch` dropped it **in silence**, the roster had a hole in it, and the match became
+ungradeable — the other way into the brick above. The three powerup writes are conditional `update`s that answer
+`conflict` when no row comes back; the pick goes through `record_pick`, which takes the match's own lock,
+because the decision is made in JavaScript and so cannot be inside the transaction that writes it.
+
+**And if a match still cannot be graded, the function ends it.** `replayMatch` now reports what it could not
+apply, and a hole in a roster is not something a later move can fill — retrying would be forever. So the match
+is abandoned (`abandon_match`), logged loudly, and answered `unplayable`: no result, nothing recorded for either
+player, the screen for that already exists, and Duel works again. One match rather than the feature.
 
 **Deploying:** `node deploy-function.mjs <env>` deploys both functions, because `submit-run` and `match-pick`
 share `game-logic.mjs` and `data/players.json` — deploying one of a pair is exactly the drift the release notes

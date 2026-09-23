@@ -58,6 +58,22 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **GM mode can't re-spin you into a board you can't afford anybody on either.** The dealer learned about
   the cap and the re-spin button didn't, so the one control you reach for to escape a dead board could hand
   you another one.
+- **A duel that can't work out its result no longer takes Duel down with it.** If the last pick landed but the
+  result didn't, both players sat on "Working out the result…" — and worse, tapping Duel afterwards put them
+  straight back into that dead match, every time, for good. It sorts itself out now: whoever opens the match
+  finishes it. A match that genuinely can't be graded ends instead, with no result and nothing recorded for
+  either player.
+- **Two things happening at once in a duel can't lose one of them.** Moving at the same moment your opponent's
+  clock ran out could quietly drop the pick that lost the race, which is what made a duel ungradeable in the
+  first place. Whichever one lands second is now told to try again, and does.
+- **A duel that can't work out its result no longer takes Duel down with it.** If the last pick landed but the
+  result didn't, both players sat on "Working out the result…" — and worse, tapping Duel afterwards put them
+  straight back into that dead match, every time, for good. It sorts itself out now: whoever opens the match
+  finishes it. A match that genuinely can't be graded ends instead, with no result and nothing recorded for
+  either player.
+- **Two things happening at once in a duel can't lose one of them.** Moving at the same moment your opponent's
+  clock ran out could quietly drop the pick that lost the race, which is what made a duel ungradeable in the
+  first place. Whichever one lands second is now told to try again, and does.
 - **A throwaway account can't use the site as picture hosting.** Guests were told no when they tried to set a
   picture or a bio, but nothing stopped one uploading the files themselves â€” ten per account, in a public
   place, each with a working public address, on an account anyone can make again in a second. The upload is

@@ -102,6 +102,20 @@ alter table public.matches add column if not exists steals jsonb not null defaul
 -- match_state below fails to compile against it. dips and steals each have a line; this one was missed.
 alter table public.matches add column if not exists respins jsonb not null default '[]'::jsonb;
 
+-- How many times anything about this match's shape has changed: the three powerup lists and the picks. Every
+-- write bumps it, and every write is conditional on the value the writer read - the same read-modify-write
+-- guard profiles.rev is, for the same reason (CLAUDE.md, "profiles is a read-modify-write").
+--
+-- Two requests for one match are ordinary here, not exotic: the player on the clock may move at the very moment
+-- their opponent claims the expired clock, and either may have two tabs open. Both read the match, and the
+-- second one's decision was taken against a board the first has already changed. Its pick row then named a
+-- player who is not on the board any more, replayMatch dropped it (silently, until now), and the roster had a
+-- hole in it - so matchResult answered null, the Edge Function 500'd, and the match sat on `drafting` with all
+-- sixteen picks in. Nothing could post again: decideMove refuses a match it replays as finished, so both
+-- screens sat on "Working out the result..." and create_match handed both players straight back into the dead
+-- match, for every duel either of them tried afterwards.
+alter table public.matches add column if not exists rev integer not null default 0;
+
 -- All three have to be ARRAYS. Only the service role writes them, so this needs a bug rather than an attacker -
 -- but the cost of that bug is total: versus-logic.mjs does `(steals || []).map(...)`, which throws on an object
 -- or a number, the Edge Function has no try/catch around decideMove, so EVERY later move on that match answers
@@ -295,6 +309,60 @@ grant execute on function public.record_versus(uuid, uuid) to service_role;
 -- one that counts and a second is told `already_done` rather than incrementing anything twice; and because the
 -- records and the status commit together, a failure leaves the match exactly as it was, for the next call to
 -- finish properly.
+-- One pick, written under the match's own lock and only if nothing has moved since the caller read it. The
+-- rev check is the whole point: match-pick decides in JavaScript (versus-logic.mjs owns every rule, VERSUS.md
+-- 2), so the decision cannot be made inside the transaction that writes it - which leaves exactly the window
+-- described on `rev` above. Told `stale`, the Edge Function answers `conflict`, and the client re-reads and
+-- plays the turn again against what is actually there.
+--
+-- `p_pick` carries the row rather than a column each: the shape is versus-logic's to decide and this function
+-- has no opinion about any of it. It sets the next deadline too, so the pick and the clock move together - two
+-- writes could not, and a pick written with the previous player's deadline still on the row is a turn the next
+-- player starts already out of time.
+create or replace function public.record_pick(p_match uuid, p_rev integer, p_pick jsonb, p_deadline timestamptz)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare m public.matches;
+begin
+  select * into m from public.matches where id = p_match for update;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  if m.status <> 'drafting' then return jsonb_build_object('error', 'not_drafting'); end if;
+  if m.rev <> p_rev then return jsonb_build_object('error', 'stale'); end if;
+
+  begin
+    insert into public.match_picks (match_id, pick_no, user_id, board_idx, kind, player_id, team, season, slot, auto)
+    values (p_match, (p_pick->>'pick_no')::int, (p_pick->>'user_id')::uuid, (p_pick->>'board_idx')::int,
+            p_pick->>'kind', (p_pick->>'player_id')::int, p_pick->>'team', (p_pick->>'season')::int,
+            p_pick->>'slot', coalesce((p_pick->>'auto')::boolean, false));
+  exception when unique_violation then
+    -- The other client got there first - with this pick number, or with this very player, since a board's
+    -- options are unique per match too. Neither is a failure: the client re-reads and sees what happened.
+    return jsonb_build_object('error', 'conflict');
+  end;
+
+  update public.matches set rev = m.rev + 1, turn_deadline = p_deadline where id = p_match;
+  return jsonb_build_object('ok', true, 'rev', m.rev + 1);
+end;
+$$;
+revoke execute on function public.record_pick(uuid, integer, jsonb, timestamptz) from public, anon, authenticated;
+grant execute on function public.record_pick(uuid, integer, jsonb, timestamptz) to service_role;
+
+-- Ends a match that cannot be finished, which is the runbook's `update matches set status = 'abandoned'` done
+-- by the code that discovers the problem instead of by a person the next morning. It is only ever reached when
+-- the replay cannot apply a pick that was written - a state nothing should be able to produce now that `rev`
+-- guards the writes, and one that no amount of retrying will clear, because the roster it grades has a hole in
+-- it that no later move can fill. One match ends with no result and nothing recorded for either player - the
+-- screen for that already exists - rather than Duel bricking for both of them.
+create or replace function public.abandon_match(p_match uuid)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  update public.matches set status = 'abandoned', ended_at = now(), turn_deadline = null
+   where id = p_match and status in ('open', 'drafting');
+  return jsonb_build_object('ok', true);
+end;
+$$;
+revoke execute on function public.abandon_match(uuid) from public, anon, authenticated;
+grant execute on function public.abandon_match(uuid) to service_role;
+
 create or replace function public.finish_match(p_match uuid, p_result jsonb, p_winner uuid, p_loser uuid)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare m public.matches;
