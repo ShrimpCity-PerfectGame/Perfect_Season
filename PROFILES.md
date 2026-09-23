@@ -401,7 +401,15 @@ SVG in Gridspin's style (cream/ink/lime/blue/orange/violet, ink strokes, like th
 **`report_player` (v2.0.0):** its note is no longer merely trimmed - it is cleaned the way a bio is
 (`cleanNote`, one line of plain text with the control, bidi and zero-width characters dropped), so
 `note_too_long` counts the cleaned text. It also raises **`guest_not_allowed`**: a guest account costs
-nothing to make, so six throwaways could put 24 open reports on somebody. `mod_act`'s rename clears `guest`
+nothing to make, so six throwaways could put 24 open reports on somebody. **`mod_act` raises it too, for
+`rename` only** (v2.0.0): a renamed guest ends up `guest = false` holding a real username on an anonymous
+session with no email or password on it, `claim_username` answers `already_named`, and the Account tab's way
+out is gated on `guest` - stranded under a name a moderator chose, with nothing able to undo it. No new report
+can point at a guest, but every one filed before that gate is still in the queue, and this was the action that
+made them dangerous. The other three actions deliberately still work on a guest: a bio or picture saved before
+v2.0.0 has to be clearable, and `dismiss` is the only way an old report against a guest gets closed at all.
+`mod_queue` carries `guest` on each entry so the queue says which is which, and the screen does not offer
+Rename for one. `mod_act`'s rename clears `guest`
 on `profiles` and `sou_runs` as well as rewriting the username.
 
 **Accepted, and deliberate (v2.0.0):** the 25 MB limit is on the file's *bytes*, and nothing checks its

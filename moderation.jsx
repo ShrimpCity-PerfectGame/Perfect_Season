@@ -226,6 +226,9 @@ function actionError(reason, action) {
   if (reason === "invalid") return action === "rename" ? USERNAME_RULE : "That action isn't available. Refresh the list and try again.";
   if (reason === "missing") return "That player doesn't exist anymore.";
   if (reason === "not_moderator") return "Only moderators can do that.";
+  // A guest has no email or password on it, so a name a moderator gives it can never be claimed back - see
+  // mod_act. The button is not offered for one either; this is what a stale queue answers with.
+  if (reason === "guest") return "That's a guest account - renaming one would leave it stranded. Dismiss the report instead.";
   return "That didn't go through. Check your connection and try again.";
 }
 // The three actions that change a player's profile ask first. Dismiss only closes reports.
@@ -375,7 +378,9 @@ function QueueItem({ player, onOpenProfile, onDone }) {
         <div className="frow md-acts">
           {hasPicture && <button type="button" className="btn" data-focus="remove_picture" disabled={busy} onClick={() => go("remove_picture", "confirm")}>Remove picture</button>}
           {player.bio && <button type="button" className="btn" data-focus="clear_bio" disabled={busy} onClick={() => go("clear_bio", "confirm")}>Clear bio</button>}
-          <button type="button" className="btn" data-focus="rename" disabled={busy} onClick={() => { setName(""); go("rename", "name"); }}>Rename player</button>
+          {/* Not for a guest: the name is generated, nobody chose it, and giving one a real name strands the
+              account under it (mod_act refuses it too, which is the rule - this is the manners). */}
+          {!player.guest && <button type="button" className="btn" data-focus="rename" disabled={busy} onClick={() => { setName(""); go("rename", "name"); }}>Rename player</button>}
           <button type="button" className="btn" data-focus="dismiss" disabled={busy} onClick={() => act("dismiss")}>{busy ? "Dismissing…" : "Dismiss"}</button>
         </div>
       )}

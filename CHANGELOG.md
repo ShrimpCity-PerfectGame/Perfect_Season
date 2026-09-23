@@ -58,6 +58,11 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **GM mode can't re-spin you into a board you can't afford anybody on either.** The dealer learned about
   the cap and the re-spin button didn't, so the one control you reach for to escape a dead board could hand
   you another one.
+- **A guest account can't be renamed into a stranded one.** Renaming a throwaway account gave it a real
+  username on a session with no email or password behind it — no way in, no way to claim it, and no way back.
+  Reports against those accounts can still be cleared; only the rename is off.
+- **The 1v1 board is in the same order as every other board.** Names on it sorted by a different rule from
+  the Leaderboard and Stats, so the same tie came out in two different orders on two screens.
 - **A duel that can't work out its result no longer takes Duel down with it.** If the last pick landed but the
   result didn't, both players sat on "Working out the result…" — and worse, tapping Duel afterwards put them
   straight back into that dead match, every time, for good. It sorts itself out now: whoever opens the match

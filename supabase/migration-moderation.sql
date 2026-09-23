@@ -147,7 +147,7 @@ begin
       from (
         select p.username, min(r.created_at) as oldest,
                jsonb_build_object(
-                 'user_id', p.id, 'username', p.username,
+                 'user_id', p.id, 'username', p.username, 'guest', p.guest,
                  'avatar_path', d.avatar_path, 'avatar_preset', d.avatar_preset,
                  -- No details row means the player never saved anything: no bio, no picture, no team.
                  'bio', coalesce(d.bio, ''), 'favorite_team', d.favorite_team,
@@ -192,6 +192,19 @@ begin
     update profile_details set bio = '', updated_at = now() where user_id = p_user_id;
     v_reason := 'bio';
   elsif p_action = 'rename' then
+    -- Never a guest. report_player refuses one as a target, so no new report can point at a guest - but
+    -- every report filed against one BEFORE that landed is still in the queue, and this is the action that
+    -- made them dangerous. A renamed guest ends up `guest = false`, holding a real username, on an anonymous
+    -- session with no email or password on it: claim_username then answers `already_named`, and the Account
+    -- tab's "keep your seasons" is gated on `guest`, so there is no way left to attach one. The account is
+    -- stranded under a name a moderator chose, and nothing can undo it.
+    --
+    -- The other three actions deliberately still work on a guest. A guest cannot save a bio or a picture any
+    -- more, but one saved before v2.0.0 is still there, and dismiss is how an old report against a guest gets
+    -- cleared at all. Refusing everything would leave those reports in the queue for good.
+    if exists (select 1 from profiles where id = p_user_id and guest) then
+      raise exception 'guest_not_allowed' using errcode = 'P0001';
+    end if;
     -- The same rules as signing up (check_username): the username rule, an exact match for taken, and
     -- the word filter.
     if p_new_name is null or p_new_name !~ '^[A-Za-z0-9_]{3,16}$' then
@@ -216,9 +229,12 @@ begin
     -- Every board reads these snapshots rather than joining profiles, so they follow the new name.
     update runs set username = p_new_name where user_id = p_user_id;
     update daily_runs set username = p_new_name where user_id = p_user_id;
-    -- `guest` goes with the name here too: mod_act above has just cleared it on the profile.
+    -- `guest` goes with the name here too, on both boards that carry it - claim_username clears both and this
+    -- cleared only one, so a renamed account's builds kept the chip under its new name. Unreachable since the
+    -- gate above (only a guest ever has these set), and left in place for exactly that reason: the two
+    -- functions that rewrite a name snapshot should not differ about what a name snapshot is.
     update sou_runs set username = p_new_name, guest = false where user_id = p_user_id;
-    update builds set username = p_new_name where user_id = p_user_id;
+    update builds set username = p_new_name, guest = false where user_id = p_user_id;
     v_reason := 'username';
   elsif p_action = 'dismiss' then
     v_reason := null;

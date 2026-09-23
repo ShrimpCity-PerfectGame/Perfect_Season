@@ -233,7 +233,10 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       .filter((p) => !p.guest && (p.pvp_wins || 0) + (p.pvp_losses || 0) > 0)
       .sort((a, b) => (b.pvp_wins || 0) - (a.pvp_wins || 0)
         || (a.pvp_losses || 0) - (b.pvp_losses || 0)
-        || a.username.localeCompare(b.username))
+        // Code points, which is what `collate "C"` is. localeCompare is the runtime's idea of alphabetical
+        // and disagrees with it on case and on anything non-ASCII - a third order again, on a board that is
+        // parity-tested against the SQL.
+        || (a.username < b.username ? -1 : a.username > b.username ? 1 : 0))
       .slice(0, limit)
       .map((p) => {
         const games = (p.pvp_wins || 0) + (p.pvp_losses || 0);

@@ -77,7 +77,7 @@ export function makeModeration(state, profileData) {
           groups.set(r.target_id, {
             oldest: time(r.created_at),
             entry: {
-              user_id: target.id, username: target.username,
+              user_id: target.id, username: target.username, guest: !!target.guest,
               avatar_path: d?.avatar_path ?? null, avatar_preset: d?.avatar_preset ?? null,
               // No details row means the player never saved anything.
               bio: d?.bio ?? "", favorite_team: d?.favorite_team ?? null,
@@ -108,14 +108,18 @@ export function makeModeration(state, profileData) {
         if (d) Object.assign(d, { bio: "", updated_at: now });
         reason = "bio";
       } else if (p_action === "rename") {
+        // Never a guest: a renamed one is left holding a real name on an anonymous session with no way to
+        // attach an email to it. The other three actions still work on one - a bio or picture from before
+        // v2.0.0 has to be clearable, and dismiss is how an old report against a guest is closed at all.
+        if (state.profiles.get(p_user_id)?.guest) fail("guest_not_allowed");
         // PostgREST hands the database a JSON number as text, so a number is checked as its digits.
         const name = p_new_name == null ? null : String(p_new_name);
         if (name == null || !USERNAME_RE.test(name)) fail("invalid");
         if (byName(name) || profileData.isReservedUsername(name)) fail("taken");
         if (!profileData.isClean(name)) fail("blocked");
-        state.profiles.get(p_user_id).username = name;
+        Object.assign(state.profiles.get(p_user_id), { username: name, guest: false });
         for (const table of [state.runs, state.dailyRuns, state.souRuns, state.builds]) {
-          for (const row of table.values()) if (row.user_id === p_user_id) row.username = name;
+          for (const row of table.values()) if (row.user_id === p_user_id) Object.assign(row, { username: name, guest: false });
         }
         reason = "username";
       } else if (p_action !== "dismiss") {

@@ -193,7 +193,7 @@ await runTest("mod_queue groups open reports by player, oldest first, with each 
   assert(q.map((p) => p.username).join() === "dave,bob,carol", `players by oldest open report, then username: ${q.map((p) => p.username)}`);
   const bob = q[1];
   assert(bob.reports.map((r) => r.id).join() === [rid(5), rid(10), rid(40)].join(), `bob's reports by time, then id: ${bob.reports.map((r) => r.id)}`);
-  assert(JSON.stringify(Object.keys(bob).sort()) === JSON.stringify(["avatar_path", "avatar_preset", "bio", "favorite_team", "reports", "user_id", "username"]), `entry keys: ${Object.keys(bob)}`);
+  assert(JSON.stringify(Object.keys(bob).sort()) === JSON.stringify(["avatar_path", "avatar_preset", "bio", "favorite_team", "guest", "reports", "user_id", "username"]), `entry keys: ${Object.keys(bob)}`);
   assert(JSON.stringify(Object.keys(bob.reports[0]).sort()) === JSON.stringify(["created_at", "id", "note", "reason", "reporter"]), `report keys: ${Object.keys(bob.reports[0])}`);
   assert(bob.user_id === ID.bob && bob.avatar_path === photo && bob.avatar_preset === null && bob.bio === "Hello there" && bob.favorite_team === "KC", `bob's details: ${JSON.stringify(bob)}`);
   assert(bob.reports[2].reporter === "dave" && bob.reports[2].note === "mean bio" && bob.reports[2].reason === "bio", "each report carries its reporter's username, note and reason");
@@ -403,6 +403,70 @@ await runTest("a guest can neither report nor be reported", async () => {
   assert(n === 1, `only the real report is stored: ${n}`);
 });
 
+await runTest("every code report_player and mod_act raise has a reason in storage-moderation.js", async () => {
+  // guest_not_allowed is raised by both and was mapped in only one of them - REPORT_REFUSALS had it, and the
+  // dangerous action's table did not, which is this release's commonest bug in miniature. Read out of the
+  // functions' own source rather than listed by hand, so a code added to the SQL with no reason decided fails
+  // here; tests/test-profile-data.mjs and tests/test-shop-sql.mjs do the same for their own functions.
+  const raised = async (fn) => [...new Set([...(await db.query("select prosrc from pg_proc where proname = $1", [fn])).rows[0].prosrc
+    .matchAll(/raise exception '([a-z_0-9]+)'/g)].map((m) => m[1]))].sort();
+  const WANT = {
+    report_player: ["bad_reason", "duplicate", "guest_not_allowed", "limit", "no_such_player", "not_signed_in", "note_too_long", "self"],
+    mod_act: ["bad_action", "blocked", "guest_not_allowed", "invalid", "no_such_player", "not_moderator", "taken"],
+  };
+  for (const [fn, want] of Object.entries(WANT)) {
+    const codes = await raised(fn);
+    assert(JSON.stringify(codes) === JSON.stringify(want), `${fn} raises ${JSON.stringify(codes)} - each needs a reason in storage-moderation.js, and a line here`);
+  }
+});
+
+await runTest("a moderator cannot rename a guest, but can still clear one up", async () => {
+  // Every report filed against a guest BEFORE report_player was gated is still in the queue, and this is the
+  // action that made them dangerous: a renamed guest ends up `guest = false` holding a real username on an
+  // anonymous session - no email, no password, claim_username answering `already_named`, and the Account tab's
+  // way out gated on `guest`. Stranded under a name a moderator chose, with nothing able to undo it.
+  await fresh(db);
+  const GUEST = uuid(81);
+  await addGuestAccount(db, GUEST);
+  const guestName = (await db.query("select username from profiles where id = $1", [GUEST])).rows[0].username;
+  // A report from before the gate, planted the way the data really exists in production.
+  await db.query("insert into reports (reporter_id, target_id, reason, note) values ($1, $2, 'username', 'legacy')", [ID.dave, GUEST]);
+  // ...and a bio from before it too, which only a moderator can clear now.
+  await db.query("insert into profile_details (user_id, bio) values ($1, 'left over') on conflict (user_id) do update set bio = 'left over'", [GUEST]);
+
+  const renamed = await act(db, ID.alice, GUEST, "rename", "NotAGuest");
+  assert(renamed.error === "guest_not_allowed", `renaming a guest is refused: ${describe(renamed)}`);
+  const after = (await db.query("select username, guest from profiles where id = $1", [GUEST])).rows[0];
+  assert(after.username === guestName && after.guest === true, `and changes nothing: ${JSON.stringify(after)}`);
+
+  // The other three still work on one, which is what lets an old report be dealt with at all.
+  assert(!(await act(db, ID.alice, GUEST, "clear_bio")).error, "a leftover bio can still be cleared");
+  assert((await db.query("select bio from profile_details where user_id = $1", [GUEST])).rows[0].bio === "", "and it is");
+  assert(!(await act(db, ID.alice, GUEST, "remove_picture")).error, "a leftover picture can still be removed");
+  assert(!(await act(db, ID.alice, GUEST, "dismiss")).error, "and the report can be dismissed");
+  assert((await db.query("select count(*)::int as n from reports where status = 'open'")).rows[0].n === 0, "which clears the queue");
+
+  // A real account is unaffected: this is a rule about guests, not a blanket refusal.
+  assert(!(await act(db, ID.alice, ID.carol, "rename", "CarolTwo")).error, "a real account still renames");
+  assert((await db.query("select username from profiles where id = $1", [ID.carol])).rows[0].username === "CarolTwo", "and it took");
+});
+
+await runTest("mod_queue says which of the reported are guests", async () => {
+  // The queue still lists them, deliberately: an old report against a guest has to be dismissable, and
+  // the flag is how a moderator knows not to reach for Rename - which the screen does not offer, and
+  // mod_act refuses. The entry shape is held against the mock by the test above.
+  await fresh(db);
+  const GUEST = uuid(82);
+  await addGuestAccount(db, GUEST);
+  await db.query("insert into reports (reporter_id, target_id, reason, note) values ($1, $2, 'username', 'legacy')", [ID.dave, GUEST]);
+  await db.query("insert into reports (reporter_id, target_id, reason, note) values ($1, $2, 'bio', 'real one')", [ID.dave, ID.carol]);
+  const q = (await queueFor(db, ID.alice)).data;
+  const flags = Object.fromEntries(q.map((e) => [e.username, e.guest]));
+  assert(Object.keys(flags).length === 2, `both are listed - a guest's report has to be dismissable: ${JSON.stringify(flags)}`);
+  assert(flags.carol === false && Object.entries(flags).some(([n, g]) => n !== "carol" && g === true),
+    `and the queue says which is which: ${JSON.stringify(flags)}`);
+});
+
 await runTest("the mock gives the same answers as the SQL for one shared sequence of calls, and leaves the same data", async () => {
   await fresh(db);
   const mock = makeMockAuth();
@@ -578,7 +642,7 @@ await runTest("storage-moderation.js maps every refusal and real PostgREST failu
   const raising = (message) => async () => ({ data: null, error: { message, details: null, hint: null, code: "P0001" }, count: null, status: 400, statusText: "Bad Request" });
   const client = (rpc, extra = {}) => ({ rpc, storage: storage(), ...extra });
 
-  const reportCases = { limit: "limit", duplicate: "duplicate", self: "self", not_signed_in: "signed_out", no_such_player: "missing", bad_reason: "invalid", note_too_long: "invalid", some_new_code: "network" };
+  const reportCases = { limit: "limit", duplicate: "duplicate", self: "self", not_signed_in: "signed_out", no_such_player: "missing", bad_reason: "invalid", note_too_long: "invalid", guest_not_allowed: "guest", some_new_code: "network" };
   for (const [code, reason] of Object.entries(reportCases)) {
     window.__ps_supabase__ = client(raising(code));
     const res = await S.reportPlayer("bob", "bio", "");
@@ -619,7 +683,7 @@ await runTest("storage-moderation.js maps every refusal and real PostgREST failu
         { user_id: "u1", username: "bob", avatar_path: "u1/1757800000000.webp", avatar_preset: null, bio: null, favorite_team: "KC",
           reports: [{ id: "r1", reason: "picture", note: null, reporter: "carol", created_at: "2026-09-14T10:00:00+00:00" }, null] },
         null,
-        { user_id: "u2", username: "dave", avatar_path: null, avatar_preset: "trophy", bio: "Hi", favorite_team: null, reports: null },
+        { user_id: "u2", username: "dave", guest: true, avatar_path: null, avatar_preset: "trophy", bio: "Hi", favorite_team: null, reports: null },
       ],
       error: null,
     };
@@ -627,12 +691,14 @@ await runTest("storage-moderation.js maps every refusal and real PostgREST failu
   const list = await S.fetchModQueue();
   assert(queueOptions?.get === true, "the queue is read as a GET");
   assert(JSON.stringify(list) === JSON.stringify([
-    { userId: "u1", username: "bob", avatarPath: "u1/1757800000000.webp", avatarUrl: "https://cdn.test/avatars/u1/1757800000000.webp", avatarPreset: null, bio: "", favoriteTeam: "KC",
+    // `guest` is false for anything that does not say true - an old function that does not send it yet
+    // must not make everyone look like a guest.
+    { userId: "u1", username: "bob", guest: false, avatarPath: "u1/1757800000000.webp", avatarUrl: "https://cdn.test/avatars/u1/1757800000000.webp", avatarPreset: null, bio: "", favoriteTeam: "KC",
       reports: [{ id: "r1", reason: "picture", note: "", reporter: "carol", createdAt: "2026-09-14T10:00:00+00:00" }] },
-    { userId: "u2", username: "dave", avatarPath: null, avatarUrl: null, avatarPreset: "trophy", bio: "Hi", favoriteTeam: null, reports: [] },
+    { userId: "u2", username: "dave", guest: true, avatarPath: null, avatarUrl: null, avatarPreset: "trophy", bio: "Hi", favoriteTeam: null, reports: [] },
   ]), `fetchModQueue maps to the app's shape and drops broken entries: ${JSON.stringify(list)}`);
 
-  const modCases = { not_moderator: "not_moderator", taken: "taken", blocked: "blocked", invalid: "invalid", no_such_player: "missing", bad_action: "invalid", PGRST202: "network" };
+  const modCases = { not_moderator: "not_moderator", taken: "taken", blocked: "blocked", invalid: "invalid", no_such_player: "missing", bad_action: "invalid", guest_not_allowed: "guest", PGRST202: "network" };
   for (const [code, reason] of Object.entries(modCases)) {
     window.__ps_supabase__ = client(raising(code));
     const res = await S.modAction("u1", "rename", "new_name");
@@ -833,6 +899,29 @@ await runTest("ModerationQueue lists each reported player's picture, bio and rep
   assert(actionsOf(cards[1]).join() === "Rename player,Dismiss" && cards[1].textContent.includes("No bio"), "dave has no picture or bio to act on");
   await click(bob.querySelector(".md-link"));
   assert(opened.join() === "bob", "the name opens the profile");
+});
+
+await runTest("ModerationQueue offers no Rename for a guest, and says why if one is asked for anyway", async () => {
+  // The report itself can no longer be filed, but every one filed before that gate is still in the queue -
+  // and Rename is what made them dangerous: it leaves a guest holding a real username on an anonymous session
+  // with no way to attach an email. mod_act refuses it; this is the screen not offering it in the first place.
+  const { auth, ids, signIn } = await queueWorld();
+  const { data } = await auth.auth.signInAnonymously();
+  const guestId = data.user.id;
+  const guestName = auth._profiles.get(guestId).username;
+  auth._reports.set("guest-legacy", {
+    id: "guest-legacy", reporter_id: ids.dave, target_id: guestId, reason: "username", note: "legacy",
+    status: "open", created_at: new Date(Date.now() - 7200e3).toISOString(),
+  });
+  await signIn("alice");
+
+  const c = await show(ModerationQueue, { onOpenProfile: () => {} });
+  const card = cardOf(c, guestName);
+  assert(card, `the guest's report is still listed, so it can be dismissed: ${[...c.querySelectorAll(".md-player")].map((x) => x.dataset.username)}`);
+  assert(!actionsOf(card).includes("Rename player"), `and Rename is not offered: ${actionsOf(card)}`);
+  assert(actionsOf(card).includes("Dismiss"), `but Dismiss is: ${actionsOf(card)}`);
+  // A real account in the same queue still has it, so this is a rule about guests and not a broken screen.
+  assert(actionsOf(cardOf(c, "bob")).includes("Rename player"), "a real account still offers Rename");
 });
 
 await runTest("ModerationQueue: Remove picture and Clear bio ask first, then act and resolve just their reports", async () => {

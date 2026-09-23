@@ -44,8 +44,11 @@ export function makeMockAuth() {
     const row = profiles.get(id);
     if (!row) return null;
     Object.assign(row, { username, guest: false });
+    // `guest` goes with the name on the boards that carry it, exactly as claim_username does - sou_runs and
+    // builds each have the column, and clearing it on the profile alone left an account that had traded up
+    // still wearing the guest chip on two boards, under its own name.
     for (const table of [runs, dailyRuns, souRuns, builds]) {
-      for (const r of table.values()) if (r.user_id === id) r.username = username;
+      for (const r of table.values()) if (r.user_id === id) Object.assign(r, { username, ...("guest" in r ? { guest: false } : {}) });
     }
     return row;
   };

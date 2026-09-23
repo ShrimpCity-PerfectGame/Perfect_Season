@@ -408,7 +408,11 @@ returns jsonb language sql stable security definer set search_path = public, pg_
     ) as row
     from public.profiles p
     where p.pvp_wins + p.pvp_losses > 0 and not p.guest
-    order by p.pvp_wins desc, p.pvp_losses asc, p.username asc
+    -- collate "C", like every other board here. A Supabase database is created en_US.UTF-8, whose default
+    -- collation is not code-point order, so a bare `p.username` put this board in a different order from every
+    -- other one AND from tests/mock-versus.mjs, which compares in JavaScript. PGlite is C, so no parity test
+    -- could see it; the assertion that sweeps for this in tests/economy-security never opened this file.
+    order by p.pvp_wins desc, p.pvp_losses asc, p.username collate "C" asc
     limit greatest(1, least(coalesce(p_limit, 20), 100))
   ) top;
 $$;

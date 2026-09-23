@@ -18,6 +18,10 @@ const REPORT_REFUSALS = {
 const MOD_REFUSALS = {
   not_moderator: "not_moderator", taken: "taken", blocked: "blocked", invalid: "invalid",
   no_such_player: "missing", bad_action: "invalid",
+  // Raised in two functions and, for a release, mapped in neither - REPORT_REFUSALS above got it and this did
+  // not. Renaming a guest strands the account (migration-moderation.sql), so mod_act refuses it, and unmapped
+  // that refusal told a moderator their connection had failed.
+  guest_not_allowed: "guest",
 };
 
 // PostgREST answers a request whose sign-in token has expired or doesn't verify with HTTP 401 (codes
@@ -25,7 +29,7 @@ const MOD_REFUSALS = {
 const signedOut = (res) => res?.status === 401 || /^PGRST30[123]$/.test(String(res?.error?.code || ""));
 
 // Reports a player. reason is one of profile-rules.mjs's REPORT_REASONS.
-//   { ok: true } | { ok: false, reason: "limit" | "duplicate" | "self" | "signed_out" | "missing" | "invalid" | "network" }
+//   { ok: true } | { ok: false, reason: "limit" | "duplicate" | "self" | "guest" | "signed_out" | "missing" | "invalid" | "network" }
 export async function reportPlayer(username, reason, note) {
   try {
     const res = await getClient().rpc("report_player", { p_username: username, p_reason: reason, p_note: note || "" });
@@ -50,7 +54,7 @@ const text = (v) => (typeof v === "string" ? v : v == null ? "" : String(v));
 
 // Open reports grouped by reported player, oldest first (the database orders them). null if they can't be
 // loaded - including for anyone who isn't a moderator.
-//   [{ userId, username, avatarPath, avatarUrl, avatarPreset, bio, favoriteTeam, reports: [{ id, reason, note, reporter, createdAt }] }]
+//   [{ userId, username, guest, avatarPath, avatarUrl, avatarPreset, bio, favoriteTeam, reports: [{ id, reason, note, reporter, createdAt }] }]
 export async function fetchModQueue() {
   try {
     const res = await getClient().rpc("mod_queue", {}, READ);
@@ -58,7 +62,9 @@ export async function fetchModQueue() {
     return res.data
       .filter((r) => r && r.user_id && r.username)
       .map((r) => ({
-        userId: r.user_id, username: text(r.username),
+        // The queue still lists a guest - an old report against one has to be dismissable - and this is how the
+        // screen knows not to offer Rename, which mod_act refuses anyway.
+        userId: r.user_id, username: text(r.username), guest: r.guest === true,
         avatarPath: r.avatar_path ?? null, avatarUrl: avatarUrl(r.avatar_path), avatarPreset: r.avatar_preset ?? null,
         bio: text(r.bio), favoriteTeam: r.favorite_team ?? null,
         reports: (Array.isArray(r.reports) ? r.reports : []).filter((x) => x && x.id).map((x) => ({

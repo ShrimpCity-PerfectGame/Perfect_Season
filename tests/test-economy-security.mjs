@@ -1100,36 +1100,20 @@ await runTest("a challenge code that hashes like the daily is refused, whatever 
 // them: the whole suite stayed green. Read as text, the way the GM cap refusal above already is.
 await runTest("the rules that only exist in the deployed files are in the deployed files", async () => {
   const index = readFileSync(new URL("../supabase/functions/submit-run/index.ts", import.meta.url), "utf8");
-  // profiles is a read-modify-write, so every write carries the revision it read. Without this a finished
-  // season is silently overwritten by the DNF that "Run it back" fires, while finished_codes keeps the code
-  // and the ledger keeps the coins - the one failure CLAUDE.md calls unrecoverable.
-  // Written as "what has to be true", not "what the code currently says". The first version of this matched
-  // one exact spelling: three real regressions walked past it - dropping the written.length check, so a lost
-  // update answers ok; removing the retry loop, which an indexOf-based ordering check waves through because a
-  // missing anchor is -1; and moving the .eq onto the READ, where it guards nothing - while two harmless
-  // rewrites (`const rev = row.rev || 0`, `??` for `||`) turned it red.
-  const applyFn = index.slice(index.indexOf("async function applyToProfile"), index.indexOf("// ---", index.indexOf("async function applyToProfile")));
-  assert(applyFn.length > 200, "applyToProfile is where it was");
-  const upd = applyFn.indexOf('.update(');
-  const cas = applyFn.indexOf('.eq("rev"', upd);
-  assert(upd > 0 && cas > upd, "the rev guard is on the UPDATE, not on the read before it");
-  assert(/rev["']?\s*:\s*[^,}]*\+\s*1/.test(applyFn), "and the update bumps rev, so the next writer sees the change");
-  // A compare-and-set that nobody checks the result of is not a compare-and-set: the update has to be able
-  // to match zero rows, and that has to be what sends it round the loop again.
-  assert(/\.select\(/.test(applyFn.slice(cas, cas + 200)), "the update returns what it wrote, so a miss is visible");
-  // A compare-and-set nobody checks the result of is not a compare-and-set. Rather than matching one
-  // spelling of the check, this takes the name the update's rows are bound to and requires the ok:true
-  // return to sit behind a condition that mentions it - however that condition is written.
-  const bound = /const \{\s*data:\s*(\w+)[^}]*\}\s*=\s*await service[\s\S]{0,200}?\.eq\("rev"/.exec(applyFn);
-  assert(bound, "the update's rows are bound to a name");
-  const okAt = applyFn.indexOf("ok: true");
-  assert(okAt > 0, "there is a success return");
-  const guard = applyFn.slice(Math.max(0, okAt - 220), okAt);
-  assert(new RegExp(`if\\s*\\([^)]*\\b${bound[1]}\\b`).test(guard),
-    `an update that matched nothing must not read as success - ok:true is not guarded on ${bound[1]}`);
-  const loop = applyFn.indexOf("for (");
-  assert(loop >= 0 && loop < upd, "all of it inside the retry loop");
-
+  // profiles is a read-modify-write, and every write carries the revision it read - without it a finished
+  // season is silently overwritten by the DNF "Run it back" fires, while finished_codes keeps the code and the
+  // ledger keeps the coins, which CLAUDE.md calls the one unrecoverable failure.
+  //
+  // That used to be asserted HERE, as text, and it is worth recording what that was worth. The assertion took
+  // the name the update's rows are bound to and required `ok: true` to sit behind a condition mentioning it -
+  // however written. So `if (written)` passed, and PostgREST answers a zero-row update with `data: []`, which
+  // is truthy: a lost update would have answered ok. `if (written.length >= 0)` passed. `attempt < 5` cut to
+  // `attempt < 1` passed. And rewriting `for` as `while`, which changes nothing at all, failed.
+  //
+  // tests/test-submit-run-edge.mjs runs the function instead, through tests/edge-harness.mjs, with another
+  // write landing between its read and its write. Measured against these same six edits: it catches all five
+  // real ones and ignores the harmless rewrite; this assertion caught two and fired on the harmless one.
+  //
   // Every username tiebreak in the Stats SQL sorts collate "C", because tests/helpers.mjs's JS mirror compares
   // code points and a Supabase database is created en_US.UTF-8. PGlite is C, so the parity test cannot see a
   // missing one - best_win_pct and most_drafted were both left out of the original sweep and nothing noticed.
@@ -1137,10 +1121,20 @@ await runTest("the rules that only exist in the deployed files are in the deploy
   // Per CLAUSE, not per line. Asking only whether `collate "C"` appears somewhere on the line missed any
   // removal on the four lines that carry two of them - including both most_drafted functions, where dropping
   // `name collate "C"` stayed green because `team collate "C"` survived beside it.
+  // Every migration with an ordering in it. The list used to be two files, and migration-versus.sql was the
+  // one it never opened - so the 1v1 board ordered by a bare `p.username`, which on production's en_US.UTF-8
+  // is a different order from every other board AND from the mock it is parity-tested against. PGlite's
+  // collation is C, so no parity test could ever have seen it.
   const files = {
     "migration-runs-log.sql": runs,
     "migration-moderation.sql": readFileSync(new URL("../supabase/migration-moderation.sql", import.meta.url), "utf8"),
+    "migration-versus.sql": readFileSync(new URL("../supabase/migration-versus.sql", import.meta.url), "utf8"),
+    "migration-profiles.sql": readFileSync(new URL("../supabase/migration-profiles.sql", import.meta.url), "utf8"),
+    "migration-shop.sql": readFileSync(new URL("../supabase/migration-shop.sql", import.meta.url), "utf8"),
   };
+  // Measured, across the five files below. 22 of them were in the original sweep's two files; the 23rd is
+  // versus_top, which this list never opened.
+  const TEXT_ORDERINGS = 23;
   const uncollated = [];
   let clauses = 0;
   for (const [file, text] of Object.entries(files)) {
@@ -1155,7 +1149,10 @@ await runTest("the rules that only exist in the deployed files are in the deploy
       }
     }
   }
-  assert(clauses >= 15, `enough text orderings to be checking the right thing: ${clauses}`);
+  // The exact number, not a floor. A floor only asks whether the clauses that REMAIN collate, so deleting a
+  // whole tiebreak lowered the count and passed - the count went down, no violation was added, and a board
+  // quietly stopped being fully tiebroken. Changing this number is a decision: add an ordering and say so.
+  assert(clauses === TEXT_ORDERINGS, `${clauses} text orderings across these files, expected ${TEXT_ORDERINGS} - add or remove one deliberately`);
   assert(uncollated.length === 0, `every one of them collates:\n  ${uncollated.join("\n  ")}`);
 });
 

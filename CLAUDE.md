@@ -174,10 +174,15 @@ parts that are unlike every other mode:
   against a board already re-spun away, `replayMatch` dropped it silently, and the roster came out with a hole
   in it. A match that still cannot be graded is **abandoned by the function**, not retried forever: one match
   instead of the feature.
-- **`match-pick` is executed by `tests/test-versus-edge.mjs`**, through a harness that bundles the real
-  `index.ts` and stubs only Deno and the query shapes it uses. Neither Edge Function was run by anything before
-  2.0; their source was read as text, and the first real run of this one found a `ReferenceError` no string
-  could have caught. Prefer adding to it over asserting on the file's characters.
+- **Both Edge Functions are executed** (v2.0.0), by `tests/test-versus-edge.mjs` and
+  `tests/test-submit-run-edge.mjs`, through `tests/edge-harness.mjs` - it bundles the real `index.ts` with
+  esbuild, points the `npm:@supabase/supabase-js@2` import at a stub, gives it a `Deno` with `env` and `serve`,
+  and runs it over a store the test supplies. Neither was run by anything before 2.0; their source was read as
+  text, and the first real run of `match-pick` found a `ReferenceError` no string could have caught. Measured
+  on `applyToProfile`'s six known edits, the executed test catches all five real regressions and ignores the
+  harmless rewrite; the source-text assertion it replaced caught two and fired on the harmless one.
+  **Prefer adding to those over asserting on a file's characters.** The stub throws by name on a query shape it
+  does not know, so a new call in a function is a loud failure rather than a silent `undefined`.
 - **Eight boards, sixteen picks**, and every board offers that team's players, its defense in each year of the
   era and its kicker - a defense can go fifth and a kicker first. A board that cannot serve *both* players is
   skipped before it is dealt (VERSUS.md 8): 33 of the 160 boards hold one quarterback or one tight end, so two
@@ -478,7 +483,8 @@ profile, so it can't be spoofed) and refuse a build with a made-up position or a
 NaN build used to crash the Stats screen for everyone). Since
 v1.11.0 there's one more writer of `profiles`, and only of `username`: a moderator's rename (`mod_act`
 in `migration-moderation.sql`), which rewrites the username snapshots in `runs`, `daily_runs`,
-`sou_runs` and `builds` too. submit-run's `profileToRow` never writes `username`, so the two can't
+`sou_runs` and `builds` too - and **never targets a guest** (v2.0.0), because a renamed one is left holding a
+real name on an anonymous session that can never have an email attached to it. submit-run's `profileToRow` never writes `username`, so the two can't
 overwrite each other.
 
 **Profiles (v1.11.0) - the rules that matter most; `PROFILES.md` has everything else.**
