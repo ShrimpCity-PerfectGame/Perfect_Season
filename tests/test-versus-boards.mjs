@@ -11,6 +11,7 @@ import { assert, runTest } from "./helpers.mjs";
 import { initGameData, BOARDS, SLOTS, WINDOWS, QB_WEIGHT, effectiveRating } from "../game-logic.mjs";
 import {
   initVersusData, VERSUS_SLOTS, MATCH_BOARDS, MATCH_PICKS, SLOT_WORTH, AVERAGE_RATING,
+  DST_WEIGHT, DST_WORTH, SLOT_WEIGHT_TOTAL, sideScore,
   optionsOn, unitsOn, optionId, optionFits, optionValue, turnAt, firstPickerOn,
   boardServesBoth, replayMatch, autoPick, openSlots, matchResult, footballFinal, rosterScore, SCORED_SLOTS,
   respinBoard, respinsLeft, MATCH_RESPINS, firstPickerOn as leadOn,
@@ -120,20 +121,33 @@ await runTest("a defense and a kicker are each worth exactly one roster slot", a
   assert(Math.abs(SLOT_WORTH - 1 / 7.25) < 1e-9, `SLOT_WORTH is 1/7.25, got 1/${(1 / SLOT_WORTH).toFixed(4)}`);
   const board = optionsOn("BAL|1");
   const dst = board.find((o) => o.kind === "dst");
+  const kick = board.find((o) => o.kind === "k");
+  // A kicker is one ordinary slot, and is scored inside your own roster.
+  assert(Math.abs(optionValue(kick, "K", "fantasy") - (kick.rating - AVERAGE_RATING) / 7.25) < 1e-9,
+    "a kicker is worth what it is above average, at one slot's weight");
+  // A defense is DST_WEIGHT of them, because a board carries exactly one of them and the pick has no choice
+  // in it - see the constant. This used to assert one slot, which is the thing that was changed.
   const asDefense = optionValue(dst, "DST", "fantasy");
-  assert(Math.abs(asDefense - (dst.rating - AVERAGE_RATING) / 7.25) < 1e-9, "a defense is worth what it is above average");
+  assert(Math.abs(asDefense - (dst.rating - AVERAGE_RATING) * DST_WEIGHT / 7.25) < 1e-9,
+    `a defense is worth what it is above average, at DST_WEIGHT: ${asDefense.toFixed(3)}`);
   const rb = board.find((o) => o.kind === "player" && o.pos === "RB");
   const asBack = optionValue(rb, "RB", "fantasy");
-  const sameEdge = { ...dst, rating: rb.rating };
-  assert(Math.abs(optionValue(sameEdge, "DST", "fantasy") - asBack) < 1e-9,
-    `equal ratings are equal points: back ${asBack.toFixed(3)} vs defense ${optionValue(sameEdge, "DST", "fantasy").toFixed(3)}`);
+  const sameEdge = { ...kick, rating: rb.rating };
+  assert(Math.abs(optionValue(sameEdge, "K", "fantasy") - asBack) < 1e-9,
+    `equal ratings are equal points for a kicker: back ${asBack.toFixed(3)} vs kicker ${optionValue(sameEdge, "K", "fantasy").toFixed(3)}`);
   // A quarterback carries the roster's extra weight, so the same distance from average counts for QB_WEIGHT
   // times as much - in both directions. (A bad quarterback hurts more than a bad defense, which is the point.)
   const qb = board.find((o) => o.kind === "player" && o.pos === "QB");
   const qbRating = effectiveRating("QB", qb, "fantasy");
+  // Against a KICKER, which is the one ordinary slot among the two added kinds - the defense carries
+  // DST_WEIGHT now, so it is no longer the yardstick for "one slot".
+  const asKickerWouldBe = optionValue({ ...kick, rating: qbRating }, "K", "fantasy");
+  assert(Math.abs(optionValue(qb, "QB", "fantasy") / asKickerWouldBe - QB_WEIGHT) < 1e-9,
+    `a quarterback counts ${QB_WEIGHT}x, got ${(optionValue(qb, "QB", "fantasy") / asKickerWouldBe).toFixed(4)}`);
+  // ...and the defense counts DST_WEIGHT, measured the same way.
   const asDefenseWouldBe = optionValue({ ...dst, rating: qbRating }, "DST", "fantasy");
-  assert(Math.abs(optionValue(qb, "QB", "fantasy") / asDefenseWouldBe - QB_WEIGHT) < 1e-9,
-    `a quarterback counts ${QB_WEIGHT}x, got ${(optionValue(qb, "QB", "fantasy") / asDefenseWouldBe).toFixed(4)}`);
+  assert(Math.abs(asDefenseWouldBe / asKickerWouldBe - DST_WEIGHT) < 1e-9,
+    `a defense counts ${DST_WEIGHT}x one slot, got ${(asDefenseWouldBe / asKickerWouldBe).toFixed(4)}`);
 });
 
 await runTest("a one-quarterback board can't serve two players who both need one", async () => {
@@ -478,8 +492,8 @@ await runTest("the result is the raw numbers, and the same every time", async ()
   const vsStrong = matchResult({ code: "RESULT1", format: "fantasy", host: state.roster.host, guest: stronger });
   const vsWeak = matchResult({ code: "RESULT1", format: "fantasy", host: state.roster.host, guest: weaker });
   assert(vsStrong.host.score < vsWeak.host.score, "a better defense lowers the other roster's score");
-  assert(Math.abs((vsWeak.host.score - vsStrong.host.score) - 80 * SLOT_WORTH) < 0.15,
-    `by exactly what it is worth: ${(vsWeak.host.score - vsStrong.host.score).toFixed(2)} for 80 rating points`);
+  assert(Math.abs((vsWeak.host.score - vsStrong.host.score) - 80 * DST_WORTH) < 0.15,
+    `by exactly what it is worth: ${(vsWeak.host.score - vsStrong.host.score).toFixed(2)} for 80 rating points at DST_WEIGHT ${DST_WEIGHT}`);
   assert(vsStrong.host.roster === vsWeak.host.roster, "and never touches your own seven picks");
 });
 
@@ -525,6 +539,36 @@ await runTest("a roster's score is its seven picks, and the kicker is one of the
   assert(rosterScore(weak, "fantasy") > 0, "and a bad one never makes a score negative");
   // The defense is not in it - it is the one pick that acts on the other roster.
   assert(rosterScore({ ...roster, DST: { ...roster.DST, rating: 1 } }, "fantasy") === mine, "the defense doesn't touch your own score");
+});
+
+await runTest("a defense is worth more than one ordinary slot, and the two places that say so agree", async () => {
+  // Found by playing a real duel: a finished match showed the two defenses worth -0.1 and -0.9, which is
+  // nothing against a median margin near 4.7. The cause is structural rather than arithmetic - a board carries
+  // exactly ONE defense, so the pick has no choice in it, while a player slot picks the best of about twenty.
+  // Measured over the pool: the best player on a board sits 62 rating points above the player median, the best
+  // defense only 14 above the defense median. DST_WEIGHT is the correction, and the numbers behind the value
+  // chosen are on the constant.
+  assert(DST_WEIGHT > 1, `a defense carries more than one slot's weight: ${DST_WEIGHT}`);
+  assert(Math.abs(DST_WORTH - DST_WEIGHT / SLOT_WEIGHT_TOTAL) < 1e-12, "DST_WORTH is the weight over the total");
+
+  // The two places a defense is valued have to agree, or the clock's auto-pick ranks it by a number the match
+  // is not scored by - which is the bug capFlex has on its sibling and the reason to check it here.
+  const dst = optionsOn("KC|3").find((o) => o.kind === "dst");
+  assert(dst, "a board has a defense");
+  const ranked = optionValue(dst, "DST", "fantasy");
+  // Real options, because rosterScore reads a player's own fields to rate a flex.
+  const pool = optionsOn("KC|3");
+  const pick = (slot) => pool.find((o) => optionFits(o, slot));
+  const mine = Object.fromEntries(VERSUS_SLOTS.map((s) => [s, pick(s)]));
+  assert(VERSUS_SLOTS.every((s) => mine[s]), "a full roster off one board, for the arithmetic");
+  const theirs = { ...mine, DST: dst };
+  const scored = sideScore(mine, theirs, "fantasy").against;
+  assert(Math.abs(ranked - scored) < 0.06, `what a defense is worth when ranked (${ranked.toFixed(3)}) is what it takes off a score (${scored.toFixed(3)})`);
+
+  // A kicker is still one ordinary slot - it is scored inside your own roster, not against theirs.
+  const k = optionsOn("KC|3").find((o) => o.kind === "k");
+  const kv = optionValue(k, "K", "fantasy");
+  assert(Math.abs(kv - (k.rating - AVERAGE_RATING) * SLOT_WORTH) < 1e-9, "a kicker is worth one slot, unchanged");
 });
 
 console.log("test-versus-boards.mjs done");

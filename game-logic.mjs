@@ -307,10 +307,17 @@ export function capLeftFor(roster, { gm, format } = {}) {
 // Mirrors reroll()'s pool selection exactly (same RNG derivation, same match() filter) - shared
 // so the client's live reroll and the server's replay/legality check can never drift apart.
 // Returns the picked board key, or null if no candidate exists (same as a no-op reroll).
-export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, drafted, open, cap = null }) {
+// `hasOption` is what counts as a board worth landing on, and it is injectable because 1v1 answers it
+// differently: its boards carry a defense and a kicker as well as players (versus-pool.json), and its `drafted`
+// is a set of versus-logic optionIds rather than player ids. Left as the default, a duel's re-spin asked a
+// question about players only - so a roster whose last open slot was DST or K matched NO board at all (0 of
+// 160, measured) and was told "There's no other board to spin to" about boards that every one of which could
+// have served it. The same line also never matched anything as taken, a number against a set of strings, so a
+// re-spin could land on a board with nothing left on it.
+export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, drafted, open, cap = null, hasOption = boardHasOption }) {
   const match = (key) => {
     const [t, w] = key.split("|");
-    if (shown.has(key) || !boardHasOption(key, drafted, open, cap)) return false;
+    if (shown.has(key) || !hasOption(key, drafted, open, cap)) return false;
     if (kind !== "team") return t === spinTeam;          // same team, another era: never a repeat
     return Number(w) === spinW;
   };

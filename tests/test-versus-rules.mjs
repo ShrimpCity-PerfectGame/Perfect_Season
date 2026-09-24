@@ -8,10 +8,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, runTest } from "./helpers.mjs";
-import { initGameData, SLOTS } from "../game-logic.mjs";
+import { initGameData, SLOTS, BOARDS, seededSequence } from "../game-logic.mjs";
 import {
   initVersusData, decideMove, replayMatch, optionsOn, optionId, optionFits, openSlots,
   VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, matchResult, pickId, optionValue,
+  respinBoard, boardServes,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -355,6 +356,49 @@ await runTest("a match plays to the end, powerups and all, and the server grades
     `the higher score won: ${JSON.stringify(result)}`);
   assert(m.move("host", { claim: "clock" }, m.deadline + 1).reason === "already_finished",
     "and a finished match takes no more moves");
+});
+
+await runTest("a re-spin finds a board when all you still need is a defense or a kicker", async () => {
+  // Found by playing a real duel: re-spinning with only the defense left said "There's no other board to spin
+  // to" - about boards every single one of which carries a defense. respinBoard leans on game-logic's
+  // rerollCandidate, whose board test knew only about PLAYERS: fits(pos, "DST") is false for every player
+  // alive, so 0 of 160 boards qualified. The same call also passed a set of versus optionIds where that
+  // function expected raw player ids, so nothing ever counted as taken either and a re-spin could land on a
+  // board that had already been stripped.
+  const empty = () => Object.fromEntries(VERSUS_SLOTS.map((s) => [s, null]));
+  const filler = { kind: "player", id: -1, season: 2020, pos: "QB", rating: 80 };
+
+  for (const only of ["DST", "K"]) {
+    const roster = empty();
+    for (const s of VERSUS_SLOTS) if (s !== only) roster[s] = filler;
+    const open = openSlots(roster);
+    assert(open.length === 1 && open[0] === only, `the roster needs only ${only}: ${JSON.stringify(open)}`);
+    // Every board can serve it - that is the premise the refusal contradicted.
+    const serving = Object.keys(BOARDS).filter((k) => boardServes(k, new Set(), open, null)).length;
+    assert(serving === Object.keys(BOARDS).length, `every board carries a ${only}: ${serving} of ${Object.keys(BOARDS).length}`);
+    for (const kind of ["team", "era"]) {
+      const got = respinBoard({ code: "ABC123", kind, pickNo: 15, key: "KC|3", seq: seededSequence("ABC123"),
+        used: new Set(), taken: new Set(), roster, otherRoster: empty() });
+      assert(got, `a ${kind} re-spin finds a board when only ${only} is open`);
+      assert(boardServes(got, new Set(), open, null), `and it is one that can serve them: ${got}`);
+    }
+  }
+
+  // ...and `taken` is honoured, which it was not: a board with nothing left on it is not a candidate.
+  const roster = empty();
+  roster.QB = filler;
+  const open = openSlots(roster);
+  const key = "KC|3";
+  const stripped = new Set(optionsOn(key).map(optionId));
+  assert(!boardServes(key, stripped, open, null), "a board whose every option is taken serves nobody");
+  let landedOnStripped = 0;
+  for (let i = 0; i < 40; i++) {
+    const got = respinBoard({ code: `STRIP${i}`, kind: "era", pickNo: 3, key, seq: seededSequence(`STRIP${i}`),
+      used: new Set(), taken: stripped, roster, otherRoster: empty() });
+    if (got === key) landedOnStripped++;
+    if (got) assert(boardServes(got, stripped, open, null), `a re-spin never lands on a board with nothing left: ${got}`);
+  }
+  assert(landedOnStripped === 0, `and never on the stripped board itself: ${landedOnStripped} times`);
 });
 
 console.log("test-versus-rules.mjs done");

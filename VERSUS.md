@@ -277,7 +277,7 @@ the draft ever reaching a slot it can't fill.
 
 ```
 your score = the weighted mean of your SEVEN picks (QB ×1.25, the kicker as one more ordinary slot)
-             − (their defense − 65) × SLOT_WORTH
+             − (their defense − 65) × DST_WORTH        (DST_WEIGHT ×2 of one ordinary slot)
 higher score wins, every time; an exact tie is a tie
 ```
 
@@ -289,10 +289,32 @@ tight end does, and nothing on the screen calls it a penalty. The consequence wo
 other anyway.
 
 `SLOT_WORTH` is `1 / (QB_WEIGHT + 6)` — **precisely what one ordinary slot is worth** in the weighted mean
-above, because that is exactly what the defense is: one of your eight picks. Nothing is tuned by feel. It puts
-the best defense in the data (112.7) at **6.58 points** off the opponent and the worst (29.4) at **4.91 back**,
-against a measured median margin of 4.8 points between two rosters drafted off the same boards (p90 13.8) — so
-both picks can decide a close match, which they should, while the six players still decide most of them.
+above. The kicker is priced at exactly that. **The defense is priced at `DST_WEIGHT` of it, and that one IS
+tuned** (v2.0.1), for a reason that is structural rather than arithmetic.
+
+A board carries exactly **one** defense, so the pick has no choice in it, while a player slot picks the best of
+about twenty. Measured over the pool: the best player on a board sits **62 rating points above the player
+median**, the best defense only **14 above the defense median**. At equal weight the defense was therefore the
+one pick of eight that could barely move a match — a real duel finished with the two defenses worth −0.1 and
+−0.9 against a median margin of 4.7, which is what prompted this.
+
+Measured over 250 matches with both sides taking the most valuable option every turn:
+
+| `DST_WEIGHT` | the two defenses differ by | the defense decides the winner |
+|---|---|---|
+| ×1 (to v2.0.0) | 1.35 points | 8.0% of matches |
+| ×1.5 | 2.03 | 13.2% |
+| **×2 (now)** | **2.70** | **14.8%** |
+| ×3 | 4.06 | 20.4% |
+
+×2 roughly doubles the felt gap and takes the defense from deciding one match in twelve to one in seven,
+without letting it outweigh the seven picks that are actually chosen. **Raising it further buys less each time
+and buys luck rather than skill**, because the pick has no agency in it: if the defense should be more
+*interesting* rather than merely heavier, the change is to offer more than one per board, which is a design
+question and not this constant.
+
+`optionValue` and `sideScore` must both use `DST_WORTH` or the clock's auto-pick ranks a defense by a number
+the match is not scored by — `tests/test-versus-boards.mjs` holds the two together.
 
 Those two figures were 7.5 and 5.6 here until the review pass measured them: they were computed as `1/6.25`,
 before the kicker moved into the weighted mean and made it `1/7.25`. Measured rather than derived, a defense or

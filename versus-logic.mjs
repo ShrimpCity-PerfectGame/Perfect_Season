@@ -31,10 +31,31 @@ export const AVERAGE_RATING = 65;
 // weak one lowers your score the way a weak tight end does, and nothing on the screen calls it a penalty.
 // The defense is the eighth and is not here, because it is the one pick that acts on the OTHER roster.
 export const SCORED_SLOTS = [...SLOTS, "K"];
-// What one ordinary slot is worth in that mean: 1 / (QB_WEIGHT + 6). The defense is worth exactly that, since
-// it is exactly one of the eight picks. Not a tuned number.
+// What one ordinary slot is worth in that mean: 1 / (QB_WEIGHT + 6). Not a tuned number.
 export const SLOT_WEIGHT_TOTAL = QB_WEIGHT + SCORED_SLOTS.length - 1;
 export const SLOT_WORTH = 1 / SLOT_WEIGHT_TOTAL;
+// ...and what a DEFENSE is worth, which is not one ordinary slot. This one IS tuned, and the reason is
+// structural rather than arithmetic: a board carries exactly ONE defense, so the pick has no choice in it,
+// while a player slot picks the best of about twenty. Measured over the pool, the best player on a board sits
+// 62 rating points above the player median and the best defense only 14 above the defense median - so at equal
+// weight the defense is the one pick of eight that can barely move a match.
+//
+// Measured over 250 matches with both sides taking the most valuable option every turn:
+//
+//   weight   the two defenses differ by   the defense decides the winner
+//   x1       1.35 points                  8.0% of matches
+//   x1.5     2.03                        13.2%
+//   x2       2.70                        14.8%     <- here
+//   x3       4.06                        20.4%
+//
+// At x1 the two defenses typically differed by 1.35 against a median margin of 4.70, which is why a finished
+// match showed a defense "worth" -0.1 and -0.9 and felt like nothing. x2 roughly doubles the gap and takes the
+// defense from deciding one match in twelve to one in seven, without letting it dominate the seven picks that
+// are actually chosen. Raising it further buys less each time and buys LUCK rather than skill, because the
+// pick has no agency in it - if the defense should be more interesting rather than merely heavier, the change
+// is to offer more than one per board, which is a design question and not this constant.
+export const DST_WEIGHT = 2;
+export const DST_WORTH = DST_WEIGHT / SLOT_WEIGHT_TOTAL;
 // The gap at which one roster is simply better, borrowed from the season sim's SPREAD so the two modes agree
 // about what a decisive margin looks like. Only the SIZE of the football final scales with it - never the winner.
 export const DECISIVE_GAP = 20;
@@ -110,7 +131,10 @@ export function optionFits(o, slot) {
 // Measured against an average option, for all three kinds, so the three are comparable: a player's raw rating
 // carries a constant a defense's does not.
 export function optionValue(o, slot, format) {
-  if (o.kind === "dst" || o.kind === "k") return (o.rating - AVERAGE_RATING) * SLOT_WORTH;
+  // The defense is worth DST_WORTH, here as well as in sideScore - the two have to agree or the clock's
+  // auto-pick, and every "best available" hint, would rank a defense by a number the match is not scored by.
+  if (o.kind === "dst") return (o.rating - AVERAGE_RATING) * DST_WORTH;
+  if (o.kind === "k") return (o.rating - AVERAGE_RATING) * SLOT_WORTH;
   const weight = slot === "QB" ? QB_WEIGHT : 1;
   return (effectiveRating(slot, o, format) - AVERAGE_RATING) * (weight / SLOT_WEIGHT_TOTAL);
 }
@@ -406,7 +430,7 @@ export function sideScore(mine, theirs, format) {
   const own = rosterScore(mine, format);
   if (own == null) return null;
   // Their defense is subtracted from YOUR score, because that is what a defense does (VERSUS.md 6).
-  const against = theirs.DST ? (theirs.DST.rating - AVERAGE_RATING) * SLOT_WORTH : 0;
+  const against = theirs.DST ? (theirs.DST.rating - AVERAGE_RATING) * DST_WORTH : 0;
   return { roster: round1(own), against: round1(against), score: round1(own - against) };
 }
 
@@ -494,11 +518,16 @@ export function matchResult({ code, format, host, guest }) {
 export function respinBoard({ code, kind, pickNo, key, seq, used, taken, roster, otherRoster }) {
   const { first } = turnAt(pickNo, code);
   const shown = new Set([...seq, ...used]);
+  const open = openSlots(roster);
   const candidate = rerollCandidate({
     seed: code, kind: kind === "era" ? "years" : "team",
     // Salted by the pick rather than the board, so two re-spins on the same board can't land on each other.
     seqIdx: pickNo, spinTeam: key.split("|")[0], spinW: Number(key.split("|")[1]),
-    shown, drafted: taken, open: openSlots(roster),
+    shown, drafted: taken, open,
+    // A 1v1 board is players AND a defense AND a kicker, and `taken` here is a set of optionIds. game-logic's
+    // default asks about players only and compares ids to strings, so this used to refuse every board on earth
+    // to a roster that only needed a defense, and never noticed one that was already stripped.
+    hasOption: (k, drafted, slots) => boardServes(k, drafted, slots, null),
   });
   if (!candidate) return null;
   if (!first) return candidate; // theirs alone

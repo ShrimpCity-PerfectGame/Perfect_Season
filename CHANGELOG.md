@@ -24,6 +24,20 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
+## [2.0.1] — unreleased
+
+### Fixed
+
+- **Re-spinning when all you need is a defense works.** It said there was no board to spin to, about boards
+  every one of which has a defense on it. The same bug meant a re-spin could also land on a board that had
+  already been picked clean.
+
+### Changed
+
+- **A defense matters twice as much.** One board carries one defense, so there's no choosing between them the
+  way there is with twenty players — which left the pick barely able to move a match. It now decides about one
+  duel in seven rather than one in twelve.
+
 ## [2.0.0] — 2026-09-24
 
 Gridspin's public release. No new modes — this is the pass that makes the game safe to point strangers at.
