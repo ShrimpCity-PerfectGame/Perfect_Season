@@ -196,6 +196,46 @@ await runTest("the opponent's screen shows the same board, and a pick lands on i
   assert([...rosters[1].querySelectorAll(".slot")].every((el) => el.dataset.filled === "0"), "and nothing on the opponent's");
 });
 
+await runTest("the player on the clock sees Your pick, and the one waiting does not", async () => {
+  // The announcement is per-screen, which no amount of testing latestEvent in isolation proves: it depends on
+  // which side THIS browser is, while the two screens read the same match rows.
+  // Opened the way the passing tests above open one - through the tile and the lobby - because that is the
+  // path the app actually supports, and a duel screen reached any other way is a test of the test.
+  await signUp("theta@x.test", "theta");
+  await goHome();
+  await clickMode(container, "Duel");
+  await flush();
+  await click(findButtonByText(container, "Open a lobby"));
+  await flush();
+  const code = versus().dataset.code;
+
+  await signUp("iota@x.test", "iota");
+  await flush();
+  const joined = await auth.rpc("join_match", { p_code: code });
+  assert(!joined.data.error, `the opponent joined: ${JSON.stringify(joined.data.error)}`);
+
+  const st = auth._versus._replay(code);
+  const leader = st.turn.side;                 // whoever leads board 1, decided by the match code
+  const email = { host: "theta@x.test", guest: "iota@x.test" };
+  const boom = () => container.querySelector(".vs-boom");
+  const said = () => container.querySelector(".vs-boom-title")?.textContent || null;
+
+  await openMatch(email[leader], code);
+  await flush(2);
+  assert(boom(), `the player on the clock gets an announcement (view ${versus()?.dataset?.view})`);
+  assert(said() === "Your pick", `saying whose it is: ${said()}`);
+  assert(boom().classList.contains("is-brief"), "in the short form - this happens eight times a match");
+  assert(boom().classList.contains("tone-turn"), "and in its own colour");
+  assert(container.querySelector('[aria-live="polite"]')?.textContent === "Your pick",
+    "and once as words, for a screen reader rather than a description of an animation");
+
+  // The player waiting, on the same rows.
+  const waiting = leader === "host" ? "guest" : "host";
+  await openMatch(email[waiting], code);
+  await flush(2);
+  assert(said() !== "Your pick", `the player waiting is not told it is theirs: ${said()}`);
+});
+
 await runTest("the follower spends a re-spin, and walks away to a board of their own", async () => {
   // The host has picked, so it is the opponent's turn - and a re-spin spent now is theirs alone (VERSUS.md 7),
   // which is the half of the rule that is easiest to get wrong and the only one visible on screen.

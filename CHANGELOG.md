@@ -24,7 +24,15 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
-## [2.0.1] — unreleased
+## [2.1.0] — unreleased
+
+### Added
+
+- **Your turn says so.** When a duel comes round to you it announces itself across the screen, the way a
+  powerup does — in the game's own lime, and briefly, since it happens eight times a match over a board you're
+  reading. The player waiting sees nothing; a powerup spent during your turn still speaks over it.
+
+## [2.0.1] — 2026-09-24
 
 ### Fixed
 

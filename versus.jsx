@@ -132,6 +132,16 @@ export const VERSUS_CSS = `
 .vs-boom.tone-spin{--vs-tone:#8FB0FF}
 .vs-boom.tone-dip{--vs-tone:#FFC46B}
 .vs-boom.tone-steal{--vs-tone:#C9A6FF}
+/* Lime, which is the game's own "this one is yours" colour everywhere else. */
+.vs-boom.tone-turn{--vs-tone:var(--accent)}
+/* Your turn is the same announcement at half the length and with a lighter wash behind it: it happens eight
+   times a match rather than twice, and it lands on a board you are in the middle of reading. Same keyframes,
+   so it is recognisably the same thing happening - only quicker. */
+.vs-boom.is-brief{animation-duration:1.2s;
+  background:radial-gradient(60% 45% at 50% 50%,rgba(6,10,22,.72),rgba(6,10,22,.34) 65%,rgba(6,10,22,0))}
+.vs-boom.is-brief .vs-boom-in{animation-duration:1.2s}
+.vs-boom.is-brief .vs-boom-icon{font-size:clamp(44px,13vw,80px)}
+.vs-boom.is-brief .vs-boom-title{font-size:clamp(34px,10vw,68px)}
 @keyframes vs-boom-bg{0%{opacity:0}10%{opacity:1}72%{opacity:1}100%{opacity:0}}
 @keyframes vs-boom-pop{
   0%{opacity:0;transform:scale(.72)}
@@ -369,9 +379,24 @@ function PowerupTrack({ left, label }) {
 //   text    the whole thing as a sentence, for the live region: a screen reader wants "ShrimpCity stole Tiki
 //           Barber", not a headline and a caption read as two unrelated fragments
 // `tone` tints the overlay, so the three powerups don't all land as the same wash of dark.
-export function latestEvent(match, state, nameOf) {
+// `side` is the VIEWER's, and it is what makes the turn announcement per-screen: a powerup is a fact about the
+// match and both players see the same one, but "your pick" is true for exactly one of them.
+export function latestEvent(match, state, nameOf, side = null) {
   if (!match || !state) return null;
   const out = [];
+  // Your turn, announced the way a powerup is - it was the quietest change on the screen and the one that most
+  // needs noticing, because a turn you have not noticed is a turn the clock is spending for you.
+  //
+  // Ordered just BEFORE any powerup spent on the same pick (`* 4 - 1` against their `* 4`), which is what keeps
+  // the two from fighting: the turn arrives, then whatever is spent during it announces itself over the top.
+  // The other order would have made your own re-spin silent, because the turn event would still be the newest
+  // thing and useFlash never repeats a key.
+  if (side && state.turn && !state.done) {
+    if (state.turn.side === side) {
+      out.push({ at: state.pickNo * 4 - 1, key: `turn:${state.pickNo}`, icon: "🎯", tone: "turn", brief: true,
+        title: "Your pick", detail: `Board ${state.boardIdx + 1} of ${MATCH_BOARDS}`, text: "Your pick" });
+    }
+  }
   for (const r of match.respins || []) {
     const era = r.kind === "era";
     const pu = POWERUPS.find((x) => x.id === (era ? "era" : "team"));
@@ -402,6 +427,9 @@ export function latestEvent(match, state, nameOf) {
 // the board, which is far too long for something covering the screen - and it has to be the same number as the
 // CSS, or the overlay either vanishes mid-animation or sits there finished.
 const FLASH_MS = 2400;
+// Your turn comes round eight times a match and a powerup twice at most, so the turn gets a shorter one: the
+// same language, half the time, over a board you are trying to read. Has to match the CSS, like FLASH_MS.
+const TURN_FLASH_MS = 1200;
 function useFlash(event) {
   const [shown, setShown] = useState(null);
   const seen = useRef(null);
@@ -409,7 +437,7 @@ function useFlash(event) {
     if (!event || event.key === seen.current) return undefined;
     seen.current = event.key;
     setShown(event);
-    const t = setTimeout(() => setShown(null), FLASH_MS);
+    const t = setTimeout(() => setShown(null), event.brief ? TURN_FLASH_MS : FLASH_MS);
     return () => clearTimeout(t);
   }, [event?.key]);
   return shown;
@@ -708,7 +736,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // whatever just happened.
   const mine = state && side ? powerupsFor(match, side) : null;
   const theirs = state && side ? powerupsFor(match, side === "host" ? "guest" : "host") : null;
-  const flash = useFlash(latestEvent(match, state, (s) => name(match, s)));
+  const flash = useFlash(latestEvent(match, state, (s) => name(match, s), side));
   // Armed, and still your turn. The effect below clears `stealing` when the turn moves, but an effect runs
   // after the frame it is reacting to: for that one frame their roster still said "Take one of theirs" and
   // its slots were still buttons. Read through `myTurn` at render time there is no such frame.
@@ -975,7 +1003,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           Tom Brady", not a description of an animation. */}
       <p className="vh" aria-live="polite">{flash ? flash.text : ""}</p>
       {flash ? (
-        <div className={`vs-boom tone-${flash.tone}`} key={flash.key} aria-hidden="true">
+        <div className={`vs-boom tone-${flash.tone} ${flash.brief ? "is-brief" : ""}`} key={flash.key} aria-hidden="true">
           <div className="vs-boom-in">
             <span className="vs-boom-icon">{flash.icon}</span>
             <p className="vs-boom-title">{flash.title}</p>

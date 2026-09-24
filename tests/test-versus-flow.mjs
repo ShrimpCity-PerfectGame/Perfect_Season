@@ -479,4 +479,45 @@ await runTest("a dip declared after a re-spin is the thing announced", async () 
   assert(latestEvent(old, state, nameOf).title === "Double dip", "a record with no turn on it still announces");
 });
 
+await runTest("your turn announces itself, to you and not to them, and a powerup still speaks over it", async () => {
+  // A turn change was the quietest thing on the screen and the one that most needs noticing - a turn you have
+  // not noticed is a turn the clock spends for you. It is announced the way a powerup is, with two differences
+  // that matter: it is per-VIEWER, because "your pick" is true for exactly one of the two, and it is shorter,
+  // because it happens eight times a match over a board you are reading.
+  setupDom();
+  const { latestEvent } = await loadModule("versus.jsx");
+  const nameOf = (side) => (side === "host" ? "alpha" : "beta");
+  const empty = { respins: [], dips: [], steals: [] };
+  const onClock = (side, pickNo = 5, boardIdx = 2) => ({ roster: { host: {}, guest: {} }, turn: { side }, pickNo, boardIdx, done: false });
+
+  // Whose screen it is decides whether it appears at all.
+  const mine = latestEvent(empty, onClock("host"), nameOf, "host");
+  assert(mine && mine.title === "Your pick", `the player on the clock is told: ${JSON.stringify(mine)}`);
+  assert(mine.brief === true, "and briefly - it is not a powerup");
+  assert(mine.detail === "Board 3 of 8", `with where they are: ${mine.detail}`);
+  assert(latestEvent(empty, onClock("guest"), nameOf, "host") === null, "the player waiting is told nothing");
+  assert(latestEvent(empty, onClock("host"), nameOf, null) === null, "and a screen with no side of its own is told nothing");
+
+  // It re-keys per pick, or it would announce once a match and then never again.
+  assert(latestEvent(empty, onClock("host", 5), nameOf, "host").key !== latestEvent(empty, onClock("host", 7), nameOf, "host").key,
+    "each turn is its own announcement");
+
+  // The ordering that matters: a powerup spent DURING your turn has to speak over it, or your own re-spin
+  // would be silent - useFlash never repeats a key, so whichever is newest is the only one that can be seen.
+  const spun = { ...empty, respins: [{ pickNo: 5, kind: "team", by: "host" }] };
+  assert(latestEvent(spun, onClock("host", 5), nameOf, "host").title === "Re-spin",
+    "a re-spin on your own turn is announced over it");
+  const robbed = { ...empty, steals: [{ at: 5, by: "guest", pickNo: 4, slot: "RB" }] };
+  assert(latestEvent(robbed, onClock("host", 5), nameOf, "host").title === "Stolen",
+    "and so is a steal that lands during it");
+
+  // ...and the turn AFTER a powerup still announces, which is the other half of the same ordering.
+  assert(latestEvent(spun, onClock("guest", 6), nameOf, "guest").title === "Your pick",
+    "the next turn is announced over the powerup before it");
+
+  // A finished match has no turn to announce.
+  assert(latestEvent(empty, { roster: { host: {}, guest: {} }, turn: null, done: true, pickNo: 17 }, nameOf, "host") === null,
+    "a finished match announces no turn");
+});
+
 console.log("test-versus-flow.mjs done");

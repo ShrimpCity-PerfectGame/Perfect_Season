@@ -180,6 +180,15 @@ walking away from the clock nearly free. Revisit it as a balance question, not a
 rules and refusals in section 7. All of them restart the clock — spending one is a turn's worth of thinking
 too, and all of them are spent on your own turn.
 
+**Your turn announces itself** (v2.1.0), through the same overlay a powerup uses — `latestEvent` takes the
+viewer's `side` and adds a "Your pick" event when the clock is theirs. Two things make it different from a
+powerup and both matter: it is **per-screen**, because "your pick" is true for exactly one of the two while a
+powerup is a fact about the match; and it is **shorter** (1.2s against 2.4s, a lighter wash, its own lime
+tint), because it happens eight times a match over a board you are reading rather than twice. It is ordered
+just *before* any powerup spent on the same pick (`pickNo * 4 - 1` against their `* 4`) — the other way round
+and your own re-spin would be silent, since `useFlash` never repeats a key and the turn would stay the newest
+event. The live region gets the words once, not a description of the animation.
+
 **Every refusal here is an HTTP status, and supabase-js turns any non-2xx into an `error` with the body behind
 `error.context`.** So `storage-versus.js`'s `playMove` has to read that body, exactly as `submitRun` does —
 without it every carefully-worded refusal in this section reaches the player as "couldn't reach the server",
