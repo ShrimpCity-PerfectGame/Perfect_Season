@@ -844,10 +844,14 @@ suite and still broke the live Leaderboard for every existing account.
   'drafting';`) - who leads which board is now seeded on the match code, so a match already under way would
   replay to a different board order than it was drafted from.
   v2.0.0's (the public release): re-run **`migration-runs-log.sql`**, **`migration-profiles.sql`**,
-  **`migration-moderation.sql`**, **`migration-wallet.sql`** and **`migration-versus.sql`**, in that order, then
-  **deploy the Edge Functions**, then the client. All five only add or replace objects, so the site keeps working
-  between them - versus included this time, since the drops it carried in v1.19.0 are all `if exists` and have
-  already run. Runs-log goes first, as it did in v1.11.0, and it has to: `player_profile` in migration-profiles.sql
+  **`migration-moderation.sql`**, **`migration-wallet.sql`**, **`migration-shop.sql`** and
+  **`migration-versus.sql`**, in that order, then **deploy the Edge Functions**, then the client. All six only
+  add or replace objects, so the site keeps working between them - versus included this time, since the drops it
+  carried in v1.19.0 are all `if exists` and have already run. **shop is easy to leave off and was**: the guest
+  gates on `shop_buy`, `equip_item` and `set_showcase` live there, so a list without it ships a client that
+  expects them to a database that never got them, and the shop stays open to guests with nothing on screen to
+  say so. `tests/test-migrations.mjs` runs the whole list from a bare `schema.sql` and holds it to naming every
+  migration in the repo, which is the check that would have caught it. Runs-log goes first, as it did in v1.11.0, and it has to: `player_profile` in migration-profiles.sql
   calls `player_stats(uuid)`, which only runs-log defines, and a `language sql` body is validated when it is
   created - so profiles-first fails outright on a database that doesn't already have it. It works on staging
   and production either way (both have had `player_stats` since v1.11.0) and fails on a new environment,

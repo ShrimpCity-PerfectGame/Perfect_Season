@@ -648,11 +648,28 @@ $$;
 revoke execute on function public.caller_is_guest() from public, anon;
 grant execute on function public.caller_is_guest() to authenticated;
 
+-- Whether the caller is an account that may hold pictures at all: one with a profile, that is not a guest.
+-- The guest half and the profile half are the same hole twice, and gating only the guest half left the second
+-- one open. An account signed in with Google has NO profile row until claim_username runs (v1.16.0) - it has
+-- no name, no profile screen, nothing for the Reports queue to act on, and `set_avatar` refuses it
+-- `not_signed_in` - and the bucket happily took ten files from it into a public bucket. Strictly worse than
+-- the guest case, since a guest at least has a name on it.
+--
+-- It is the rule `use_account_username` already states for the boards - "No profile, no board" - said about
+-- pictures. The dialog that blocks the screen until an account picks a name does not block the REST API.
+create or replace function public.caller_can_hold_avatars()
+returns boolean language sql stable security invoker set search_path = public, pg_temp as $$
+  select exists (select 1 from public.profiles p where p.id = auth.uid() and not p.guest);
+$$;
+revoke execute on function public.caller_can_hold_avatars() from public, anon;
+grant execute on function public.caller_can_hold_avatars() to authenticated;
+
 -- A signed-in player works only inside their own folder, "<their id>/...". A file they add, or rename, must
 -- be named exactly as the app names uploads - "<their id>/<10-16 digits>.webp|jpg|png", one level and
 -- nothing else (profile-rules.mjs's isOwnAvatarPath) - and adding one needs room in the folder. Adding or
--- replacing a file also requires uploads not to be paused, and the caller not to be a guest - replacing
--- counts for both, or either rule could be sidestepped by overwriting a picture already there. Reading and
+-- replacing a file also requires uploads not to be paused, and the caller to be an account that may hold
+-- pictures at all - replacing counts for both, or either rule could be sidestepped by overwriting a picture
+-- already there. Reading and
 -- deleting cover the whole folder, so anything already there can still be cleared out, by a former guest
 -- included. Supabase needs select as well as delete to delete an object.
 -- Moderators get their own policies in migration-moderation.sql.
@@ -668,7 +685,7 @@ create policy "players upload avatar files to their own folder" on storage.objec
     bucket_id = 'avatars'
     and name ~ '^[^/]+/[0-9]{10,16}\.(webp|jpg|png)$' and split_part(name, '/', 1) = auth.uid()::text
     and not coalesce((select f.enabled from public.site_flags f where f.key = 'uploads_paused'), false)
-    and not public.caller_is_guest()
+    and public.caller_can_hold_avatars()
     and public.avatar_folder_has_room()
   );
 
@@ -680,7 +697,7 @@ create policy "players update their own avatar files" on storage.objects
     bucket_id = 'avatars'
     and name ~ '^[^/]+/[0-9]{10,16}\.(webp|jpg|png)$' and split_part(name, '/', 1) = auth.uid()::text
     and not coalesce((select f.enabled from public.site_flags f where f.key = 'uploads_paused'), false)
-    and not public.caller_is_guest()
+    and public.caller_can_hold_avatars()
   );
 
 drop policy if exists "players delete their own avatar files" on storage.objects;

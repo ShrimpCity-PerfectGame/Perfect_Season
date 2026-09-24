@@ -58,6 +58,10 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **GM mode can't re-spin you into a board you can't afford anybody on either.** The dealer learned about
   the cap and the re-spin button didn't, so the one control you reach for to escape a dead board could hand
   you another one.
+- **An account that hasn't picked a name yet can't use the site as picture hosting either.** The same hole as
+  the guest one, one step further along — an account part-way through signing in with Google has no name at
+  all, and nothing stopped it uploading.
+- **A duel that has ended says so**, instead of telling a player they aren't in a match they're in.
 - **A season that can't be saved says so.** A malformed submission used to come back looking exactly like the
   connection being down, so the advice was to retry something that was never going to work.
 - **The daily can't be rehearsed through the app.** A challenge code can no longer be one that deals a daily's

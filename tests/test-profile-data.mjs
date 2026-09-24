@@ -580,6 +580,22 @@ await runTest("a guest cannot put a file in the avatars bucket, however it asks"
   await owner("update profiles set guest = false, username = 'expostguest' where id = $1", [GUEST]);
   assert(!(await insertFile(GUEST, mine)).error, "a guest that has kept its seasons uploads like any account");
   await owner("delete from storage.objects where name like $1", [`${GUEST}/%`]);
+
+  // The same hole, one step further along, and gating only the guest half left it open: an account signed in
+  // with Google has NO profile row until claim_username runs, so it is not a guest - it is less than one. No
+  // name, no profile screen, nothing for the Reports queue to act on, and set_avatar refuses it outright. The
+  // bucket took its files anyway. It is the rule use_account_username already states for the boards ("no
+  // profile, no board") said about pictures, and the dialog that blocks the screen until an account picks a
+  // name does not block the REST API.
+  const NAMELESS = uuid(78);
+  await addProviderAccount(db, NAMELESS);
+  assert((await owner("select count(*)::int as n from profiles where id = $1", [NAMELESS]))[0].n === 0, "it really has no profile row");
+  const nameless = await insertFile(NAMELESS, avatarFile(NAMELESS, 1));
+  assert(/row-level security/.test(nameless.error || ""), `an account with no profile cannot add a file either, got ${JSON.stringify(nameless)}`);
+  // ...and can once it claims one, which is the only thing that should change that.
+  await asUser(db, NAMELESS, () => db.query("select claim_username($1)", ["namedatlast"]));
+  assert(!(await insertFile(NAMELESS, avatarFile(NAMELESS, 1))).error, "and can once it has claimed a name");
+  await owner("delete from storage.objects where name like $1", [`${NAMELESS}/%`]);
 });
 
 await runTest("save_profile and set_avatar raise exactly the codes storage-profile.js has a reason for", async () => {

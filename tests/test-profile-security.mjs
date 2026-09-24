@@ -620,9 +620,11 @@ const EXPECTED_FUNCTIONS = {
   "new_guest_name()": [true, PG_TEMP_LAST, false, false],
   // Called by the avatars insert policy as the uploading player, so they need execute; anon never uploads.
   "avatar_folder_has_room()": [false, PG_TEMP_LAST, false, true],
-  // 2.0: the bucket's insert and update policies call it, so the player running them needs execute - and
-  // invoker, because profiles is publicly selectable and it should need nothing its caller doesn't have.
+  // 2.0: the bucket's insert and update policies call caller_can_hold_avatars, and storage-profile.js asks
+  // caller_is_guest to word the refusal - so the player running either needs execute. Invoker, because
+  // profiles is publicly selectable and neither should need anything its caller doesn't already have.
   "caller_is_guest()": [false, PG_TEMP_LAST, false, true],
+  "caller_can_hold_avatars()": [false, PG_TEMP_LAST, false, true],
   "handle_new_user()": [true, PG_TEMP_LAST, true, true],
   "is_moderator()": [true, PG_TEMP_LAST, true, true],
   "mod_act(p_user_id uuid, p_action text, p_new_name text)": [true, PG_TEMP_LAST, true, true],

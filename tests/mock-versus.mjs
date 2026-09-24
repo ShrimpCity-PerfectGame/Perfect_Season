@@ -169,9 +169,10 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     // NOT "no such match" - told `not_found`, the screen puts "That match doesn't exist." over a live board.
     if (state.versusReadFails) return httpError("could not read the match", 500);
     if (!m) return httpError("not_found", 404);
-    if (m.status !== "drafting") return httpError("not_your_match", 409);
+    // Who is asking, then what state the match is in - index.ts's order, for its reason.
     const side = sideOf(m, uid);
     if (!side) return httpError("not_your_match", 403);
+    if (m.status !== "drafting") return httpError("already_finished", 409);
 
     const changed = (payload) => { onMatchChange(m.id); return payload; };
     // Sixteen picks in and the row still says `drafting`: the grade, or the write recording it, did not go

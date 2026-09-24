@@ -111,9 +111,12 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   const { data: match, error: matchError } = await service.from("matches").select("*").eq("code", code).maybeSingle();
   if (matchError) return json({ error: "could not read the match" }, 500);
   if (!match) return json({ error: "no match", reason: "not_found" }, 404);
-  if (match.status !== "drafting") return json({ error: "not playing", reason: "not_your_match" }, 409);
+  // Who is asking, THEN what state the match is in. The other way round, a player posting into a match that
+  // had just finished - or one the handler had just abandoned, which the other screen does a beat later - was
+  // told "You're not in this match." about a match they were in. Two different facts deserve two answers.
   const side = sideOf(match, user.id);
   if (!side) return json({ error: "not your match", reason: "not_your_match" }, 403);
+  if (match.status !== "drafting") return json({ error: "not playing", reason: "already_finished" }, 409);
 
   const picks = await readPicks(service, match);
   const powerups = { respins: match.respins || [], dips: match.dips || [], steals: match.steals || [] };

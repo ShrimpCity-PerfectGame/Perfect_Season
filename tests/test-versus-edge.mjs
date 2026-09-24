@@ -106,7 +106,17 @@ await runTest("a finish that fails is picked up by the next request, from either
 
   // Twice is harmless: both screens notice the sixteenth pick at once, and finish_match says who got there first.
   const again = await invoke({ code: t.code }, { userId: onClock });
-  assert(again.status === 409, `a finished match answers not_your_match, not a second result: ${again.status}`);
+  assert(again.status === 409, `a finished match answers a refusal, not a second result: ${again.status}`);
+  // ...and it says the right thing. Both players ask, so the second one hears about a match that is over -
+  // which is not the same as "you're not in this match", the answer they used to get about a match they were
+  // in. The status check sat before the side check, so the two facts shared one word.
+  assert(again.body?.reason === "already_finished", `about a match that is over, not one they are not in: ${JSON.stringify(again.body)}`);
+  // A real third account, not an unknown id - an unknown id is refused as unauthorized before any of this.
+  await t.sb.auth.signUp({ email: "third@x.test", password: "password1", options: { data: { username: "thirdly" } } });
+  const outsider = (await t.sb.auth.signInWithPassword({ email: "third@x.test", password: "password1" })).data.user.id;
+  const stranger = await invoke({ code: t.code }, { userId: outsider });
+  assert(stranger.status === 403 && stranger.body?.reason === "not_your_match",
+    `while somebody genuinely not in it still hears that: ${stranger.status} ${JSON.stringify(stranger.body)}`);
 });
 
 await runTest("a match that cannot be graded is ended by the function, not left drafting", async () => {
@@ -127,6 +137,11 @@ await runTest("a match that cannot be graded is ended by the function, not left 
   assert(m.status === "abandoned" && !m.result, `and ends the match: ${m.status}`);
   const after = [host.pvp_wins || 0, host.pvp_losses || 0, guest.pvp_wins || 0, guest.pvp_losses || 0];
   assert(JSON.stringify(before) === JSON.stringify(after), `with nothing recorded for either player: ${JSON.stringify([before, after])}`);
+  // The other screen asks a beat later, and hears about a match that is over rather than being told it is
+  // not theirs. Its own poll then shows the abandoned screen, which says what happened.
+  const other = await invoke({ code: t.code }, { userId: t.guest });
+  assert(other.status === 409 && other.body?.reason === "already_finished",
+    `the other player hears the truth: ${other.status} ${JSON.stringify(other.body)}`);
 });
 
 await runTest("a powerup landing under a request does not write a pick against a board that has moved", async () => {

@@ -220,6 +220,18 @@ await runTest("a code that is the daily's own seed is refused before any boards 
   await click(findButtonByText(container, "Draft it"));
   await flush(4);
   assert(container.querySelector(".seedline")?.textContent?.includes("K3F9QZ"), "an ordinary code still deals its boards");
+
+  // And a refused code costs nothing. The guard sits BEFORE abandonCurrent(), so turning a code away does not
+  // take the draft you already had with it - refusing a request must never charge a DNF for a draft it never
+  // started. Move the guard below that await and this is what goes.
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await type(box, forged);
+  await flush();
+  await click(findButtonByText(container, "Draft it"));
+  await flush(3);
+  const kept = JSON.parse(window.storage.data["personal:ps-draft"] || "null");
+  assert(kept?.mode?.code === "K3F9QZ", `the draft in progress survives a refused code: ${JSON.stringify(kept?.mode)}`);
 });
 
 console.log("test-daily.mjs done");

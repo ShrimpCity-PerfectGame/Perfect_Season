@@ -116,11 +116,16 @@ and policies are the boundary - a modified browser calls them directly, and the 
 only manners. `save_profile`, `set_avatar`, `report_player` (v2.0.0), `shop_buy`, `equip_item` and `set_showcase`
 (v2.0.0) raise **`guest_not_allowed`**; `submit-run` refuses a daily (`guest_daily`); `can_play_versus` refuses a
 duel. **The `avatars` bucket refuses one too** (v2.0.0) - its insert and update policies call
-`caller_is_guest()`, alongside the `uploads_paused` kill switch and for the same reason: gating only the
+`caller_can_hold_avatars()` (a profile row, and not a guest), alongside the `uploads_paused` kill switch and
+for the same reason: gating only the
 function left the gate cosmetic, because an anonymous sign-in could skip `set_avatar` and insert straight into
 `storage.objects`, putting ten files in a **public** bucket - ten working unauthenticated addresses - on an
 account that costs nothing to make again, stopped only by the per-folder cap. Reading and deleting stay open, so
-anything already there can still be cleared out. What a guest is **not** refused is coins: `claim_minigame` and
+anything already there can still be cleared out. The profile half of that function matters as much as the
+guest half, and gating only the guest half left it open: an account signed in with Google has **no profile row
+at all** until `claim_username` runs, so it is not a guest - it is less than one, with no name and no profile
+screen - and the bucket took its files. It is `use_account_username`'s "no profile, no board" said about
+pictures. What a guest is **not** refused is coins: `claim_minigame` and
 submit-run's rewards pay one like anyone else, and what it earns waits for the name it claims.
 
 `guest_not_allowed` has to be mapped in **every** client module that can receive it - `storage-profile.js`'s

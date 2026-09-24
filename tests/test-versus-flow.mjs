@@ -63,9 +63,11 @@ await runTest("a refusal reaches the player as its reason, not as the network be
     const missing = await playMove({ code: "NOPE12" });
     assert(!missing.ok && missing.reason === "not_found", `a match that doesn't exist: ${JSON.stringify(missing)}`);
 
-    // 409: a match that isn't drafting - this lobby has nobody in it yet.
+    // 409: a match that isn't drafting - this lobby has nobody in it yet. `already_finished`, not
+    // `not_your_match`: the host IS in it. The two facts shared one word until the side check moved above the
+    // status check, so a player posting into a match that had just ended was told it was not theirs.
     const idle = await playMove({ code, claim: "clock" });
-    assert(!idle.ok && idle.reason === "not_your_match", `a match not under way: ${JSON.stringify(idle)}`);
+    assert(!idle.ok && idle.reason === "already_finished", `a match not under way: ${JSON.stringify(idle)}`);
 
     // 403: signed in, a real match under way, not in it.
     await as(B);
@@ -200,7 +202,7 @@ await runTest("sixteen picks, two full rosters, and a winner the server chose", 
 
   // A finished match takes no more moves, from either of them.
   await as(A);
-  assert((await move(sb, { code, claim: "clock" })).reason === "not_your_match", "the match is closed");
+  assert((await move(sb, { code, claim: "clock" })).reason === "already_finished", "the match is closed, and says so rather than disowning the player");
 });
 
 await runTest("a finish that fails is picked up by the next request, from either player", async () => {
