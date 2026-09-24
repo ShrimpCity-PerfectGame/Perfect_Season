@@ -106,6 +106,37 @@ await runTest("the backfill recovers recent and best runs, maps them like runLog
   assert(rows[4].dnf && rows[4].format === null && rows[4].ladder === "genius", "a DNF keeps its ladder and has no format");
 });
 
+await runTest("re-running the migration never duplicates a run whose stored date isn't a number", async () => {
+  // The file's header promises it is safe to re-run, and re-running it is the documented way to pick up a
+  // change to the Stats functions. It was not safe: a stored run with no numeric `date` falls back to
+  // `profiles.updated_at` for its created_at, which is not a property of the run at all - it moves whenever
+  // anything writes that profile. So the unique key (user_id, created_at, dnf) came out different on the
+  // second pass and the run was inserted again, and again on the third. Measured at 1 -> 2 -> 3.
+  //
+  // The existing test above re-runs the migration twice and never saw it, because every run in its fixture
+  // carries a numeric date - the one shape that was already stable.
+  const db = await freshDb();
+  const id = uuid(41);
+  const dated = { date: Date.UTC(2026, 8, 12), w: 12, l: 5, score: 88.1, mode: "unlimited", outcome: "Made the playoffs" };
+  const dateless = { w: 9, l: 8, score: 71.4, mode: "unlimited", outcome: "Missed the playoffs" }; // no `date` at all
+  const stringDate = { date: "2026-09-12", w: 3, l: 14, score: 40.2, mode: "unlimited", outcome: "Missed the playoffs" };
+  await addProfile(db, { id, username: "datelessalice", runs: 3, dnf: 0, wins: 24, losses: 27, recent: [dated, dateless, stringDate] });
+
+  await db.exec(MIGRATION);
+  const after = async () => (await db.query("select count(*)::int as n from runs where user_id = $1", [id])).rows[0].n;
+  const first = await after();
+  assert(first === 2, `three stored runs, two distinct keys - the two dateless ones share one: ${first}`);
+
+  // Anything at all writing the profile between passes is what makes the fallback move, which is the ordinary
+  // case: a season, a DNF, a rename. Then the migration is run again, exactly as the runbook says to.
+  for (let pass = 2; pass <= 4; pass++) {
+    await db.query("update profiles set updated_at = now() + ($1 || ' hours')::interval where id = $2", [String(pass), id]);
+    await db.exec(MIGRATION);
+    const n = await after();
+    assert(n === first, `pass ${pass} adds nothing: ${n} rows, expected ${first}`);
+  }
+});
+
 await runTest("site_stats and site_totals match the mock exactly, past 300 accounts and 10 runs per account", async () => {
   const db = await freshDb();
   await db.exec(MIGRATION);

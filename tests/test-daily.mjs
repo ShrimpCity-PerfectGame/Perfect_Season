@@ -1,5 +1,6 @@
 // Seeded boards, the daily lock, and challenge codes.
 import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, makeMockAuth, clickMode } from "./helpers.mjs";
+import * as GL from "../game-logic.mjs";
 
 function boardOf(container) {
   const team = container.querySelector(".reel .team")?.textContent;
@@ -161,6 +162,64 @@ await runTest("switching to the daily while an Unlimited reel is still spinning 
   const key = Object.keys(storage.data).find((k) => k.includes("ps-daily-wip"));
   const snap = JSON.parse(storage.data[key]);
   assert(snap.seq[snap.seqIdx] === `${snap.spin.team}|${snap.spin.w}`, `the daily's saved board must be its own, got ${snap.spin.team}|${snap.spin.w} for ${snap.seq[snap.seqIdx]}`);
+});
+
+await runTest("a code that is the daily's own seed is refused before any boards are dealt", async () => {
+  // The daily's protection was entirely server-side, and the attack needed no server: finish() computes the
+  // whole season in the browser, and a signed-out player never submits at all - so a code that hashes like
+  // today's daily seed dealt today's daily, bit for bit, and nothing was ever consulted about it. submit-run
+  // refusing to RECORD one is not the same as refusing to DEAL one.
+  //
+  // It cannot be closed completely: the bundle is public and the game is seeded, so anyone willing to run
+  // game-logic.mjs offline can deal any board they like. What this closes is the in-app version - the one an
+  // ordinary player would ever find - and that is the honest claim.
+  setupDom();
+  window.storage = makeStorage();
+  window.__ps_supabase__ = makeMockAuth();
+  const { container } = await mount();
+  await flush();
+
+  // Found the way anyone would: hashStr is FNV-1a/32 and invertible.
+  const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const PRIME = 16777619;
+  let inv = 1;
+  for (let i = 0; i < 6; i++) inv = Math.imul(inv, 2 - Math.imul(PRIME, inv));
+  const step = (h, c) => Math.imul(h ^ c, PRIME) >>> 0;
+  const unstep = (h, c) => ((Math.imul(h, inv) >>> 0) ^ c) >>> 0;
+  const seed = GL.dailySeed(new Date().toISOString().slice(0, 10), "fantasy");
+  const target = GL.hashStr(seed);
+  const fwd = new Map();
+  for (const a of A) for (const b of A) for (const c of A) for (const e of A) {
+    let h = 2166136261 >>> 0;
+    for (const ch of [a, b, c, e]) h = step(h, ch.charCodeAt(0));
+    if (!fwd.has(h)) fwd.set(h, a + b + c + e);
+  }
+  let forged = null;
+  outer:
+  for (const a of A) for (const b of A) for (const c of A) for (const e of A) {
+    let h = target;
+    for (const ch of [e, c, b, a]) h = unstep(h, ch.charCodeAt(0));
+    const pre = fwd.get(h);
+    if (pre) { forged = pre + a + b + c + e; break outer; }
+  }
+  assert(forged && GL.hashStr(forged) === target, `a forged code exists: ${forged}`);
+  assert(JSON.stringify(GL.seededSequence(forged)) === JSON.stringify(GL.seededSequence(seed)),
+    "and it deals the daily's own boards - which is what it is for");
+
+  const box = container.querySelector('input[aria-label="Challenge code"]');
+  await type(box, forged);
+  await flush();
+  await click(findButtonByText(container, "Draft it"));
+  await flush(3);
+  assert(!container.querySelector(".seedline"), `no draft was dealt: ${container.querySelector(".seedline")?.textContent}`);
+  assert(/reserved/i.test(text(container)), `and it says why: ${text(container).slice(0, 300)}`);
+
+  // An ordinary code still works, or the guard would have refused the feature rather than the attack.
+  await type(box, "K3F9QZ");
+  await flush();
+  await click(findButtonByText(container, "Draft it"));
+  await flush(4);
+  assert(container.querySelector(".seedline")?.textContent?.includes("K3F9QZ"), "an ordinary code still deals its boards");
 });
 
 console.log("test-daily.mjs done");

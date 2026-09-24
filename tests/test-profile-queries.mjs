@@ -2,6 +2,7 @@
 // column of every profile (an unfiltered select("*")). This pins that totals are summed in the
 // database (site_totals()) and rank is a server-side count, and that the numbers are unchanged.
 import { makeMockAuth } from "./helpers.mjs";
+import { readFileSync } from "node:fs";
 import { fetchSiteTotals, fetchOwnRank, fetchSiteStats, fetchTopBuilds } from "../storage.js";
 
 let failed = 0;
@@ -73,3 +74,23 @@ assert(await fetchOwnRank(100) === null, "a rank count that throws should come b
 
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }
 console.log("test-profile-queries.mjs done");
+
+// Two rows on the same number come back in whatever order the database felt like, so the one that drops off
+// the bottom of the top ten changes on every refresh. Every ordering in the Stats SQL was given a tiebreak for
+// this; the five in storage.js were a separate sweep and it reached one of them. Worst is Over/Under - small
+// integer scores over one shared round sequence, so ties at the rank-10 cut are the ordinary case rather than
+// a coincidence, and rows genuinely appear and disappear between refreshes.
+{
+  const src = readFileSync(new URL("../storage.js", import.meta.url), "utf8");
+  for (const fn of ["fetchLeaderboardTop", "fetchLadderTop", "fetchDailyTop", "fetchSouTop", "fetchTopBuilds"]) {
+    const at = src.indexOf(`export async function ${fn}(`);
+    assert(at > 0, `${fn} is where it was`);
+    const next = src.indexOf("export async function", at + 1);
+    const fnBody = src.slice(at, next < 0 ? src.length : next);
+    // The column can be a variable (bestCol's, the ladder's), so this counts orderings rather than names -
+    // and requires the LAST one to be the literal username tiebreak.
+    const orders = [...fnBody.matchAll(/\.order\(([^,)]+)/g)].map((m) => m[1].trim().replace(/^"|"$/g, ""));
+    assert(orders.length >= 2 && orders[orders.length - 1] === "username",
+      `${fn} is tiebroken on username, or its rows swap places between refreshes: ${JSON.stringify(orders)}`);
+  }
+}

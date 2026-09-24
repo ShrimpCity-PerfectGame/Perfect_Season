@@ -239,15 +239,12 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     // in about a second - "5214I2DA" for daily-2026-09-23 - and the app's own code box accepts exactly that
     // shape. What identifies a draft is the hash, not the text, so that is what this compares.
     //
-    // Two days either side covers every daily still worth forging: isPlausibleDailyDate already allows a
-    // day's grace in each direction, and a daily_runs row can only ever be written for a date the function
-    // itself decides. Ten comparisons, and no dependence on how the code was spelled.
-    const dailyHashes = new Set<number>();
-    for (let d = -2; d <= 2; d++) {
-      const day = new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
-      for (const f of ["fantasy", "standard"]) dailyHashes.add(GL.hashStr(GL.dailySeed(day, f)));
-    }
-    if (/^daily-/i.test(mode.code) || dailyHashes.has(GL.hashStr(mode.code))) {
+    // The window used to be two days either side, on the reasoning that a daily_runs row can only be written
+    // for a date this function decides. True, and beside the point: the prize is the BOARDS, not the row. A
+    // code that hashes like next week's daily seed deals next week's daily bit for bit, as a challenge code
+    // that counts and pays - and collisions were demonstrated at T+3, T+7, T+30 and T+180. game-logic.mjs's
+    // isReservedCode is a year either side, and is the same function the browser refuses to deal.
+    if (GL.isReservedCode(mode.code)) {
       return json({ error: "that code is reserved", reason: "reserved_code" }, 400);
     }
     seed = mode.code;

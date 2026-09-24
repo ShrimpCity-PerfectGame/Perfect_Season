@@ -175,7 +175,10 @@ export async function fetchUpsetRank(score, format = "fantasy") {
 // zeroes from accounts that never played the mode isn't a leaderboard.
 export async function fetchLadderTop(mode = "unlimited", limit = 10) {
   const col = LADDER_COL[mode] || LADDER_COL.unlimited;
-  const { data, error } = await getClient().from("profiles").select("*").gt(col, 0).order(col, { ascending: false }).limit(limit);
+  // Tiebroken on username, for the reason fetchLeaderboardTop is: two players on the same points otherwise
+  // swap places between page loads, and the row that drops off the bottom changes with them.
+  const { data, error } = await getClient().from("profiles").select("*").gt(col, 0)
+    .order(col, { ascending: false }).order("username", { ascending: true }).limit(limit);
   if (error || !data) return [];
   return data.map(rowToProfile);
 }
@@ -191,14 +194,22 @@ export async function fetchSiteTotals() {
   return { runs: Number(data.runs) || 0, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0 };
 }
 export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
-  const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).eq("format", format).order("score", { ascending: false }).limit(limit);
+  // Tiebroken on username, for the reason fetchLeaderboardTop is.
+  const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).eq("format", format)
+    .order("score", { ascending: false }).order("username", { ascending: true }).limit(limit);
   if (error || !data) return [];
   // `guest` travels with the name everywhere a name is shown, and this render site already asks for it.
   // A guest cannot play the daily today, so this is the flag being in place, not a live bug.
   return data.map((r) => ({ username: r.username, w: r.w, l: r.l, score: r.score, outcome: r.outcome, guest: !!r.guest }));
 }
 export async function fetchSouTop(date, limit = 10) {
-  const { data, error } = await getClient().from("sou_runs").select("*").eq("date", date).order("score", { ascending: false }).limit(limit);
+  // Tiebroken on username, for the reason fetchLeaderboardTop is: two rows on the same number otherwise
+  // swap places between page loads, and the one that drops off the bottom of the top ten changes with
+  // them. Every ordering in the Stats SQL was given a tiebreak; the four in this file were missed, and
+  // this is the one it matters most on - small integer scores over a single shared round sequence, so
+  // ties at the rank-10 cut are the ordinary case rather than a coincidence.
+  const { data, error } = await getClient().from("sou_runs").select("*").eq("date", date)
+    .order("score", { ascending: false }).order("username", { ascending: true }).limit(limit);
   if (error || !data) return [];
   return data.map((r) => ({ username: r.username, score: r.score, guest: !!r.guest }));
 }
@@ -240,7 +251,9 @@ export async function fetchTopBuilds(limit = 10) {
     .in("pos", BUILD_POSITIONS)
     .lt("overall", 1e12)
     .gt("overall", -1e12)
+    // Tiebroken on username, for the reason fetchLeaderboardTop is.
     .order("overall", { ascending: false })
+    .order("username", { ascending: true })
     .limit(limit);
   if (error || !Array.isArray(data)) return [];
   return data

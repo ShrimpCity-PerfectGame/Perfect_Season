@@ -943,7 +943,19 @@ absolute target — but a big swing in them after a change to `rating`, `SPREAD`
 balance shift, not a tuned one. It takes a format and a GM flag (`… 250 standard gm`) — a grading
 change means running each format, since they have separate benchmarks.
 
-**Protect the daily.** The daily is a single seeded draft per day **per scoring format**: no resets,
+**Protect the daily.** A challenge code that HASHES like a daily's own seed deals that daily's boards bit for
+bit, so `isReservedCode` (game-logic.mjs) refuses one - in the browser before any boards are dealt, and in
+submit-run before anything is recorded, from the same function. The browser half matters as much as the server
+half: `finish()` computes the whole season locally and a signed-out player never submits at all, so the server
+was simply never consulted. The window is a year either side (`DAILY_SEED_WINDOW_DAYS`), not two days: what a
+narrow window silently answers "no" to is the wrong question, because the prize is the BOARDS, not the
+`daily_runs` row - collisions were demonstrated at T+3, T+7, T+30 and T+180. `hashStr` is FNV-1a/32 and
+invertible, so a meet-in-the-middle finds an 8-character `[A-Z0-9]` collision for any target in about a second,
+which is exactly the shape the code box accepts. **Accepted gap, and it cannot be closed:** the bundle is public
+and the game is seeded, so anyone willing to run game-logic.mjs offline can deal any board they like. What is
+closed is the in-app rehearsal - the one an ordinary player would ever find.
+
+The daily is a single seeded draft per day **per scoring format**: no resets,
 its own saved progress slot (`ps-daily-wip:<date>`, suffixed `:std` for Championship), and it
 resumes rather than restarts. Any new navigation path
 must not give a player a second crack at it. Unlimited drafts may be reset, but a reset counts as a

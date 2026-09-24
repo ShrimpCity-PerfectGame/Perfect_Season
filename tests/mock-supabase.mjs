@@ -394,12 +394,7 @@ export function makeMockAuth() {
       // run a bit-exact rehearsal of that day's daily - same boards, same season, recorded and paid.
       // The hash, not the spelling: hashStr is invertible, so a code that hashes like a daily seed IS that
       // daily. Mirrors supabase/functions/submit-run/index.ts.
-      const dailyHashes = new Set();
-      for (let d = -2; d <= 2; d++) {
-        const day = new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
-        for (const f of ["fantasy", "standard"]) dailyHashes.add(GL.hashStr(GL.dailySeed(day, f)));
-      }
-      if (/^daily-/i.test(mode.code) || dailyHashes.has(GL.hashStr(mode.code))) {
+      if (GL.isReservedCode(mode.code)) {
         return refused(400, { error: "that code is reserved", reason: "reserved_code" });
       }
       seed = mode.code;

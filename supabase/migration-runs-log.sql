@@ -103,6 +103,17 @@ select
   case when jsonb_typeof(run->'roster') = 'array' then run->'roster' end,
   true
 from src
+-- Once per account, ever. The unique key is (user_id, created_at, dnf), and `created_at` falls back to
+-- `profiles.updated_at` for a stored run with no numeric `date` - which is not a property of the run at all:
+-- it moves every time anything writes that profile. So a second pass gave those runs a different key and
+-- inserted them again, and a third gave them another: measured at 1 -> 2 -> 3 duplicates across passes, on a
+-- file whose header promises it is safe to re-run. Re-running it is also the documented way to pick up a
+-- change to the Stats functions below, so this was not a hypothetical.
+--
+-- Guarding on the account rather than on the timestamp is what makes it idempotent no matter what the
+-- timestamps do. It does not repair duplicates a previous re-run already made - 2.0-STATUS.md section 6 has
+-- the query that finds them.
+where not exists (select 1 from public.runs r where r.user_id = src.id and r.backfilled)
 on conflict (user_id, created_at, dnf) do nothing;
 
 -- ---------- Reads ----------

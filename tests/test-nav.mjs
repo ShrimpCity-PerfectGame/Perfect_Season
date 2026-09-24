@@ -58,4 +58,51 @@ await runTest("the Players tab browses the board by team and era, read-only", as
   assert(!container.querySelector(".card button.hit"), "the player index must be read-only - no draftable cards");
 });
 
+await runTest("a dead board survives a reload, and a re-spin is the way out of it", async () => {
+  // noBoardLeft is a fact about the draft, and it was not in the snapshot - so a reload cleared it and put the
+  // player back on the same dead board with its Lock ins live. A reload is what the note itself suggested, and
+  // every pick made from there was refused by the server. `reroll()` never cleared it either, so you could
+  // spin to a perfectly good board and stay locked out of it.
+  setupDom();
+  const storage = makeStorage();
+  window.storage = storage;
+  window.__ps_supabase__ = makeMockAuth();
+  let app = await mount();
+  await flush();
+  await clickMode(app.container, "Unlimited");
+  await flush(4);
+  assert(app.container.querySelector(".seedline"), "a draft is dealt");
+
+  // Take the draft the app just saved and mark it dead, which is the state advance() leaves behind.
+  const saved = JSON.parse(storage.data["personal:ps-draft"]);
+  // The key has to BE there, not merely be falsy: the snapshot is what a reload restores from, and a field
+  // it never writes is a field that can only ever come back false. Planting it below tests the read; this
+  // line is the write.
+  assert("noBoardLeft" in saved && saved.noBoardLeft === false, `a live draft saves the flag, and it is false: ${JSON.stringify(saved.noBoardLeft)}`);
+  storage.data["personal:ps-draft"] = JSON.stringify({ ...saved, noBoardLeft: true });
+  storage.data["personal:ps-free-wip"] = storage.data["personal:ps-draft"];
+
+  // A reload: the flag has to come back with the draft.
+  setupDom();
+  window.storage = storage;
+  window.__ps_supabase__ = makeMockAuth();
+  app = await mount();
+  await flush(4);
+  await clickMode(app.container, "Unlimited");
+  await flush(4);
+  assert(/no board left that fits/i.test(text(app.container)),
+    `the dead board survives a reload: ${text(app.container).slice(0, 300)}`);
+  // And the note no longer contradicts the button five lines above it.
+  assert(!/nothing you've drafted here counts against you/i.test(text(app.container)),
+    "and does not claim the draft is free to abandon when Reset charges a DNF");
+
+  // A re-spin is the escape: rerollCandidate only offers a board this roster can pick from.
+  const spin = findButtonByText(app.container, "Re-spin team");
+  assert(spin && !spin.disabled, "a re-spin is offered");
+  await click(spin);
+  await flush(6);
+  assert(!/no board left that fits/i.test(text(app.container)),
+    `and it clears the dead board: ${text(app.container).slice(0, 300)}`);
+});
+
 console.log("test-nav.mjs done");

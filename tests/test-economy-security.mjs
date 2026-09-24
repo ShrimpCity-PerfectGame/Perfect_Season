@@ -1083,7 +1083,11 @@ await runTest("8c. a GM season must fit under the salary cap: an uncapped roster
 // rolling hash - the same season, bit for bit. Refusing the literal string `daily-...` was not enough, and
 // this test is the proof: hashStr is FNV-1a/32 and invertible, so the collision below is found in about a
 // second with a meet-in-the-middle, and it fits the app's own code box. No modified client required.
-await runTest("a challenge code that hashes like the daily is refused, whatever it looks like", async () => {
+// A code that hashes like `seed`, found the way anyone would: hashStr is FNV-1a/32 and invertible, so a
+// meet-in-the-middle finds an 8-character [A-Z0-9] collision for any target in about a second. Lifted out of
+// the test below so a test can forge a daily OTHER than today's - which is what the window is about, and which
+// nothing checked: narrowing the guard to today alone left the whole suite green.
+function forgeCodeFor(seed) {
   const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const PRIME = 16777619;
   let inv = 1;
@@ -1091,7 +1095,6 @@ await runTest("a challenge code that hashes like the daily is refused, whatever 
   const step = (h, c) => Math.imul(h ^ c, PRIME) >>> 0;
   const unstep = (h, c) => ((Math.imul(h, inv) >>> 0) ^ c) >>> 0;
 
-  const seed = GL.dailySeed(new Date().toISOString().slice(0, 10), "fantasy");
   const target = GL.hashStr(seed);
   const fwd = new Map();
   for (const a of A) for (const b of A) for (const c of A) for (const e of A) {
@@ -1107,20 +1110,49 @@ await runTest("a challenge code that hashes like the daily is refused, whatever 
     const pre = fwd.get(h);
     if (pre) { forged = pre + a + b + c + e; break outer; }
   }
+  return forged;
+}
+const dayOffset = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+await runTest("a challenge code that hashes like the daily is refused, whatever it looks like and whichever day it is", async () => {
+  const seed = GL.dailySeed(dayOffset(0), "fantasy");
+  const forged = forgeCodeFor(seed);
   assert(forged, "a collision exists and is findable - that is the whole point");
-  assert(GL.hashStr(forged) === target, `${forged} hashes like ${seed}`);
+  assert(GL.hashStr(forged) === GL.hashStr(seed), `${forged} hashes like ${seed}`);
   assert(/^[A-Z0-9]{4,8}$/.test(forged), `${forged} is a shape the app's own code box accepts`);
   assert(JSON.stringify(GL.seededSequence(forged)) === JSON.stringify(GL.seededSequence(seed)),
     "and it deals the day's own boards, which is what makes it worth forging");
 
-  // submit-run has to refuse it. The mock mirrors the function; the function is read as text below.
   const played = await free(forged, draftTrace(forged));
   assert(played?.reason === "reserved_code",
     `a forged daily code is refused: ${JSON.stringify(played).slice(0, 160)}`);
 
+  // Not only today's. The window used to be two days either side, on the reasoning that a daily_runs row can
+  // only be written for a date the function decides - true, and beside the point, because the prize is the
+  // BOARDS. A code that hashes like a future daily's seed deals that daily bit for bit, as a challenge code
+  // that counts and pays. And nothing caught it: the test forged today, so narrowing the guard to today alone
+  // stayed green. These are the offsets the sweep demonstrated collisions at.
+  for (const offset of [1, -1, 3, 7, 30, 180, -180, 364, -364]) {
+    for (const format of ["fantasy", "standard"]) {
+      const other = GL.dailySeed(dayOffset(offset), format);
+      assert(GL.isReservedCode(forgeCodeFor(other)), `a code hashing like ${other} (T${offset >= 0 ? "+" : ""}${offset}) is reserved`);
+    }
+  }
+  // ...and an ordinary code still is not, or the guard would refuse the whole game.
+  for (const ok of ["K3F9QZ", "ABCD", "ZZZZZZZZ", "12345678"]) {
+    assert(!GL.isReservedCode(ok), `${ok} is an ordinary code`);
+  }
+  // A day beyond the window is out of scope and says so here rather than silently: a year is the promise.
+  assert(!GL.isReservedCode(forgeCodeFor(GL.dailySeed(dayOffset(400), "fantasy"))),
+    "a year is the window, and 400 days is outside it - stated, not assumed");
+
+  // The rule is one function, so the browser refuses to DEAL what the server refuses to record. Without that,
+  // finish() computes the whole season locally and signed out nothing is ever submitted - so the server was
+  // never consulted and the daily was rehearsable in the app itself.
   const index = readFileSync(new URL("../supabase/functions/submit-run/index.ts", import.meta.url), "utf8");
-  assert(/dailyHashes\.has\(GL\.hashStr\(mode\.code\)\)/.test(index),
-    "and the deployed function compares the hash, not the spelling");
+  assert(/GL\.isReservedCode\(mode\.code\)/.test(index), "and the deployed function asks the shared rule");
+  const app = readFileSync(new URL("../perfect-season.jsx", import.meta.url), "utf8");
+  assert(/isReservedCode\(code\)/.test(app), "as does the code box, before any boards are dealt");
 });
 
 // Two rules that ship in files nothing in this suite executes. The mocks mirror the Edge Function and PGlite

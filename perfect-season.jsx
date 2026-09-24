@@ -15,7 +15,7 @@ import versusPool from "./data/versus-pool.json";
 import { cssVars, PALETTE, THEME } from "./theme.mjs";
 import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
-  hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, capLeftFor, rerollCandidate, MIN_SALARY,
+  hashStr, mulberry32, withSeed, fits, pick, boardHasOption, seededSequence, boardAt, capLeftFor, rerollCandidate, MIN_SALARY, isReservedCode,
   flexRating, effectiveRating, winProb, shuffle, windowedShuffle, tagOpp, buildTimeline, simulateSeason,
   applyDnf, LOSER_PTS, MARGINS, GM_CAP, playerSalary, REROLL_BUDGET,
   passerRating, normFormat, BEST_FIELDS, FORMATS,
@@ -2144,6 +2144,8 @@ export default function PerfectSeason() {
   function showBoardFormat(f) { boardFormatRef.current = f; setBoardFormat(f); }
   const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
+  // Why a code was turned away before any boards were dealt - today, only a code that is a daily's own seed.
+  const [codeError, setCodeError] = useState("");
   // A friend's boards from a challenge link (gridspin.app/c/CODE?beat=7-10), waiting on the Modes screen.
   const [challenge, setChallenge] = useState(() => (typeof window === "undefined" ? null : parseChallengeLink(window.location.pathname, window.location.search)));
   const [dailyBoard, setDailyBoard] = useState({ loading: false, rows: [], format: "fantasy" });
@@ -2722,7 +2724,10 @@ export default function PerfectSeason() {
     // inside the clear's flight wrote the NEW draft's snapshot and then had the old clear delete it - a
     // dealt draft lost on a reload, with no DNF, which is the free redo 1.8.1 closed.
     if (pendingClears.current[slotId(mode)]) return;
-    const snap = { history, spin: spinTarget.current || spin, used, rerolls, mode, seq, seqIdx, rules: DRAFT_RULES };
+    // noBoardLeft rides along, because it is a fact about the draft and not about this page view. Left out,
+    // a reload cleared it and put the player back on the same dead board with its Lock ins live - and a reload
+    // is what the note itself suggests. Every pick from there was refused by the server.
+    const snap = { history, spin: spinTarget.current || spin, used, rerolls, mode, seq, seqIdx, noBoardLeft, rules: DRAFT_RULES };
     sset(DRAFT_KEY, snap, false);
     sset(mode.kind === "daily" ? DAILY_PROGRESS(mode.date, mode.format) : FREE_PROGRESS, snap, false);
     setWip((w) => ({ ...w, [slotId(mode)]: history.length }));
@@ -3051,7 +3056,7 @@ export default function PerfectSeason() {
     setSpinning(false);
     const r = {};
     saved.history.forEach((h) => { r[h.slot] = findPlayer(h.key, h.id, h.season); });
-    setNoBoardLeft(false);
+    setNoBoardLeft(!!saved.noBoardLeft);
     setRoster(r); setHistory(saved.history); setUsed(saved.used || []);
     setRerolls(saved.rerolls || { team: REROLL_BUDGET, years: REROLL_BUDGET });
     setMode(saved.mode); setSeq(saved.seq || []); setSeqIdx(saved.seqIdx || 0);
@@ -3152,6 +3157,11 @@ export default function PerfectSeason() {
     const next = rerollCandidate({ seed: mode.seed, kind, seqIdx, spinTeam: spin.team, spinW: spin.w, shown, drafted: d, open: o, cap: capLeftFor(roster, { gm: mode.gm, format: mode.format }) });
     if (!next) return;
     const n = [...seq]; n.splice(seqIdx + 1, 0, next);
+    // The dead board is no longer the board. rerollCandidate only ever offers one this roster can pick from
+    // (boardHasOption, with the cap), so landing here means there IS something to take - and leaving the flag
+    // set left the player looking at a good board with every Lock in dead, which is the opposite of what a
+    // re-spin is for. A refused re-spin returns above and changes nothing, flag included.
+    setNoBoardLeft(false);
     setSeq(n); setSeqIdx(seqIdx + 1); setUsed([...used, next]);
     const [t, w] = next.split("|");
     animateTo({ team: t, w: Number(w) }, kind === "team" ? "years" : "team");
@@ -3772,6 +3782,16 @@ export default function PerfectSeason() {
   async function startCode(raw) {
     const code = (raw || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
     if (code.length < 4) return;
+    // A code that hashes like a daily's own seed deals that daily's boards, bit for bit. submit-run refuses to
+    // RECORD one, which is not the same as refusing to deal it: finish() computes the whole season in the
+    // browser, so the boards, the picks and the result were all there to be rehearsed - and signed out nothing
+    // is submitted at all, so the server was never consulted. Refused here too, so the rehearsal never starts.
+    //
+    // It cannot be closed completely and it is worth being honest about why: the bundle is public and the
+    // whole game is seeded, so anyone willing to run game-logic.mjs offline can deal any board they like. What
+    // this closes is the in-app version, which is the one an ordinary player would ever find.
+    if (isReservedCode(code)) { setCodeError("That code is reserved. Try another one."); return; }
+    setCodeError("");
     // Awaited so the abandoned draft is read and charged before it's wiped.
     await abandonCurrent();
     clearDraft(DRAFT_KEY);
@@ -4204,9 +4224,10 @@ export default function PerfectSeason() {
                 <p>Enter a code to draft the exact same boards someone else had.</p>
                 <div className="frow">
                   <input className="inp" value={codeInput} maxLength={8} placeholder="e.g. K3F9QZ" aria-label="Challenge code"
-                    onChange={(e) => setCodeInput(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && startCode(codeInput)} />
+                    onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setCodeError(""); }} onKeyDown={(e) => e.key === "Enter" && startCode(codeInput)} />
                   <button className="btn solid" disabled={codeInput.trim().length < 4} onClick={() => startCode(codeInput)}>Draft it</button>
                 </div>
+                {codeError && <p className="note" role="status">{codeError}</p>}
               </div>
             </div>
 
@@ -4378,10 +4399,15 @@ export default function PerfectSeason() {
 
                 {/* Only a truly-done position (state 2) sinks to the bottom - a filled named
                     slot that's still flex-eligible (state 1) stays put next to open ones. */}
+                {/* Says what is true, which it did not: "nothing you've drafted here counts against you" sat
+                    five lines under a Reset button reading "Tap again: counts as a DNF", and Reset does charge
+                    one. A re-spin, if one is left, is the way out that costs nothing. */}
                 {noBoardLeft && !spinning && (
                   <p className="note" role="status" style={{ marginTop: 0 }}>
                     There's no board left that fits what you still need, so this draft can't be finished.
-                    Reset it and start a new one - nothing you've drafted here counts against you.
+                    {rerolls.team + rerolls.years > 0
+                      ? " Re-spin for a board you can use."
+                      : user && mode.kind !== "daily" ? " Resetting is the only way on, and it counts as a DNF." : " Reset it and start a new one."}
                   </p>
                 )}
                 {!spinning && (

@@ -58,6 +58,15 @@ a minor one. 2.0.0 is the number the site is being advertised under.)
 - **GM mode can't re-spin you into a board you can't afford anybody on either.** The dealer learned about
   the cap and the re-spin button didn't, so the one control you reach for to escape a dead board could hand
   you another one.
+- **A season that can't be saved says so.** A malformed submission used to come back looking exactly like the
+  connection being down, so the advice was to retry something that was never going to work.
+- **The daily can't be rehearsed through the app.** A challenge code can no longer be one that deals a daily's
+  own boards — today's or any other day's.
+- **A draft with no board left to play stays that way through a reload**, instead of putting you back on the
+  dead board with picks that the server then refused. A re-spin now gets you out of it, and the message no
+  longer says the draft is free to abandon when resetting counts as a DNF.
+- **Leaderboards stop shuffling.** Rows tied on the same number could swap places between refreshes, so the
+  one at the bottom of the top ten came and went. Over/Under was worst.
 - **A guest account can't be renamed into a stranded one.** Renaming a throwaway account gave it a real
   username on a session with no email or password behind it — no way in, no way to claim it, and no way back.
   Reports against those accounts can still be cleared; only the rename is off.

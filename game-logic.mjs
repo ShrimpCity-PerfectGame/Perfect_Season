@@ -36,6 +36,32 @@ export const normFormat = (f) => (f === "standard" ? "standard" : "fantasy");
 // while the server built "daily-<date>-std"), which silently discarded every Championship daily.
 export const dailySeed = (date, format) => `daily-${date}${normFormat(format) === "standard" ? "-std" : ""}`;
 
+// How far either side of today a challenge code is checked against the daily's own seeds. A year, because the
+// question a narrower window silently answers "no" to is the wrong one: not "could this be today's daily" but
+// "could this be A daily". hashStr is FNV-1a/32 and invertible, so a meet-in-the-middle finds an 8-character
+// [A-Z0-9] collision for any target in about a second, and the app's own code box accepts exactly that shape.
+// At two days either side, collisions were demonstrated for T+3, T+7, T+30 and T+180 - each of them a code
+// that deals a future daily's boards, bit for bit, as a challenge code that counts and pays.
+//
+// The cost is 2 x 731 hashes of a short string per check, which is nothing, and it is paid once per
+// submission and once when a code is typed.
+export const DAILY_SEED_WINDOW_DAYS = 365;
+
+// Whether a challenge code is a daily's draft wearing a challenge code's clothes. The hash, not the spelling:
+// what identifies a draft is the seed's hash, so refusing the literal string "daily-..." refuses nothing.
+// Shared, because the browser and submit-run must agree about it exactly - the browser so a rehearsal is never
+// dealt at all, the function so a modified browser cannot post one.
+export function isReservedCode(code, now = Date.now()) {
+  if (typeof code !== "string" || !code) return false;
+  if (/^daily-/i.test(code)) return true;
+  const h = hashStr(code);
+  for (let d = -DAILY_SEED_WINDOW_DAYS; d <= DAILY_SEED_WINDOW_DAYS; d++) {
+    const day = new Date(now + d * 86400000).toISOString().slice(0, 10);
+    for (const f of FORMATS) if (hashStr(dailySeed(day, f)) === h) return true;
+  }
+  return false;
+}
+
 // A rating is capped here before it reaches team-score math. Note the stored `rating` in
 // data/players.json already has this applied (nothing in the file exceeds 130), so this only
 // bites when computing a rating here.
