@@ -141,10 +141,25 @@ async function logRun(service: any, row: any) {
   if (error) console.error("runs log insert failed:", error.message);
 }
 
+// Everything below runs inside handle(), so an unexpected throw still answers with the CORS headers - the same
+// wrapper match-pick has, and this file never got. Without it a TypeError anywhere in here escaped to Deno,
+// which answers a bare 500 with no headers at all; a browser reports that as a network failure, so a season
+// this function had refused for a good reason reached the player as "check your connection". Reachable from a
+// modified client in one line - `history: [null, ...]` or a number in `seq` - and, being a throw, reachable
+// from any future bug in the several hundred lines below.
 Deno.serve(async (req) => {
   const cors = corsHeaders(req);
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors } });
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+  try {
+    return await handle(req, json);
+  } catch (e) {
+    console.error("submit-run:", e);
+    return json({ error: "failed to save" }, 500);
+  }
+});
+
+async function handle(req: Request, json: (body: unknown, status?: number) => Response) {
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization");
@@ -166,8 +181,12 @@ Deno.serve(async (req) => {
     // The mode is a tag, not a claim about a roster - it only decides which ladder eats the
     // penalty, and lying about it can only move your own penalty sideways, never erase it.
     // applyDnf falls back to unlimited for anything unrecognized.
-    const done = await applyToProfile(service, user.id, (p) =>
-      GL.applyDnf(p, Number(bodyRaw.picks) || 0, bodyRaw.mode));
+    // Clamped to what a draft can actually hold. `picks` is stored on the run and shown back as "abandoned
+    // after N picks", and nothing bounded it: `picks: 1e12` was accepted, counted, and written into `recent`
+    // and the runs log - where the column is an integer, so the insert overflowed and was swallowed, because a
+    // failed log must never fail a season that counted. A DNF that looks like it abandoned a trillion picks.
+    const picks = Math.min(GL.SLOTS.length, Math.max(0, Math.trunc(Number(bodyRaw.picks) || 0)));
+    const done = await applyToProfile(service, user.id, (p) => GL.applyDnf(p, picks, bodyRaw.mode));
     if (done.reason === "no_profile") return json({ error: "no profile for this account" }, 400);
     if (!done.ok) return json({ error: "failed to save" }, 500);
     await logRun(service, GL.runLogRow(user.id, done.username, done.profile.recent[0]));
@@ -394,4 +413,4 @@ Deno.serve(async (req) => {
 
   // `coins` and `newBadges` are new; a client from before them reads `ok` and `run` as it always did.
   return json({ ok: true, run, coins, newBadges });
-});
+}

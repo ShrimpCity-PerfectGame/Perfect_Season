@@ -922,6 +922,29 @@ const snapshotOf = (uid) => plain({
 });
 const free = (code, trace, { gm = false, genius = false, format, mode = {}, body = {} } = {}) =>
   submitRun({ mode: { kind: "free", code, ...mode }, history: trace.history, seq: trace.seq, gm, genius, format, ...body });
+// The same submission, read at the HTTP layer. storage.js's submitRun deliberately carries only `duplicate`
+// and `reserved_code` out of a refusal - everything else is a bare `{ ok: false }`, because for those "it will
+// be saved next time" is true. A test that wants to know WHICH refusal has to read the body, exactly where the
+// real client's error path finds it. Until the mock stopped answering 400s in a success envelope, `res.error`
+// could be read straight off a successful call, and storage.js's error-body parse was executed by no test at
+// all - so every assertion below was checking a shape production has never produced.
+async function refusalOf(send) {
+  const seen = [];
+  const invoke = auth.functions.invoke.bind(auth.functions);
+  auth.functions.invoke = async (name, opts) => {
+    const res = await invoke(name, opts);
+    if (res?.error) seen.push({ status: res.error.context?.status, body: await res.error.context?.json?.().catch(() => null) });
+    return res;
+  };
+  try {
+    const out = await send();
+    if (out?.ok) return out;
+    const last = seen.at(-1);
+    return { ...out, status: last?.status, ...(last?.body || {}) };
+  } finally {
+    auth.functions.invoke = invoke;
+  }
+}
 const daily = (date, format = "fantasy", { mode = {}, body = {} } = {}) => {
   const trace = draftTrace(GL.dailySeed(date, format));
   return submitRun({ mode: { kind: "daily", date, ...mode }, history: trace.history, seq: trace.seq, gm: false, format, ...body });
@@ -998,8 +1021,14 @@ await runTest("8c. a GM season must fit under the salary cap: an uncapped roster
   assert(trace, "a best-available roster over the cap in both formats");
   const before = snapshotOf(cheat.id);
   for (const format of ["fantasy", "standard"]) {
-    const r = await free(code, trace, { gm: true, format, mode: { gm: true } });
-    assert(!r.ok && r.error === "illegal roster" && r.reason === "over the salary cap", `an uncapped roster as GM (${format}, $${capOf(trace.roster, format)}M): ${show(r)}`);
+    const r = await refusalOf(() => free(code, trace, { gm: true, format, mode: { gm: true } }));
+    // Refused as an illegal roster - which is the security property. WHICH refusal is worth a note: the replay
+    // gets there first, because replayDraft applies GM's cap reserve from the roster it rebuilds and a board
+    // the client could not have afforded anybody on is one it would have skipped. This assertion used to
+    // require `over the salary cap`, and passed only because the mock called replayDraft without `{ gm,
+    // format }` - the real function has always passed them, so production has never answered that here. The
+    // explicit cap check below it is the backstop for a roster that replays cleanly and still overspends.
+    assert(!r.ok && r.error === "illegal roster", `an uncapped roster as GM (${format}, $${capOf(trace.roster, format)}M): ${show(r)}`);
   }
   assert(snapshotOf(cheat.id) === before, "nothing was written: no profile change, runs-log row, code or coins");
   // A Daily claiming GM isn't a GM season at all: submit-run ignores the flag on a Daily, so it counts as the plain
@@ -1175,7 +1204,7 @@ await runTest("8d. the same draft counts once: the same code in any variant or f
   const baseBoards = GL.seededSequence(base).join();
   for (const v of variants) {
     assert(GL.seededSequence(v).join() !== baseBoards, `${show(v)} deals other boards`);
-    const borrowed = await free(v, draftTrace(base));
+    const borrowed = await refusalOf(() => free(v, draftTrace(base)));
     assert(!borrowed.ok && borrowed.error === "illegal roster", `${base}'s draft sent as ${show(v)} doesn't replay: ${show(borrowed)}`);
   }
   assert(snapshotOf(P.id) === before, "a borrowed draft writes nothing");
@@ -1202,7 +1231,7 @@ await runTest("8e. a Daily counts once per date and format; the three dates a pl
   }
   assert(same(streaks, [5, 5, 10, 10, 15, 15]), `the streak climbs a day per date, both formats sharing it: ${show(streaks)}`);
   for (const date of [twoAhead, twoBack, "2026-02-30", `${TODAY} `, TODAY.replace(/-/g, "/")]) {
-    const r = await daily(date);
+    const r = await refusalOf(() => daily(date));
     assert(!r.ok && r.error === "a daily submission must be for today", `a Daily dated ${show(date)} is refused: ${show(r)}`);
   }
   const dailyRows = mockLedger(P.id).filter((l) => l.kind === "daily");

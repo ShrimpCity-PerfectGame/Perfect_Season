@@ -6,6 +6,19 @@
 import { setupDom, makeStorage, mount, flush, click, type, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth } from "./helpers.mjs";
 import { submitRun, submitDnf } from "../storage.js";
 
+// storage.js's submitRun deliberately carries only `duplicate` and `reserved_code` out of a refusal - every
+// other one is `{ ok: false }`, because "it will be saved next time" is true for them. A test that wants to
+// know WHICH refusal has to read the HTTP body, which is where the real client's error path finds it too.
+// It used to be able to read it off `res.error`, because the mock answered 400s in a SUCCESS envelope - so
+// nothing ever executed storage.js's error-body parse, and every test here asserted a shape production has
+// never once produced.
+async function refusal(body) {
+  const { data, error } = await window.__ps_supabase__.functions.invoke("submit-run", { body });
+  if (!error) return { ok: true, ...data };
+  const parsed = await error.context?.json?.().catch(() => null);
+  return { ok: false, status: error.context?.status, ...(parsed || {}) };
+}
+
 setupDom();
 window.storage = makeStorage();
 const auth = makeMockAuth();
@@ -147,9 +160,10 @@ await runTest("the server derives the daily seed from the format - a standard cl
   // Drafted against the FANTASY daily's boards, then submitted claiming the standard format.
   // The server re-derives seed `daily-<date>-std`, whose boards are different, so the replay fails.
   const { history, seq } = await buildLegitTrace(`daily-${date}`);
-  const res = await submitRun({ mode: { kind: "daily", date }, history, seq, gm: false, format: "standard" });
+  const res = await refusal({ mode: { kind: "daily", date }, history, seq, gm: false, format: "standard" });
   assert(!res.ok, "expected a format/seed mismatch to be rejected, got: " + JSON.stringify(res));
   assert(res.error === "illegal roster", "expected the replay itself to reject it, got: " + JSON.stringify(res));
+  assert(res.status === 400, "as a 400, the way the real function sends it: " + res.status);
 });
 
 await runTest("both formats' dailies can be played the same day, and each stays one-per-day", async () => {

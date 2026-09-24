@@ -309,6 +309,14 @@ export function rerollCandidate({ seed, kind, seqIdx, spinTeam, spinW, shown, dr
 export function replayDraft(seed, history, seq, { gm = false, format } = {}) {
   const fail = (reason) => ({ ok: false, reason });
   if (!Array.isArray(history) || !Array.isArray(seq) || history.length !== SLOTS.length) return fail("wrong shape");
+  // ...and every entry IS one. The gate above only counted them, so `history: [null, null, ...]` and a `seq`
+  // holding a number both walked through it and then died on `.key` and `.split` - a TypeError thrown out of
+  // the Edge Function, which answers a bare 500 with no CORS headers, which a browser reports as the network
+  // being down. A player whose season was refused was told to check their connection.
+  if (!seq.every((k) => typeof k === "string")) return fail("wrong shape");
+  if (!history.every((h) => h && typeof h === "object"
+      && typeof h.key === "string" && typeof h.slot === "string"
+      && Number.isFinite(h.id) && Number.isFinite(h.season))) return fail("wrong shape");
 
   const base = seededSequence(seed);
   const roster = {};

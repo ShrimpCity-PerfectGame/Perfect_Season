@@ -190,8 +190,16 @@ export function makeMockAuth() {
           if (!["QB", "RB", "WR", "TE"].includes(row.pos) || !(Math.abs(overall) < 1e12)) {
             return Promise.resolve({ error: { code: "P0001", message: "bad_build" } });
           }
+          // use_account_username: the account's own name AND whether it is a guest, from one read, so the
+          // two can never disagree about whose row this is. No profile, no board - `coalesce(..., new.username)`
+          // handed the browser's own value back for an account with no profile row, which since v1.16.0 is a
+          // reachable state holding a valid token. The mock kept the pre-fix shape in both halves: it took the
+          // browser's name when there was no profile, and it never stamped `guest` at all - so the guest chip
+          // on the Over/Under and builds boards had no jsdom coverage whatever.
+          const buildsOwner = profiles.get(row.user_id);
+          if (!buildsOwner) return Promise.resolve({ error: { code: "P0001", message: "no_profile" } });
           const id = globalThis.crypto.randomUUID();
-          builds.set(id, { id, created_at: new Date().toISOString(), ...row, username: profiles.get(row.user_id)?.username ?? row.username });
+          builds.set(id, { id, created_at: new Date().toISOString(), ...row, username: buildsOwner.username, guest: !!buildsOwner.guest });
         } else {
           // daily_runs is keyed per format (its real primary key is (date, format, user_id));
           // sou_runs has no format and stays (date, user_id).
@@ -199,9 +207,15 @@ export function makeMockAuth() {
             ? `${row.date}:${row.format || "fantasy"}:${row.user_id}`
             : `${row.date}:${row.user_id}`;
           // Both tables default created_at to now(), which player_stats' tiebreaks read. sou_runs takes the
-          // account's own username, as its trigger does.
-          const username = table === "sou_runs" ? profiles.get(row.user_id)?.username ?? row.username : row.username;
-          store.set(key, { created_at: new Date().toISOString(), ...row, ...(username !== undefined ? { username } : {}) });
+          // account's own username and its `guest` flag from use_account_username, as builds does above -
+          // and refuses a row from an account with no profile rather than trusting the browser's name.
+          let stamped = {};
+          if (table === "sou_runs") {
+            const owner = profiles.get(row.user_id);
+            if (!owner) return Promise.resolve({ error: { code: "P0001", message: "no_profile" } });
+            stamped = { username: owner.username, guest: !!owner.guest };
+          }
+          store.set(key, { created_at: new Date().toISOString(), ...row, ...stamped });
         }
         return Promise.resolve({ error: null });
       },
@@ -348,8 +362,10 @@ export function makeMockAuth() {
     };
 
     if (body?.dnf) {
-      const done = await applyToProfile((p) => GL.applyDnf(p, Number(body.picks) || 0, body.mode));
-      if (done.reason === "no_profile") return { error: { message: "no profile for this account" } };
+      // Clamped to what a draft holds, as index.ts does: `picks` is stored on the run and shown back.
+      const picks = Math.min(GL.SLOTS.length, Math.max(0, Math.trunc(Number(body.picks) || 0)));
+      const done = await applyToProfile((p) => GL.applyDnf(p, picks, body.mode));
+      if (done.reason === "no_profile") return refused(400, { error: "no profile for this account" });
       if (!done.ok) return refused(500, { error: "failed to save" });
       logRun(GL.runLogRow(userId, done.username, done.profile.recent[0]));
       return { data: { ok: true } };
@@ -359,21 +375,21 @@ export function makeMockAuth() {
     // A Daily is never GM or Genius, so those flags are ignored there - mirroring index.ts.
     const gm = mode?.kind === "daily" ? false : !!rawGm;
     const genius = mode?.kind === "daily" ? false : !!rawGenius;
-    if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return { data: { error: "malformed submission" } };
+    if (!mode || !Array.isArray(history) || !Array.isArray(seq)) return refused(400, { error: "malformed submission" });
 
     // Top-level only, allow-listed, missing means fantasy - mirrors index.ts exactly.
-    if (rawFormat != null && !GL.FORMATS.includes(rawFormat)) return { data: { error: "unknown scoring format" } };
+    if (rawFormat != null && !GL.FORMATS.includes(rawFormat)) return refused(400, { error: "unknown scoring format" });
     const format = GL.normFormat(rawFormat);
 
     let seed;
     if (mode.kind === "daily") {
       if (typeof mode.date !== "string" || !isPlausibleDailyDateMock(mode.date)) {
-        return { data: { error: "a daily submission must be for today" } };
+        return refused(400, { error: "a daily submission must be for today" });
       }
       seed = GL.dailySeed(mode.date, format);
     } else if (mode.kind === "free") {
       // Over 32 characters is refused like a missing code, as index.ts does: finished_codes can't hold it.
-      if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return { data: { error: "missing challenge code" } };
+      if (typeof mode.code !== "string" || !mode.code || mode.code.length > 32) return refused(400, { error: "missing challenge code" });
       // ...and not the daily's own seed, which is short enough to pass as a code and would make a free
       // run a bit-exact rehearsal of that day's daily - same boards, same season, recorded and paid.
       // The hash, not the spelling: hashStr is invertible, so a code that hashes like a daily seed IS that
@@ -384,15 +400,18 @@ export function makeMockAuth() {
         for (const f of ["fantasy", "standard"]) dailyHashes.add(GL.hashStr(GL.dailySeed(day, f)));
       }
       if (/^daily-/i.test(mode.code) || dailyHashes.has(GL.hashStr(mode.code))) {
-        return { data: { error: "that code is reserved", reason: "reserved_code" } };
+        return refused(400, { error: "that code is reserved", reason: "reserved_code" });
       }
       seed = mode.code;
     } else {
-      return { data: { error: "unknown mode" } };
+      return refused(400, { error: "unknown mode" });
     }
 
-    const replay = GL.replayDraft(seed, history, seq);
-    if (!replay.ok) return { data: { error: "illegal roster", reason: replay.reason } };
+    // `{ gm, format }` is not optional: replayDraft applies GM's cap reserve from the roster it rebuilds, and
+    // without it this mock accepted rosters the real function refuses and refused ones it accepts - measured at
+    // 6.5-8.9% of GM drafts. The headline rule "GM's cap is a reserve" had no coverage at all on the submit path.
+    const replay = GL.replayDraft(seed, history, seq, { gm, format });
+    if (!replay.ok) return refused(400, { error: "illegal roster", reason: replay.reason });
     const roster = replay.roster;
 
     let tot = 0, wt = 0;
@@ -405,7 +424,7 @@ export function makeMockAuth() {
     // the client, since capUsed feeds a competitive Stats-screen leaderboard.
     const finalCapUsed = gm ? GL.SLOTS.reduce((sum, s) => sum + GL.playerSalary(roster[s], format), 0) : undefined;
     // A GM season over the cap is an illegal roster, refused before anything is written - mirroring index.ts.
-    if (gm && finalCapUsed > GL.GM_CAP) return { data: { error: "illegal roster", reason: "over the salary cap" } };
+    if (gm && finalCapUsed > GL.GM_CAP) return refused(400, { error: "illegal roster", reason: "over the salary cap" });
     // Recomputed from the verified boards, mirroring index.ts - par and points are never taken
     // from the client.
     const par = GL.botPar(history.map((h) => h.key), { format, gm: !!gm });
@@ -420,7 +439,7 @@ export function makeMockAuth() {
     };
 
     const existingRow = profiles.get(userId);
-    if (!existingRow) return { data: { error: "no profile for this account" } };
+    if (!existingRow) return refused(400, { error: "no profile for this account" });
     // A guest posts everywhere but the daily: a guest account can be made again and again, and the daily
     // is one draft per account per day (submit-run/index.ts says the same, and means it).
     if (mode.kind === "daily" && existingRow.guest) return refused(403, { error: "the daily is for accounts", reason: "guest_daily" });

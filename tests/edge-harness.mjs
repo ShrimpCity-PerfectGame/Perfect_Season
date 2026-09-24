@@ -17,8 +17,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const CLIENT_STUB = path.join(root, "build", "edge-supabase-stub.mjs");
 
-// A store is: { users, rowsOf(table), insert(table, row), remove(table, match), rpcs, and the three failure
-// switches }. Only the shapes the functions actually ask for are here; anything else throws by name, so a new
+// A store is: { users, rowsOf(table), insert(table, row), remove(table, match), rpcs, and the failure
+// switches - readFails, writeFails, rpcFails and throwOn }. Only the shapes the functions actually ask for are here; anything else throws by name, so a new
 // call in a function is a loud failure rather than a silent undefined two lines later.
 const STUB_SOURCE = `
 export function createClient(url, key, opts) {
@@ -35,6 +35,10 @@ export function createClient(url, key, opts) {
   const from = (table) => {
     const q = { table, filters: [], orderBy: null, patch: null, wantRows: false, mode: "select" };
     const rows = () => {
+      // Not a failure the client reports - a failure it THROWS. supabase-js does, and so does any bug in the
+      // handler itself; the only question is whether the response still carries its CORS headers, because one
+      // that does not reaches the browser as the network being down.
+      if (store.throwOn?.[table]) throw new TypeError("something went wrong reading " + table);
       if (store.readFails?.[table]) return { error: { message: "read failed" }, data: null };
       let out = store.rowsOf(table);
       for (const [col, val] of q.filters) out = out.filter((r) => r[col] === val);

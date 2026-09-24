@@ -1133,7 +1133,14 @@ const ERRORS = {
   too_early: "The clock hasn't run out yet.",
   no_option: "Something has gone wrong with this board — the match may need to be abandoned.",
   "failed to save": "The server couldn't save that. Try again.",
+  // The read that failed, not the match that is missing. Unmapped it rendered "That didn't work." - the
+  // generic line the server's careful wording exists to replace, and the opposite of what it means: the match
+  // is fine, only this request's read of it was not.
+  "could not read the match": "Couldn't read the match just then. Try again.",
+  unplayable: "This match can't be worked out, so it's been ended. Nothing was recorded for either player.",
   "failed to grade": "The server couldn't work out the result. The match may need to be abandoned.",
+  // playMove reads `reason` before `error`, so this is the one the screen actually sees for that 500.
+  grading: "The server couldn't work out the result. The match may need to be abandoned.",
   unauthorized: "Sign in to play.",
   signed_out: "Sign in to play.",
   network: "Couldn't reach the server. Try again.",

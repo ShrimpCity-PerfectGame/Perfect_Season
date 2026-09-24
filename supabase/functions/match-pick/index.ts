@@ -89,10 +89,18 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
 
   let move: any;
   try { move = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+  // A body that isn't an object at all - `null`, a number, a bare string - is valid JSON and reaches here.
+  // The `in` operator throws on all three, which turned a 400 into a 500.
+  if (!move || typeof move !== "object" || Array.isArray(move)) return json({ error: "bad move", reason: "bad_slot" }, 400);
   // `slot` reaches fits() -> slot.startsWith(), so anything that isn't a string threw a TypeError. Every
   // other field is already coerced safely (boardIdx strict-compares, the numbers go through Number() and
   // refuse as NaN), and the steal branch whitelists its own slot - this is the pick branch catching up.
-  if ("slot" in move && typeof move.slot !== "string") return json({ error: "bad move", reason: "not_your_turn" }, 400);
+  //
+  // Asked as `"slot" in move`, this was false for the shape the client actually sends: JSON.stringify drops an
+  // `undefined`, so a re-spin, a dip and a steal all arrive with no `slot` key at all - the check only ever
+  // saw the picks that had one. `!== undefined` is the question that was meant. And `bad_slot` is the word for
+  // it: `not_your_turn` told a player the wrong thing about a message that was simply malformed.
+  if (move.slot !== undefined && typeof move.slot !== "string") return json({ error: "bad move", reason: "bad_slot" }, 400);
   const code = typeof move?.code === "string" ? move.code.toUpperCase() : "";
   if (!code) return json({ error: "no match", reason: "not_found" }, 400);
 

@@ -11,6 +11,7 @@
 import { assert, runTest, makeMockAuth } from "./helpers.mjs";
 import { loadMatchPick, storeFor } from "./edge-match-pick.mjs";
 import * as V from "../versus-logic.mjs";
+import { readFileSync } from "node:fs";
 import { replayMatch, optionsOn, optionId, optionFits, openSlots } from "../versus-logic.mjs";
 
 const { invoke } = await loadMatchPick();
@@ -229,6 +230,44 @@ await runTest("a read that fails is a failure, never an empty match", async () =
   t.store.readFails.matches = true;
   const unread = await invoke({ code: t.code }, { userId: t.host });
   assert(unread.status === 500, `a failed read of the match is a 500, not "no such match": ${unread.status} ${JSON.stringify(unread.body)}`);
+});
+
+await runTest("a malformed message is a bad message, said in those words", async () => {
+  // Three things wrong with one line. `"slot" in move` is FALSE when the key is absent - and absent is the
+  // shape the client actually sends, because JSON.stringify drops an `undefined`, so a re-spin, a dip and a
+  // steal all arrive with no `slot` at all and the check only ever saw picks that had one. The `in` operator
+  // then throws on a body that is null or a number, turning a 400 into a 500. And `not_your_turn` was the
+  // wrong word for any of it: the message is malformed, which says nothing about whose turn it is.
+  const t = await table();
+  for (const [label, body] of [
+    ["slot as a number", { code: t.code, boardIdx: 0, kind: "player", slot: 7, playerId: 1, season: 2020 }],
+    ["slot as null", { code: t.code, boardIdx: 0, kind: "player", slot: null, playerId: 1, season: 2020 }],
+    ["slot as an object", { code: t.code, boardIdx: 0, kind: "player", slot: {}, playerId: 1, season: 2020 }],
+  ]) {
+    const res = await invoke(body, { userId: t.host });
+    assert(res.status === 400 && res.body?.reason === "bad_slot", `${label}: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  for (const [label, raw] of [["null", null], ["a number", 7], ["a string", "hello"], ["an array", []]]) {
+    const res = await invoke(raw, { userId: t.host });
+    assert(res.status === 400, `a body that is ${label} is a 400, not a 500: ${res.status} ${JSON.stringify(res.body)}`);
+    assert(res.headers.get("access-control-allow-origin"), `and carries CORS (${label})`);
+  }
+  // A move with no slot at all is the ordinary shape and must still be judged on its merits, not refused here.
+  const spun = await invoke({ code: t.code, respin: "team" }, { userId: replay(t.match(), []).turn.side === "host" ? t.host : t.guest });
+  assert(spun.status === 200, `a re-spin, which carries no slot, still works: ${spun.status} ${JSON.stringify(spun.body)}`);
+});
+
+await runTest("every reason the function can send has words on the screen", async () => {
+  // A reason with no entry in versus.jsx's ERRORS renders "That didn't work." - the generic line these
+  // carefully worded refusals exist to replace. `could not read the match` was one: the match is fine, only
+  // this request's read of it failed, and the screen said neither.
+  const src = readFileSync(new URL("../versus.jsx", import.meta.url), "utf8");
+  const words = new Set([...src.slice(src.indexOf("const ERRORS = {")).matchAll(/^\s*"?([a-z_ ]+)"?:/gm)].map((m) => m[1].trim()));
+  const fn = readFileSync(new URL("../supabase/functions/match-pick/index.ts", import.meta.url), "utf8");
+  const sent = new Set([...fn.matchAll(/reason: "([a-z_]+)"/g)].map((m) => m[1]));
+  for (const m of fn.matchAll(/json\(\{ error: "([a-z_ ]+)" \}/g)) sent.add(m[1]);
+  const orphans = [...sent].filter((r) => !words.has(r) && r !== "invalid JSON" && r !== "method not allowed");
+  assert(orphans.length === 0, `every reason match-pick sends has words: missing ${JSON.stringify(orphans)}`);
 });
 
 console.log("test-versus-edge.mjs done");

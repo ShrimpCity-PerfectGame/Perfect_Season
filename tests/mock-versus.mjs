@@ -157,9 +157,17 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     // because it is the ordinary two-players-racing case.
     const uid = state.currentUserId();
     if (!uid) return httpError("unauthorized", 401);
+    // The two shape gates index.ts has, mirrored: a body that isn't an object throws on `in`/`.slot`, and a
+    // `slot` that isn't a string reaches fits() -> startsWith(). Both are 400s with `bad_slot`, because a
+    // malformed message is a malformed message and not a claim about whose turn it is.
+    if (!body || typeof body !== "object" || Array.isArray(body)) return httpError("bad_slot", 400);
+    if (body.slot !== undefined && typeof body.slot !== "string") return httpError("bad_slot", 400);
     const code = typeof body?.code === "string" ? body.code.toUpperCase() : "";
     if (!code) return httpError("not_found", 400);
     const m = matches.get(code);
+    // Test-only: the read of the match failing the way a database error does, which index.ts answers 500 and
+    // NOT "no such match" - told `not_found`, the screen puts "That match doesn't exist." over a live board.
+    if (state.versusReadFails) return httpError("could not read the match", 500);
     if (!m) return httpError("not_found", 404);
     if (m.status !== "drafting") return httpError("not_your_match", 409);
     const side = sideOf(m, uid);

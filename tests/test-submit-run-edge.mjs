@@ -13,6 +13,11 @@
 import { assert, runTest } from "./helpers.mjs";
 import { loadEdgeFunction } from "./edge-harness.mjs";
 import * as GL from "../game-logic.mjs";
+import { readFileSync } from "node:fs";
+
+// The real boards, so a sequence in a trace is a sequence the function recognises.
+const data = JSON.parse(readFileSync(new URL("../data/players.json", import.meta.url), "utf8"));
+GL.initGameData(data.players, data.opponents);
 
 const { invoke } = await loadEdgeFunction("submit-run");
 
@@ -33,7 +38,7 @@ function store({ rev = 0 } = {}) {
   const runs = [];
   return {
     users: { has: (id) => profiles.has(id) },
-    readFails: {}, writeFails: {}, rpcFails: {}, beforeWrite: null, rpcCalls: [],
+    readFails: {}, writeFails: {}, rpcFails: {}, throwOn: {}, beforeWrite: null, rpcCalls: [],
     profiles, runs,
     rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : table === "runs" ? runs : []),
     insert(table, row) { if (table === "runs") runs.push(row); return { row }; },
@@ -135,6 +140,63 @@ await runTest("an account with no profile is told so, and a failed read is not t
   // that whoever closes it sees this line go red and updates it deliberately.
   assert(dropped.status === 400, `a dropped read currently answers ${dropped.status} ${JSON.stringify(dropped.body)} - see 2.0-STATUS.md §4`);
   assert(s2.profiles.get(ME).dnf === 1, "and either way nothing was written");
+});
+
+await runTest("a malformed trace is refused, never thrown", async () => {
+  // The shape gate counted the entries and did not look at them, so `history: [null, ...]` and a number in
+  // `seq` walked through it and died on `.key` and `.split`. A TypeError out of the handler is a bare 500 with
+  // no CORS headers, which a browser reports as the network being down - so a season this function refused for
+  // a good reason reached the player as "check your connection", with a Retry that could never work.
+  const s = store();
+  globalThis.__edge_store__ = s;
+  const seq = GL.seededSequence("ABCDEF");
+  const six = Array.from({ length: 6 }, () => null);
+  const cases = [
+    ["six nulls for a history", { history: six, seq }],
+    ["numbers for a history", { history: [1, 2, 3, 4, 5, 6], seq }],
+    ["a history entry missing its key", { history: six.map(() => ({ id: 1, season: 2020, slot: "QB" })), seq }],
+    ["a history entry whose id is text", { history: six.map(() => ({ key: "KC|0", id: "x", season: 2020, slot: "QB" })), seq }],
+    ["a number in the sequence", { history: six, seq: seq.map((k, i) => (i === 3 ? 7 : k)) }],
+    ["an object in the sequence", { history: six, seq: seq.map((k, i) => (i === 3 ? {} : k)) }],
+    ["null for the whole sequence entry list", { history: six, seq: [null, null] }],
+  ];
+  for (const [label, body] of cases) {
+    const res = await invoke({ mode: { kind: "free", code: "ABCDEF" }, ...body }, { userId: ME });
+    assert(res.status === 400, `${label} is a refusal, not a crash: ${res.status} ${JSON.stringify(res.body)}`);
+    assert(res.headers.get("access-control-allow-origin"), `${label} still carries CORS`);
+    assert(res.body?.reason === "wrong shape", `${label} says what was wrong: ${JSON.stringify(res.body)}`);
+  }
+  assert(me(s).runs === 4 && s.runs.length === 0, "and none of it wrote anything");
+});
+
+await runTest("an abandoned draft cannot have abandoned more picks than a draft holds", async () => {
+  // `picks` is stored on the run and shown back as "abandoned after N picks", and nothing bounded it.
+  // 1e12 was accepted, counted, and written into `recent` - and into the runs log, where the column is an
+  // integer, so that insert overflowed and was swallowed, because a failed log must never fail a season that
+  // counted. The DNF stood, describing a trillion picks.
+  for (const [sent, want] of [[1e12, 6], [7, 6], [-3, 0], [2.9, 2], ["4", 4], [NaN, 0], [null, 0], ["nonsense", 0]]) {
+    const s = store();
+    globalThis.__edge_store__ = s;
+    const res = await invoke({ dnf: true, picks: sent, mode: "unlimited" }, { userId: ME });
+    assert(res.status === 200, `picks: ${JSON.stringify(sent)} still saves: ${res.status}`);
+    assert(me(s).recent[0].picks === want, `picks: ${JSON.stringify(sent)} is stored as ${want}, got ${me(s).recent[0].picks}`);
+    assert(s.runs[0].picks === want, `and logged as ${want}, got ${s.runs[0].picks}`);
+  }
+});
+
+await runTest("something throwing inside the handler still answers, with headers", async () => {
+  // What the wrapper is for, and it is worth being explicit that nothing else can reach it: with the shape
+  // gate above in place, no INPUT throws any more. This makes something throw the way a client library or a
+  // future bug in the several hundred lines below would. Without the wrapper the exception escapes to Deno,
+  // which answers a bare 500 with no headers at all - and a browser calls that a network failure, so a season
+  // refused for a good reason reaches the player as "check your connection", with a Retry that cannot work.
+  const s = store();
+  globalThis.__edge_store__ = s;
+  s.throwOn.profiles = true;
+  const res = await invoke({ dnf: true, picks: 1, mode: "unlimited" }, { userId: ME });
+  assert(res.status === 500, `it answers rather than escaping: ${res.status} ${JSON.stringify(res.body)}`);
+  assert(res.headers.get("access-control-allow-origin"), "and carries CORS, which is the whole point");
+  assert(res.body?.error, `with a body the client can read: ${JSON.stringify(res.body)}`);
 });
 
 await runTest("every answer carries the CORS headers, the refusals included", async () => {

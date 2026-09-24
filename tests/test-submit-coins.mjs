@@ -215,8 +215,10 @@ await runTest("a challenge code over 32 characters is refused like a missing one
   const player = await signUp("longcode");
   const before = snapshot(player.id);
   const tooLong = "L".repeat(33);
-  const res = await season(tooLong);
-  assert(!res.ok && res.error === "missing challenge code", `33 characters: ${show(res)}`);
+  // Through the HTTP answer, not through submitRun: a refusal that is not `duplicate` or `reserved_code`
+  // reaches the client as a bare `{ ok: false }`, which is the whole of what production sees.
+  const res = await answer({ mode: { kind: "free", code: tooLong }, ...legalTrace(tooLong), gm: false });
+  assert(res.status === 400 && res.body?.error === "missing challenge code", `33 characters: ${show(res)}`);
   assert(snapshot(player.id) === before, "nothing written");
   const fits = await season("L".repeat(32));
   assert(fits.ok && rowsOf(auth._finishedCodes, player.id).some((r) => r.code === "L".repeat(32)), `32 characters is fine: ${show(fits).slice(0, 200)}`);
@@ -384,6 +386,69 @@ await runTest("a free code cannot be the daily's own seed", async () => {
   // which is the shape dailySeed produces, not the word.
   const fine = await season("DAILYBOY");
   assert(!/reserved/i.test(JSON.stringify(fine)), `an ordinary code still works: ${JSON.stringify(fine).slice(0, 160)}`);
+});
+
+await runTest("a refusal reaches the client the way the server sends it, and submitRun carries only what it should", async () => {
+  // supabase-js turns any non-2xx into an `error` and hands the body over separately, so storage.js's
+  // submitRun has to read it - and until 2.0 the mock answered every 400 in a SUCCESS envelope, so that parse
+  // was executed by no test at all. `reserved_code` looked covered and was not: the assertion was reading a
+  // body that had leaked through `data`. Everything else is deliberately dropped, because for those "it will
+  // be saved next time" is true and the result screen says so.
+  const p1 = await signUp("refusalreader");
+  await signIn(p1);
+  const today = GL.dailySeed(TODAY, "fantasy");
+
+  // reserved_code: the code IS the daily's own seed, so it can never be accepted, however often it is sent.
+  const reserved = await season(today);
+  assert(same(reserved, { ok: false, reason: "reserved_code" }), `a reserved code is carried through: ${show(reserved)}`);
+
+  // duplicate: the same finished draft again.
+  const first = await season("REFUSAL-ONE");
+  assert(first.ok, `the first one counts: ${show(first.error || first)}`);
+  assert(same(await season("REFUSAL-ONE"), { ok: false, reason: "duplicate" }), "and the second is a duplicate");
+
+  // Everything else is `{ ok: false }` and nothing more - the reason stays on the server.
+  for (const [label, body] of [
+    ["an over-long code", { mode: { kind: "free", code: "L".repeat(33) }, ...legalTrace("x"), gm: false }],
+    ["a backdated daily", { mode: { kind: "daily", date: "2020-01-01" }, ...legalTrace(GL.dailySeed("2020-01-01", "fantasy")), gm: false, format: "fantasy" }],
+    ["an unknown format", { mode: { kind: "free", code: "REFUSAL-FMT" }, ...legalTrace("REFUSAL-FMT"), gm: false, format: "halfppr" }],
+    ["an unknown mode", { mode: { kind: "nonsense" }, ...legalTrace("REFUSAL-MODE"), gm: false }],
+  ]) {
+    const res = await submitRun(body);
+    assert(same(res, { ok: false }), `${label} is a bare refusal: ${show(res)}`);
+    // ...and the server really did send it as an HTTP error with a readable body, which is the half that
+    // could not be seen while the mock answered in a success envelope.
+    const raw = await answer(body);
+    assert(raw.status === 400 && raw.body?.error, `${label} is a 400 with a body: ${show(raw)}`);
+  }
+});
+
+await runTest("a GM season that skipped a board it could not afford anybody on still counts", async () => {
+  // "GM's cap is a reserve, not just a ceiling" is a headline rule of this release, and it had NO coverage on
+  // the submit path: the mock called replayDraft without `{ gm, format }`, so its replay judged a GM draft by
+  // free-mode rules. Measured at 6.5-8.9% disagreement - and this trace is one of them. The client skipped a
+  // board nobody affordable was on, which is exactly what boardAt does under a cap; told nothing about GM, the
+  // replay calls that "a board with a legal pick was passed over" and refuses a season that was played legally.
+  const player = await signUp("gmskipper");
+  await signIn(player);
+  const seed = "T9GU27";
+  const history = [
+    { key: "BAL|3", id: 1080, season: 2019, slot: "QB" },
+    { key: "HOU|1", id: 746, season: 2010, slot: "RB" },
+    { key: "TEN|0", id: 408, season: 2000, slot: "FLEX1" },
+    { key: "SF|2", id: 174, season: 2013, slot: "WR" },
+    { key: "BUF|3", id: 937, season: 2020, slot: "FLEX2" },
+    { key: "NO|2", id: 914, season: 2014, slot: "TE" },
+  ];
+  const seq = GL.seededSequence(seed);
+  // The rule itself, stated where it can be read: told the rules it was played under, the replay accepts it;
+  // told nothing, it does not. That gap is what the mock used to sit in.
+  assert(GL.replayDraft(seed, history, seq, { gm: true, format: "fantasy" }).ok, "the trace is legal under GM's rules");
+  assert(!GL.replayDraft(seed, history, seq).ok, "and illegal under free-mode rules - which is the point");
+
+  const res = await submitRun({ mode: { kind: "free", code: seed, gm: true }, history, seq, gm: true, format: "fantasy" });
+  assert(res.ok, `so the season counts: ${show(res)}`);
+  assert(res.run?.gm === true && res.run.capUsed <= GL.GM_CAP, `as a GM season inside the cap: $${res.run?.capUsed}M`);
 });
 
 console.log("test-submit-coins.mjs done");
