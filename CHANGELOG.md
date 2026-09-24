@@ -24,7 +24,7 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
-## [2.0.0] — unreleased
+## [2.0.0] — 2026-09-24
 
 Gridspin's public release. No new modes — this is the pass that makes the game safe to point strangers at.
 (The version is a milestone, not a semver bump: by this repo's own convention a fixes-only release would be
