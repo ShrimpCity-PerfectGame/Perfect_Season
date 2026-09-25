@@ -270,8 +270,17 @@ begin
     return case when m.status = 'open' then public.match_state(m.code) else jsonb_build_object('error', 'own_match') end;
   end if;
   if m.guest_id is not null then
-    return case when m.guest_id = v_uid then public.match_state(m.code) else jsonb_build_object('error', 'already_full') end;
+    -- Either player reopening their own match gets it back, in whatever state it is in - including one that
+    -- is over, so the link still shows the result.
+    if m.guest_id = v_uid then return public.match_state(m.code); end if;
+    -- A stranger, too late. 'Already has two players' is true of a duel being drafted and misleading about one
+    -- that has ended, so the state answers for itself rather than the guest slot answering for all three.
+    if m.status = 'done' then return jsonb_build_object('error', 'already_finished'); end if;
+    if m.status = 'abandoned' then return jsonb_build_object('error', 'match_abandoned'); end if;
+    return jsonb_build_object('error', 'already_full');
   end if;
+  -- No opponent ever arrived, so nothing started: a lobby the host called off must not say that it did.
+  if m.status = 'abandoned' then return jsonb_build_object('error', 'match_abandoned'); end if;
   if m.status <> 'open' then return jsonb_build_object('error', 'already_started'); end if;
 
   update public.matches

@@ -873,6 +873,9 @@ suite and still broke the live Leaderboard for every existing account.
   and the function have to agree on, and the scoring half decides what a season is worth. `match-pick` changes
   on its own account too: it finishes a match before it looks at what was asked for, writes every change against
   the revision it read, and ends a match it cannot grade (VERSUS.md 4).
+  v2.2.1's: re-run **`migration-versus.sql`**, then the client. It replaces `join_match` and adds nothing, so
+  it is safe on any shape and the site keeps working between the two steps - the old function simply answers
+  `already_full` for a duel that has ended, which is what it always did. No Edge Function change.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging

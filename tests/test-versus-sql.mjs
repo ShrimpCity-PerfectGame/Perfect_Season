@@ -123,6 +123,25 @@ await runTest("taking an invite: the first one through the link is the opponent"
   assert((await call(GUEST, "join_match", { p_code: code })).data?.code === code, "the opponent reopening the link gets the match back");
   assert((await call(OTHER, "join_match", { p_code: code })).data?.error === "already_full", "a third person is told it's full");
   assert((await call(HOST, "join_match", { p_code: code })).data?.error === "own_match", "and the host can't join their own started match");
+
+  // A link outlives the duel, so the three ways of being too late have to read differently. "Already has two
+  // players" is true while it is being drafted and misleading once it is over - and a lobby the host closed
+  // before anybody took it never started at all, which is what `already_started` used to tell them it had.
+  await owner("update matches set status = 'done', ended_at = now() where code = $1", [code]);
+  assert((await call(OTHER, "join_match", { p_code: code })).data?.error === "already_finished",
+    "a link to a finished duel says it is over, not that it is full");
+  assert((await call(GUEST, "join_match", { p_code: code })).data?.code === code,
+    "while a player of it still gets it back - the link is how they reach the result");
+
+  await owner("update matches set status = 'abandoned' where code = $1", [code]);
+  assert((await call(OTHER, "join_match", { p_code: code })).data?.error === "match_abandoned",
+    "and one that was called off says so");
+
+  // The same, for a lobby nobody ever took: no guest slot to answer for it, so the status has to.
+  const dead = (await call(HOST, "create_match", {})).data.code;
+  await owner("update matches set status = 'abandoned' where code = $1", [dead]);
+  assert((await call(OTHER, "join_match", { p_code: dead })).data?.error === "match_abandoned",
+    "a lobby the host called off was never a match that started");
 });
 
 await runTest("anything taken in a match is gone, for both sides", async () => {

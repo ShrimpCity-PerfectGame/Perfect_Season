@@ -10,6 +10,22 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.2.1] — 2026-09-25
+
+**Needs `migration-versus.sql` re-run in each environment before the client** (`join_match` only; it replaces
+the function and adds nothing, so re-running is safe on any shape and the live site keeps working between the
+two steps). No Edge Function change.
+
+### Fixed
+
+- **A duel link now says which way you are too late.** Opening one that has already been taken said "that match
+  already has two players" whatever had happened to it since — true while it is being drafted, misleading once
+  it is over, and simply wrong for a lobby the host closed before anybody took it, which reached "that match has
+  already started" about a match that never started. `join_match` answers from the state instead:
+  `already_finished` for a duel that is over, `match_abandoned` for one called off, `already_full` only while it
+  is actually being drafted. Either player reopening their own match still gets it back in any state — the link
+  is how they reach the result.
+
 
 ## [2.2.0] — 2026-09-24
 

@@ -1176,6 +1176,10 @@ const ERRORS = {
   guest_not_allowed: "A duel needs an account on both sides — a guest can't play one.",
   not_found: "That match doesn't exist.",
   already_full: "That match already has two players.",
+  // A duel that ended before you opened its link. Two answers rather than one, because "it already has two
+  // players" is true of a draft in progress and simply misleading about a match that is over or was called
+  // off - and a lobby the host closed without anybody taking it never started at all.
+  match_abandoned: "That duel was called off.",
   own_match: "That's your own link.",
   already_started: "That match has already started.",
   not_your_turn: "It's not your turn.",

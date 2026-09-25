@@ -122,7 +122,15 @@ year aren't mistaken for each other.
 | function | returns | does |
 |---|---|---|
 | `create_match(p_format text)` | jsonb: the match row | One open match per host at a time (a second call returns the existing one). Generates the code. Guests (`profiles.guest`) may not create one — see 5. |
-| `join_match(p_code text)` | jsonb: the match row, or a code | `not_found`, `already_full`, `own_match`, `not_signed_in`, `guest_not_allowed`. Sets `guest_id`, `status = 'drafting'` and the first `turn_deadline`. |
+| `join_match(p_code text)` | jsonb: the match row, or a code | `not_found`, `already_full`, `already_finished`, `match_abandoned`, `already_started`, `own_match`, `not_signed_in`, `guest_not_allowed`. Sets `guest_id`, `status = 'drafting'` and the first `turn_deadline`. |
+
+A link outlives the duel it opened, so **being too late has three answers, not one**. Either player reopening
+their own match gets it back whatever state it is in — the link is how they reach the result — and a stranger
+is told which way they missed it: `already_full` while it is being drafted, `already_finished` once it is over,
+`match_abandoned` if it was called off. A lobby the host closed before anybody took it has no guest slot to
+answer for it, so the status does; it used to reach `already_started`, which told them a match had begun that
+never did. Every one of those codes needs words in `versus.jsx`'s `ERRORS` and a mention in `storage-versus.js`'s
+`joinMatch` contract, or `tests/test-versus-screen.mjs`'s refusal-words test calls it orphaned.
 | `match_state(p_code text)` | jsonb | The match plus its picks, for a client that has just opened the page or reconnected. Read-only (`stable`), called as GET. |
 
 Everything that decides a pick lives in the Edge Function below, not here, because it needs the game's own rules.

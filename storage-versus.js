@@ -47,7 +47,8 @@ export async function createMatch(format) {
 }
 
 // Takes someone's invite. The host opening their own link gets their lobby back rather than an error.
-//   { ok: true, match } | { ok: false, reason: "not_found" | "already_full" | "own_match" | "already_started"
+//   { ok: true, match } | { ok: false, reason: "not_found" | "already_full" | "already_finished"
+//                                             | "match_abandoned" | "own_match" | "already_started"
 //                                             | "guest_not_allowed" | "signed_out" | "network" }
 export async function joinMatch(code) {
   if (typeof code !== "string" || !code) return failed("not_found");

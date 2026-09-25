@@ -100,7 +100,16 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     if (!m) return { error: "not_found" };
     // The host opening their own link is not an error; they get their lobby back.
     if (m.host_id === uid) return m.status === "open" ? matchState({ p_code: m.code }) : { error: "own_match" };
-    if (m.guest_id) return m.guest_id === uid ? matchState({ p_code: m.code }) : { error: "already_full" };
+    if (m.guest_id) {
+      // Either player reopening gets it back in whatever state it is in; a stranger is told which state that
+      // is, because "already has two players" is misleading about a duel that has ended.
+      if (m.guest_id === uid) return matchState({ p_code: m.code });
+      if (m.status === "done") return { error: "already_finished" };
+      if (m.status === "abandoned") return { error: "match_abandoned" };
+      return { error: "already_full" };
+    }
+    // No opponent ever arrived, so nothing started.
+    if (m.status === "abandoned") return { error: "match_abandoned" };
     if (m.status !== "open") return { error: "already_started" };
     m.guest_id = uid;
     m.status = "drafting";

@@ -584,4 +584,41 @@ await runTest("the lobby invite reads as an invitation and ends with the link", 
   assert(versusInviteText({ hostName: "alpha" }, "") === "", "no link, no card");
 });
 
+await runTest("a link outlives its duel, and says which way it is too late", async () => {
+  // The mock's join_match against the same three answers test-versus-sql.mjs holds the real SQL to. The two
+  // are written line for line and nothing compares them automatically, so each is pinned on its own side.
+  const { sb, as, A, B } = await twoPlayers();
+  await as(A);
+  const code = (await call(sb, "create_match", {})).code;
+  await as(B);
+  await call(sb, "join_match", { p_code: code });
+
+  // A third account, so "too late" is asked by somebody who was never in it.
+  await sb.auth.signOut();
+  await sb.auth.signUp({ email: "three@x.test", password: "password1", options: { data: { username: "gamma" } } });
+  const asThird = async () => { await sb.auth.signInWithPassword({ email: "three@x.test", password: "password1" }); };
+
+  await asThird();
+  assert((await call(sb, "join_match", { p_code: code })).error === "already_full", "while it is being drafted, it is full");
+
+  const m = sb._versus._matches.get(code);
+  m.status = "done";
+  await asThird();
+  assert((await call(sb, "join_match", { p_code: code })).error === "already_finished", "once it is over, it is over");
+  await as(B);
+  assert((await call(sb, "join_match", { p_code: code })).code === code, "and a player of it still reaches the result through the link");
+
+  m.status = "abandoned";
+  await asThird();
+  assert((await call(sb, "join_match", { p_code: code })).error === "match_abandoned", "called off says called off");
+
+  // A lobby nobody ever took: there is no guest slot to answer for it, so the status has to - and it must not
+  // claim a match started, which is what already_started used to tell them.
+  await as(A);
+  const dead = (await call(sb, "create_match", {})).code;
+  sb._versus._matches.get(dead).status = "abandoned";
+  await asThird();
+  assert((await call(sb, "join_match", { p_code: dead })).error === "match_abandoned", "a closed lobby never started");
+});
+
 console.log("test-versus-flow.mjs done");
