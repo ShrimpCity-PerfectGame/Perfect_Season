@@ -559,4 +559,29 @@ await runTest("an announcement plays once, however often the screen re-reads", a
     `and each distinct one did play: ${JSON.stringify(played)}`);
 });
 
+await runTest("the lobby invite reads as an invitation and ends with the link", async () => {
+  // The card the lobby hands the share sheet. Unlike a season card there is nothing to keep off it: the code
+  // IS the invitation, the boards are dealt from it for both players, and neither has seen them.
+  setupDom();
+  const { versusInviteText } = await loadModule("versus.jsx");
+  const link = "https://gridspin.test/vs/ABC123";
+
+  const card = versusInviteText({ hostName: "alpha" }, link);
+  const lines = card.split("\n");
+  assert(lines[0].startsWith("alpha invited you"), `it names who is asking, first: ${JSON.stringify(lines[0])}`);
+  assert(/duel/i.test(lines[0]) && lines[0].includes("Gridspin"), `and what it is: ${JSON.stringify(lines[0])}`);
+  assert(lines.at(-1) === link, `the link is the last line, on its own: ${JSON.stringify(lines.at(-1))}`);
+  assert(lines.length === 3, `three lines, the length of a text message: ${lines.length}`);
+
+  // A lobby is only reachable signed in, so there is always a name - but "Host invited you to a duel" is worse
+  // than not naming anybody, and `name()` would have said exactly that.
+  const nameless = versusInviteText({}, link);
+  assert(!/Host/.test(nameless), `no placeholder name: ${JSON.stringify(nameless.split("\n")[0])}`);
+  assert(nameless.split("\n").at(-1) === link, "and still the link last");
+
+  // Nothing to send to, nothing to send: the caller would otherwise share a message whose invitation is
+  // missing, and the link is the only part that cannot be guessed.
+  assert(versusInviteText({ hostName: "alpha" }, "") === "", "no link, no card");
+});
+
 console.log("test-versus-flow.mjs done");

@@ -86,7 +86,7 @@ await runTest("the Modes tile opens a lobby with a link to send", async () => {
   const code = versus().dataset.code;
   assert(/^[A-HJ-NP-Z2-9]{6}$/.test(code || ""), `a lobby with a code, got ${JSON.stringify(code)}`);
   assert(text(container).includes(`/vs/${code}`), "and the link to send is on screen");
-  assert(findButtonByText(container, "Copy link"), "with a button to copy it");
+  assert(findButtonByText(container, "Invite a friend"), "with a button to send it");
   assert(text(container).includes("Waiting for an opponent"), "and says what it is waiting for");
   // The address is the link, so it survives a reload and can be copied out of the bar.
   assert(window.location.pathname === `/vs/${code}`, `the address is the invite, got ${window.location.pathname}`);
@@ -465,6 +465,65 @@ await runTest("a steal through the buttons moves the player on both screens", as
 
 // The draft keeps a clock ticking and a Realtime channel open, both of which would hold the process open
 // after the last assertion - so the screen comes down the way a player leaving it would take it down.
+// After the matches above, not among them: it opens a lobby of its own, and who leads board one is seeded on
+// the match code, so an extra match in the middle re-deals the one the board tests share. It stays above
+// the reactRoot.unmount() below, which is where the mounted app ends.
+await runTest("the lobby sends a written invitation, not an address", async () => {
+  // Matchmaking is entirely "get this link to one person", and that person is almost always reached in a text.
+  // A bare URL says neither who sent it nor what it is - and whoever opens it first IS the opponent, so it has
+  // to be worth opening. The button hands the device's share sheet a message instead of loading the clipboard.
+  const clip = Object.getOwnPropertyDescriptor(window.navigator, "clipboard");
+  const ua = window.navigator.userAgent;
+  // The test above leaves the app inside a match, where there are no tabs to reach the Account panel by.
+  await goHome();
+  await signUp("inviter@x.test", "inviter");
+  await goHome();
+  await clickMode(container, "Duel");
+  await flush();
+  await click(findButtonByText(container, "Open a lobby"));
+  await flush();
+  const code = versus().dataset.code;
+
+  // A computer, where there is no sheet: the same message goes to the clipboard, so what gets pasted into a
+  // chat is still a sentence. The link is on screen to read either way.
+  let copied = null;
+  Object.defineProperty(window.navigator, "clipboard", { value: { writeText: async (t) => { copied = t; } }, configurable: true });
+  await click(findButtonByText(container, "Invite a friend"));
+  await flush();
+  assert(copied, "the invitation went somewhere");
+  assert(copied.includes("inviter"), `it says who is asking: ${JSON.stringify(copied)}`);
+  assert(/invited you to a duel/i.test(copied), `and what it is: ${JSON.stringify(copied)}`);
+  assert(copied.trim().endsWith(`/vs/${code}`), `with the link last: ${JSON.stringify(copied)}`);
+  assert(findButtonByText(container, "Copied"), "and the button says what actually happened");
+
+  // A phone, which is the whole point of this: the sheet takes it, and nothing is copied behind its back.
+  let shared = null;
+  Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 (iPhone)", configurable: true });
+  Object.defineProperty(window.navigator, "share", { value: async (d) => { shared = d; }, configurable: true });
+  copied = null;
+  await click(findButtonByText(container, "Copied") || findButtonByText(container, "Invite a friend"));
+  await flush();
+  assert(shared, "the share sheet was offered it");
+  assert(shared.text.includes(`/vs/${code}`), `the sheet got the invitation: ${JSON.stringify(shared)}`);
+  assert(copied === null, "and it was not also dumped on the clipboard");
+  assert(findButtonByText(container, "Invite sent"), "the button says it was sent");
+
+  // Closing the sheet is a choice, not a failure. The half that bites is the clipboard: falling through to
+  // it would send the invitation after they had decided not to. The label assertion under it is weaker than it
+  // looks - INVITE_SAID has no words for "cancelled", so the button reads the same either way - and it is here
+  // to catch somebody giving it some.
+  Object.defineProperty(window.navigator, "share", {
+    value: async () => { throw Object.assign(new Error("closed"), { name: "AbortError" }); }, configurable: true });
+  await click(findButtonByText(container, "Invite sent") || findButtonByText(container, "Invite a friend"));
+  await flush();
+  assert(copied === null, "an abandoned share sheet does not fall through to the clipboard");
+  assert(!findButtonByText(container, "Copied"), "and the button claims nothing");
+
+  Object.defineProperty(window.navigator, "userAgent", { value: ua, configurable: true });
+  delete window.navigator.share;
+  if (clip) Object.defineProperty(window.navigator, "clipboard", clip);
+});
+
 reactRoot.unmount();
 // Every refusal the rules can give has words on the screen, and every set of words belongs to a refusal the
 // rules can still give. Both halves have been wrong: `would_strand` stayed in the map for a release after the

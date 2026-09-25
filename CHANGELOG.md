@@ -11,6 +11,26 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-09-24
+
+### Added
+
+- **A duel invite is a message now, not an address.** The lobby's "Copy link" is **Invite a friend**: it hands
+  the phone's share sheet a written invitation — who is asking, one line of what a duel is, and the link last —
+  so it can go straight into a text. Matchmaking is entirely getting one link to one person, and whoever opens
+  it first *is* the opponent, so a bare URL in somebody's messages was asking a lot of it. On a computer there
+  is no share sheet, so the same message is copied instead; the link stays on screen either way. The button
+  says only what actually happened, and a closed share sheet is not a send.
+
+### Fixed
+
+- **Sharing from a duel no longer writes over the season result screen's status.** Everything that knows how a
+  device shares now lives in one `sendShare`, and `shareOut` is the season result's own wrapper around it.
+  Sharing a duel result used to leave "Shared" on the Share result button of a season nobody had shared — and
+  with the clipboard blocked, the duel's text sat in that screen's copy-it-by-hand box. The duel screen reports
+  its own status instead.
+
+
 - **An Android app**, wrapping the same game (Capacitor). Nothing about the website changes, and the app isn't on
   Google Play yet — see "The Android app" in CLAUDE.md.
 - In the app, **Back works the way Android expects**: it closes the rules or a report sheet, then returns to Modes
@@ -24,7 +44,7 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
-## [2.1.1] — unreleased
+## [2.1.1] — 2026-09-24
 
 ### Fixed
 

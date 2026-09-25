@@ -629,7 +629,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const [code, setCode] = useState(codeFromAddress || null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [copied, setCopied] = useState(false);
+  const [sent, setSent] = useState(null);   // what the last invite actually did, or null
   // The option a player has tapped but not locked in, exactly as the single-player draft holds one.
   const [selected, setSelected] = useState(null);
   // Which pick the clock has already been claimed for, and how many times - so a refusal backs off instead of
@@ -842,13 +842,33 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     );
   }
 
+  // The site's own address first, the way every other share path builds one. Read off `location.origin` this
+  // was `https://localhost/vs/ABC123` inside the Android app, whose web view is served from localhost - and the
+  // lobby link is the whole of matchmaking, so there was no other way to hand somebody a code from the app.
+  // The share card two hundred lines down already did this correctly with the same `siteUrl`.
+  const origin = siteUrl || (typeof location !== "undefined" ? location.origin : "");
+  const linkFor = (c) => (origin ? `${origin}${versusPath(c)}` : versusPath(c));
+
+  // One send, from either screen. onShare is the app's one share path and the one place that knows a closed
+  // share sheet must say nothing at all. Rendered without it, the clipboard directly, so the button is never
+  // dead. Says only what actually happened, and goes back to itself after a moment - the old Copy link latched
+  // on for the rest of the session, and said "Copied" even when the clipboard had refused.
+  const sendInvite = async (m) => {
+    const text = versusInviteText(m, linkFor(m.code));
+    const how = onShare ? await onShare(text) : (await copy(text)) ? "copied" : "manual";
+    if (!how || how === "cancelled") return how;
+    setSent(how);
+    window.setTimeout(() => setSent(null), 2500);
+    return how;
+  };
+
   if (!match) {
     return (
       <section className="versus" data-view="lobby">
         {showRules ? <VersusHowTo onClose={closeRules} /> : null}
         <h2 className="h">Duel</h2>
         <p className="note">
-          Open a lobby and send the link. You and whoever takes it draft from the same eight boards — six players,
+          Open a lobby and invite somebody. You and whoever takes it draft from the same eight boards — six players,
           a defense and a kicker each — and the better roster wins. No dice.
         </p>
         {error ? <p className="vs-err" role="alert">{errorText(error)}</p> : null}
@@ -860,12 +880,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
     );
   }
 
-  // The site's own address first, the way every other share path builds one. Read off `location.origin` this
-  // was `https://localhost/vs/ABC123` inside the Android app, whose web view is served from localhost - and the
-  // lobby link is the whole of matchmaking, so there was no other way to hand somebody a code from the app.
-  // The share card two hundred lines down already did this correctly with the same `siteUrl`.
-  const origin = siteUrl || (typeof location !== "undefined" ? location.origin : "");
-  const link = origin ? `${origin}${versusPath(match.code)}` : versusPath(match.code);
+  const link = linkFor(match.code);
   const hostName = match.hostName || "Host";
   const guestName = match.guestName || "…";
 
@@ -876,16 +891,17 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
         <h2 className="h">Your lobby</h2>
         <div className="vs-link">
           <code>{link}</code>
-          {/* Says Copied only if it was, and goes back to itself - it used to latch on for the rest of the
-              session, and said so even when the clipboard had refused. */}
-          <button className="btn sm" onClick={async () => {
-            if (!(await copy(link))) return;
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 2500);
-          }}>{copied ? "Copied" : "Copy link"}</button>
+          {/* The whole of matchmaking is getting this link to one person, so the button hands the phone's share
+              sheet a written invitation rather than putting an address on the clipboard - a duel starts in a
+              text, not in a paste. On a computer there is no sheet, so it copies the same message; the link is
+              on screen above either way.
+              Says what actually happened and goes back to itself. It used to latch on for the rest of the
+              session, and said "Copied" even when the clipboard had refused. */}
+          <button className="btn sm" onClick={() => sendInvite(match)}>{INVITE_SAID[sent] || "Invite a friend"}</button>
         </div>
         <p className="vs-wait"><span className="vs-dot" /> Waiting for an opponent…</p>
         <p className="vs-note">The first person to open the link is your opponent. Keep this page open.</p>
+        {sent === "manual" ? <p className="vs-note">Couldn't share it — copy the link above instead.</p> : null}
         <button className="btn" onClick={onBack}>Back</button>
       </section>
     );
@@ -1095,6 +1111,25 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
 // being drafted must not be spoiled by the loser posting the board - and like it the link goes last, where a
 // chat app turns it into a preview. The link is an invitation, not a replay: /vs/<code> is that match, which is
 // over, so it points at the game rather than at the draft.
+// The invite a host sends, so the lobby hands over a message rather than an address. A bare link in somebody's
+// texts says neither who sent it nor what it is, and the first person to open this one becomes the opponent -
+// so it has to read like an invitation and be worth opening. Same shape as every other card the game sends:
+// what it is, one line of what happens, the link last.
+//
+// Nothing here has to be withheld, which is the one way it differs from a season card: the code IS the
+// invitation, the boards are dealt from it for both players, and neither has seen them yet.
+export function versusInviteText(match, link) {
+  if (!link) return "";
+  // `name()` would say "Host", which is nobody. A lobby is only reachable signed in, so the name is there -
+  // but a share that reads "Host invited you" is worse than one that doesn't name anybody.
+  const host = match?.hostName || "";
+  return [
+    host ? `${host} invited you to a duel on Gridspin 🏈` : "You're invited to a duel on Gridspin 🏈",
+    "Same boards, one pick each. Better roster wins.",
+    link,
+  ].join("\n");
+}
+
 export function versusShareText(match, result, side, siteUrl) {
   if (!result) return "";
   const mine = side === "guest" ? "guest" : "host";
@@ -1120,6 +1155,9 @@ export function versusShareText(match, result, side, siteUrl) {
 }
 
 const name = (match, side) => (side === "host" ? match.hostName || "Host" : side === "guest" ? match.guestName || "Opponent" : "");
+// What the invite button says once it has been pressed. Only ever what happened: a closed share sheet is
+// not a send, and it keeps the button where it was.
+const INVITE_SAID = { shared: "Invite sent", copied: "Copied", manual: "Couldn't share" };
 const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
 // Resolves to whether it actually landed. writeText REJECTS on a denied permission rather than throwing, so the
 // try/catch alone caught nothing and the button said "Copied" over a clipboard that had not changed - and left

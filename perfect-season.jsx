@@ -1986,6 +1986,33 @@ export function parseChallengeLink(pathname, search) {
   };
 }
 
+// Handing something to the phone's share sheet, or to the clipboard when there isn't one. What is being
+// shared is built by whoever is sharing - a season (shareText), a duel result (versusShareText) or a duel
+// invite (versusInviteText) - because this half is the same for all of them, and this is the one place that
+// knows an abandoned share sheet must say nothing at all: closing it is a choice, not a failure, and nothing
+// was sent. Answers what happened in the same words shareProfile does, so a screen can report it:
+//   "shared" the sheet took it · "cancelled" the sheet was closed · "copied" the clipboard has it ·
+//   "manual" neither worked, so show the text and let them copy it by hand
+// It holds no state on purpose. It used to be half of shareOut, which wrote the season result screen's
+// status - so anything else that shared wrote over it.
+export async function sendShare(text) {
+  if (!text) return "manual";
+  try {
+    // The sheet on phones only. On a computer, copying is what people expect.
+    if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      await navigator.share({ text });
+      return "shared";
+    }
+  } catch (e) { if (e && e.name === "AbortError") return "cancelled"; }
+  // Anything that isn't the sheet being closed falls through to the clipboard rather than giving up.
+  try {
+    await navigator.clipboard.writeText(text);
+    return "copied";
+  } catch (e) {
+    return "manual";
+  }
+}
+
 // The Wordle-style share: the record, a square per game, the playoffs and a link - never the players,
 // so it can't spoil the daily's boards. 🟩 a win, 🟥 a loss, 🟨 an upset win (isUpsetWin, the rule
 // behind the result screen's 🚨 tiles).
@@ -3875,24 +3902,20 @@ export default function PerfectSeason() {
     return false;
   }
 
-  // Handing a card to the phone's share sheet, or to the clipboard when there isn't one. The card itself is
-  // built by whoever is sharing - a season (shareText) or a match (versusShareText) - since this half is the
-  // same either way, and the one place that knows an abandoned share sheet must say nothing at all.
+  // The season result's Share: sendShare above, plus the status line under the button. Everything that knows
+  // how a device shares lives up there; this only records what happened for the one screen that reports it.
+  //
+  // The two are split because the status is the SEASON RESULT's, and 1v1 shares things of its own - a result
+  // card, and now a lobby invite sent at the start of every duel. Writing this state from those left "Shared"
+  // on the Share result button of a season nobody had shared, and a blocked clipboard left the invite sitting
+  // in the result screen's copy-it-by-hand box. The duel screen gets sendShare and says so itself.
   async function shareOut(text) {
-    if (!text) return;
-    try {
-      if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
-        await navigator.share({ text });
-        setShare({ state: "shared", text }); return;
-      }
-    } catch (e) { if (e && e.name === "AbortError") return; }
-    try {
-      await navigator.clipboard.writeText(text);
-      setShare({ state: "copied", text });
-      setTimeout(() => setShare((s) => (s.state === "copied" ? { ...s, state: "idle" } : s)), 2500);
-    } catch (e) {
-      setShare({ state: "manual", text }); // clipboard blocked: show the text to copy by hand
-    }
+    if (!text) return "manual";
+    const how = await sendShare(text);
+    if (how === "cancelled") return how; // nothing was shared, so there is nothing to say
+    setShare({ state: how, text });
+    if (how === "copied") setTimeout(() => setShare((s) => (s.state === "copied" ? { ...s, state: "idle" } : s)), 2500);
+    return how;
   }
   async function doShare() {
     // result.rank is this season's rank from the runs log ({rank,total}), or null/undefined when
@@ -4697,7 +4720,7 @@ export default function PerfectSeason() {
             <VersusScreen
               key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
               format={format} onBack={leaveVersus} onCode={setVersusCode}
-              onShare={shareOut} siteUrl={APP_SITE_URL}
+              onShare={sendShare} siteUrl={APP_SITE_URL}
             />
             )}
           </>

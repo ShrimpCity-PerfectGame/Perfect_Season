@@ -585,8 +585,17 @@ server re-spins that board itself, charged to no one.
 ## 9. Screens (`versus.jsx`, prefix `vs-`)
 
 - **The Modes tile** — "1v1" beside the others: create a lobby, or the link to the one you already have open.
-- **The lobby** — your link with a copy button, and the state of the other side ("waiting for an opponent" /
-  "they're here").
+- **The lobby** — your link, an **Invite a friend** button, and the state of the other side ("waiting for an
+  opponent" / "they're here"). The button hands the device's share sheet a written invitation
+  (`versusInviteText`: who is asking, one line of what a duel is, the link last) rather than putting a bare
+  address on the clipboard — matchmaking is entirely "get this link to one person", that person is reached in a
+  text, and whoever opens it first *is* the opponent, so it has to say what it is and be worth opening. On a
+  computer there is no sheet and the same message is copied instead; the link stays on screen to read either
+  way. The button says only what happened (`INVITE_SAID`), and a closed share sheet is not a send: nothing is
+  claimed and nothing falls through to the clipboard behind it.
+  The screen is handed `sendShare` (perfect-season.jsx), **not** `shareOut` — `shareOut` writes the season
+  result screen's status line, so sharing anything from here used to leave "Shared" under a season nobody had
+  shared, and a blocked clipboard left the invite sitting in that screen's copy-it-by-hand box.
 - **Its own rules** (`VersusHowTo`), shown once per device under its own flag (`ps-vs-howto-seen`) and from a
   button under the board after that. Somebody arriving on an invite has very likely never seen this mode, and
   the game's How to play answers none of the questions it raises — whose turn, what the clock does, what the
