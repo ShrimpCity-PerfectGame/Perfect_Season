@@ -430,12 +430,18 @@ const FLASH_MS = 2400;
 // Your turn comes round eight times a match and a powerup twice at most, so the turn gets a shorter one: the
 // same language, half the time, over a board you are trying to read. Has to match the CSS, like FLASH_MS.
 const TURN_FLASH_MS = 1200;
-function useFlash(event) {
+// EVERY key it has shown, not just the last one. Holding only the last was enough while powerups were the only
+// events - the newest was always the newest powerup, so it stayed matched. Turn announcements interleave with
+// them, and then the newest event oscillates: your turn, a re-spin during it, your turn again, and on a turn
+// that is not yours it falls back to the last powerup, whose key no longer matches - so an announcement from
+// two picks ago played again, on somebody else's turn, looking like it had arrived late. A match has at most
+// sixteen turns and six powerups, so remembering all of them costs nothing.
+export function useFlash(event) {
   const [shown, setShown] = useState(null);
-  const seen = useRef(null);
+  const seen = useRef(new Set());
   useEffect(() => {
-    if (!event || event.key === seen.current) return undefined;
-    seen.current = event.key;
+    if (!event || seen.current.has(event.key)) return undefined;
+    seen.current.add(event.key);
     setShown(event);
     const t = setTimeout(() => setShown(null), event.brief ? TURN_FLASH_MS : FLASH_MS);
     return () => clearTimeout(t);

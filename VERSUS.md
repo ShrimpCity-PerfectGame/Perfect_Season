@@ -189,6 +189,14 @@ just *before* any powerup spent on the same pick (`pickNo * 4 - 1` against their
 and your own re-spin would be silent, since `useFlash` never repeats a key and the turn would stay the newest
 event. The live region gets the words once, not a description of the animation.
 
+**`useFlash` remembers every key it has shown, not just the last one** (v2.1.1). Holding only the last was
+enough while powerups were the only events — the newest event was always the newest powerup, so it stayed
+matched. Turn announcements interleave with them, and then the newest event oscillates: your turn, a re-spin
+during it, your turn again. On a turn that is not yours the newest falls back to the last powerup, whose key no
+longer matches, and it plays again — two picks late, on the wrong turn, looking random. Found by playing, not
+by the suite: the first test written for it modelled the rule with a `Set` and so passed against the bug. It
+drives the real hook now.
+
 **Every refusal here is an HTTP status, and supabase-js turns any non-2xx into an `error` with the body behind
 `error.context`.** So `storage-versus.js`'s `playMove` has to read that body, exactly as `submitRun` does —
 without it every carefully-worded refusal in this section reaches the player as "couldn't reach the server",

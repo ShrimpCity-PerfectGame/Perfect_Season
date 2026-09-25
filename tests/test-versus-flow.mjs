@@ -520,4 +520,43 @@ await runTest("your turn announces itself, to you and not to them, and a powerup
     "a finished match announces no turn");
 });
 
+await runTest("an announcement plays once, however often the screen re-reads", async () => {
+  // Reported from a real duel: "it seemed to throw random adverts, like a re-spin on the next turn rather than
+  // current". It was not random and it was not late - it was the SAME announcement playing again two picks
+  // later, on somebody else's turn.
+  //
+  // useFlash remembered only the LAST key it had shown. While powerups were the only events that was enough:
+  // the newest event was always the newest powerup, so it stayed matched and never repeated. Turn
+  // announcements interleave with them, so the newest event oscillates - your turn, a re-spin during it, your
+  // turn again - and on a turn that is not yours the newest falls back to the last powerup, whose key no
+  // longer matched. It played again. Shipped in 2.1.0 and found by playing.
+  //
+  // Driving the real hook, because modelling its rule in the test is how the first attempt at this passed
+  // against the bug: the model was the fix.
+  setupDom();
+  const { useFlash } = await loadModule("versus.jsx");
+  const React = (await import("react")).default;
+  const { renderComponent } = await import("./helpers.mjs");
+
+  const played = [];
+  function Probe({ event }) {
+    const shown = useFlash(event);
+    const last = React.useRef(null);
+    if (shown && shown.key !== last.current) { last.current = shown.key; played.push(shown.key); }
+    if (!shown) last.current = null;
+    return React.createElement("div", null, shown ? shown.key : "");
+  }
+  const ev = (key) => ({ key, title: key, brief: true });
+  // Exactly the sequence a duel produces: your turn, a powerup during it, your turn again - and then a turn
+  // that is not yours, where the newest event falls back to the powerup from before.
+  const sequence = ["turn:2", "respin:2:team", "turn:3", "respin:2:team", "turn:4", "respin:2:team", "turn:5"];
+  const { rerender } = await renderComponent(Probe, { event: ev(sequence[0]) });
+  for (const key of sequence.slice(1)) await rerender({ event: ev(key) });
+
+  const dupes = played.filter((k, i) => played.indexOf(k) !== i);
+  assert(dupes.length === 0, `an announcement played more than once: ${JSON.stringify(played)}`);
+  assert(played.includes("turn:2") && played.includes("respin:2:team") && played.includes("turn:5"),
+    `and each distinct one did play: ${JSON.stringify(played)}`);
+});
+
 console.log("test-versus-flow.mjs done");

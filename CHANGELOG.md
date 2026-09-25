@@ -24,7 +24,14 @@ CLAUDE.md.
   — cream on Modes, navy while drafting, black on the Leaderboard — instead of framing a dark page in cream. The
   clock and battery icons flip to suit. Nothing on the website changes.
 
-## [2.1.0] — unreleased
+## [2.1.1] — unreleased
+
+### Fixed
+
+- **An announcement no longer plays twice.** A re-spin or a steal could appear again a couple of picks later,
+  on the other player's turn, looking like it had arrived late. Introduced by the turn announcement in 2.1.0.
+
+## [2.1.0] — 2026-09-24
 
 ### Added
 
