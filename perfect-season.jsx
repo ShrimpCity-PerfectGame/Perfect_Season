@@ -4319,8 +4319,14 @@ export default function PerfectSeason() {
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>
                     <span>Drafts that went 20–0</span><span>{perfectPct}%</span>
                   </div>
+                  {/* Lime, which is a FILL and never text - the one thing --accent is for on cream. This read
+                      `var(--lamp)`, a token that exists in no scope of theme.mjs, so the fill resolved to
+                      nothing and the bar has been empty since it shipped: the width was always right, there
+                      was simply nothing to paint. A colour used once is the easy one to get wrong, because
+                      tests/test-theme-contrast.mjs holds the scopes to the same token SET and a name that is
+                      in none of them is in all of them equally. */}
                   <div style={{ height: 8, borderRadius: 4, background: "var(--surface2)", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${Math.max(perfectPct, totals.perfect > 0 ? 2 : 0)}%`, background: "var(--lamp)", borderRadius: 4 }} />
+                    <div style={{ height: "100%", width: `${Math.max(perfectPct, totals.perfect > 0 ? 2 : 0)}%`, background: "var(--accent)", borderRadius: 4 }} />
                   </div>
                 </div>
               </div>

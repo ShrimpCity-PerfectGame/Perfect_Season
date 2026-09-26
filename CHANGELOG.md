@@ -10,6 +10,25 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.4.1] — 2026-09-26
+
+Client only: no migration, no Edge Function change.
+
+### Fixed
+
+- **The sitewide "drafts that went 20-0" bar fills again.** Its fill was painted `var(--lamp)`, a custom
+  property defined in no scope of `theme.mjs` and referenced in exactly that one line, so it resolved to
+  transparent and the bar has been empty since it shipped - the width was always right, there was simply
+  nothing to paint. It is `var(--accent)` now, lime being a fill and never text, which is the one thing that
+  token is for on cream.
+  Nothing in the suite could see it: `tests/test-theme-contrast.mjs` holds the three scopes to the same token
+  SET, which catches a token missing from one scope and not a name missing from all three equally; the bar is
+  not text, so no contrast rule applies; and the element renders with the correct geometry either way. That
+  test now also checks that **every `var(--x)` the app paints with is a theme token or is set somewhere** -
+  all 63 across the nine screen files, `--lamp` being the only one that was not. It strips block comments
+  first, because a comment explaining a bad name is that name to a regex, which is how it first ran red
+  against the note left where the bug had been.
+
 ## [2.4.0] — 2026-09-26
 
 **Needs `migration-runs-log.sql` re-run in each environment BEFORE the client.** It adds `ladder_best` and
