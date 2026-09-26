@@ -10,6 +10,31 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.3.0] — 2026-09-25
+
+Client only: no migration, no Edge Function change.
+
+### Changed
+
+- **Every mode on the Modes screen has a colour of its own.** It read as random because it was: Genius shared
+  violet with Duel, Build-a-player shared lime with the daily, and Genius, GM and Build-a-player were three
+  identical cream cards told apart only by a small tinted icon. Each cream tile now owns one colour applied the
+  same three ways - a wash across the card, the icon chip, and the border - so the set reads as one system
+  rather than four unrelated treatments. Genius is crimson, GM blue, Build-a-player teal; the daily keeps its
+  lime feature block, Unlimited its neutral dark card, Duel its violet and Over/Under its orange.
+  Tint, never paint: a saturated field fails AA under the ink (violet is 4.46:1), so the colour identifies the
+  tile and the surface keeps carrying the text. No new tokens - every colour already existed in all three
+  scopes, so dark and night follow for free. The `genius` token moved with its tile, because the mode bar chip
+  on the draft screen mirrors it; its dark value is `#FF7EA0` rather than the obvious crimson, which is the
+  same value as `qb` and sits below AA on the Navy card's glow corner.
+
+### Removed
+
+- **"N left on the board" is gone from the duel's board header.** It was the first thing squeezed at every
+  width and truncated to "30 left on the b..." beside a long opponent name even on a full-size phone - and the
+  board underneath already lists every option there is, so it said twice, badly, what the screen says once.
+  The 360px font-shrink that existed to fight the truncation goes with it.
+
 ## [2.2.1] — 2026-09-25
 
 **Needs `migration-versus.sql` re-run in each environment before the client** (`join_match` only; it replaces

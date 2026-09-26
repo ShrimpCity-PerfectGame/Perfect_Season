@@ -697,10 +697,26 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .mode p{margin:6px 0 12px;color:var(--muted);font-size:14.5px;max-width:58ch}
 .mode .icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;line-height:1;flex:0 0 auto;
   background:var(--surface2);border:2px solid currentColor}
-.mode.m-genius .icon{background:color-mix(in srgb,var(--violet) 20%,var(--surface))}
-.mode.m-gm .icon{background:color-mix(in srgb,var(--blue) 16%,var(--surface))}
 .mode.m-sou .icon{background:color-mix(in srgb,#fff 40%,var(--orange))}
-.mode.m-bap .icon{background:color-mix(in srgb,var(--accent) 40%,var(--surface))}
+/* The three cream tiles each own a colour, used the same three ways - a wash across the card, the icon chip,
+   and the border - so the set reads as one system rather than three unrelated treatments. They were plain
+   cream with only a tinted icon, which made Genius, GM and Build-a-player indistinguishable at a glance.
+   TINT, never paint. A saturated field fails AA under the ink - see the 1v1 note above, where violet is
+   4.46:1 - so the colour identifies the tile and the surface keeps carrying the text. The percentages are
+   low for that reason, not timidity: at 14% the ink is still on essentially the surface's own contrast.
+   No new tokens: each is a token that already exists in all three scopes, so the night and dark scopes
+   follow for free and tests/test-theme-contrast.mjs has nothing new to check.
+   Two of these MOVED, because the palette had two collisions and that is most of what read as random:
+   Genius was violet, which is 1v1's colour, and Build-a-player was lime, which is the daily's. */
+.mode.m-genius{--mode:var(--genius)}
+.mode.m-gm{--mode:var(--gm)}
+.mode.m-bap{--mode:var(--rb)}
+.mode.m-genius,.mode.m-gm,.mode.m-bap{
+  background:linear-gradient(135deg,color-mix(in srgb,var(--mode) 14%,var(--surface)),var(--surface));
+  border-color:color-mix(in srgb,var(--mode) 45%,var(--ink))}
+.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon{
+  background:color-mix(in srgb,var(--mode) 26%,var(--surface));
+  border-color:color-mix(in srgb,var(--mode) 55%,var(--ink))}
 .mode .go{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--bg);background:var(--ink);
   border-radius:999px;padding:7px 14px 6px 16px;display:inline-flex;align-items:center;gap:6px}
 .mode .go::after{content:'\\2192';font-family:'Inter',system-ui,sans-serif;font-weight:800}

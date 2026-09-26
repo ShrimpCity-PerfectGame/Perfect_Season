@@ -56,11 +56,6 @@ export const VERSUS_CSS = `
    both under the 3:1 large text needs, and a text-shadow counts for nothing in WCAG. The pill makes it the same
    readable clock on all 32 teams. The number is what says time is short; .low only colours what it already says. */
 .vs-pnr{display:flex;align-items:center;gap:10px;min-width:0}
-.vs-pnr .vs-left{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* At 320 the clock beside it leaves about 108px for 121px of text, so "24 left on the board" became
-   "24 left on the b...". The board count is the thing a player is actually reading there, so the
-   words give way rather than the number. */
-@media (max-width:360px){.vs-pnr .vs-left{font-size:12px;letter-spacing:-.01em}}
 .vs-reelclock{font-family:var(--display);font-size:30px;line-height:1;flex:none;
   color:#fff;font-variant-numeric:tabular-nums;background:rgba(6,10,22,.88);border-radius:10px;padding:2px 9px}
 .vs-reelclock .vs-s{font-size:16px;opacity:.75;margin-left:1px}
@@ -516,7 +511,6 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
   const [team, w] = boardKey.split("|");
   const options = optionsOn(boardKey);
   const open = openSlots(roster);
-  const left = options.filter((o) => !taken.has(optionId(o))).length;
   // Which finished sections a player has asked to see again, exactly as the single-player draft keeps it.
   const [showDone, setShowDone] = useState({});
   return (
@@ -524,8 +518,12 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
       <div className="reel" aria-live="polite" style={teamVars(team)}>
         <div className="stripe" style={{ background: TEAMS[team][2] }} />
         {/* The clock sits IN this row, not floated over the card. Absolutely positioned it had no idea what was
-            underneath it, and what was underneath it was "N left on the board" - so the two overlapped and the
-            line was clipped. A flex item cannot collide with its own siblings at any width.
+            underneath it, so the two overlapped and the line was clipped. A flex item cannot collide with its
+            own siblings at any width.
+            It used to share the row with "N left on the board", which is why that rule exists. The count is
+            gone: it was the first thing to be squeezed at every width, and it truncated to "30 left on the b..."
+            beside a long opponent name even on a full-size phone - and the board underneath already lists every
+            option there is, so it was saying twice, badly, what the screen says once.
             role="timer" rather than a bare aria-label on a div, which isn't reliably exposed - and it carries
             aria-live="off", which is the point: the reel around it is a polite live region, so a per-second
             countdown inside it had a screen reader re-reading the whole board every second, for forty-five
@@ -533,7 +531,6 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
         <div className="pickno">
           <span>{turnLabel}</span>
           <span className="vs-pnr">
-            <span className="vs-left">{left} left on the board</span>
             {seconds != null ? (
               <span className={`vs-reelclock ${seconds <= 10 ? "low" : ""}`}
                     role="timer" aria-live="off" aria-label={`${seconds} seconds left in this turn`}>

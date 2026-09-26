@@ -47,8 +47,11 @@ export const THEME = {
     wr: "#2350D8",
     te: "#B4470F",
     flex: "#6D3FD6",
-    // Draft variants in the mode bar: Genius mode violet, GM mode blue (the colors of their Modes tiles).
-    genius: "#6D3FD6",
+    // Draft variants in the mode bar: Genius mode crimson, GM mode blue - the colors of their Modes tiles,
+    // and this pair has to follow those tiles or the chip on the draft screen stops naming the mode you chose.
+    // Genius was violet until the tiles were given one colour each: violet is 1v1's, and two modes sharing it
+    // was half of why the Modes screen read as random.
+    genius: "#C2255C",
     gm: "#2350D8",
     ga: "#1B6E37",
     gb: "#0A6E60",
@@ -93,7 +96,7 @@ export const THEME = {
     wr: "#5AA9FF",
     te: "#F5A04A",
     flex: "#B18CFF",
-    genius: "#B18CFF",
+    genius: "#FF7EA0",
     gm: "#5AA9FF",
     ga: "#4ADE80",
     gb: "#2FD3B5",
@@ -134,7 +137,7 @@ export const THEME = {
     wr: "#5AA9FF",
     te: "#F5A04A",
     flex: "#B18CFF",
-    genius: "#B18CFF",
+    genius: "#FF7EA0",
     gm: "#5AA9FF",
     ga: "#4ADE80",
     gb: "#2FD3B5",
