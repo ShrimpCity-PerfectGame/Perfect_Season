@@ -1,7 +1,7 @@
 {
   "name": "perfect-season",
   "private": true,
-  "version": "2.3.0",
+  "version": "2.4.0",
   "type": "module",
   "scripts": {
     "check": "esbuild perfect-season.jsx --bundle --format=esm --platform=node --jsx=automatic --outfile=build/app.js --external:react --external:react-dom",

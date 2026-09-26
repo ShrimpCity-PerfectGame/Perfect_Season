@@ -581,8 +581,40 @@ export function makeMockAuth() {
       avg_win_pct: games > 0 ? Math.round((100 * wins) / games) : 0,
     };
   }
+  // Mirrors migration-runs-log.sql's ladder_best(): one row per account - their best run in that mode - so the
+  // board answers "who is best at GM" rather than handing one player four of the ten places. Every comparison
+  // below is the SQL's own order, tiebreak for tiebreak, because tests/test-runs-sql.mjs holds the two to
+  // identical JSON and a tiebreak that exists on only one side passes here and reorders on the live site.
+  function ladderBest({ p_ladder, p_format, p_limit = 10 } = {}) {
+    const lim = Math.max(1, Math.min(p_limit ?? 10, 50));
+    const inMode = [...runs.values()].filter((r) => !r.dnf && r.score != null
+      && r.ladder === p_ladder && r.format === p_format);
+    const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    // row_number() over (partition by user_id order by score desc, created_at, id)
+    const best = new Map();
+    const tally = new Map();
+    for (const r of inMode) {
+      const held = best.get(r.user_id);
+      if (!held || r.score > held.score
+        || (r.score === held.score && (cmpStr(r.created_at, held.created_at) < 0
+          || (r.created_at === held.created_at && cmpStr(String(r.id), String(held.id)) < 0)))) best.set(r.user_id, r);
+      const t = tally.get(r.user_id) || { drafts: 0, perfect: 0 };
+      t.drafts += 1;
+      if (r.perfect) t.perfect += 1;
+      tally.set(r.user_id, t);
+    }
+    return [...best.values()]
+      .sort((a, b) => b.score - a.score || cmpStr(a.created_at, b.created_at) || cmpStr(a.username, b.username))
+      .slice(0, lim)
+      .map((r) => ({
+        id: r.user_id, username: r.username, guest: guestOf(r.user_id),
+        score: r.score, w: r.w, l: r.l,
+        drafts: tally.get(r.user_id).drafts, perfect: tally.get(r.user_id).perfect,
+      }));
+  }
+
   const rpcs = {
-    site_totals: siteTotals, site_stats: siteStats,
+    site_totals: siteTotals, site_stats: siteStats, ladder_best: ladderBest,
     player_stats: ({ p_user_id } = {}) => playerStats(state, p_user_id),
     ...profileData.rpcs, ...moderation.rpcs, ...wallet.rpcs, ...shop.rpcs, ...versus.rpcs,
   };

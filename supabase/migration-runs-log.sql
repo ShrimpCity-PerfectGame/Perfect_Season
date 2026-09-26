@@ -338,3 +338,45 @@ returns jsonb language sql stable security invoker set search_path = public as $
                 order by b.overall desc, b.created_at, b.id limit 1))
   );
 $$;
+
+-- ---------------------------------------------------------------------------
+-- The best draft each account has in ONE MODE, top N: the score board the Leaderboard shows per mode, the way
+-- the points ladder beside it already has a mode of its own.
+--
+-- `profiles` cannot answer this. It keeps one best score per FORMAT (best_score / best_score_std) and nothing
+-- per ladder, so this reads the runs log - which is the complete history, and `recent` is not (see the
+-- runs-log note in CLAUDE.md). Adding four more columns to `profiles` would have been the other way, and it
+-- would mean submit-run writing them, a backfill, and a second place for a best score to disagree with itself.
+--
+-- ONE ROW PER ACCOUNT - their best run in that mode - not one row per run. This board answers "who is best at
+-- GM"; a board where one player holds four of the ten places answers a different question, and `best_gm` and
+-- `biggest_upsets` in site_stats already answer that one.
+--
+-- Every order by is fully tiebroken, the last of them `username collate "C"`. The Supabase databases are
+-- en_US.UTF-8 and PGlite is C, so a tiebreak missing here reorders rows between page loads on the live site
+-- and tests/test-runs-sql.mjs cannot see it - which is exactly how the missing team tiebreak in most-drafted
+-- was found.
+--
+-- `guest` travels with the name, as it does on every other board: one that drops the flag turns a throwaway
+-- account into a clickable, reportable one (CLAUDE.md, Guests - eight boards did).
+create or replace function public.ladder_best(p_ladder text, p_format text, p_limit integer default 10)
+returns jsonb language sql stable security invoker set search_path = public as $$
+  with played as (
+    select r.user_id, r.username, r.score, r.w, r.l, r.created_at, r.id,
+           row_number() over (partition by r.user_id order by r.score desc, r.created_at, r.id) as rn,
+           count(*) over (partition by r.user_id) as drafts,
+           count(*) filter (where r.perfect) over (partition by r.user_id) as perfect_runs
+      from runs r
+     where not r.dnf and r.score is not null
+       and r.ladder = p_ladder and r.format = p_format
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'id', b.user_id, 'username', b.username, 'guest', coalesce(pr.guest, false),
+           'score', b.score, 'w', b.w, 'l', b.l,
+           'drafts', b.drafts, 'perfect', b.perfect_runs)
+         order by b.score desc, b.created_at, b.username collate "C"), '[]'::jsonb)
+    from (select * from played where rn = 1
+           order by score desc, created_at, username collate "C"
+           limit greatest(1, least(coalesce(p_limit, 10), 50))) b
+    left join profiles pr on pr.id = b.user_id
+$$;

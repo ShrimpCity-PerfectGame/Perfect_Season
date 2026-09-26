@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
@@ -2199,6 +2199,12 @@ export default function PerfectSeason() {
   // game between two people, and both formats grade it the same way.
   const [versusBoard, setVersusBoard] = useState({ loading: false, rows: [] });
   const [ladderMode, setLadderMode] = useState("unlimited");
+  // Which mode the Top 10 score board is showing, and its rows. "all" is the sitewide board and keeps using
+  // `lb.top` (profiles); a single mode is fetched from the runs log, because profiles has no per-mode best.
+  // Paired mode+format inside the state the way lb/lbFormat are, so a board can never render its rows under
+  // another mode's heading while a slower request is still in flight.
+  const [lbMode, setLbMode] = useState("all");
+  const [best, setBest] = useState({ loading: false, rows: [], mode: "all", format: "fantasy" });
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: 0, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
@@ -3867,6 +3873,19 @@ export default function PerfectSeason() {
     const rows = await fetchVersusTop(10);
     setVersusBoard({ loading: false, rows });
   }
+  // The Top 10 for one mode. "all" needs no request at all - that board is already loaded with the rest of
+  // the leaderboard - so this only goes to the database for a real mode, and keeps the rows it has on screen
+  // while the next ones arrive, the way loadLadder and loadDailyBoard do.
+  async function loadBest(m, f) {
+    const mk = LADDERS.includes(m) ? m : "all";
+    const fmt = normFormat(f || boardFormatRef.current);
+    if (mk === "all") { setBest({ loading: false, rows: [], mode: "all", format: fmt }); return; }
+    setBest((b) => ({ loading: true, rows: b.mode === mk && b.format === fmt ? b.rows : [], mode: mk, format: fmt }));
+    try {
+      setBest({ loading: false, rows: await fetchLadderBest(mk, fmt, 10), mode: mk, format: fmt });
+    } catch (e) { setBest({ loading: false, rows: [], mode: mk, format: fmt }); }
+  }
+
   async function loadLadder(m) {
     const mk = LADDERS.includes(m) ? m : ladderMode;
     setLadder((l) => ({ loading: true, rows: l.mode === mk ? l.rows : [], mode: mk }));
@@ -3986,6 +4005,18 @@ export default function PerfectSeason() {
 
   // Always paired: the rows and the accessor that reads them must describe the same format.
   const lbFormat = normFormat(lb.format);
+  // The rows the Top 10 renders, and one shape for them. The sitewide board comes from `profiles` and the
+  // per-mode one from the runs log, and the two answer with different field names for the same four numbers -
+  // so the table reads them through this rather than carrying a branch in every cell.
+  // A per-mode board only counts as showing when it is the mode that was asked for: mid-request `best` still
+  // holds the last mode's rows, and rendering those under this heading would be a lie the player can read.
+  const lbShowing = lbMode !== "all" && best.mode === lbMode && best.format === lbFormat;
+  const lbRows = lbMode === "all" ? lb.top : (lbShowing ? best.rows : []);
+  const lbRow = (r) => (lbMode === "all"
+    ? { id: r.id, username: r.username, guest: r.guest, score: scoreOf(r, lbFormat), dnf: r.dnf,
+        rec: r.bestRecord ? `${r.bestRecord.w}–${r.bestRecord.l}` : null, drafts: draftsOf(r), perfect: r.perfect }
+    : { id: r.id, username: r.username, guest: r.guest, score: r.score == null ? null : Number(r.score), dnf: 0,
+        rec: r.w == null ? null : `${r.w}–${r.l}`, drafts: Number(r.drafts) || 0, perfect: Number(r.perfect) || 0 });
   const siteBest = lb.top[0];
   const totals = lb.totals;
   const perfectPct = totals.runs > 0 ? Math.round((100 * totals.perfect) / totals.runs) : 0;
@@ -4763,7 +4794,7 @@ export default function PerfectSeason() {
                   <span className="fmtlabel">Scoring</span>
                   {FORMATS.map((f) => (
                     <button key={f} className={`fmtbtn ${boardFormat === f ? "on" : ""}`} aria-pressed={boardFormat === f}
-                      onClick={() => { showBoardFormat(f); loadLeaderboard(f); loadDailyBoard(f); }}>
+                      onClick={() => { showBoardFormat(f); loadLeaderboard(f); loadDailyBoard(f); loadBest(lbMode, f); }}>
                       {FORMAT_LABEL[f]}<span className="fmtsub">{f === "fantasy" ? "Full PPR" : "Standard"}</span>
                     </button>
                   ))}
@@ -4782,21 +4813,38 @@ export default function PerfectSeason() {
                   <div className="panel"><p style={{ margin: 0 }}>No scores yet. Finish a season while logged in to claim the top spot.</p></div>
                 )}
 
-                {lb.top.length > 0 && (
+                {/* The score board, per mode as well as per format. The points ladder below has had a mode of
+                    its own since it existed; this one only ever split by scoring format, so "who has the best
+                    GM roster" was a question the Leaderboard could not answer.
+                    Every mode stays the sitewide board and comes from `profiles`, which is what this table has
+                    always read. A single mode cannot: profiles keeps one best score per FORMAT and nothing per
+                    ladder, so that comes from the runs log through ladder_best - one row per account, their
+                    best draft in that mode, so a player holding four of the ten places is not a thing. */}
+                <div className="fmtpick ladderpick" role="group" aria-label="Leaderboard mode">
+                  <span className="fmtlabel">Mode</span>
+                  <button className={`fmtbtn ${lbMode === "all" ? "on" : ""}`} aria-pressed={lbMode === "all"}
+                    onClick={() => { setLbMode("all"); loadBest("all"); }}>Every mode</button>
+                  {LADDERS.map((m) => (
+                    <button key={m} className={`fmtbtn ${lbMode === m ? "on" : ""}`} aria-pressed={lbMode === m}
+                      onClick={() => { setLbMode(m); loadBest(m); }}>{LADDER_LABEL[m]}</button>
+                  ))}
+                </div>
+                {lbRows.length > 0 ? (
                   <>
-                    <h2 className="h">Top 10{" "}— {FORMAT_LABEL[lbFormat]}</h2>
+                    <h2 className="h">Top 10{" "}&mdash; {FORMAT_LABEL[lbFormat]}{lbMode === "all" ? "" : ` \u00b7 ${LADDER_LABEL[lbMode]}`}</h2>
                     <table className="lb">
                       <thead><tr><th><span className="vh">Rank</span></th><th>Player</th><th className="r">Best score</th><th className="r lbrec">Best record</th><th className="r hide">Drafts</th><th className="r hide">Perfect</th></tr></thead>
                       <tbody>
-                        {lb.top.map((q, i) => {
+                        {lbRows.map((raw, i) => {
+                          const q = lbRow(raw);
                           const mine = !!userId && q.id === userId;
                           return (
-                            <tr key={q.id} className={rankRowClass(i, mine)}>
+                            <tr key={q.id || i} className={rankRowClass(i, mine)}>
                               <RankCell i={i} />
-                              <td className="nm"><PlayerName name={q.username} mine={mine} guest={q.guest} />{q.bestRecord && <span className="subrec">{q.bestRecord.w}–{q.bestRecord.l}</span>}</td>
-                              <td className="r v">{scoreOf(q, lbFormat) != null ? scoreOf(q, lbFormat).toFixed(1) : "–"}</td>
-                              <td className="r lbrec">{q.bestRecord ? `${q.bestRecord.w}–${q.bestRecord.l}` : "–"}</td>
-                              <td className="r hide">{draftsOf(q)}{q.dnf ? <span className="muted"> ({q.dnf} DNF)</span> : null}</td>
+                              <td className="nm"><PlayerName name={q.username} mine={mine} guest={q.guest} />{q.rec && <span className="subrec">{q.rec}</span>}</td>
+                              <td className="r v">{q.score != null ? q.score.toFixed(1) : "\u2013"}</td>
+                              <td className="r lbrec">{q.rec || "\u2013"}</td>
+                              <td className="r hide">{q.drafts}{q.dnf ? <span className="muted"> ({q.dnf} DNF)</span> : null}</td>
                               <td className="r hide">{q.perfect}</td>
                             </tr>
                           );
@@ -4804,7 +4852,11 @@ export default function PerfectSeason() {
                       </tbody>
                     </table>
                   </>
-                )}
+                ) : lbMode !== "all" ? (
+                  <p className="note" style={{ marginTop: 0 }}>
+                    {best.loading ? "Loading the board\u2026" : `No ${FORMAT_LABEL[lbFormat]} seasons in ${LADDER_LABEL[lbMode]} yet.`}
+                  </p>
+                ) : null}
                 {authReady && !user && <p className="note">You're not on the leaderboard yet. <button className="linkbtn" onClick={() => openTab("profile")}>Log in or create an account</button> and your seasons will count here.</p>}
                 {user && myRank >= 10 && scoreOf(stats, lbFormat) != null && <p className="note">You're #{myRank + 1} with a best {FORMAT_LABEL[lbFormat]} score of {scoreOf(stats, lbFormat).toFixed(1)}.</p>}
                 {user && stats && scoreOf(stats, lbFormat) == null && <p className="note">Finish a {FORMAT_LABEL[lbFormat]} season to get on this board.</p>}

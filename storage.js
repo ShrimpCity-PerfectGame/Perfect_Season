@@ -182,6 +182,26 @@ export async function fetchLadderTop(mode = "unlimited", limit = 10) {
   if (error || !data) return [];
   return data.map(rowToProfile);
 }
+// The per-mode score board: each account's best draft in one ladder and one format, best first
+// (migration-runs-log.sql's ladder_best). An RPC rather than an order-by on profiles, the way
+// fetchLeaderboardTop and fetchLadderTop are, because profiles keeps one best score per FORMAT
+// (best_score / best_score_std) and nothing per mode - the runs log is the only place that knows.
+// Rows come back already shaped and already tiebroken; the ordering lives in SQL so the mock can be held to
+// it (tests/test-runs-sql.mjs). Empty on failure, never a partial board.
+export async function fetchLadderBest(ladder = "unlimited", format = "fantasy", limit = 10) {
+  try {
+    const { data, error } = await getClient().rpc("ladder_best", {
+      p_ladder: LADDER_COL[ladder] ? ladder : "unlimited",
+      p_format: format === "standard" ? "standard" : "fantasy",
+      p_limit: limit,
+    }, READ);
+    if (error || !Array.isArray(data)) return [];
+    return data;
+  } catch (e) {
+    return [];
+  }
+}
+
 // Both Stats functions only read, so they go out as GET (storage-core.js's READ) and get supabase-js's
 // automatic retry. Keep it that way for any new read-only RPC; writes stay POST and go out exactly once.
 

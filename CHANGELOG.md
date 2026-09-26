@@ -10,6 +10,28 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.4.0] — 2026-09-26
+
+**Needs `migration-runs-log.sql` re-run in each environment BEFORE the client.** It adds `ladder_best` and
+changes nothing else, so it is safe on any shape and its backfill is a no-op as always - but the client calls
+that function the moment somebody taps a mode, so a client ahead of the migration shows an empty board for
+every mode. No Edge Function change.
+
+### Added
+
+- **The Leaderboard's Top 10 has a mode of its own.** Daily, Unlimited, Genius and GM each get their own
+  score board, beside the "Every mode" one that was there before - so "who has the best GM roster" is finally
+  a question the Leaderboard can answer, the way the points ladder below it has had a mode since it existed.
+  A single mode cannot come from `profiles`, which keeps one best score per FORMAT (`best_score` /
+  `best_score_std`) and nothing per ladder, so it reads the runs log through a new `ladder_best(ladder,
+  format, limit)`. Adding four more columns to `profiles` was the other way and would have meant submit-run
+  writing them, a backfill, and a second place for a best score to disagree with itself.
+  **One row per account** - their best draft in that mode - because the board answers "who is best at this
+  mode"; a list where one player holds four of the ten places is what `best_gm` on the Stats screen already
+  is. Mirrored in `tests/mock-supabase.mjs` and held to the real SQL by `tests/test-runs-sql.mjs`, which
+  gained two accounts tied on the same score so the tiebreaks are actually exercised - without them the
+  fixture's scores never collided inside a top ten and dropping a tiebreak passed.
+
 ## [2.3.0] — 2026-09-25
 
 Client only: no migration, no Edge Function change.

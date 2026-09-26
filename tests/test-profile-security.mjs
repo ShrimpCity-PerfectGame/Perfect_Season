@@ -627,6 +627,9 @@ const EXPECTED_FUNCTIONS = {
   "caller_can_hold_avatars()": [false, PG_TEMP_LAST, false, true],
   "handle_new_user()": [true, PG_TEMP_LAST, true, true],
   "is_moderator()": [true, PG_TEMP_LAST, true, true],
+  // Reads the runs log for one mode's score board. Invoker and public, like the other read-only
+  // aggregates: runs and profiles both have public select, so it needs no definer rights.
+  "ladder_best(p_ladder text, p_format text, p_limit integer)": [false, "public", true, true],
   "mod_act(p_user_id uuid, p_action text, p_new_name text)": [true, PG_TEMP_LAST, true, true],
   "mod_queue()": [true, PG_TEMP_LAST, true, true],
   "player_profile(p_username text)": [false, "public", true, true],

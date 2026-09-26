@@ -1194,8 +1194,9 @@ await runTest("the rules that only exist in the deployed files are in the deploy
     "migration-shop.sql": readFileSync(new URL("../supabase/migration-shop.sql", import.meta.url), "utf8"),
   };
   // Measured, across the five files below. 22 of them were in the original sweep's two files; the 23rd is
-  // versus_top, which this list never opened.
-  const TEXT_ORDERINGS = 23;
+  // versus_top, which this list never opened. 24 and 25 are ladder_best (v2.4.0), which orders by username
+  // twice - once to pick the ten rows and once to order them inside jsonb_agg - and both collate.
+  const TEXT_ORDERINGS = 25;
   const uncollated = [];
   let clauses = 0;
   for (const [file, text] of Object.entries(files)) {

@@ -3,7 +3,7 @@
 // database (site_totals()) and rank is a server-side count, and that the numbers are unchanged.
 import { makeMockAuth } from "./helpers.mjs";
 import { readFileSync } from "node:fs";
-import { fetchSiteTotals, fetchOwnRank, fetchSiteStats, fetchTopBuilds } from "../storage.js";
+import { fetchSiteTotals, fetchOwnRank, fetchSiteStats, fetchTopBuilds, fetchLadderBest } from "../storage.js";
 
 let failed = 0;
 const assert = (cond, msg) => { if (!cond) { failed++; console.error("FAIL:", msg); } };
@@ -44,8 +44,10 @@ const rpcCalls = [];
 mock.rpc = (name, args, opts) => { rpcCalls.push({ name, opts }); return realRpc(name, args, opts); };
 await fetchSiteTotals();
 await fetchSiteStats();
+// The per-mode score board is read-only too, and it is fetched every time somebody taps a mode.
+await fetchLadderBest("gm", "fantasy", 10);
 mock.rpc = realRpc;
-for (const name of ["site_totals", "site_stats"]) {
+for (const name of ["site_totals", "site_stats", "ladder_best"]) {
   const call = rpcCalls.find((c) => c.name === name);
   assert(call?.opts?.get === true, `${name} must be called with { get: true } so a dropped request is retried, got ${JSON.stringify(call?.opts)}`);
 }

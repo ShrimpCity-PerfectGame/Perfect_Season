@@ -185,6 +185,21 @@ await runTest("site_stats and site_totals match the mock exactly, past 300 accou
     }
   }
 
+  // Two accounts tied on the same score in the same mode, with the LATER account's run stamped EARLIER, so
+  // the order is decided by the tiebreaks alone and dropping one changes the answer. The scores above never
+  // collide inside a top ten, so without this ladder_best's tiebreaks were untested - checked by reverting
+  // them and watching this stay green, which is the whole reason the pair is here.
+  for (const [n, when] of [[3, clock + 5000], [300, clock + 1000]]) {
+    const id = uuid(n);
+    const row = runLogRow(id, `player${String(n).padStart(3, "0")}`, {
+      w: 20, l: 0, score: 150, gm: true, format: "fantasy", mode: "free", champ: true, playoffs: true,
+      date: when, roster: slots.map((slot, i) => player(slot, names[i % 8], 2005, i % 2 ? "KC" : "NE", 120)),
+    });
+    await addRun(db, row);
+    mock._runs.set(`${row.user_id}|${row.created_at}|${row.dnf}`, { backfilled: false, ...row });
+  }
+  clock += 10000;
+
   const sqlStats = (await db.query("select site_stats(10) as s")).rows[0].s;
   const mockStats = (await mock.rpc("site_stats", { p_limit: 10 })).data;
   const diff = firstDiff(canon(sqlStats), canon(mockStats));
@@ -211,6 +226,38 @@ await runTest("site_stats and site_totals match the mock exactly, past 300 accou
     assert(upsets.every((u, i) => i === 0 || Number(u.score) >= Number(upsets[i - 1].score)), `${f}: upsets must be ordered lowest score first`);
   }
   assert(sqlStats.by_format.fantasy.best_lineups.length === 15 && sqlStats.most_wins.length === 10, "boards are capped at their limits");
+  // ...and the per-mode score board, over the same data. Every ladder and both formats, because a tiebreak
+  // that exists on one side only would otherwise hide in whichever mode the fixture happens not to fill.
+  for (const ladder of ["daily", "unlimited", "genius", "gm"]) {
+    for (const f of ["fantasy", "standard"]) {
+      const where = `ladder_best(${ladder}, ${f})`;
+      const sqlBest = (await db.query("select ladder_best($1, $2, 10) as b", [ladder, f])).rows[0].b;
+      const mockBest = (await mock.rpc("ladder_best", { p_ladder: ladder, p_format: f, p_limit: 10 })).data;
+      const d = firstDiff(canon(sqlBest), canon(mockBest));
+      assert(!d, `${where}: SQL and mock disagree at ${d}`);
+      // One row per account - this board is "who is best at this mode", not a list of good drafts.
+      const ids = sqlBest.map((r) => r.id);
+      assert(new Set(ids).size === ids.length, `${where}: an account holds two places`);
+      assert(sqlBest.every((r, i) => i === 0 || Number(r.score) <= Number(sqlBest[i - 1].score)), `${where}: not ordered by score`);
+      // The flag every board has to carry, or a throwaway account becomes a clickable, reportable one.
+      assert(sqlBest.every((r) => typeof r.guest === "boolean"), `${where}: a row is missing its guest flag`);
+      // Only runs from THAT mode and format, which is the whole point of the board.
+      for (const r of sqlBest) {
+        const n = Number((await db.query(
+          "select count(*) as c from runs where user_id = $1 and ladder = $2 and format = $3 and not dnf and score = $4",
+          [r.id, ladder, f, r.score])).rows[0].c);
+        assert(n > 0, `${where}: ${r.username}'s ${r.score} is not a run of theirs in that mode`);
+      }
+    }
+  }
+  // Each account's BEST run in the mode, not their latest or their first.
+  const gmTop = (await db.query("select ladder_best('gm', 'fantasy', 10) as b")).rows[0].b;
+  assert(gmTop.length > 0, "the fixture puts somebody on the GM board");
+  const theirBest = Number((await db.query(
+    "select max(score) as s from runs where user_id = $1 and ladder = 'gm' and format = 'fantasy' and not dnf",
+    [gmTop[0].id])).rows[0].s);
+  assert(Number(gmTop[0].score) === theirBest, `the top row should be that account's best GM run (${theirBest}), got ${gmTop[0].score}`);
+
 });
 
 await runTest("runs is readable by anyone and writable by no client role", async () => {

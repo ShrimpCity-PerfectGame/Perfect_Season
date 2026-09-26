@@ -618,7 +618,12 @@ account's last 10 runs. Every finished draft and DNF is also appended to the `ru
 `game-logic.mjs`'s `runLogRow` — a failed log insert is logged, never fails the season. Anything
 per-run on the Stats screen (most-drafted, GM scores, biggest upsets) must read `runs`, not
 `recent`. Stats aggregates run in the database: `site_stats()`
-and `site_totals()`, called via `storage.js`'s `fetchSiteStats`/`fetchSiteTotals`. The jsdom mock
+and `site_totals()`, called via `storage.js`'s `fetchSiteStats`/`fetchSiteTotals`, and since v2.4.0
+**`ladder_best(ladder, format, limit)`** behind `fetchLadderBest` - the Leaderboard's Top 10 for one mode,
+one row per account (their best draft in it). That one has to read the log rather than `profiles`, which
+keeps a best score per FORMAT (`best_score`/`best_score_std`) and nothing per ladder; adding four more
+columns would mean submit-run writing them, a backfill, and a second place for a best score to disagree
+with itself. It is mirrored in `tests/mock-supabase.mjs` like the others. The jsdom mock
 in `tests/helpers.mjs` reimplements both, and `tests/test-runs-sql.mjs` runs the real SQL in PGlite
 and fails if the mock and the SQL return different JSON — **change both together**, and keep every
 `order by` fully tiebroken (the test is how the missing team tiebreak in most-drafted was found).
@@ -873,6 +878,10 @@ suite and still broke the live Leaderboard for every existing account.
   and the function have to agree on, and the scoring half decides what a season is worth. `match-pick` changes
   on its own account too: it finishes a match before it looks at what was asked for, writes every change against
   the revision it read, and ends a match it cannot grade (VERSUS.md 4).
+  v2.4.0's: re-run **`migration-runs-log.sql`**, then the client. It adds `ladder_best` and changes nothing
+  else, so it is safe on any shape and its backfill is a no-op as always - but the client calls that function
+  the moment somebody taps a mode on the Leaderboard, so a client ahead of the migration shows an empty board
+  for every mode rather than an error. Run it first. No Edge Function change.
   v2.2.1's: re-run **`migration-versus.sql`**, then the client. It replaces `join_match` and adds nothing, so
   it is safe on any shape and the site keeps working between the two steps - the old function simply answers
   `already_full` for a duel that has ended, which is what it always did. No Edge Function change.
