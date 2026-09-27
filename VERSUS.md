@@ -560,6 +560,20 @@ Single player asks one question of a board: can it fill any slot I still have op
 until it finds one that can, and skips the rest. 1v1 has to ask a harder one, because **a board is drafted
 twice**: the first picker takes an option and the second picker has to still have one.
 
+**A re-spin is judged on what the board still owes, not on the pick number** (v2.8.1). `respinBoard` used to
+work out "leader or follower" from `turnAt(pickNo, code)` — arithmetic that assumes two picks a board — and to
+assume the asker takes one pick off whatever it deals. A dip adds a turn, its forfeit removes one, and a steal
+rewrites who leads, so after any of those the arithmetic disagrees with the replay: the serve-both rule was
+skipped for a board's real leader, and a player who had already declared a double dip was dealt a board with a
+single quarterback on it and took both picks off it. Either way the next player had no legal move, and that is
+the worst state the game has — `autoPick` returns null, the clock answers 500 forever, `replayMatch` never
+reports done, so the Edge Function never reaches `finish()` and never abandons it. Both screens sit on "Working
+out the result..." and `create_match` hands both players back into the dead match for every later duel.
+It now takes `left` (the board's remaining turns, from `replayMatch`) and `side`, and asks that the board serve
+the turns it still owes each player. Measured over 1,500 matches: 32 bricks from the dip case and 55 from the
+leader case, both now zero. **Do not reintroduce a pick-number shortcut here** — the pick number stops being
+the truth the moment any powerup is spent.
+
 This is not a corner case. Of the 160 boards, **33 carry only one quarterback or only one tight end** — the
 Colts' 1999–2005 board has exactly one quarterback, and everyone knows which. If both players come to that board
 still needing a QB, the first takes Manning and the second has nothing to do.

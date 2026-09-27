@@ -87,7 +87,9 @@ await runTest("loads: balance hook, tabs, every item with a state, the wallet; B
   assert(JSON.stringify(names) === JSON.stringify([...Object.values(KIND_LABEL), "Showcase"]), "tabs: " + names);
   assert(tab(c, "Frames").getAttribute("aria-selected") === "true", "Frames is open first");
   const frames = [...c.querySelectorAll("article.sh-item")].map((a) => `${a.dataset.item}:${a.dataset.state}`);
-  assert(JSON.stringify(frames) === JSON.stringify(["frame-ink:equipped", "frame-lime:buy", "frame-team:short", "frame-gold:short", "frame-flame:short", "frame-undefeated:locked"]),
+  // Orbit is locked for the same reason Undefeated is, and says so differently: one waits on a badge, the
+  // other on the one-off unlock, and neither is ever "buy" however many coins are in the wallet.
+  assert(JSON.stringify(frames) === JSON.stringify(["frame-ink:equipped", "frame-lime:buy", "frame-team:short", "frame-gold:short", "frame-flame:short", "frame-undefeated:locked", "frame-orbit:locked"]),
     "frames and their states: " + frames);
   assert(text(tile(c, "frame-team")).includes("750 more coins"), "a short item says how many more coins it needs");
   assert(preview(c)?.querySelector('[data-card="card-navy"]') && preview(c).querySelector('[data-frame="frame-ink"]'), "the preview wears the defaults");
@@ -236,7 +238,7 @@ await runTest("an avatar pack: bought, not equipped, and its avatars become choo
   const { c, props } = await openShop("collector", uid);
   await openTab(c, "Avatar packs");
   const packsShown = [...c.querySelectorAll("article.sh-item")].map((a) => a.dataset.item).join();
-  assert(packsShown === "pack-sideline,pack-trophy-room,pack-night-game,pack-draft-day,pack-hall-of-fame", `the five packs, in order, got ${packsShown}`);
+  assert(packsShown === "pack-sideline,pack-trophy-room,pack-night-game,pack-draft-day,pack-hall-of-fame,pack-stargazer", `the six packs, in order, got ${packsShown}`);
   await select(c, "pack-sideline");
   assert(preview(c).querySelector('.sh-pack[aria-label="Headset, Water cooler, Pylon, Penalty flag"]'), "the case shows the pack's avatars");
   await click(button(c, "Buy"));
@@ -374,6 +376,13 @@ await runTest("styles: only sh- classes, hover inside (hover:hover), and motion 
   const selectors = SHOP_CSS.replace(/\/\*[\s\S]*?\*\//g, "").match(/[^{}]+(?=\{)/g).map((s) => s.trim()).filter((s) => !s.startsWith("@"));
   const stray = selectors.flatMap((s) => s.split(",")).map((s) => s.trim()).filter((s) => !/^\.sh-[a-z]/.test(s));
   assert(!stray.length, "every rule starts with an sh- class: " + stray);
+  // Every rarity needs its own --rar, and a missing one is not a missing colour: `var(--rar)` on an undefined
+  // property is invalid at computed-value time, which drops the WHOLE declaration. When `supporter` was added
+  // as a rarity in v2.6.0 and this rule was not, every supporter item's tile lost its preview background and
+  // its detail row lost the hard shadow as well as the rarity edge - a hole in the grid, shipped.
+  const { RARITIES } = await import("../shop-catalog.mjs");
+  const missing = RARITIES.filter((r) => !new RegExp(`\.sh-r-${r}\s*\{[^}]*--rar:`).test(SHOP_CSS));
+  assert(!missing.length, `every rarity has a --rar: ${missing.join(", ")} missing`);
   const outsideHover = SHOP_CSS.split("@media (hover:hover)")[0];
   assert(!/:hover/.test(outsideHover), "hover rules live inside (hover:hover)");
   const reduced = SHOP_CSS.split("@media (prefers-reduced-motion:reduce)")[1] || "";

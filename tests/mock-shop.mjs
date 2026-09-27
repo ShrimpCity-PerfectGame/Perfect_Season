@@ -13,7 +13,7 @@ const fail = (code) => {
 };
 const ID = /^[a-z0-9-]{1,40}$/;
 // equip_item's slot -> the profile_details column it writes.
-const SLOT_COLUMN = { frame: "frame", card: "card_theme", title: "title" };
+const SLOT_COLUMN = { frame: "frame", card: "card_theme", title: "title", nameplate: "nameplate", namecolor: "namecolor", celebration: "celebration" };
 
 // state:       tests/mock-supabase.mjs's shared state
 // wallet:      tests/mock-wallet.mjs's makeWallet(state)
@@ -43,11 +43,33 @@ export function makeShop(state, { wallet, profileData }) {
     return uid;
   };
   // Free items are everyone's; a badge item is whoever's badge_awards has its badge; the rest need a purchase.
+  // The supporters table, mirroring migration-shop.sql: a one-off unlock, no expiry, written only by the
+  // service role or by hand. Held on the mock's shared state so a test can grant it the way SQL would.
+  const isSupporter = (uid) => !!(uid && state.supporters?.has(uid));
   const owns = (uid, item) => item.rarity === "free" || inventory.has(`${uid}|${item.id}`)
-    || (item.badge != null && wallet.tables.badge_awards.has(`${uid}|${item.badge}`));
+    || (item.badge != null && wallet.tables.badge_awards.has(`${uid}|${item.badge}`))
+    || (item.rarity === "supporter" && isSupporter(uid));
   const byShopOrder = (a, b) => SHOP_KINDS.indexOf(a.kind) - SHOP_KINDS.indexOf(b.kind) || a.sort - b.sort || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
   const rpcs = {
+    // Mirrors migration-shop.sql's board_looks(): who is wearing what, for the boards. Ordered by name with
+    // the SQL's own collate "C" (a plain codepoint compare), and only the accounts wearing something, because
+    // tests/test-shop-sql.mjs holds this and the real function to identical JSON.
+    board_looks({ p_limit = 500, p_names = null } = {}) {
+      // p_names asks about exactly those accounts and ignores the limit - the duel screen's two players, who
+      // may sit outside the boards' first `limit` wearers. Capped, like the SQL, because it comes from a browser.
+      const lim = p_names ? Math.min(p_names.length, 100) : Math.max(1, Math.min(p_limit ?? 500, 2000));
+      return [...state.profiles.values()]
+        .map((p) => ({
+          username: p.username,
+          supporter: !!(state.supporters?.has(p.id)),
+          namecolor: profileData.tables.profile_details.get(p.id)?.namecolor ?? null,
+        }))
+        .filter((r) => typeof r.username === "string" && (r.supporter || r.namecolor != null)
+          && (!p_names || p_names.includes(r.username)))
+        .sort((a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0))
+        .slice(0, lim);
+    },
     shop_state() {
       const uid = player();
       const worn = profileData.tables.profile_details.get(uid);
@@ -56,7 +78,10 @@ export function makeShop(state, { wallet, profileData }) {
         items: [...items.values()].map((item) => ({ ...item, owned: owns(uid, item) })).filter((item) => item.active || item.owned)
           .sort(byShopOrder)
           .map(({ id, kind, rarity, price, badge, active, sort, owned }) => ({ id, kind, rarity, price, badge, active, sort, owned })),
-        equipped: { frame: worn?.frame ?? null, card: worn?.card_theme ?? null, title: worn?.title ?? null, showcase: [...(worn?.showcase || [])] },
+        supporter: isSupporter(uid),
+        equipped: { frame: worn?.frame ?? null, card: worn?.card_theme ?? null, title: worn?.title ?? null,
+                    nameplate: worn?.nameplate ?? null, namecolor: worn?.namecolor ?? null,
+                    celebration: worn?.celebration ?? null, showcase: [...(worn?.showcase || [])] },
       };
     },
     shop_buy({ p_item = null } = {}) {
@@ -67,6 +92,7 @@ export function makeShop(state, { wallet, profileData }) {
       const item = items.get(p_item);
       if (!item || !item.active) fail("unavailable");
       if (item.badge != null) fail("badge_only");
+      if (item.rarity === "supporter") fail("supporter_only");
       if (owns(uid, item)) fail("owned");
       if (wallet.balanceOf(uid) < item.price) fail("not_enough");
       const key = `${uid}|${item.id}`;
@@ -102,6 +128,20 @@ export function makeShop(state, { wallet, profileData }) {
   return {
     tables: { shop_items: items, inventory },
     rpcs,
+    // The DELETE half of migration-shop.sql's supporters_sync: a refund takes off everything supporter-rarity
+    // the account was wearing, including a picture from a supporter pack. The card renders the column and asks
+    // nobody about ownership, so anything left equipped would go on showing after the unlock was gone.
+    stripSupporterItems: (uid) => {
+      const worn = profileData.tables.profile_details.get(uid);
+      if (!worn) return;
+      const isSupporterItem = (id) => !!id && items.get(id)?.rarity === "supporter";
+      for (const [slot, column] of Object.entries(SLOT_COLUMN)) {
+        void slot;
+        if (isSupporterItem(worn[column])) worn[column] = null;
+      }
+      const pack = worn.avatar_preset ? profileData.tables.avatar_presets.get(worn.avatar_preset)?.pack : null;
+      if (pack && isSupporterItem(packItem(pack))) worn.avatar_preset = null;
+    },
     // set_avatar's check for a paid pack's avatar (state.ownsAvatarPack): the pack's shop item, owned the way
     // shop_state says it is, as migration-profiles.sql checks it.
     ownsAvatarPack: (uid, pack) => {

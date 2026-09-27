@@ -8,13 +8,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, runTest } from "./helpers.mjs";
-import { initGameData, BOARDS, SLOTS, WINDOWS, QB_WEIGHT, effectiveRating } from "../game-logic.mjs";
+import { initGameData, BOARDS, SLOTS, WINDOWS, QB_WEIGHT, effectiveRating, seededSequence } from "../game-logic.mjs";
 import {
   initVersusData, VERSUS_SLOTS, MATCH_BOARDS, MATCH_PICKS, SLOT_WORTH, AVERAGE_RATING,
   DST_WEIGHT, DST_WORTH, SLOT_WEIGHT_TOTAL, sideScore,
   optionsOn, unitsOn, optionId, optionFits, optionValue, turnAt, firstPickerOn,
   boardServesBoth, replayMatch, autoPick, openSlots, matchResult, footballFinal, rosterScore, SCORED_SLOTS,
-  respinBoard, respinsLeft, MATCH_RESPINS, firstPickerOn as leadOn,
+  respinBoard, respinsLeft, MATCH_RESPINS, firstPickerOn as leadOn, boardServes,
   stealableSlots, stealsLeft, MATCH_STEALS, canDoubleDip, dipsLeft, MATCH_DIPS, MATCH_BOARDS as BOARDS_N,
 } from "../versus-logic.mjs";
 
@@ -569,6 +569,58 @@ await runTest("a defense is worth more than one ordinary slot, and the two place
   const k = optionsOn("KC|3").find((o) => o.kind === "k");
   const kv = optionValue(k, "K", "fantasy");
   assert(Math.abs(kv - (k.rating - AVERAGE_RATING) * SLOT_WORTH) < 1e-9, "a kicker is worth one slot, unchanged");
+});
+
+await runTest("a re-spin is judged on what the board still owes, not on pick-number arithmetic", async () => {
+  // Two ways to brick a duel permanently, both in respinBoard, both found by fuzzing whole matches.
+  //
+  // It decided "leader or follower" from turnAt(pickNo, code) - arithmetic that assumes two picks a board - and
+  // it assumed the asker takes ONE pick off the board it deals. A dip adds a turn, its forfeit removes one, and
+  // a steal rewrites who leads, so after any of those the arithmetic disagrees with the replay: the serve-both
+  // rule was skipped for a board's real leader, and a player who had already declared a double dip was dealt a
+  // board holding one quarterback or one tight end. 33 of the 160 boards are like that.
+  // What that costs is the worst outcome in the game: autoPick returns null, the clock answers 500 forever,
+  // replayMatch never reports done, so match-pick never reaches finish() and never abandons it. Both screens
+  // sit on "Working out the result..." and create_match hands both players back into the dead match.
+  // Swept over many codes rather than one, because whether the boundary is reached depends on which board the
+  // seed deals: 33 of the 160 hold a single quarterback or a single tight end, and those are the ones that
+  // brick. A roster needing exactly QB and TE is the shape that finds them.
+  const scarce = () => ({ QB: null, TE: null, RB: {}, WR: {}, FLEX1: {}, FLEX2: {}, DST: {}, K: {} });
+  let dipChecked = 0, privateChecked = 0;
+  const bad = [];
+  for (let i = 0; i < 300; i++) {
+    const code = `DIPSPIN${i}`;
+    const seq = seededSequence(code);
+    const key = seq[0];
+    const taken = new Set();
+    const mine = scarce(), theirs = scarce();
+    const ask = (left, side) => respinBoard({
+      code, kind: "team", pickNo: 3, key, seq, used: new Set(), taken, roster: mine, otherRoster: theirs, left, side,
+    });
+    // A dipper takes TWO off the board they are dealt, and the opponent still picks here too.
+    const dipped = ask(["host", "host", "guest"], "host");
+    if (dipped) {
+      dipChecked++;
+      if (!boardServes(dipped, taken, openSlots(mine), openSlots(theirs), 2)) bad.push(`${code}: dipped onto ${dipped}`);
+    }
+    // A dipper who is also the board's LAST picker: two turns, nobody after them. Serve-both cannot save this
+    // one - there is nobody to serve - so the only thing standing between them and a board with a single
+    // quarterback on it is counting their turns properly. This is where the count is load-bearing.
+    const soloDip = ask(["host", "host"], "host");
+    if (soloDip) {
+      dipChecked++;
+      if (!boardServes(soloDip, taken, openSlots(mine), null, 2)) bad.push(`${code}: solo dip onto ${soloDip}`);
+    }
+    // The board's last picker owes nobody else anything: their re-spin is private and must not be refused for
+    // failing a serve-both test against an opponent who never drafts it.
+    const solo = ask(["host"], "host");
+    if (solo) {
+      privateChecked++;
+      if (!boardServes(solo, taken, openSlots(mine), null, 1)) bad.push(`${code}: private onto ${solo}`);
+    }
+  }
+  assert(dipChecked > 50 && privateChecked > 50, `the sweep reached both shapes (${dipChecked} dipped, ${privateChecked} private)`);
+  assert(bad.length === 0, `a re-spin dealt a board that cannot serve the turns it owes: ${bad.slice(0, 5).join(" | ")}`);
 });
 
 console.log("test-versus-boards.mjs done");

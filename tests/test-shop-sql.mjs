@@ -38,8 +38,8 @@ const byCode = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const shopOrder = (a, b) => SHOP_KINDS.indexOf(a.kind) - SHOP_KINDS.indexOf(b.kind) || a.sort - b.sort || byCode(a.id, b.id);
 const ITEM_KEYS = ["active", "badge", "id", "kind", "owned", "price", "rarity", "sort"];
 // A profile_details row's columns, as to_jsonb gives them.
-const DETAILS_COLUMNS = ["avatar_path", "avatar_preset", "bio", "card_theme", "favorite_team", "frame", "showcase", "title", "updated_at", "user_id"];
-const NOTHING_WORN = { frame: null, card: null, title: null, showcase: [] };
+const DETAILS_COLUMNS = ["avatar_path", "avatar_preset", "bio", "card_theme", "celebration", "favorite_team", "frame", "namecolor", "nameplate", "showcase", "title", "updated_at", "user_id"];
+const NOTHING_WORN = { frame: null, card: null, title: null, nameplate: null, namecolor: null, celebration: null, showcase: [] };
 const SHOWCASE_ID = /^[a-z0-9-]{1,40}$/;
 // The launch seeds as shop-catalog.mjs describes them: prices by rarity, sort 10, 20, 30... per kind in catalog order.
 function catalogSeeds() {
@@ -110,6 +110,7 @@ function mockWorld() {
   let current = null;
   const state = {
     profiles: new Map(), runs: new Map(), dailyRuns: new Map(), souRuns: new Map(), builds: new Map(),
+    supporters: new Set(),   // the supporters table, service-role only in the database
     currentUserId: () => current, isModerator: () => false, ownsAvatarPack: () => false,
   };
   const profileData = makeProfileData(state, { playerStats });
@@ -146,7 +147,9 @@ await runTest("the seeds are shop-catalog.mjs's launch catalog (ids, kinds, rari
     assert(RARITIES.includes(i.rarity), `${i.id}'s rarity ${i.rarity} is a known one`);
     if (i.rarity === "badge") assert(BADGE_BY_ID[i.badge], `${i.id} unlocks with a real badges.mjs badge, not ${i.badge}`);
     else assert(i.badge === null, `${i.id} has no badge`);
-    if (i.rarity !== "free" && i.rarity !== "badge") assert(Number.isInteger(LAUNCH_PRICES[i.rarity]) && LAUNCH_PRICES[i.rarity] > 0, `${i.rarity} has a launch price`);
+    // free, badge and supporter are the three that coins cannot buy, so they have no price.
+    if (!["free", "badge", "supporter"].includes(i.rarity)) assert(Number.isInteger(LAUNCH_PRICES[i.rarity]) && LAUNCH_PRICES[i.rarity] > 0, `${i.rarity} has a launch price`);
+    else assert(LAUNCH_PRICES[i.rarity] === undefined, `${i.rarity} is not bought with coins, so it has no launch price`);
   }
   for (const slot of EQUIP_SLOTS) {
     assert(SHOP_KINDS.includes(slot), `the ${slot} slot takes the kind of the same name`);
@@ -286,7 +289,7 @@ await runTest("the four functions: security definer with pg_temp last, for signe
 await runTest("shop_state: your balance, every item on sale in shop order with what you own, and what you're wearing", async () => {
   const P = await newPlayer("state"), Q = await newPlayer("other");
   let s = (await call(P, "shop_state")).data;
-  assert(same(Object.keys(s).sort(), ["balance", "equipped", "items"]), `top-level keys, got ${show(s)}`);
+  assert(same(Object.keys(s).sort(), ["balance", "equipped", "items", "supporter"]), `top-level keys, got ${show(s)}`);
   assert(s.balance === (await balanceOf(P)), `the balance is the wallet's, got ${s.balance}`);
   const seeds = catalogSeeds();
   assert(same(s.items, seeds.map((i) => ({ ...i, owned: i.rarity === "free" }))), `a new player sees the catalog in shop order, owning only the free items, got ${show(s.items)}`);
@@ -304,9 +307,13 @@ await runTest("shop_state: your balance, every item on sale in shop order with w
   s = (await call(P, "shop_state")).data;
   assert(s.balance === start, `the balance is back where it started after spending what was given: ${s.balance} vs ${start}`);
   const owned = s.items.filter((i) => i.owned).map((i) => i.id);
-  const wantOwned = seeds.filter((i) => i.rarity === "free" || ["frame-team", "frame-undefeated", "title-undefeated"].includes(i.id)).map((i) => i.id);
-  assert(same(owned, wantOwned), `owned: the free items, the one bought and the undefeated badge's two, got ${show(owned)}`);
-  assert(same(s.equipped, { frame: "frame-team", card: "card-navy", title: "title-undefeated", showcase: ["undefeated", "ring-bearer"] }), `equipped, got ${show(s.equipped)}`);
+  // Four from the undefeated badge since v2.7.0: the frame, the title, the Champion celebration and the
+  // Undefeated name colour. A badge unlocking more than one item is the point of a badge item, so this list is
+  // deliberate, not a count.
+  const wantOwned = seeds.filter((i) => i.rarity === "free"
+    || ["frame-team", "frame-undefeated", "title-undefeated", "cel-champion", "name-trophy"].includes(i.id)).map((i) => i.id);
+  assert(same(owned, wantOwned), `owned: the free items, the one bought and the undefeated badge's four, got ${show(owned)}`);
+  assert(same(s.equipped, { frame: "frame-team", card: "card-navy", title: "title-undefeated", nameplate: null, namecolor: null, celebration: null, showcase: ["undefeated", "ring-bearer"] }), `equipped, got ${show(s.equipped)}`);
   const q = (await call(Q, "shop_state")).data;
   assert(same(q.items.filter((i) => i.owned).map((i) => i.id), seeds.filter((i) => i.rarity === "free").map((i) => i.id)) && same(q.equipped, NOTHING_WORN), `another player's purchases and badges aren't Q's, got ${show(q)}`);
 
@@ -433,7 +440,7 @@ await runTest("a badge item is never sold, and becomes yours - and wearable - on
   // submit-run's award_badges records a badge as it pays for it; the owner stands in for it here.
   await owner("insert into badge_awards (user_id, badge) values ($1, 'undefeated')", [P]);
   const s = (await call(P, "shop_state")).data;
-  assert(same(s.items.filter((i) => i.rarity === "badge" && i.owned).map((i) => i.id), ["frame-undefeated", "title-undefeated"]), `the badge's two items are owned, got ${show(s.items.filter((i) => i.rarity === "badge"))}`);
+  assert(same(s.items.filter((i) => i.rarity === "badge" && i.owned).map((i) => i.id), ["frame-undefeated", "title-undefeated", "name-trophy", "cel-champion"]), `the badge's four items are owned, got ${show(s.items.filter((i) => i.rarity === "badge"))}`);
   assert((await call(P, "shop_buy", { p_item: "title-undefeated" })).error === "badge_only", "owned, and still never sold");
   assert(same(await holdings(P), before), "no coins moved and no inventory row");
   assert((await call(P, "equip_item", { p_slot: "frame", p_item: "frame-undefeated" })).data?.frame === "frame-undefeated", "wears the frame");
@@ -478,7 +485,7 @@ await runTest("equip_item checks the slot, then the item's kind, then ownership;
   // A first save creates the row, with nothing else set.
   const FRESH = await newPlayer("fresh"), BLANK = await newPlayer("blank");
   let r = await call(FRESH, "equip_item", { p_slot: "card", p_item: "card-navy" });
-  assert(same(stripTime(r.data), { user_id: FRESH, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: "card-navy", title: null, showcase: [], updated_at: null }), `a first equip creates the row, got ${show(r)}`);
+  assert(same(stripTime(r.data), { user_id: FRESH, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: "card-navy", title: null, nameplate: null, namecolor: null, celebration: null, showcase: [], updated_at: null }), `a first equip creates the row, got ${show(r)}`);
   r = await call(BLANK, "equip_item", { p_slot: "title", p_item: null });
   assert(r.data?.user_id === BLANK && r.data.title === null && same(await detailsOf(BLANK), r.data), `taking off what isn't worn saves an empty row, got ${show(r)}`);
 });
@@ -521,7 +528,7 @@ await runTest("set_showcase saves up to three badge ids in order, refuses anythi
   assert((await failure(db, "update profile_details set showcase = $2 where user_id = $1", [P, tooMany.slice(0, SHOWCASE_MAX)])) === "", "and takes SHOWCASE_MAX");
   const NEW = await newPlayer("case");
   const r = await call(NEW, "set_showcase", { p_badges: ["first-down"] });
-  assert(same(stripTime(r.data), { user_id: NEW, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: null, title: null, showcase: ["first-down"], updated_at: null }), `a first showcase creates the row, got ${show(r)}`);
+  assert(same(stripTime(r.data), { user_id: NEW, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: null, title: null, nameplate: null, namecolor: null, celebration: null, showcase: ["first-down"], updated_at: null }), `a first showcase creates the row, got ${show(r)}`);
 });
 
 // ---------- set_avatar and the packs ----------
@@ -643,7 +650,7 @@ await runTest("a database seeded by v1.12.0 takes v1.13.0's titles and packs on 
     await v12.exec(sql("migration-shop.sql"));
     assert((await q("select price from shop_items where id = 'title-film-room'"))[0].price === 900, "a price changed by hand stays");
     const order = (await q(`select id from shop_items where kind = 'title' order by sort, id collate "C"`)).map((r) => r.id);
-    const want = ["film-room", "waiver-hawk", "draft-guru", "cap-wizard", "war-room", "sleeper-agent", "cinderella", "first-overall", "the-goat", "undefeated", "daily-winner"].map((t) => `title-${t}`);
+    const want = ["film-room", "waiver-hawk", "draft-guru", "cap-wizard", "war-room", "sleeper-agent", "cinderella", "first-overall", "the-goat", "undefeated", "daily-winner", "supporter"].map((t) => `title-${t}`);
     assert(order.join() === want.join(), `a hand-set place stays and the other badge titles move back, got ${order.join()}`);
   } finally {
     await v12.close();
@@ -855,6 +862,22 @@ await runTest("the mock returns what the SQL returns for one list of calls, and 
       [BADGE, "set_showcase", { p_badges: null }],
       [NEWBIE, "set_showcase", { p_badges: [] }],
       [RICH, "shop_state", {}], [BADGE, "shop_state", {}], [NEWBIE, "shop_state", {}],
+      // v2.7.0: name colours equipped, refused and read back. board_looks is asked by a player and by an account
+      // with no profile at all, because the boards are public and a visitor reads them too - and once with a
+      // limit, which is the only argument it takes and the one place the two sides could disagree on ordering.
+      [RICH, "equip_item", { p_slot: "namecolor", p_item: "name-trophy" }],
+      [POOR, "equip_item", { p_slot: "namecolor", p_item: "name-vapor" }],
+      [POOR, "shop_buy", { p_item: "name-vapor" }],
+      [BADGE, "equip_item", { p_slot: "namecolor", p_item: "name-nebula" }],
+      [CONFLICT, "shop_buy", { p_item: "name-vapor" }],
+      [CONFLICT, "equip_item", { p_slot: "namecolor", p_item: "name-vapor" }],
+      [RICH, "board_looks", {}], [NOBODY, "board_looks", {}], [RICH, "board_looks", { p_limit: 1 }],
+      // p_names is the duel screen's question - these two people, whoever else wears something. A name that
+      // wears nothing and a name that does not exist both come back absent rather than as a row of nulls.
+      [RICH, "board_looks", { p_names: ["par_rich", "par_conf"] }],
+      [RICH, "board_looks", { p_names: ["par_poor", "no_such_player"] }],
+      [RICH, "board_looks", { p_names: [] }],
+      [RICH, "board_looks", { p_limit: 1, p_names: ["par_rich", "par_conf"] }],
       [RICH, "set_avatar", { p_path: null, p_preset: "medal" }],
       [RICH, "set_avatar", { p_path: null, p_preset: "headset" }],
       [POOR, "set_avatar", { p_path: null, p_preset: "medal" }],
@@ -984,7 +1007,7 @@ await runTest("storage-shop.js over the real functions: reads go as GET, writes 
   sent = rpcLog.length;
   assert(same(await S.setShowcase("undefeated"), { ok: false, reason: "invalid" }) && rpcLog.length === sent, "a list that isn't one is answered without a request");
   shop = await S.fetchShop();
-  assert(same(shop.equipped, { frame: null, card: "card-navy", title: null, showcase: ["undefeated", "dynasty"] }) && shop.balance === start - priceOf("frame-lime"), `the shop reads it all back, got ${show(shop.equipped)}`);
+  assert(same(shop.equipped, { frame: null, card: "card-navy", title: null, nameplate: null, namecolor: null, celebration: null, showcase: ["undefeated", "dynasty"] }) && shop.balance === start - priceOf("frame-lime"), `the shop reads it all back, got ${show(shop.equipped)}`);
 
   session = POOR;
   assert(same(await S.buyItem("frame-flame"), { ok: false, reason: "not_enough" }), "not_enough");
@@ -1004,6 +1027,76 @@ await runTest("storage-shop.js over the real functions: reads go as GET, writes 
   session = null;
 });
 
+await runTest("supporter: the one-off unlock owns its items, coins never buy them, and a refund takes them off", async () => {
+  // The whole gate, end to end, as a player meets it. The inventories elsewhere in this file check the SHAPE
+  // of what was added; this checks that it does anything.
+  const P = await newPlayer("patron");
+  const kindOf = Object.fromEntries(SHOP_ITEMS.map((i) => [i.id, i.kind]));
+  const gated = SHOP_ITEMS.filter((i) => i.rarity === "supporter").map((i) => i.id);
+  const presetOf = (item) => AVATAR_PACKS.find((k) => k.item === item).presets[0].key;
+  assert(gated.length > 0, "there are supporter items to gate");
+
+  // Before: owned by nobody, and no balance reaches them. The refusal is supporter_only and never not_enough -
+  // "you can't afford it" would be a lie about something money in this game cannot buy.
+  let s = (await call(P, "shop_state")).data;
+  assert(s.supporter === false, `not a supporter yet, got ${show(s.supporter)}`);
+  for (const id of gated) {
+    assert(itemOf(s, id).owned === false, `${id} is not owned`);
+    assert((await call(P, "shop_buy", { p_item: id })).error === "supporter_only", `${id} is not for sale`);
+    // An avatar pack is not an equip slot - owning it unlocks its avatars in the picker - so what has to be
+    // refused for a pack is set_avatar, not equip_item. That is the half that went missing the first time a
+    // supporter pack was written: shop_state called it owned and the picker offered it, and set_avatar in
+    // migration-profiles.sql had no supporter arm and refused the save as bad_preset.
+    if (kindOf[id] === "avatar_pack") {
+      assert((await call(P, "equip_item", { p_slot: kindOf[id], p_item: id })).error === "bad_slot", `${id} is not a slot`);
+      assert((await call(P, "set_avatar", { p_path: null, p_preset: presetOf(id) })).error === "bad_preset",
+        `${id}'s avatars are refused before the unlock`);
+    } else {
+      assert((await call(P, "equip_item", { p_slot: kindOf[id], p_item: id })).error === "not_owned", `${id} cannot be worn`);
+    }
+  }
+  assert((await owner("select supporter from profiles where id = $1", [P]))[0].supporter === false, "and profiles agrees");
+
+  // The unlock: one row, written the way a payment webhook or the SQL editor would write it.
+  await owner("insert into supporters (user_id, source, reference) values ($1, 'stripe', 'pi_test_123')", [P]);
+  assert((await owner("select supporter from profiles where id = $1", [P]))[0].supporter === true, "the trigger sets the flag");
+  s = (await call(P, "shop_state")).data;
+  assert(s.supporter === true, "and shop_state says so");
+  for (const id of gated) {
+    assert(itemOf(s, id).owned === true, `${id} is theirs now`);
+    if (kindOf[id] === "avatar_pack") {
+      assert(!(await call(P, "set_avatar", { p_path: null, p_preset: presetOf(id) })).error,
+        `${id}'s avatars can be worn now`);
+    } else {
+      assert(!(await call(P, "equip_item", { p_slot: kindOf[id], p_item: id })).error, `${id} can be worn`);
+    }
+    // Still not for sale: it came with the unlock, it was never a purchase, and buying it would take coins
+    // for something already owned.
+    assert((await call(P, "shop_buy", { p_item: id })).error === "supporter_only", `${id} is still not bought with coins`);
+  }
+  // One row is one account.
+  const Q = await newPlayer("stranger");
+  assert((await call(Q, "shop_state")).data.supporter === false, "nobody else gained anything");
+  for (const id of gated) assert(itemOf((await call(Q, "shop_state")).data, id).owned === false, `${id} is not theirs`);
+
+  // A refund takes the row away - and with it the flag, and anything of its that was being worn. Leaving it
+  // equipped would show the item on a profile that no longer owns it, because the card renders the column.
+  const worn = (await owner("select frame, card_theme, title, celebration from profile_details where user_id = $1", [P]))[0];
+  assert(Object.values(worn).some((v) => gated.includes(v)), `something gated is being worn first: ${show(worn)}`);
+  await owner("delete from supporters where user_id = $1", [P]);
+  assert((await owner("select supporter from profiles where id = $1", [P]))[0].supporter === false, "the trigger clears the flag");
+  const after = (await owner("select frame, card_theme, title, celebration from profile_details where user_id = $1", [P]))[0];
+  assert(!Object.values(after).some((v) => gated.includes(v)), `nothing gated is still worn, got ${show(after)}`);
+  // And the picture, which is not an equip slot but is just as visible: a supporter pack's avatar has to come
+  // off with everything else, or the card goes on showing an avatar the account no longer owns.
+  const pic = (await owner("select avatar_preset from profile_details where user_id = $1", [P]))[0].avatar_preset;
+  assert(pic === null, `a supporter pack's avatar came off too, got ${show(pic)}`);
+  s = (await call(P, "shop_state")).data;
+  for (const id of gated) assert(itemOf(s, id).owned === false, `${id} is not theirs after a refund`);
+  // What they bought with coins is untouched - a refund of the unlock is not a wipe.
+  assert(itemOf(s, "frame-ink").owned === true, "the free items are still free");
+});
+
 await runTest("storage-shop.js maps every code the functions raise to its reason, a rejected session to signed_out, anything else to network, and never throws", async () => {
   // Every code in the functions' own definitions, so a new one can't arrive without a decision here.
   const raised = async (fn) => [...new Set([...(await owner("select prosrc from pg_proc where proname = $1", [fn]))[0].prosrc.matchAll(/raise exception '([a-z_]+)'/g)].map((m) => m[1]))].sort();
@@ -1011,7 +1104,7 @@ await runTest("storage-shop.js maps every code the functions raise to its reason
     shop_state: { not_signed_in: null }, // fetchShop is null for any failure
     // guest_not_allowed: the shop is refused to a guest in SQL, not only hidden in the app (SHOP.md). It has to
     // be mapped wherever it is raised, or it reads as "network" - "check your connection", for a rule.
-    shop_buy: { not_signed_in: "signed_out", unavailable: "unavailable", badge_only: "badge_only", owned: "owned", not_enough: "not_enough", purchase_conflict: "network", guest_not_allowed: "guest" },
+    shop_buy: { not_signed_in: "signed_out", unavailable: "unavailable", badge_only: "badge_only", supporter_only: "supporter_only", owned: "owned", not_enough: "not_enough", purchase_conflict: "network", guest_not_allowed: "guest" },
     equip_item: { not_signed_in: "signed_out", bad_slot: "invalid", bad_item: "invalid", not_owned: "not_owned", guest_not_allowed: "guest" },
     set_showcase: { not_signed_in: "signed_out", bad_showcase: "invalid", guest_not_allowed: "guest" },
   };
@@ -1077,7 +1170,7 @@ await runTest("storage-shop.js maps every code the functions raise to its reason
     // A loose answer still comes out in the app's shape.
     answer({ data: { balance: "1200", items: [null, { id: 7 }, { id: "frame-ink", kind: "frame", rarity: "free", price: null, sort: "10", owned: 1 }], equipped: { frame: "frame-lime", showcase: ["undefeated", 3] } }, error: null, status: 200 });
     const loose = await S.fetchShop();
-    assert(same(loose, { balance: 1200, items: [{ id: "frame-ink", kind: "frame", rarity: "free", price: null, badge: null, active: true, sort: 10, owned: true }], equipped: { frame: "frame-lime", card: null, title: null, showcase: ["undefeated"] } }), `fetchShop tidies a loose answer, got ${show(loose)}`);
+    assert(same(loose, { balance: 1200, items: [{ id: "frame-ink", kind: "frame", rarity: "free", price: null, badge: null, active: true, sort: 10, owned: true }], supporter: false, equipped: { frame: "frame-lime", card: null, title: null, nameplate: null, namecolor: null, celebration: null, showcase: ["undefeated"] } }), `fetchShop tidies a loose answer, got ${show(loose)}`);
     answer({ data: { balance: 900, earned: 1650, spent: 750, recent: [{ amount: -750, kind: "purchase", ref: "frame-lime", created_at: "2026-09-14T12:00:00+00:00" }, null] }, error: null, status: 200 });
     const wallet = await S.fetchWallet();
     assert(same(wallet, { balance: 900, earned: 1650, spent: 750, recent: [{ amount: -750, kind: "purchase", ref: "frame-lime", createdAt: "2026-09-14T12:00:00+00:00" }] }), `fetchWallet's shape, got ${show(wallet)}`);

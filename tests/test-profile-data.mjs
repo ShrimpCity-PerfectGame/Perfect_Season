@@ -12,7 +12,7 @@
 //   - storage-profile.js's statuses and reasons, its uploads and its clean-up.
 // The word filter's own cases are in test-word-filter.mjs.
 import { assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { freshDb, addAccount, addProviderAccount, addGuestAccount, asUser, asAnon, failure, uuid, sql } from "./pg-fixture.mjs";
+import { freshDb, addAccount, addProviderAccount, addGuestAccount, asUser, asAnon, failure, uuid, sql, attachEmail } from "./pg-fixture.mjs";
 import { makeProfileData, BLOCKED_WORDS_SEED, AVATAR_FOLDER_LIMIT } from "./mock-profile-data.mjs";
 import { playerStats } from "./mock-profile-stats.mjs";
 import { FREE_AVATAR_PRESETS, TEAM_CODES, AVATAR_BUCKET, AVATAR_MAX_BYTES, AVATAR_TYPES, emptyPlayerStats, mapPlayerStats } from "../profile-rules.mjs";
@@ -33,8 +33,8 @@ const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 // Every default avatar: the free starter set, plus v1.12.0's paid packs (migration-shop.sql).
 const ALL_PRESETS = FREE_AVATAR_PRESETS.length + AVATAR_PACKS.reduce((n, p) => n + p.presets.length, 0);
 // A profile_details row's columns, v1.12.0's cosmetics included.
-const DETAILS_COLUMNS = ["avatar_path", "avatar_preset", "bio", "card_theme", "favorite_team", "frame", "showcase", "title", "updated_at", "user_id"];
-const EMPTY_DETAILS = { bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null, title: null, showcase: [], updatedAt: null };
+const DETAILS_COLUMNS = ["avatar_path", "avatar_preset", "bio", "card_theme", "celebration", "favorite_team", "frame", "namecolor", "nameplate", "showcase", "title", "updated_at", "user_id"];
+const EMPTY_DETAILS = { bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null, title: null, nameplate: null, namecolor: null, celebration: null, showcase: [], updatedAt: null };
 
 // What each refusal these two functions raise means to the app - storage-profile.js's SAVE_REASONS and
 // AVATAR_REASONS. Checked twice against two different things: below, that the SQL raises exactly these codes
@@ -326,6 +326,15 @@ await runTest("a guest is given a name, keeps what it plays, and can trade the n
   await owner("insert into runs (user_id, username, ladder, format) values ($1, $2, 'unlimited', 'fantasy')", [one, first.username]);
   await owner("insert into builds (user_id, username, pos, overall, filled) values ($1, $2, 'QB', 88, '{}'::jsonb)", [one, first.username]);
 
+  // A bare anonymous session cannot buy its way out of being a guest. Clearing `guest` is what opens the
+  // daily, the shop, duels, reports and the avatars bucket, and every one of those refusals reads that one
+  // column - so this RPC is the gate, not the browser's email form. Without this an anonymous sign-in plus
+  // one POST is a full account, over and over.
+  assert((await call(one, "claim_username", { p_username: "Taken_By_Guest" })).data === "still_anonymous",
+    "a guest with no credential attached is refused");
+  assert((await owner("select guest from profiles where id = $1", [one]))[0].guest === true, "and is still a guest");
+  // The real trade-up: KeepSeasons puts an email on the account first, and then the name is theirs.
+  await attachEmail(db, one);
   assert((await call(one, "claim_username", { p_username: "Taken_By_Guest" })).data === "ok", "it can take a name of its own");
   const after = await nameOf(one);
   assert(after.username === "Taken_By_Guest" && after.guest === false, `and stops being a guest, got ${JSON.stringify(after)}`);

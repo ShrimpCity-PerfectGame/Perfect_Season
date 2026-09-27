@@ -1,7 +1,7 @@
-import { Fragment, useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest, fetchBoardLooks,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
@@ -24,7 +24,7 @@ import {
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
-  POS_NAME, cityRange, statCells, Confetti,
+  POS_NAME, cityRange, statCells, Confetti, BoardWear,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -32,7 +32,7 @@ import { PICKER_CSS } from "./avatar-picker.jsx";
 import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
 // The one definition of the event the Android shell asks Back with; the website never sends it.
 import { BACK_EVENT } from "./app-shell.mjs";
-import { COSMETICS_CSS, FramedAvatar, Coin } from "./cosmetics.jsx";
+import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
@@ -585,6 +585,10 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
   border-radius:10px;padding:8px 14px;font-weight:800;text-decoration:none;box-shadow:3px 3px 0 var(--hard)}
 .namelink{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit}
 /* A guest's name on a board: the name as plain text, with a quiet chip saying what it is. */
+/* The supporter star. --accent-ink is the one accent token that is AA in every scope (game blue on cream,
+   lime on the dark and night ones), which is exactly what an accent-coloured mark beside text needs. It is
+   role="img" with a label, so it is not a meaning carried by colour alone. */
+.supchip{margin-left:5px;font-size:12px;line-height:1;color:var(--accent-ink);vertical-align:2px}
 .guestchip{margin-left:6px;padding:1px 6px;border:1px solid var(--line2);border-radius:999px;font-size:10.5px;
   font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);vertical-align:2px}
 @media (hover:hover){.namelink:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
@@ -817,7 +821,7 @@ p.gamecoins .earned{display:flex}
 .modechip.genius{color:var(--genius);border-color:color-mix(in srgb,var(--genius) 60%,transparent);background:color-mix(in srgb,var(--genius) 16%,transparent)}
 .modechip.gm{color:var(--gm);border-color:color-mix(in srgb,var(--gm) 60%,transparent);background:color-mix(in srgb,var(--gm) 16%,transparent)}
 .reel{position:relative;overflow:hidden;margin-bottom:10px;padding:18px 20px 16px 22px;border-radius:16px;
-  background:linear-gradient(102deg,var(--tc1) 0%,color-mix(in srgb,var(--tc1) 62%,var(--bg)) 46%,color-mix(in srgb,var(--tc1) 18%,var(--bg)) 82%);
+  background:linear-gradient(102deg,var(--tc-deep,var(--tc1)) 0%,color-mix(in srgb,var(--tc-deep,var(--tc1)) 62%,var(--bg)) 46%,color-mix(in srgb,var(--tc-deep,var(--tc1)) 18%,var(--bg)) 82%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 12px 30px rgba(0,0,0,.35)}
 .reel::before,.result-hero::before,.champion::before{content:'';position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1.4px);background-size:6px 6px;pointer-events:none}
 .reel>*{position:relative;z-index:1}
@@ -832,7 +836,7 @@ p.gamecoins .earned{display:flex}
 .reel.spin .team,.reel.spin .years{opacity:.8;filter:blur(.6px)}
 .rerolls{display:flex;gap:8px;margin-bottom:22px;flex-wrap:wrap}
 .sticky{position:fixed;top:0;left:0;right:0;z-index:30;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
-  background:linear-gradient(102deg,color-mix(in srgb,var(--tc1) 78%,var(--bg)) 0%,color-mix(in srgb,var(--bg) 95%,transparent) 58%);transform:translateY(-110%);transition:transform .18s ease-out}
+  background:linear-gradient(102deg,color-mix(in srgb,var(--tc-deep,var(--tc1)) 78%,var(--bg)) 0%,color-mix(in srgb,var(--bg) 95%,transparent) 58%);transform:translateY(-110%);transition:transform .18s ease-out}
 .sticky.show{transform:none}
 .sticky .in{position:relative;max-width:900px;margin:0 auto;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;
   padding:calc(8px + var(--sa-top,0px)) calc(16px + var(--sa-right,0px)) 8px calc(24px + var(--sa-left,0px))}
@@ -847,7 +851,10 @@ p.gamecoins .earned{display:flex}
 .chip-slot{opacity:.75;letter-spacing:.04em}
 /* Reads as the h3 it used to be: it's a heading level, not a size (the level below the screen's own name). */
 .locked-h{margin:0 0 4px;font-size:1.17em;font-weight:700}
-.chip.on{border:1px solid transparent;color:var(--pc,var(--accent-ink));background:color-mix(in srgb,var(--pc,var(--accent)) 16%,transparent)}
+/* 6%, not 16%: the chip tints its background with its OWN colour, so the tint eats the contrast of the text
+   sitting on it. At 16% three positions failed AA on cream - TE 3.96, QB 4.01, RB 4.45 - and the theme test
+   never saw it, because it measures tokens against the scope's surfaces, not against a tint of themselves. */
+.chip.on{border:1px solid transparent;color:var(--pc,var(--accent-ink));background:color-mix(in srgb,var(--pc,var(--accent)) 6%,transparent)}
 .brk{display:none}
 .sec{margin:0 0 22px}
 .sec .hd{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 8px;flex-wrap:wrap}
@@ -1227,7 +1234,11 @@ p.gamecoins .earned{display:flex}
   .mb::after{content:'';position:absolute;left:-3px;right:-3px;top:-6px;bottom:-6px}
   .whoami::after{content:'';position:absolute;left:-4px;right:-4px;top:-10px;bottom:-4px}
   /* Names sit in rows about 40px apart, so their hit areas stop short of the next row's. */
-  .namelink::after{content:'';position:absolute;left:-6px;right:-6px;top:-10px;bottom:-10px;min-width:44px}
+  /* Height as well as width. min-width guarded one axis and the other was left at whatever the line box
+     happened to be - 36.8px on Stats, 37.6px in a leaderboard row - and these are now the main way into a
+     profile from every board. The ::after is centred on the button so it grows both ways. */
+  .namelink::after{content:'';position:absolute;left:-6px;right:-6px;top:50%;transform:translateY(-50%);
+    min-width:44px;height:44px}
   /* The header chips sit just above the tab grid on phones: keep their hit areas off the tabs. */
   .nav button.pill::after{bottom:-4px}
   /* 40, not the 44 the rule above sets: six tabs and two header chips share the top of a 320px
@@ -1412,13 +1423,28 @@ function PlayerIndex() {
 // module-scope components (PlayerName, RankRows, ...) with no route to the app's navigation, so the
 // app hands its openProfile down through this context instead of threading a prop through each board.
 const OpenProfile = createContext(null);
+// BoardWear - who is wearing what, and the scope being drawn - lives in ui-common.jsx, because the duel screen
+// reads it too and a screen file never imports this module back. NameLink below is the one place a board name
+// is rendered, which is why neither the star nor the colour needed threading through a single board function.
 function NameLink({ name, guest }) {
   const openProfile = useContext(OpenProfile);
+  const wear = useContext(BoardWear);
   // A guest has no profile screen to open - no picture, no bio, nothing it could set - so its name is
-  // shown as what it is instead of offering an empty page.
+  // shown as what it is instead of offering an empty page. A guest is never a supporter: the shop refuses
+  // one, so there is no star to show either.
   if (guest) return <>{name}<span className="guestchip">guest</span></>;
-  if (!name || !openProfile) return name || null;
-  return <button type="button" className="namelink" onClick={() => openProfile(name)}>{name}</button>;
+  const look = wear?.looks?.get(name) || null;
+  // The colour goes on the name and nothing else. The star and the guest chip stay outside it, in their own
+  // tokens, or a drifting gradient would take the chip with it and the one thing it has to stay is legible.
+  const inked = <NameInk look={look} scope={wear?.scope || "light"}>{name}</NameInk>;
+  if (!name || !openProfile) return name ? inked : null;
+  const star = wear?.supporters?.has(name)
+    ? <span className="supchip" role="img" aria-label="Supporter">{"★"}</span>
+    : null;
+  return <>
+    <button type="button" className="namelink" onClick={() => openProfile(name)}>{inked}</button>
+    {star}
+  </>;
 }
 
 // Coming back from Google with no session: the player changed their mind at Google's screen, or the
@@ -1530,6 +1556,7 @@ function PickName({ email, onClaimed, onSignOut }) {
       invalid: USERNAME_RULE,
       already_named: "This account already has a name. Reload the page to use it.",
       not_signed_in: "You've been signed out. Sign in again.",
+      still_anonymous: "This account has no email yet. Keep your seasons from the Account tab instead.",
     }[answer] || "Something went wrong. Try again.");
   }
 
@@ -1607,8 +1634,16 @@ function KeepSeasons({ name, onKept, onUseAnother }) {
     const answer = await claimUsername(username);
     setBusy(false);
     if (answer === "ok") return onKept(username);
-    setErr({ taken: "That username is taken. Try another one.", blocked: NAME_NOT_ALLOWED, invalid: USERNAME_RULE }[answer]
-      || "Something went wrong. Try again.");
+    // still_anonymous means the email never landed on the account, so the database refused to clear `guest`
+    // - it is the gate, not this form. It should be unreachable from here (the email step above has to
+    // succeed first), but a rule that reaches a player as "something went wrong" is the failure this app
+    // keeps having, so it gets words.
+    setErr({
+      taken: "That username is taken. Try another one.",
+      blocked: NAME_NOT_ALLOWED,
+      invalid: USERNAME_RULE,
+      still_anonymous: "Your email didn't save, so the account can't be kept yet. Try the email and password again.",
+    }[answer] || "Something went wrong. Try again.");
   }
 
   return (
@@ -2184,7 +2219,14 @@ export default function PerfectSeason() {
   // reads the board format at call time - a ref, so it can't pick up a stale value the way
   // reading the state variable through a closure would.
   const boardFormatRef = useRef("fantasy");
+  // ...and the same treatment for `stats`, for the same reason. finish() fires the post-season refresh as
+  // `saving.then(() => loadLeaderboard(fmt))`, which is that render's loadLeaderboard, holding the `stats`
+  // from BEFORE the season - so the board asked the server for the rank of the old best score and showed it
+  // beside the new one ("You're #40 with a best score of 104.2" when 104.2 is top ten). Assigned during
+  // render, so any later continuation reads what was last rendered.
   function showBoardFormat(f) { boardFormatRef.current = f; setBoardFormat(f); }
+  const statsRef = useRef(null);
+  statsRef.current = stats;
   const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
   // Why a code was turned away before any boards were dealt - today, only a code that is a daily's own seed.
@@ -2203,6 +2245,9 @@ export default function PerfectSeason() {
   // `lb.top` (profiles); a single mode is fetched from the runs log, because profiles has no per-mode best.
   // Paired mode+format inside the state the way lb/lbFormat are, so a board can never render its rows under
   // another mode's heading while a slower request is still in flight.
+  // Who has the Supporter unlock, as a Set of names, read once when a screen full of names opens. Empty
+  // until then and empty if the read fails - a missing star is nothing, where a wrong one is a claim.
+  const [boardLooks, setBoardLooks] = useState(() => ({ supporters: new Set(), looks: new Map() }));
   const [lbMode, setLbMode] = useState("all");
   const [best, setBest] = useState({ loading: false, rows: [], mode: "all", format: "fantasy" });
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: 0, topBuilds: [] });
@@ -2637,9 +2682,22 @@ export default function PerfectSeason() {
     if (k === "profile") setProfileOf(null);
     setView(k);
     if (k === "home") refreshWip();
-    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }
-    if (k === "stats" && !siteStats.loaded) loadSiteStats();
   }
+  // Everything a screen needs when it opens, keyed on the VIEW rather than on a tab click - because a tab
+  // click is only ONE way to arrive. Landing on /leaderboard (the address in the sitemap, the one search
+  // results point at), Back or Forward to it, and the two "See the leaderboard" buttons under a finished
+  // season all open the screen without going through openTab at all.
+  // 2.7.1 moved only the name colours and stars here and left the three board loads behind, so those routes
+  // still drew a Leaderboard whose Points ladder said "No one has earned points in Unlimited yet" and whose
+  // Duel board said "Nobody has duelled yet" - the empty states claim a fact, because `loading` starts false.
+  // Arriving by the tab was the one path that worked, which is also why no test caught it.
+  // `userId` is a dependency because the board's "You're #N" line is computed from who is asking: the mount
+  // load runs before the session lands, so a signed-in player who opened /leaderboard directly never got it.
+  useEffect(() => {
+    if (view === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }
+    if (view === "stats" && !siteStats.loaded) loadSiteStats();
+    if (view === "board" || view === "stats" || view === "statsou") loadBoardWear();
+  }, [view, userId]);
   function openProfile(name) {
     leftAt.current = window.scrollY || 0;
     setProfileOf(name);
@@ -2801,7 +2859,7 @@ export default function PerfectSeason() {
       const [top, totals] = await Promise.all([fetchLeaderboardTop(10, boardFormat), fetchSiteTotals()]);
       let myRank = -1;
       if (userId) {
-        const mine = scoreOf(stats, boardFormat);
+        const mine = scoreOf(statsRef.current, boardFormat);
         // Rows are keyed by the account's id - comparing against the username never matched.
         const idx = top.findIndex((q) => q.id === userId);
         // A rank that couldn't be counted (null) is left out, like no score at all.
@@ -3886,6 +3944,31 @@ export default function PerfectSeason() {
     } catch (e) { setBest({ loading: false, rows: [], mode: mk, format: fmt }); }
   }
 
+  // Cheap and rarely changing, so it rides along with whichever board screen was opened rather than having
+  // a refresh of its own.
+  // The duel screen's two players, by name. Stable, because it is an effect's dependency over there and a
+  // function rebuilt every render would re-fire it on every pick. It closes over nothing that changes.
+  const notePlayers = useCallback((names) => { loadBoardWear(names); }, []);
+  async function loadBoardWear(names = null) {
+    try {
+      const rows = await fetchBoardLooks(names ? { names } : undefined);
+      setBoardLooks((was) => {
+        // A boards read replaces what we know; a read for named accounts adds to it, because it only asked
+        // about those names and says nothing about anybody else.
+        const supporters = new Set(names ? was.supporters : []);
+        const looks = new Map(names ? was.looks : []);
+        // It does answer for the names it asked about, though - including "nothing any more". Without this,
+        // taking a colour off would leave the old one on screen for as long as the tab stayed open.
+        if (names) for (const who of names) { supporters.delete(who); looks.delete(who); }
+        for (const r of rows) {
+          if (r.supporter) supporters.add(r.username);
+          if (r.namecolor) looks.set(r.username, r.namecolor);
+        }
+        return { supporters, looks };
+      });
+    } catch (e) { /* plain names are the safe answer: no star, no colour */ }
+  }
+
   async function loadLadder(m) {
     const mk = LADDERS.includes(m) ? m : ladderMode;
     setLadder((l) => ({ loading: true, rows: l.mode === mk ? l.rows : [], mode: mk }));
@@ -4102,6 +4185,7 @@ export default function PerfectSeason() {
 
   return (
     <OpenProfile.Provider value={openProfile}>
+      <BoardWear.Provider value={{ ...boardLooks, scope }}>
     <div className={`ps${scope === "light" ? "" : ` ${scope}`}`}>
       <style>{APP_CSS}</style>
       <div className="wrap">
@@ -4123,7 +4207,10 @@ export default function PerfectSeason() {
                 {/* The button is labeled, so the picture beside the name is decorative. It wears your frame. */}
                 <FramedAvatar frame={myDetails?.frame ?? null} team={TEAMS[myDetails?.favoriteTeam] ? myDetails.favoriteTeam : null}
                   username={user} photoUrl={myDetails?.avatarUrl ?? null} preset={myDetails?.avatarPreset ?? null} size={24} decorative />
-                <span className="whoname">{user}</span>
+                {/* Your own name wears your own colour, on every screen - the play screen included, where it is
+                    the only name there is. It comes from myDetails rather than the boards' read: this is you,
+                    and the app already holds what you have equipped. */}
+                <span className="whoname"><NameInk look={myDetails?.namecolor ?? null} scope={scope}>{user}</NameInk></span>
               </button>
             )}
             <span className="ver" title={`Gridspin v${APP_VERSION}`}>v{APP_VERSION}</span>
@@ -4392,7 +4479,7 @@ export default function PerfectSeason() {
                   )}
                   {/* resumeFree, not restart: the draft in the Unlimited slot, whatever its variant, is resumed rather than charged as a DNF. */}
                   <button className="btn" onClick={() => resumeFree()}>Play an unlimited draft</button>
-                  <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>Today's leaderboard</button>
+                  <button className="btn" onClick={ () => setView("board")}>Today's leaderboard</button>
                 </div>
               </div>
             )}
@@ -4560,6 +4647,15 @@ export default function PerfectSeason() {
 
             {result && (
               <>
+                {/* The equipped win celebration, over the whole screen, on a title. The little Confetti inside
+                    .cel below stays: that one belongs to the panel and has been there since the result screen
+                    had one, and this plays over everything.
+                    A title, not every finished season - roughly one run in eleven - because a celebration that
+                    fires on a 12-8 is not a celebration. It is fixed, aria-hidden and pointer-events:none, so
+                    it cannot take a tap or read out over the result the screen already announces. */}
+                {finished && (result.perfect || result.champ) && (
+                  <WinCelebration celebration={myDetails?.celebration ?? null} />
+                )}
                 {/* Record first: it's the number people screenshot. Team score, points and this
                     season's rank share one strip under it, and the moments only appear when they
                     happened. */}
@@ -4594,7 +4690,7 @@ export default function PerfectSeason() {
                   <div className="frow resultactions">
                     <button className="btn solid" onClick={doShare}>{share.state === "copied" ? "Copied to clipboard" : share.state === "shared" ? "Shared" : "Share result"}</button>
                     <button className="btn" onClick={runItBack}>Run it back 🔁</button>
-                    <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>See the leaderboard</button>
+                    <button className="btn" onClick={ () => setView("board")}>See the leaderboard</button>
                   </div>
                 )}
                 {finished && share.state === "manual" && (
@@ -4773,7 +4869,7 @@ export default function PerfectSeason() {
             <VersusScreen
               key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
               format={format} onBack={leaveVersus} onCode={setVersusCode}
-              onShare={sendShare} siteUrl={APP_SITE_URL}
+              onShare={sendShare} onPlayers={notePlayers} siteUrl={APP_SITE_URL}
             />
             )}
           </>
@@ -5358,6 +5454,7 @@ export default function PerfectSeason() {
         </main>
       </div>
     </div>
+      </BoardWear.Provider>
     </OpenProfile.Provider>
   );
 }

@@ -10,6 +10,7 @@ import {
 import { replayMatch, optionId, autoPick, VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS } from "../versus-logic.mjs";
 import { TEAMS, WINDOWS } from "../game-logic.mjs";
 import fs from "node:fs";
+const { NAME_LOOKS } = await loadModule("cosmetics.jsx");
 
 setupDom();
 // This screen is driven by a Realtime subscription: a change to the match arrives, the screen re-reads, and
@@ -392,6 +393,17 @@ await runTest("the last pick lands on the other screen before the result does", 
     || { winner: "host", margin: 1, host: { score: 1, against: 0, points: 7 }, guest: { score: 0, against: 0, points: 3 } };
   await openMatch("delta@x.test", code);
   assert(versus().dataset.view === "done", `and then the result: ${versus().dataset.view}`);
+  // And it says who beat whom, in names. This line is built out of name parts rather than one string since
+  // v2.7.0 (so each name can wear its colour), and the words are the part that must not have moved: the
+  // scoreline above it doesn't say which number was yours.
+  const beat = container.querySelector(".vs-beat")?.textContent || "";
+  // Each roster is still labelled with whose it is, and data-side still carries the PLAIN name - it is a test
+  // hook, and a painted name is an element, which would land in an attribute as "[object Object]".
+  const sides = [...container.querySelectorAll(".vs-rosters .roster")].map((r) => r.dataset.side);
+  assert(sides.length === 2 && sides.every(Boolean), `both rosters are named: ${JSON.stringify(sides)}`);
+  const [a, b] = sides;
+  assert([`${a} beat ${b}`, `${b} beat ${a}`, `${a} and ${b} tied`, `${b} and ${a} tied`].includes(beat),
+    `who beat whom, in both names: "${beat}" for ${a} and ${b}`);
 });
 
 // A steal, driven through the buttons, in the real app.
@@ -468,6 +480,55 @@ await runTest("a steal through the buttons moves the player on both screens", as
 // After the matches above, not among them: it opens a lobby of its own, and who leads board one is seeded on
 // the match code, so an extra match in the middle re-deals the one the board tests share. It stays above
 // the reactRoot.unmount() below, which is where the mounted app ends.
+await runTest("a duel paints both names in the colours their accounts wear, and says the same words", async () => {
+  // The whole path, not the component: the screen reports its two players, the app asks board_looks for exactly
+  // those names, and the answer comes back down a context into a name on screen. A duel is the one place the
+  // boards' "first N wearers" read cannot be relied on - there are two names that matter and they can be
+  // anywhere in the alphabet - so the names read is what this actually exercises.
+  await signUp("kappa@x.test", "kappa");
+  await goHome();
+  await clickMode(container, "Duel");
+  await flush();
+  await click(findButtonByText(container, "Open a lobby"));
+  await flush();
+  const code = versus().dataset.code;
+
+  await signUp("lambda@x.test", "lambda");
+  await flush();
+  // Owning one the way the SQL editor would grant it: a supporter item needs no coins and no badge, and the
+  // mock keeps the same escape hatch the real table has.
+  const lambdaId = [...auth._profiles.values()].find((p) => p.username === "lambda").id;
+  auth._supporters.add(lambdaId);
+  const worn = await auth.rpc("equip_item", { p_slot: "namecolor", p_item: "name-nebula" });
+  assert(!worn.data?.error && !worn.error, `lambda equips a name colour: ${JSON.stringify(worn.error || worn.data)}`);
+  const joined = await auth.rpc("join_match", { p_code: code });
+  assert(!joined.data.error, `the opponent joined: ${JSON.stringify(joined.data.error)}`);
+
+  await openMatch("kappa@x.test", code);
+  await flush(3);
+
+  const painted = [...container.querySelectorAll(".cs-name")];
+  const theirs = painted.find((n) => n.textContent === "lambda");
+  assert(theirs, `the opponent's name is painted: ${painted.map((n) => n.textContent).join(", ") || "nothing is"}`);
+  assert(theirs.dataset.nameLook === "name-nebula", `in the look they equipped, got ${theirs.dataset.nameLook}`);
+  // The DARK scope's palette: 1v1 wears the draft's scope, and a look is a different colour in each one. This is
+  // the assertion that would fail if the duel screen painted names with the cream boards' values.
+  assert(theirs.style.getPropertyValue("--cs-name-1") === NAME_LOOKS["name-nebula"].dark[0],
+    `in the dark scope's palette, got ${theirs.style.getPropertyValue("--cs-name-1")}`);
+
+  // An account wearing nothing is not wrapped at all - the name, exactly as it has always been.
+  assert(!painted.some((n) => n.textContent === "kappa"), "a name wearing nothing is left alone");
+
+  // And the words are untouched. A colour is a colour; it must not rewrite what the screen says, which is what
+  // a screen reader and every other test in this file read.
+  const them = container.querySelector(".vs-them .vs-side-hd");
+  assert(them && them.textContent.includes("lambda's roster"), `their roster still says whose it is: ${them?.textContent}`);
+  // data-side keeps the plain name: it is a test hook, and a React element lands in an attribute as [object Object].
+  assert(container.querySelector('.vs-them [data-side]')?.dataset.side === "lambda's roster"
+    || container.querySelector('.vs-them .roster')?.dataset.side === "lambda's roster",
+    `the roster's data-side is still the plain string: ${container.querySelector('.vs-them .roster')?.dataset.side}`);
+});
+
 await runTest("the lobby sends a written invitation, not an address", async () => {
   // Matchmaking is entirely "get this link to one person", and that person is almost always reached in a text.
   // A bare URL says neither who sent it nor what it is - and whoever opens it first IS the opponent, so it has

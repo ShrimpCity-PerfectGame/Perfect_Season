@@ -174,11 +174,13 @@ export function makeProfileData(state, { playerStats }) {
   // Every column of the row, as to_jsonb gives it - v1.12.0's cosmetics (migration-shop.sql) included.
   const detailsJson = (d) => (d ? {
     user_id: d.user_id, bio: d.bio, avatar_path: d.avatar_path, avatar_preset: d.avatar_preset, favorite_team: d.favorite_team,
-    frame: d.frame ?? null, card_theme: d.card_theme ?? null, title: d.title ?? null, showcase: [...(d.showcase || [])], updated_at: d.updated_at,
+    frame: d.frame ?? null, card_theme: d.card_theme ?? null, title: d.title ?? null,
+    nameplate: d.nameplate ?? null, namecolor: d.namecolor ?? null,
+    celebration: d.celebration ?? null, showcase: [...(d.showcase || [])], updated_at: d.updated_at,
   } : null);
   // Also used by tests/mock-shop.mjs's equip_item and set_showcase, which write the same row.
   function upsertDetails(uid, patch) {
-    const row = details.get(uid) || { user_id: uid, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: null, title: null, showcase: [] };
+    const row = details.get(uid) || { user_id: uid, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: null, title: null, nameplate: null, namecolor: null, celebration: null, showcase: [] };
     Object.assign(row, patch, { updated_at: new Date().toISOString() });
     details.set(uid, row);
     return detailsJson(row);
@@ -240,7 +242,16 @@ export function makeProfileData(state, { playerStats }) {
       if (!isClean(p_username)) return "blocked";
       if ([...state.profiles.values()].some((r) => r.username === p_username)) return "taken";
       if (!row) state.createProfile(uid, p_username);
-      else state.renameAccount(uid, p_username); // a guest keeping what it played, under its own name
+      else {
+        // A guest keeping what it played, under its own name - but only once a credential is attached to the
+        // session. Mirrors the auth.users test in migration-profiles.sql: clearing `guest` is what opens the
+        // daily, the shop, duels, reports and the avatars bucket, so an anonymous session calling this RPC
+        // directly would promote itself past every one of those refusals.
+        const u = state.currentUser?.() || null;
+        const attached = !!(u && (u.email || u.phone || u.is_anonymous === false));
+        if (!attached) return "still_anonymous";
+        state.renameAccount(uid, p_username);
+      }
       return "ok";
     },
     check_username({ p_username = null } = {}) {

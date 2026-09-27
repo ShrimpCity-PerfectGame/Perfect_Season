@@ -7,7 +7,7 @@
 // contract's test hooks (SHOP.md 7.2), so these checks hold for the real screen as well as phase 0's stub.
 import {
   setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto,
-  makeMockAuth, clickMode,
+  makeMockAuth, clickMode, loadModule,
 } from "./helpers.mjs";
 import { COIN_RULES } from "../rewards.mjs";
 
@@ -304,6 +304,44 @@ await runTest("the Shop opens from the result; a bought frame is worn in the hea
   await until(() => shopOf(container).querySelector('.sh-item[data-item="frame-lime"]')?.dataset.state === "equipped", "the shop again, Lime still equipped");
   await back();
   assert(!shopOf(container) && container.querySelector(".result-hero .rec")?.textContent === resultY, `Back again returns to the result, got: ${text(container).slice(0, 200)}`);
+});
+
+// A .jsx module has to be transpiled to be read here, the way every other test reads one.
+const { NAME_LOOKS } = await loadModule("cosmetics.jsx");
+
+await runTest("a bought name colour paints your own name in the header, and repaints it when the screen changes", async () => {
+  // Your own name comes from what YOU have equipped, not from the boards' read - so it is painted everywhere,
+  // the play screen included, where it is the only name on screen.
+  auth._wallet.apply(uid, 1000, "season", "TEST-NAMECOLOR");
+  await click(named(coinsOf(container), "Shop"));
+  await until(() => shopOf(container)?.dataset.balance, "the shop to load");
+  await click(named(shopOf(container), "Name colors"));
+  const tile = () => shopOf(container).querySelector('.sh-item[data-item="name-ember"]');
+  await until(tile, "the Ember name colour's tile");
+  const mine = container.querySelector(".whoname").textContent;
+  await click(tile().querySelector("button"));
+  await until(() => named(shopOf(container), "Buy"), "Buy after selecting it");
+  await click(named(shopOf(container), "Buy"));
+  await until(() => named(shopOf(container), "Confirm purchase"), "Confirm purchase");
+  await click(named(shopOf(container), "Confirm purchase"));
+
+  const ink = () => container.querySelector(".whoname .cs-name");
+  await until(ink, () => `the header name painted, got: ${container.querySelector(".whoname")?.innerHTML}`);
+  assert(ink().dataset.nameLook === "name-ember", `in the look just bought, got ${ink().dataset.nameLook}`);
+  assert(ink().textContent === mine, `and it is still your name: ${ink().textContent} vs ${mine}`);
+  // The shop is a cream screen, so it wears the light palette.
+  assert(ink().style.getPropertyValue("--cs-name-1") === NAME_LOOKS["name-ember"].light[0],
+    `the cream screen's value, got ${ink().style.getPropertyValue("--cs-name-1")}`);
+
+  // Back to the result, which is a dark screen - and the SAME name has to come back in the dark palette. This
+  // is the whole design in one assertion: a look is three palettes and the screen picks, so a name that kept
+  // one colour across both would be unreadable on one of them.
+  await back();
+  await until(() => container.querySelector(".result-hero"), "back on the result");
+  assert(ink(), "your name is still painted on the result screen");
+  assert(ink().style.getPropertyValue("--cs-name-1") === NAME_LOOKS["name-ember"].dark[0],
+    `the dark screen's value, got ${ink().style.getPropertyValue("--cs-name-1")}`);
+  assert(NAME_LOOKS["name-ember"].light[0] !== NAME_LOOKS["name-ember"].dark[0], "the two are different colours");
 });
 
 await runTest("the frame is on your profile card too, with your balance; the card's Shop and Back", async () => {

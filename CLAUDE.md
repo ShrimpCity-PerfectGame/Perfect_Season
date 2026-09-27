@@ -136,7 +136,12 @@ functions' own source, so a new code cannot arrive unmapped. PROFILES.md, "What 
 list. A guest stops being one from the Account
 tab (`KeepSeasons`): an email and password go onto the same account, then `claim_username` trades the given name
 for a real one and rewrites the name snapshots on the boards, the way a moderator's rename does - the one time
-that function is allowed to change an existing name. Everything played, earned and counted stays. The known cost
+that function is allowed to change an existing name. **`claim_username` is the gate, not that form** (v2.8.1):
+clearing `guest` is what opens all of the above, so it refuses unless a credential is actually attached to the
+`auth.users` row - otherwise an anonymous session calls the RPC itself and gets a full account for one sign-in
+and one POST, over and over. The check is permissive on purpose (email, a pending email change, phone, or no
+longer anonymous): with email confirmation ON, which staging has, the address can sit in `email_change` while
+`is_anonymous` stays true, so gating on that flag alone would refuse the real trade-up. Everything played, earned and counted stays. The known cost
 is leaderboard pressure: one person can make guests freely, so **turn on a CAPTCHA for anonymous sign-ins** in
 each Supabase project before this is busy, and remember anonymous users count toward Supabase's monthly actives.
 `tests/test-guest-accounts.mjs` covers the game's side; the naming and the trade-up are held to the real SQL in
@@ -581,7 +586,34 @@ overwrite each other.
 - **Card themes set the card's text scope.** `CardTheme` adds `cs-dark`, `cs-night` or `cs-light`, which
   perfect-season.jsx maps to theme.mjs's scopes; each theme's painted colors are data in `cosmetics.jsx`, so
   `tests/test-cosmetics.mjs` can hold its text to WCAG AA, for all 32 teams on Team colors.
-- **Runbook** (SQL editor): change a price - `update shop_items set price = 1500 where id = 'frame-lime';`; take an
+- **A supporter can dress entirely in supporter items (v2.8.0)**, and that is the point: Orbit (frame), Cosmos
+  (card), Supporter (title), Aurora (nameplate), Nebula (name colour), Supernova (celebration) and Stargazer
+  (avatar pack) fill **every slot**, in one cosmic line, so the set reads as one thing rather than as seven
+  unrelated purchases. Two things a supporter pack drags with it that no other kind does: `set_avatar` in
+  migration-profiles.sql needed a **supporter arm** - shop_state calls the pack owned and the picker offers its
+  avatars, so without it the save came back `bad_preset`, which is the exact drift the comment above that check
+  warns about - and it has to read the entitlement into a **variable through EXECUTE**, because plpgsql plans a
+  statement whole and an arm naming `public.supporters` inside that condition fails to plan on a database that
+  has not had migration-shop.sql re-run. `supporters_sync` also clears a supporter pack's **avatar** on a
+  refund: a picture is not an equip slot, but it is just as visible, and the card renders the column.
+- **Supporter (v2.6.0) is a one-off unlock, not a subscription**, and the only thing in the game that costs
+  real money. It unlocks the `supporter`-rarity items and, once there are ads, turns them off. The entitlement
+  is a row in `supporters` - RLS on, no policy at all, like `wallets`: written by the service role (a payment
+  webhook) or by hand. `source` says which door it came in by (`stripe` | `play` | `apple` | `grant`), because
+  an account gains it once but a store build has to use that store's billing; `reference` is the payment's id,
+  so a refund can find the row. A trigger keeps `profiles.supporter` in step, and that is what the app reads:
+  the ad decision happens before anything renders, not after a shop call, and a supporter chip beside a name is
+  public the way the guest chip is. **Deleting the row is the refund** - the flag clears and anything
+  supporter-rarity being worn comes off, because a card renders the equipped column and asks nobody about
+  ownership. Nothing is deleted, so buying again restores it all.
+  **Supporter items are DIFFERENT, not better.** The best thing in the game stays a badge item, earned by going
+  20-0 rather than bought. Coins can never buy a supporter item (`shop_buy` refuses `supporter_only` before it
+  looks at the balance, so nobody reads "not enough coins" for something no balance reaches), and nothing behind
+  the paywall may touch drafts, scores, leaderboards, the daily or duels - the cosmetic-only rule stops being a
+  preference the moment money is involved.
+- **Runbook** (SQL editor): grant supporter -
+  `insert into supporters (user_id, source, note) select id, 'grant', 'why' from profiles where username = 'NAME';`
+  (deleting that row is the refund, and takes the items off); change a price - `update shop_items set price = 1500 where id = 'frame-lime';`; take an
   item off sale (owners keep it) - `update shop_items set active = false where id = 'frame-lime';`; give an item
   (a pack included) to everyone - `update shop_items set rarity = 'free', price = null where id = 'pack-sideline';` -
   since a pack's avatars follow its shop item everywhere (`shop_state`, `set_avatar`, the picker). The seeds in
@@ -589,6 +621,50 @@ overwrite each other.
 - **Cosmetic artwork uses fixed colors**, like the avatar drawings: frame and card-theme paints are data in
   `cosmetics.jsx` (`COLORS`), not theme tokens, because an item looks the same wherever it's worn. Text on a card
   still takes its scope's tokens, and `tests/test-cosmetics.mjs` checks those against every paint behind text.
+- **Nameplates (v2.6.0)** are a banner behind the name on the player card, and they are where "coloured,
+  animated names" ended up. **Not one colour clears AA as text on all three card scopes** - lime is 1.28:1 on
+  cream, game blue 3.19:1 on the dark card - so coloured text alone cannot work in an app with a cream, a navy
+  and a black surface. The colour travels with its own background instead: a plate is `stops` (one colour, or
+  a gradient's several) plus **its own** `ink`, and `platePaint` publishes them the way `cardPaint` does, so
+  `tests/test-cosmetics.mjs` holds the ink to AA against *every* stop - a drifting gradient can put any stop
+  under any letter. The lively ones animate `background-position` only, so nothing moves, nothing reflows, and
+  the colours under the letters stay the ones that were measured. Plates render on the player card, where the
+  frame, card theme and title already do, so no board query has to carry them.
+- **Name colours (v2.7.0)** are the name itself, coloured and drifting, **on the boards** - and they are where
+  "animated names with different colours" finally landed. The rule that sent them to nameplates first still holds:
+  no single colour clears AA on cream and on true black. What gets round it is that a look does not have to BE a
+  colour. `NAME_LOOKS` names each one **once per app scope**, the way theme.mjs names every token three times, and
+  `NameLink` hands `NameInk` the scope the app is already drawing in - deep on cream (Stats), bright on black
+  (the Leaderboard). Ember is Ember on both; only its lightness moves, which is the one thing the surface forces.
+  `tests/test-cosmetics.mjs` holds **every stop** to AA against **every surface a board name can sit on**
+  (`NAME_SURFACES`, which includes the 30% lime wash `.lb tr.me td` paints over your own row) - a drift slides any
+  stop under any letter, so measuring the first one proves nothing. The drift is `background-position` only and
+  stops under reduced motion. The colour goes on the name and nothing else: the supporter star and the guest chip
+  stay outside it in their own tokens. **The player card does not wear one** - six card themes over 32 team
+  colours has no readable text colour, which is exactly what nameplates are for, so the two features split the
+  game between them rather than competing.
+  **Where a name colour shows:** every board through `NameLink`; the **duel screen** through `DuelName`
+  (versus.jsx), which paints the name but never links it - that screen is a draft on a clock, and a profile link
+  would push a history entry and take the player off the match mid-turn; and **your own name in the header**, on
+  every screen including the play screen, where it is the only name there is. Your own comes from
+  `myDetails.namecolor`, not from the boards' read: it is you, and the app already holds what you equipped. The
+  context is `BoardWear` and it lives in **ui-common.jsx**, not here, because versus.jsx reads it and a screen
+  file never imports this module back.
+  Who wears what comes from **`board_looks(p_limit, p_names)`**, one read for both board decorations - the
+  supporter flag lives on `profiles` and the colour in `profile_details`, and a board that asked twice would show
+  one before the other. `p_names` is the duel's question: two people by name, who may sit outside the boards'
+  first few hundred wearers, so VersusScreen reports its pair up through `onPlayers` and the app asks for exactly
+  those two. It is the one function in migration-shop.sql `anon` may execute, because a signed-out visitor reads
+  the Leaderboard; `tests/test-economy-security.mjs` keeps that as a named one-item list rather than a relaxed rule.
+- **Win celebrations (v2.5.0)** are the fifth kind: an overlay (`WinCelebration`) over the whole result screen
+  when a season wins the title, fixed, `aria-hidden` and `pointer-events:none`, so it never takes a tap or
+  reads out over a result the screen already announces. The little `<Confetti>` inside `.cel` is a different
+  thing and stays. CSS only and no canvas - it runs on a phone while the season is still ticking in, and a
+  canvas would be invisible to the tests, which read the DOM. Every piece's position is a pure function of its
+  index, so a celebration draws the same picture every time. `Champion` is unlocked by the **undefeated**
+  badge rather than sold, which makes three items on that badge. To see one without fighting the RNG: sign in
+  as `admin`, force a 20-0, and press **Skip to the end** - the overlay shares `finished` with the `.cel`
+  panel, so it plays when the animation lands, not when the result first appears.
 
 **A failed read is not an answer.** `fetchProfile` threw its error away, so "the read failed" and "this
 account has no profile row" were the same value - `null` - and both are real states, because an account
@@ -878,6 +954,31 @@ suite and still broke the live Leaderboard for every existing account.
   and the function have to agree on, and the scoring half decides what a season is worth. `match-pick` changes
   on its own account too: it finishes a match before it looks at what was asked for, writes every change against
   the revision it read, and ends a match it cannot grade (VERSUS.md 4).
+  v2.8.0's: re-run **`migration-shop.sql`**, then **`migration-profiles.sql`**, then **deploy both Edge
+  Functions**, then the client - shop first, the way v1.12.0's list runs them, because profiles' `set_avatar` is what learns the new
+  supporter pack and shop is what creates the pack and the `supporters` table it asks about. (The EXECUTE guard
+  means the other order cannot fail either; it would just refuse a supporter's pack avatars until shop caught
+  up.) Shop adds three items and four `avatar_presets` rows and teaches `supporters_sync` to take a supporter
+  pack's avatar off on a refund; profiles replaces `set_avatar` **and `claim_username`**, which no longer clears
+  `guest` for a session with no credential attached - that one is a security fix and wants to land before the
+  client. The Edge Functions change on their own account this time (submit-run gives the duplicate guard back on
+  a thrown error, match-pick abandons a match it cannot grade) **and** because `versus-logic.mjs` and
+  `game-logic.mjs` did, which is the drift the section above warns about.
+  v2.7.0's (name colours): re-run **`migration-shop.sql`**, then the client. It adds the `namecolor` kind and
+  its `profile_details` column, nine items, and `board_looks()` - which it **drops and re-creates**, because the
+  signature gained `p_names` before it had shipped anywhere and `create or replace` cannot change one. Same file as v2.5.0's and v2.6.0's, so one
+  re-run carries all three when they ship together. A client ahead of the migration shows no Name colors tab
+  worth opening and every name plain - `fetchBoardLooks` catches the missing function and answers with an empty
+  list, which is the same thing a board showed before any of this. No Edge Function change.
+  v2.6.0's (supporter): re-run **`migration-shop.sql`**, then the client. It adds the `supporters` table and
+  its trigger, `profiles.supporter`, the `supporter` rarity and two items behind it. Same file as v2.5.0's, so
+  one re-run carries both when they ship together. No Edge Function change.
+  v2.5.0's (win celebrations): re-run **`migration-shop.sql`**, then the client. It adds the `celebration`
+  column to `profile_details`, widens `shop_items`' `kind` check and seeds five items. The `kind` check is the
+  part to know about: `create table if not exists` leaves an existing table's constraint alone, so the file
+  drops and re-adds it by name before the seed - without that, every database seeded before this release
+  refuses the new rows and the seed is what fails. A client ahead of the migration shows no celebrations in
+  the shop and plays the free Confetti, which is the default anyway. No Edge Function change.
   v2.4.0's: re-run **`migration-runs-log.sql`**, then the client. It adds `ladder_best` and changes nothing
   else, so it is safe on any shape and its backfill is a no-op as always - but the client calls that function
   the moment somebody taps a mode on the Leaderboard, so a client ahead of the migration shows an empty board

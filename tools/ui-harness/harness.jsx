@@ -157,11 +157,29 @@ NAMES.forEach((username, i) => {
   if (photo) mock._storageObjects.set(`avatars/${path}`, { bucket: "avatars", path, contentType: "image/webp", size: 2048, owner: id, publicUrl: PHOTO });
 });
 
+// What the boards decorate a name with (v2.6.0, v2.7.0): the supporter star and the name colour. Seeded across
+// the first few players so the Leaderboard and the Stats boards show a spread of them side by side - a drifting
+// gradient next to a flat colour next to a plain name is the only way to see whether any of them reads.
+const HARNESS_NAME_LOOKS = ["name-vapor", "name-prism", "name-flame", "name-trophy", "name-frost", "name-nebula",
+  "name-toxic", "name-ember", "name-blue"];
+NAMES.forEach((username, i) => {
+  const id = `seed-${i}`;
+  if (i % 3 === 0) mock._supporters.add(id);
+  if (i % 2 === 0) {
+    const look = HARNESS_NAME_LOOKS[(i / 2) % HARNESS_NAME_LOOKS.length];
+    const row = mock._profileDetails.get(id);
+    if (row) row.namecolor = look;
+    else mock._profileDetails.set(id, { user_id: id, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, namecolor: look, updated_at: new Date(clock).toISOString() });
+  }
+});
+
 async function signIn(username) {
   const { data } = await mock.auth.signUp({ email: `${username}@harness.test`, password: "harness-only", options: { data: { username } } });
   if (username === "admin") return; // a fresh account, so forced outcomes start from a clean profile
   Object.assign(mock._profiles.get(data.user.id), profileFor(data.user.id, username, 0), { daily_streak: 6, daily_best_streak: 6 });
-  mock._profileDetails.set(data.user.id, { user_id: data.user.id, bio: BIOS[0], avatar_path: null, avatar_preset: "helmet", favorite_team: "KC", updated_at: new Date().toISOString() });
+  // Wearing a name colour, so the header shows one on every screen - which is the only way to see the play
+  // screen's (navy) and the leaderboard's (black) palettes of the same look side by side.
+  mock._profileDetails.set(data.user.id, { user_id: data.user.id, bio: BIOS[0], avatar_path: null, avatar_preset: "helmet", favorite_team: "KC", namecolor: "name-vapor", updated_at: new Date().toISOString() });
 }
 
 // ---------- screen=profile: the profile screen on its own ----------

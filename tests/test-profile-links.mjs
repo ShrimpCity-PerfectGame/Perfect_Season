@@ -422,4 +422,81 @@ await runTest("a player a moderator renames while they're signed in still gets t
 });
 
 await close();
+await runTest("a supporter's name carries a star on the boards, and nobody else's does", async () => {
+  // The star arrives through NameLink, which every board in the game renders names with - so this checks the
+  // one place rather than eight. That is why it is a context and not a column: `guest` is a fact about a row
+  // when it was written and is snapshotted onto it, but supporter changes the day somebody buys, and a
+  // snapshot would be stale on every row already there.
+  const auth = makeMockAuth();
+  seedSite(auth);
+  const backer = [...auth._profiles.values()][0];
+  const plain = [...auth._profiles.values()].find((p) => p.id !== backer.id && !p.guest);
+  // Granted the way the runbook grants it - a row only the service role can write.
+  auth._supporters.add(backer.id);
+  backer.supporter = true;
+
+  const container = await open("http://localhost/", auth);
+  await click(tab(container, "Leaderboard"));
+  await flush();
+  await flush();
+
+  const starOn = (name) => {
+    const link = [...container.querySelectorAll(".namelink")].find((b) => b.textContent.trim() === name);
+    if (!link) return null;
+    return !!(link.nextElementSibling && link.nextElementSibling.classList.contains("supchip"));
+  };
+  assert(starOn(backer.username) === true, `${backer.username} is a supporter and has one`);
+  assert(starOn(plain.username) === false, `${plain.username} is not, and has none`);
+  // It says what it is rather than being a colour somebody has to interpret.
+  const chip = container.querySelector(".supchip");
+  assert(chip && chip.getAttribute("role") === "img" && /supporter/i.test(chip.getAttribute("aria-label") || ""),
+    `the star names itself, got ${chip && chip.outerHTML}`);
+
+  // The mock carries the table's TRIGGER, not just its rows. profiles.supporter is what the app reads before
+  // anything renders (the ad decision will), and a refund has to take the worn items off - or a test can reach
+  // a state the database cannot: shop_state saying the item is not owned while the card still shows it.
+  assert(auth._profiles.get(backer.id).supporter === true, "granting the unlock sets profiles.supporter");
+  const details = auth._profileDetails.get(backer.id) || { user_id: backer.id };
+  auth._profileDetails.set(backer.id, { ...details, frame: "frame-orbit", namecolor: "name-nebula" });
+  auth._supporters.delete(backer.id);
+  assert(auth._profiles.get(backer.id).supporter === false, "a refund clears profiles.supporter");
+  const after = auth._profileDetails.get(backer.id);
+  assert(after.frame === null && after.namecolor === null,
+    `and takes the supporter items off, got ${JSON.stringify({ frame: after.frame, namecolor: after.namecolor })}`);
+});
+
+await runTest("landing straight on /leaderboard shows the stars and the colours, not a bare board", async () => {
+  // The bug this keeps out: the boards' decorations were loaded when a TAB WAS CLICKED, so every other way of
+  // arriving drew the board with every star and colour missing - the /leaderboard address itself, and Back or
+  // Forward to it. It lasted until the player happened to leave the screen and come back. /leaderboard is the
+  // address this site hands to search engines, so an arrival that way is the likeliest first thing anyone sees.
+  // Found by opening the real staging site at that address rather than by clicking through it.
+  const auth = makeMockAuth();
+  seedSite(auth);
+  const backer = [...auth._profiles.values()][0];
+  const painted = [...auth._profiles.values()].find((p) => p.id !== backer.id && !p.guest);
+  auth._supporters.add(backer.id);
+  backer.supporter = true;
+  auth._profileDetails.set(painted.id, { ...(auth._profileDetails.get(painted.id) || { user_id: painted.id }), namecolor: "name-vapor" });
+
+  const container = await open(`http://localhost${BOARD_PATH}`, auth);
+  await flush(4);
+  assert(container.querySelector(".lb"), `the Leaderboard is the screen: ${text(container).slice(0, 120)}`);
+
+  const star = container.querySelector(".supchip");
+  assert(star, "the supporter's star is there on arrival, without a tab having been clicked");
+  const ink = [...container.querySelectorAll(".cs-name")].find((n) => n.textContent === painted.username);
+  assert(ink, `and the name colour: painted ${[...container.querySelectorAll(".cs-name")].length} names`);
+  assert(ink.dataset.nameLook === "name-vapor", `the look they wear, got ${ink.dataset.nameLook}`);
+
+  // ...and the BOARDS themselves, not only their decorations. The Points ladder and the Duel board were
+  // loaded by a tab click and by nothing else, so arriving at this address drew them claiming, as fact, that
+  // nobody had ever played - their empty states say so because `loading` starts false. 2.7.1 moved only the
+  // stars and colours onto the view and left these behind.
+  const shown = text(container);
+  assert(!shown.includes("No one has earned points"),
+    `the points ladder loaded rather than claiming nobody has played: ${shown.slice(0, 200)}`);
+  assert(shown.includes("laddergal"), "and it shows who is actually on it");
+});
+
 console.log("test-profile-links.mjs done");

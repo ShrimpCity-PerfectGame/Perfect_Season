@@ -2,16 +2,85 @@
 // files (profile.jsx, moderation.jsx, ...). Moved here out of perfect-season.jsx so those files don't
 // have to import the main component module back - everything below is a plain function, constant or
 // stateless component, with no app state, apart from the register of open dialogs at the bottom.
-import { useEffect, useMemo, useRef } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { TEAMS, BEST_FIELDS, normFormat, WINDOWS, passerRating } from "./game-logic.mjs";
 import { PALETTE } from "./theme.mjs";
+
+// What the screens decorate a name with, and the scope they are drawing in:
+// { supporters: Set of names, looks: Map of name -> name-colour id, scope }. A context rather than props
+// threaded through every board, because every name on a board renders through one NameLink - and it lives
+// HERE rather than in perfect-season.jsx because the duel screen needs it too, and a screen file never
+// imports the main component back.
+// The scope rides along because a name colour is three palettes, one per scope, and only the app knows which
+// screen is being drawn (NAME_LOOKS in cosmetics.jsx has the reason it has to be three).
+export const BoardWear = createContext(null);
+// The look an account wears, by NAME - which is what every board and the duel screen have; ids never reach
+// them. Null for an account wearing nothing, which is almost all of them.
+export function useNameLook(name) {
+  const wear = useContext(BoardWear);
+  return (name && wear?.looks?.get(name)) || null;
+}
+// The scope to paint a name in. Light is the right default: it is what every screen except the play, duel and
+// leaderboard screens is, and what a component rendered outside the provider (a test, a preview) should get.
+export function useWearScope() {
+  return useContext(BoardWear)?.scope || "light";
+}
 
 export const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
 export const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };
 export const LADDER_LABEL = { daily: "Daily", unlimited: "Unlimited", genius: "Genius", gm: "GM" };
 
 // A team's two colors as CSS variables, for anything drawn in team colors.
-export const teamVars = (code) => ({ "--tc1": TEAMS[code][2], "--tc2": TEAMS[code][3] });
+// The team colour, and a version of it deep enough to print cream on.
+//
+// The board header (.reel) and the duel's sticky bar paint --tc1 and write the team, the years, the city and
+// "Pick N of 6" over it in white and cream. Eleven of the 32 teams are bright enough that this fails WCAG AA
+// outright: Pittsburgh's gold measured 1.52:1 for the small text, against 4.5 - unreadable, not marginal, on
+// the screen the game is actually played on. tests/test-theme-contrast.mjs never caught it because it measures
+// tokens against the SCOPE's background, and this background is data, not a token.
+// --tc-deep is --tc1 mixed toward ink until cream clears AA on it, and no further: a team already dark enough
+// comes back untouched, which is most of them, so the brand colours only move where they had to.
+const CREAM_ON = PALETTE.cream;
+const srgb = (hex) => hex.replace("#", "").match(/../g).map((x) => parseInt(x, 16));
+const relLum = (hex) => {
+  const [r, g, b] = srgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const ratio = (a, b) => {
+  const x = relLum(a), y = relLum(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+};
+const towardInk = (hex, share) => {
+  const [r, g, b] = srgb(hex), [ir, ig, ib] = srgb(PALETTE.ink);
+  const mix = (v, i) => Math.round(v * (1 - share) + i * share);
+  return `#${[mix(r, ir), mix(g, ig), mix(b, ib)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+};
+// The weakest text the reel prints: white at 75% ("Pick 1 of 6") and cream at 78% (the city), which composite
+// to something lower-contrast than either colour at full strength. Measuring the solid colours alone left the
+// two smallest labels still failing, so the bar is set by the faintest thing on the panel.
+const over = (hex, on, alpha) => {
+  const [r, g, b] = srgb(hex), [br, bg2, bb] = srgb(on);
+  const mix = (v, u) => Math.round(v * alpha + u * (1 - alpha));
+  return `#${[mix(r, br), mix(g, bg2), mix(b, bb)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+};
+const readable = (bgHex) => Math.min(
+  ratio(over("#FFFFFF", bgHex, 0.75), bgHex),
+  ratio(over(CREAM_ON, bgHex, 0.78), bgHex),
+  ratio(CREAM_ON, bgHex),
+);
+const deepen = (hex) => {
+  for (let share = 0; share <= 1.0001; share += 0.02) {
+    const c = towardInk(hex, share);
+    if (readable(c) >= 4.5) return c;
+  }
+  return PALETTE.ink;
+};
+// Worked out once for all 32 teams rather than on every board change.
+const TC_DEEP = Object.fromEntries(Object.keys(TEAMS).map((code) => [code, deepen(TEAMS[code][2])]));
+export const teamVars = (code) => ({ "--tc1": TEAMS[code][2], "--tc2": TEAMS[code][3], "--tc-deep": TC_DEEP[code] });
 export const gradeTier = (r) => (r >= 95 ? "ga" : r >= 80 ? "gb" : r >= 56 ? "gc" : "gd");
 export function grade(r) {
   const t = [[120, "A+"], [105, "A"], [95, "A−"], [88, "B+"], [80, "B"], [72, "B−"], [64, "C+"], [56, "C"], [48, "C−"], [40, "D"]];

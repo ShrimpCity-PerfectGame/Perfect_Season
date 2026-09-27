@@ -41,6 +41,9 @@ export function rowToProfile(row) {
     // A guest (v1.17.0): an account made for a visitor who finished a season, so the season could go on
     // the board. No profile screen, no shop, and never the daily.
     guest: !!row.guest,
+    // v2.6.0: has the one-off Supporter unlock. Public, like the guest flag - the badge beside a name is the
+    // point of it. profiles has no client write policy, so this is as safe to read as the username.
+    supporter: !!row.supporter,
   };
 }
 export function profileToRow(s) {

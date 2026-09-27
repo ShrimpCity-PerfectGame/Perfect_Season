@@ -202,6 +202,31 @@ export async function fetchLadderBest(ladder = "unlimited", format = "fantasy", 
   }
 }
 
+// Who is wearing what, for the boards: the supporter star and the name colour, by name. One small read
+// rather than a flag on every board row, because the boards that come from daily_runs, sou_runs and builds
+// hold a SNAPSHOT of the name and the guest flag, stamped when the row was written - right for `guest`, which
+// is a fact about the account at the time, and wrong for both of these. A supporter star appears the day
+// somebody buys and a name colour changes whenever they equip another one, so a snapshot would be stale on
+// every row already written. The boards ask who wears what, now, and every name renders through one NameLink
+// that knows.
+// Names rather than ids because a name is what a board renders, and profiles.username is unique.
+// Rows: { username, supporter, namecolor }, and only for accounts wearing something - see board_looks in
+// supabase/migration-shop.sql. An empty list is the safe answer to any failure: plain names, which is what
+// every board showed before any of this.
+// `names` asks about exactly those accounts and ignores the limit, which is what the duel screen needs: two
+// people, who may be anywhere in the alphabet and so may sit outside the boards' first `limit` wearers. Without
+// it a duel between two players who both bought a colour could show neither.
+export async function fetchBoardLooks({ names = null, limit = 500 } = {}) {
+  try {
+    const args = names ? { p_limit: limit, p_names: names } : { p_limit: limit };
+    const { data, error } = await getClient().rpc("board_looks", args, READ);
+    if (error || !Array.isArray(data)) return [];
+    return data.filter((r) => r && typeof r.username === "string");
+  } catch (e) {
+    return [];
+  }
+}
+
 // Both Stats functions only read, so they go out as GET (storage-core.js's READ) and get supabase-js's
 // automatic retry. Keep it that way for any new read-only RPC; writes stay POST and go out exactly once.
 

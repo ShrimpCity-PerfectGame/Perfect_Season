@@ -10,6 +10,240 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.8.1] — 2026-09-27
+
+**Order: `migration-shop.sql`, then `migration-profiles.sql`, then BOTH Edge Functions, then the client** -
+in each environment. Shop adds three items and four avatar presets and teaches `supporters_sync` to take a
+supporter pack's avatar off on a refund. Profiles replaces `set_avatar` (it learns the supporter pack) and
+`claim_username` (which now refuses to clear `guest` for a session with no credential attached - run it before
+the client, or the browser's trade-up form is offering something the database still allows anyone to do).
+The functions change because `versus-logic.mjs` and `game-logic.mjs` did, and because both functions changed on
+their own account: `submit-run` gives the duplicate guard back on a thrown error, `match-pick` abandons a match
+it cannot grade. `versus-logic.mjs` is the one to watch - the browser imports the same module, so deploying the
+client without the functions leaves the two running different rulebooks.
+
+### Added
+
+- **A supporter can now dress entirely in supporter items.** Three new ones complete the set: **Orbit**, a dark
+  violet frame with one bright body going round it; **Cosmos**, a deep-space card theme with a violet nebula in
+  one corner and a field of stars; and **Stargazer**, an avatar pack of four - Comet, Moonlight, Constellation
+  and Satellite. With the title, the Aurora nameplate, the Nebula name colour and the Supernova celebration
+  already there, supporter now fills **every slot**, in one cosmic line, so it reads as one thing rather than as
+  seven unrelated purchases. Football seen from a long way off, which is what keeps a cosmic pack from looking
+  like it wandered in from another game.
+  Cosmos' two numbers were chosen by measurement rather than eye: one star layer at 6% and the nebula at 70%.
+  Two star layers would overlap and put a brighter value behind a letter than `cardPaint` declares, and a star
+  inside the nebula is the brightest thing a letter can land on - at the first values I tried, eleven of night's
+  text tokens fell below AA on it. Orbit's ring is kept dark all the way round so the body crossing it is the
+  only bright thing; with the ring carrying its own bright violet the whole frame read as a plain purple circle
+  at 24px.
+
+### Fixed
+
+A ten-agent sweep of the whole codebase, each on one area, hunting for defects rather than reviewing style.
+Everything below was reproduced before it was changed, and every fix was checked by breaking it again.
+
+- **Any anonymous session could promote itself to a full account with one RPC.** `claim_username`'s guest
+  trade-up cleared `profiles.guest` without checking the session had stopped being anonymous - and every guest
+  refusal in the database reads that one column, so clearing it opened the daily, the shop, duels, reports, the
+  public avatars bucket and a profile page. The email-and-password step lives in the browser, which is manners,
+  not the boundary; `mod_act`'s rename was given a guest gate for a smaller version of this and this function
+  never had one. Cost per account was one anonymous sign-in and one POST, repeatable. The trade-up now requires
+  a credential actually attached to the `auth.users` row, tested permissively (email, a pending email change,
+  phone, or no longer anonymous) because with email confirmation on - which staging has - gating on
+  `is_anonymous` alone would refuse the real trade-up.
+- **Two ways to brick a duel permanently**, both in `respinBoard`, which recomputed state the replay already
+  knew. It read "leader or follower" from pick-number arithmetic, which stops being true once a dip adds a turn
+  or a steal rewrites one, so the serve-both rule was skipped for a board's real leader (2.6% of re-spins in
+  that shape) - and it assumed the asker takes one pick off the board, when a player who has declared a double
+  dip takes two (0.36% of dip-then-re-spin lines). Both dealt boards that could not serve the turns they owed:
+  `autoPick` returns null, the clock answers 500 forever, `replayMatch` never reports done, so `match-pick`
+  never reaches `finish()` and never abandons it - both screens on "Working out the result..." and
+  `create_match` handing both players back into the dead match for every later duel. The second was
+  deliberately exploitable: dip, re-spin onto a thin board, take both, deny your opponent the win. It now asks
+  what the board still owes each player. Measured over 1,500 matches: 32 and 55 bricks respectively, both zero.
+- **A match that could not be graded, but had no dropped picks, was retried forever.** `match-pick` abandoned
+  on `missing` and 500'd on anything else `matchResult` refused - and it is pure over the rosters the replay
+  just derived, so it answers the same way on every later request. It abandons now, like its sibling.
+- **A thrown error in `submit-run` stranded the duplicate guard**, so that season could never be recorded: the
+  player is told "already recorded" forever, and a Daily left a row on the public board carrying w/l/score for
+  a season `profiles` never counted. Only the failed-write path gave the guard back. Reachable without an
+  attacker - `applyRun` throws outright on a profile whose `recent` is not an array, and an isolate killed
+  mid-request does the same with no catch at all.
+- **Both re-spins spent on one turn, era first, threw the team one away.** The replay applied a fixed
+  team-then-era order rather than the order they were spent, so the player was answered with a board, both
+  counters went to zero, that board was burned out of the pool, and the board never changed. The order is
+  recorded now; rows written before it keep the old behaviour, so a match in flight replays identically.
+- **`decideMove` accepted any slot beginning with `FLEX`** - `FLEXX`, `FLEX99`. The database's CHECK refused
+  the insert, so the player got "failed to save" instead of a refusal, and a row that ever did land would put a
+  player in a slot `openSlots` cannot see: the turn spent, the slot still open, the match ungradeable.
+- **`/leaderboard` still drew boards claiming nobody had ever played.** 2.7.1 moved the name colours and stars
+  onto the view and left the three board loads in `openTab`, so that address, Back/Forward, and both "See the
+  leaderboard" buttons showed a Points ladder saying "No one has earned points in Unlimited yet" and a Duel
+  board saying "Nobody has duelled yet" - stated as fact, because `loading` starts false. Every board load is
+  keyed on the view now.
+- **The board header failed WCAG AA on 11 of 32 teams.** `.reel` and the duel's sticky bar paint the team's
+  colour and write over it in white and cream; on Pittsburgh's gold "Pick 1 of 6" measured 1.52:1, on the
+  screen the game is played on. `tests/test-theme-contrast.mjs` never saw it because the surface is data, not a
+  token. `--tc-deep` deepens a team's colour only until cream carries the text - 11 changed, 21 untouched -
+  and a new test holds every team on every stop of the gradient.
+- **A name colour on the duel screen was painted over the team's colour**, where Flame on Pittsburgh measured
+  1.00:1 - the same luminance, an invisible name. It sits on a solid pill now, the same answer the clock in
+  that row already had.
+- **Every supporter item's shop tile rendered as a hole**, since v2.6.0. `.sh-r-supporter` was never added, and
+  `var(--rar)` on an undefined property is invalid at computed-value time - which drops the whole declaration,
+  so the tile lost its preview background and the detail row lost its hard shadow as well as the rarity edge.
+  A test now holds every rarity to having one.
+- **After a season, the Leaderboard showed the rank of your old best score beside the new one.** `finish()`
+  fires the refresh through a closure holding the pre-season `stats`; `boardFormatRef` exists for exactly this
+  class and `stats` never got one.
+- **Two of four daily doors were not gated on `authReady`**, and the worst set the view first - tapping "Play
+  today's daily" from the Leaderboard stranded the player on an empty Draft screen with no explanation. The
+  rule lives in `startDaily` now, so a fifth door gets it for free. A finished daily is also no longer re-dealt.
+- **A daily finished for an earlier date than the last one recorded destroyed the streak.** The date is the
+  player's own calendar date and submit-run accepts UTC yesterday/today/tomorrow, so one account on two devices
+  an ocean apart could legitimately do it. `dailyLast` no longer moves backwards either.
+- **The mock had no `supporters_sync`**, so a refund left items equipped and `profiles.supporter` was never set
+  at all - `storage-core.js`'s mapping read false in every test, and the ad decision to be built on it would
+  have tested as working. The mock carries the trigger now, and its table dispatch no longer falls open to
+  `daily_runs` for a table it does not know.
+- Smaller, all measured: a nameplate ran 28px off the card at 320px for a wide 16-character name; a name link's
+  tap target was 36.8px tall against the repo's own 44px rule, on the main route into a profile; roster chips
+  tinted their own background with their own colour at 16% and three positions fell below AA; the avatar
+  picker's `overflow:hidden` clipped its focus ring entirely; the supporter star was 11px under a 12px floor;
+  `applyRun` could write `NaN` into six counters where `applyDnf` could not.
+
+- **`set_avatar` would have refused a supporter pack's avatars.** Its pack check knew free, bought and badge
+  packs and had no supporter arm, while `shop_state` has counted a supporter-rarity item as owned since 2.6.0 -
+  so the picker would have offered the avatars and the save would have come back `bad_preset`. The comment
+  above that check says exactly this ("anything narrower here would offer avatars this then refuses"); it was
+  written about the badge arm and the supporter arm was never added. Found by writing the first supporter pack,
+  and the mock had been right all along - it asks the shop's own `owns()`, which is why the two disagreed.
+  The arm reads the entitlement into a variable through `EXECUTE`, because plpgsql plans a statement whole and
+  naming `public.supporters` inside that condition would fail to plan on a database that has not had
+  `migration-shop.sql` re-run - the same reasoning the inventory check beside it already used.
+- **A refund left a supporter pack's avatar on the card.** `supporters_sync` took off every equipped supporter
+  item but not the picture, which is not an equip slot and is just as visible. It clears now, back to the
+  player's initial.
+
+## [2.7.1] — 2026-09-27
+
+Client only. No migration, no Edge Function change.
+
+### Fixed
+
+- **Landing straight on `/leaderboard` drew a board with no stars and no name colours.** They were loaded when
+  a tab was *clicked*, and a tab click is only one way onto that screen: the `/leaderboard` address itself, and
+  Back or Forward to it, open it without going through `openTab` at all. The board came up bare and stayed bare
+  until the player happened to leave and come back. That address is the one the site hands to search engines, so
+  an arrival that way is the likeliest first thing anybody sees. It now loads from the **view**, which covers
+  every route onto the screen. Over/Under's board shows names too and had never loaded them by any route.
+  The supporter star had the same gap in 2.6.0 and was never shipped with it; this is the first release where
+  either is right. Found by opening the real staging site at that address rather than by clicking through it -
+  the tab click, which is what every test did, was the one path that worked.
+
+## [2.7.0] — 2026-09-27
+
+**Needs `migration-shop.sql` re-run in each environment BEFORE the client.** It adds the `namecolor` kind and
+its `profile_details` column, nine items, and `board_looks()`. Same file as 2.5.0's and 2.6.0's, so one re-run
+carries all three. No Edge Function change.
+
+### Added
+
+- **Name colours: the name itself, coloured and drifting, on the boards.** Nine looks, six of them animated -
+  Vaporwave, Flame, Frost, Prism, Toxic, Nebula, plus flat Game blue and Ember, and Undefeated for the badge.
+  They render on the Leaderboard and the Stats boards through the one `NameLink` every name already goes
+  through; on the **duel screen**, where both players' names are painted wherever the screen says them - on the
+  clock banner, over each roster, and in "X beat Y" at the end; and on **your own name in the header**, on every
+  screen, which is what puts one on the play screen, where it is the only name there is.
+  **The contrast wall that sent coloured names to nameplates in 2.6.0 is still there, and this is what gets round
+  it.** No single colour clears WCAG AA on cream and on true black - lime is 1.28:1 on cream, game blue 3.19:1 on
+  the dark card - so a look is not a colour: each one is named **once per app scope**, the way theme.mjs names
+  every token three times, and the app hands in the scope it is drawing. Deep on cream, bright on black, the same
+  look either way. Every stop of every palette is held to AA against every surface a board name can sit on,
+  including the 30% lime wash the Leaderboard paints over your own row, because a drifting gradient puts any stop
+  under any letter. The drift is `background-position` only - nothing moves, nothing reflows - and it stops under
+  reduced motion.
+  The colour goes on the name and nothing else: the supporter star and the guest chip stay outside it in their
+  own tokens, so the one thing that has to stay legible does. **The player card keeps its nameplate instead** -
+  six card themes over 32 team colours has no readable text colour - so the two split the game rather than
+  compete, and the shop's tab says so rather than leaving an equip looking like it did nothing.
+  Every price tracks the nameplates: 750 common, 2,000 rare, 6,000 epic, 15,000 legendary. Undefeated is the
+  fourth item on that badge and is never sold; Nebula comes with Supporter.
+- **`board_looks(p_limit, p_names)`**: one read for both things a board decorates a name with. The supporter flag lives on
+  `profiles` and the name colour in `profile_details`, so something had to join them - and a board that asked
+  twice would show one decoration before the other. It is the only function in `migration-shop.sql` a signed-out
+  caller may run, because a visitor reads the Leaderboard too, and it reads nothing that isn't already public.
+  It replaces 2.6.0's unshipped supporters read.
+  `p_names` asks about exactly those accounts and ignores the limit - the duel's two players, who may be
+  anywhere in the alphabet and so may sit outside the boards' first few hundred wearers. Without it a duel
+  between two players who had both bought a colour could show neither.
+
+### Fixed
+
+- **A nameplate drew over the title on the player card.** `.cs-plate` was already taken - the avatar artwork has
+  used it since v1.11.0 - so the plate inherited `position:absolute`, the name measured zero pixels high and the
+  banner landed on top of the title beneath it. Renamed to `.cs-nameplate`; the artwork had the name first.
+  A plate is also a block sized to its content now, with an outer ring, so it can't vanish into a card of nearly
+  its own colour (Turf is `#092B12` on a `#06200D` card). Not shipped in 2.6.0 - the whole shop revamp goes out
+  together.
+
+## [2.6.0] — 2026-09-27
+
+**Needs `migration-shop.sql` re-run in each environment BEFORE the client.** It adds the `supporters` table
+and its trigger, `profiles.supporter`, the `supporter` rarity, the `nameplate` and `celebration` kinds and
+their columns, and eighteen items. No Edge Function change.
+
+### Added
+
+- **Supporter: a one-off unlock, not a subscription.** The only thing in the game that costs real money. It
+  unlocks the `supporter`-rarity items and, once there are ads, turns them off - a promise that has to keep
+  being kept for anyone who bought before the ads existed, which is why the entitlement never expires.
+  The entitlement is a row in `supporters`: RLS on and **no policy at all**, like `wallets` - written by the
+  service role (a payment webhook) or by hand in the SQL editor, because an entitlement a browser can write is
+  a shop with no door. It carries `source` (`stripe` | `play` | `apple` | `grant`) and `reference`, designed
+  for the stores now while it costs one column: an account gains this once, but a store build has to use that
+  store's billing, and a refund has to be able to find the row.
+  A trigger keeps `profiles.supporter` in step, which is what the app reads - the ad decision happens before
+  anything renders, not after a shop call. **Deleting the row is the refund**: the flag clears and anything
+  supporter-rarity being worn comes off, because a card renders the equipped column and asks nobody about
+  ownership. Nothing is deleted, so buying again restores it.
+  **Supporter items are different, not better.** The best thing in the game stays a badge item, earned by going
+  20-0. Coins can never buy a supporter item: `shop_buy` refuses `supporter_only` before it looks at the
+  balance, so nobody reads "not enough coins" for something no balance reaches, and the shop shows them locked
+  with "Comes with the one-off Supporter unlock" rather than a price it would refuse.
+  Two items to start: the **Supporter** title and the **Supernova** celebration.
+  No payment yet - grant it by hand:
+  `insert into supporters (user_id, source, note) select id, 'grant', 'why' from profiles where username = 'NAME';`
+
+- **A star beside a supporter's name**, on every board. It arrives through `NameLink` — the one component
+  every name in the game renders through — rather than as a column on each board's rows, which is both smaller
+  and more correct: `guest` is snapshotted because it is a fact about the account when the row was written,
+  while supporter changes the day somebody buys, so a snapshot would be stale on every row already in
+  `daily_runs`, `sou_runs` and `builds` (whose foreign key points at `auth.users`, not `profiles`, so the flag
+  cannot be embedded either). The star is `--accent-ink`, the one accent token that is AA in all three scopes,
+  and carries a label so it is not meaning held in a colour.
+
+- **Nameplates**, including animated ones — a banner behind the name on the player card. Eleven, one for
+  every way to unlock a thing: coins up the rarity ladder, the Dynasty badge, and the Supporter unlock. Four of
+  them (Midnight, Inferno, Emerald, Aurora) drift a gradient.
+  This is where *"animated names with different colours"* ended up, and the measurement is why: **not one
+  colour clears AA as text on all three card scopes** — lime is 1.28:1 on cream, game blue 3.19:1 on the dark
+  card. Coloured text alone cannot work in an app with a cream, a navy and a black surface, so the colour
+  travels with its own background, where it can be as vivid as it likes because the pair is checkable. Every
+  stop of a gradient is checked, not just the first: a drift can put any stop under any letter. The drift is
+  `background-position` only, so nothing moves and nothing reflows, and it stops under `prefers-reduced-motion`.
+
+- **Win celebrations.** A fifth kind of shop item: an overlay that plays over the whole result screen when a
+  season wins the title - Confetti (free, and the default), Spotlight, Fireworks, Gold rain, and **Champion,
+  unlocked by the Undefeated badge rather than sold**, because the best celebration in the game should belong
+  to somebody who has gone 20-0. Priced off the existing rarity ladder (750 / 2,000 / 6,000), not invented.
+  CSS only, no canvas: it runs on a phone while the season is still ticking in. Fixed, `aria-hidden` and
+  `pointer-events:none`, so it never takes a tap or reads out over the result the screen already announces,
+  and it does not play at all under `prefers-reduced-motion` - the final frame of confetti is an empty screen,
+  so there is nothing to snap to. Every piece's position is a pure function of its index, so a celebration
+  draws the same picture every time. The little confetti inside the `.cel` panel is a different thing and stays.
+
 ## [2.4.1] — 2026-09-26
 
 Client only: no migration, no Edge Function change.

@@ -336,9 +336,15 @@ export function replayMatch({ code, picks = [], respins = [], dips = [], steals 
       // A re-spin is spent before a player's FIRST pick on a board. The board's opening pick moves the board for
       // everyone on it; anyone else's moves only their own, since the board has already been picked over.
       if (order.indexOf(side) === i) {
-        for (const kind of ["team", "era"]) {
-          const spin = spins.get(`${pickNo}|${kind}`);
-          if (!spin) continue;
+        // In the order they were actually SPENT, not a fixed team-then-era. Both counters can go on one turn,
+        // and the second is computed from the board the first left behind - so replaying them the other way
+        // round threw the second one away: the player was answered ok with a board, both counters ticked down,
+        // that board was burned out of the pool, and the board never changed. `n` is the position within the
+        // turn; rows written before it existed have none, and a stable sort leaves them in the old order, so a
+        // match already in flight replays exactly as it did.
+        const spun = ["team", "era"].map((kind) => spins.get(`${pickNo}|${kind}`)).filter(Boolean)
+          .sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
+        for (const spin of spun) {
           used.add(spin.key);
           if (i === 0) { board.key = spin.key; board.followKey = spin.key; } else board.followKey = spin.key;
         }
@@ -515,8 +521,28 @@ export function matchResult({ code, format, host, guest }) {
 // later would simply turn up again, since nothing removes the original (CLAUDE.md's reroll-pool invariant).
 // Refused - costing nothing, as a no-op re-spin does in single player - when there is no candidate at all, or
 // when a leader's candidate couldn't serve both. A refused re-spin is not spent.
-export function respinBoard({ code, kind, pickNo, key, seq, used, taken, roster, otherRoster }) {
-  const { first } = turnAt(pickNo, code);
+// `left` is the board's REMAINING turns, this one included, straight from replayMatch (state.turn.left), and
+// `side` is who is asking. Both are needed and neither can be worked out here:
+//
+//   - Leader or follower was `turnAt(pickNo, code)`, which is pick-number arithmetic that assumes two picks a
+//     board. A dip adds a turn and its forfeit takes one away, and a steal rewrites who leads - so after any of
+//     those it disagrees with the replay, and the serve-both rule was skipped for a board's real leader (2.6%
+//     of re-spins in that shape dealt a board that could not serve both, and every one of them bricked the
+//     match), or demanded against an opponent who never drafts that board, refusing a legal private re-spin.
+//   - How many picks the asker is about to take off this board was assumed to be one. A player who has already
+//     declared a double dip takes TWO, and nothing told respinBoard, so it dealt boards holding one
+//     quarterback or one tight end - 33 of the 160 are like that - and the match could not be finished.
+//
+// A bricked match is the worst outcome in the game: autoPick returns null, the clock answers 500 forever,
+// replayMatch never reports done, so match-pick never reaches finish() and never abandons it. Both screens sit
+// on "Working out the result..." and create_match hands both players back into it for every later duel.
+//
+// So the rule is asked as what it actually is: the board has to serve the turns it still owes each player.
+// That covers the leader (both of them still to pick), the follower (only their own), and the dipper (two).
+export function respinBoard({ code, kind, pickNo, key, seq, used, taken, roster, otherRoster, left, side }) {
+  const turnsLeft = Array.isArray(left) && left.length ? left : [side];
+  const mineLeft = turnsLeft.filter((s) => s === side).length || 1;
+  const theirsLeft = turnsLeft.filter((s) => s !== side).length;
   const shown = new Set([...seq, ...used]);
   const open = openSlots(roster);
   const candidate = rerollCandidate({
@@ -527,11 +553,16 @@ export function respinBoard({ code, kind, pickNo, key, seq, used, taken, roster,
     // A 1v1 board is players AND a defense AND a kicker, and `taken` here is a set of optionIds. game-logic's
     // default asks about players only and compares ids to strings, so this used to refuse every board on earth
     // to a roster that only needed a defense, and never noticed one that was already stripped.
-    hasOption: (k, drafted, slots) => boardServes(k, drafted, slots, null),
+    hasOption: (k, drafted, slots) => boardServes(k, drafted, slots, null, mineLeft),
   });
   if (!candidate) return null;
-  if (!first) return candidate; // theirs alone
-  return boardServesBoth(candidate, taken, openSlots(roster), openSlots(otherRoster)) ? candidate : null;
+  // Asked again here, not left to the hasOption filter above: that one steers rerollCandidate toward a usable
+  // board, this one is the guarantee. A board that cannot serve the asker's own remaining turns is refused
+  // outright, whether or not anyone else picks here.
+  if (!boardServes(candidate, taken, openSlots(roster), null, mineLeft)) return null;
+  // Nobody else still picks on this board, so serving the asker is the whole rule.
+  if (!theirsLeft) return candidate;
+  return boardServes(candidate, taken, openSlots(roster), openSlots(otherRoster), mineLeft) ? candidate : null;
 }
 
 export function respinsLeft(respins, side) {
@@ -674,9 +705,13 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     const board = respinBoard({
       code, kind: move.respin, pickNo: state.pickNo, key,
       seq: state.seq, used: state.used, taken: state.taken, roster: mine, otherRoster: theirs,
+      // The replay's own account of what this board still owes, rather than arithmetic on the pick number.
+      left: state.turn.left, side,
     });
     if (!board) return refuse("no_candidate");
-    return { ok: true, action: "respin", kind: move.respin, key: board, pickNo: state.pickNo, side, state };
+    // Where this one comes in the turn, so the replay can apply two in the order they were spent.
+    const n = (respins || []).filter((r) => r.pickNo === state.pickNo).length;
+    return { ok: true, action: "respin", kind: move.respin, key: board, pickNo: state.pickNo, side, n, state };
   }
 
   if (move.dip) {
@@ -751,6 +786,13 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     : o.kind === move.kind && o.team === move.team && o.season === Number(move.season)));
   if (!wanted) return refuse("not_on_board");
   if (state.taken.has(optionId(wanted))) return refuse("already_taken");
+  // The slot has to be one of the eight. game-logic's `fits` answers "does this player fit" for anything
+  // beginning with FLEX, and `mine[move.slot]` is undefined for a slot that does not exist, so "FLEXX" and
+  // "FLEX99" got through both guards. match_picks' CHECK constraint refused the insert, so the player saw
+  // "failed to save" instead of a refusal - but this module is the rulebook, and a row that ever did land would
+  // put a player in roster.FLEXX, where openSlots never sees him: the turn is spent, the slot stays open, and
+  // the match grades to null.
+  if (!VERSUS_SLOTS.includes(move.slot)) return refuse("bad_slot");
   if (!optionFits(wanted, move.slot) || mine[move.slot]) return refuse("bad_slot");
   return asPick(wanted, move.slot, false);
 }
