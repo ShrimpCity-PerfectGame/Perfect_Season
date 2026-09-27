@@ -10,6 +10,54 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.6.0] — 2026-09-27
+
+**Needs `migration-shop.sql` re-run in each environment BEFORE the client.** It adds the `supporters` table
+and its trigger, `profiles.supporter`, the `supporter` rarity, the `nameplate` and `celebration` kinds and
+their columns, and eighteen items. No Edge Function change.
+
+### Added
+
+- **Supporter: a one-off unlock, not a subscription.** The only thing in the game that costs real money. It
+  unlocks the `supporter`-rarity items and, once there are ads, turns them off - a promise that has to keep
+  being kept for anyone who bought before the ads existed, which is why the entitlement never expires.
+  The entitlement is a row in `supporters`: RLS on and **no policy at all**, like `wallets` - written by the
+  service role (a payment webhook) or by hand in the SQL editor, because an entitlement a browser can write is
+  a shop with no door. It carries `source` (`stripe` | `play` | `apple` | `grant`) and `reference`, designed
+  for the stores now while it costs one column: an account gains this once, but a store build has to use that
+  store's billing, and a refund has to be able to find the row.
+  A trigger keeps `profiles.supporter` in step, which is what the app reads - the ad decision happens before
+  anything renders, not after a shop call. **Deleting the row is the refund**: the flag clears and anything
+  supporter-rarity being worn comes off, because a card renders the equipped column and asks nobody about
+  ownership. Nothing is deleted, so buying again restores it.
+  **Supporter items are different, not better.** The best thing in the game stays a badge item, earned by going
+  20-0. Coins can never buy a supporter item: `shop_buy` refuses `supporter_only` before it looks at the
+  balance, so nobody reads "not enough coins" for something no balance reaches, and the shop shows them locked
+  with "Comes with the one-off Supporter unlock" rather than a price it would refuse.
+  Two items to start: the **Supporter** title and the **Supernova** celebration.
+  No payment yet - grant it by hand:
+  `insert into supporters (user_id, source, note) select id, 'grant', 'why' from profiles where username = 'NAME';`
+
+- **Nameplates**, including animated ones — a banner behind the name on the player card. Eleven, one for
+  every way to unlock a thing: coins up the rarity ladder, the Dynasty badge, and the Supporter unlock. Four of
+  them (Midnight, Inferno, Emerald, Aurora) drift a gradient.
+  This is where *"animated names with different colours"* ended up, and the measurement is why: **not one
+  colour clears AA as text on all three card scopes** — lime is 1.28:1 on cream, game blue 3.19:1 on the dark
+  card. Coloured text alone cannot work in an app with a cream, a navy and a black surface, so the colour
+  travels with its own background, where it can be as vivid as it likes because the pair is checkable. Every
+  stop of a gradient is checked, not just the first: a drift can put any stop under any letter. The drift is
+  `background-position` only, so nothing moves and nothing reflows, and it stops under `prefers-reduced-motion`.
+
+- **Win celebrations.** A fifth kind of shop item: an overlay that plays over the whole result screen when a
+  season wins the title - Confetti (free, and the default), Spotlight, Fireworks, Gold rain, and **Champion,
+  unlocked by the Undefeated badge rather than sold**, because the best celebration in the game should belong
+  to somebody who has gone 20-0. Priced off the existing rarity ladder (750 / 2,000 / 6,000), not invented.
+  CSS only, no canvas: it runs on a phone while the season is still ticking in. Fixed, `aria-hidden` and
+  `pointer-events:none`, so it never takes a tap or reads out over the result the screen already announces,
+  and it does not play at all under `prefers-reduced-motion` - the final frame of confetti is an empty screen,
+  so there is nothing to snap to. Every piece's position is a pure function of its index, so a celebration
+  draws the same picture every time. The little confetti inside the `.cel` panel is a different thing and stays.
+
 ## [2.4.1] — 2026-09-26
 
 Client only: no migration, no Edge Function change.

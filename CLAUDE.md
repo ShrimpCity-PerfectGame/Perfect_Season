@@ -581,7 +581,24 @@ overwrite each other.
 - **Card themes set the card's text scope.** `CardTheme` adds `cs-dark`, `cs-night` or `cs-light`, which
   perfect-season.jsx maps to theme.mjs's scopes; each theme's painted colors are data in `cosmetics.jsx`, so
   `tests/test-cosmetics.mjs` can hold its text to WCAG AA, for all 32 teams on Team colors.
-- **Runbook** (SQL editor): change a price - `update shop_items set price = 1500 where id = 'frame-lime';`; take an
+- **Supporter (v2.6.0) is a one-off unlock, not a subscription**, and the only thing in the game that costs
+  real money. It unlocks the `supporter`-rarity items and, once there are ads, turns them off. The entitlement
+  is a row in `supporters` - RLS on, no policy at all, like `wallets`: written by the service role (a payment
+  webhook) or by hand. `source` says which door it came in by (`stripe` | `play` | `apple` | `grant`), because
+  an account gains it once but a store build has to use that store's billing; `reference` is the payment's id,
+  so a refund can find the row. A trigger keeps `profiles.supporter` in step, and that is what the app reads:
+  the ad decision happens before anything renders, not after a shop call, and a supporter chip beside a name is
+  public the way the guest chip is. **Deleting the row is the refund** - the flag clears and anything
+  supporter-rarity being worn comes off, because a card renders the equipped column and asks nobody about
+  ownership. Nothing is deleted, so buying again restores it all.
+  **Supporter items are DIFFERENT, not better.** The best thing in the game stays a badge item, earned by going
+  20-0 rather than bought. Coins can never buy a supporter item (`shop_buy` refuses `supporter_only` before it
+  looks at the balance, so nobody reads "not enough coins" for something no balance reaches), and nothing behind
+  the paywall may touch drafts, scores, leaderboards, the daily or duels - the cosmetic-only rule stops being a
+  preference the moment money is involved.
+- **Runbook** (SQL editor): grant supporter -
+  `insert into supporters (user_id, source, note) select id, 'grant', 'why' from profiles where username = 'NAME';`
+  (deleting that row is the refund, and takes the items off); change a price - `update shop_items set price = 1500 where id = 'frame-lime';`; take an
   item off sale (owners keep it) - `update shop_items set active = false where id = 'frame-lime';`; give an item
   (a pack included) to everyone - `update shop_items set rarity = 'free', price = null where id = 'pack-sideline';` -
   since a pack's avatars follow its shop item everywhere (`shop_state`, `set_avatar`, the picker). The seeds in
@@ -589,6 +606,24 @@ overwrite each other.
 - **Cosmetic artwork uses fixed colors**, like the avatar drawings: frame and card-theme paints are data in
   `cosmetics.jsx` (`COLORS`), not theme tokens, because an item looks the same wherever it's worn. Text on a card
   still takes its scope's tokens, and `tests/test-cosmetics.mjs` checks those against every paint behind text.
+- **Nameplates (v2.6.0)** are a banner behind the name on the player card, and they are where "coloured,
+  animated names" ended up. **Not one colour clears AA as text on all three card scopes** - lime is 1.28:1 on
+  cream, game blue 3.19:1 on the dark card - so coloured text alone cannot work in an app with a cream, a navy
+  and a black surface. The colour travels with its own background instead: a plate is `stops` (one colour, or
+  a gradient's several) plus **its own** `ink`, and `platePaint` publishes them the way `cardPaint` does, so
+  `tests/test-cosmetics.mjs` holds the ink to AA against *every* stop - a drifting gradient can put any stop
+  under any letter. The lively ones animate `background-position` only, so nothing moves, nothing reflows, and
+  the colours under the letters stay the ones that were measured. Plates render on the player card, where the
+  frame, card theme and title already do, so no board query has to carry them.
+- **Win celebrations (v2.5.0)** are the fifth kind: an overlay (`WinCelebration`) over the whole result screen
+  when a season wins the title, fixed, `aria-hidden` and `pointer-events:none`, so it never takes a tap or
+  reads out over a result the screen already announces. The little `<Confetti>` inside `.cel` is a different
+  thing and stays. CSS only and no canvas - it runs on a phone while the season is still ticking in, and a
+  canvas would be invisible to the tests, which read the DOM. Every piece's position is a pure function of its
+  index, so a celebration draws the same picture every time. `Champion` is unlocked by the **undefeated**
+  badge rather than sold, which makes three items on that badge. To see one without fighting the RNG: sign in
+  as `admin`, force a 20-0, and press **Skip to the end** - the overlay shares `finished` with the `.cel`
+  panel, so it plays when the animation lands, not when the result first appears.
 
 **A failed read is not an answer.** `fetchProfile` threw its error away, so "the read failed" and "this
 account has no profile row" were the same value - `null` - and both are real states, because an account
@@ -878,6 +913,15 @@ suite and still broke the live Leaderboard for every existing account.
   and the function have to agree on, and the scoring half decides what a season is worth. `match-pick` changes
   on its own account too: it finishes a match before it looks at what was asked for, writes every change against
   the revision it read, and ends a match it cannot grade (VERSUS.md 4).
+  v2.6.0's (supporter): re-run **`migration-shop.sql`**, then the client. It adds the `supporters` table and
+  its trigger, `profiles.supporter`, the `supporter` rarity and two items behind it. Same file as v2.5.0's, so
+  one re-run carries both when they ship together. No Edge Function change.
+  v2.5.0's (win celebrations): re-run **`migration-shop.sql`**, then the client. It adds the `celebration`
+  column to `profile_details`, widens `shop_items`' `kind` check and seeds five items. The `kind` check is the
+  part to know about: `create table if not exists` leaves an existing table's constraint alone, so the file
+  drops and re-adds it by name before the seed - without that, every database seeded before this release
+  refuses the new rows and the seed is what fails. A client ahead of the migration shows no celebrations in
+  the shop and plays the free Confetti, which is the default anyway. No Edge Function change.
   v2.4.0's: re-run **`migration-runs-log.sql`**, then the client. It adds `ladder_best` and changes nothing
   else, so it is safe on any shape and its backfill is a no-op as always - but the client calls that function
   the moment somebody taps a mode on the Leaderboard, so a client ahead of the migration shows an empty board

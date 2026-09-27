@@ -17,8 +17,8 @@
 
 create table if not exists public.shop_items (
   id      text primary key check (id ~ '^[a-z0-9-]{1,40}$'),
-  kind    text not null check (kind in ('frame', 'card', 'title', 'avatar_pack')),
-  rarity  text not null check (rarity in ('free', 'common', 'rare', 'epic', 'legendary', 'badge')),
+  kind    text not null check (kind in ('frame', 'card', 'title', 'nameplate', 'celebration', 'avatar_pack')),
+  rarity  text not null check (rarity in ('free', 'common', 'rare', 'epic', 'legendary', 'badge', 'supporter')),
   price   integer check (price is null or price between 1 and 1000000),
   -- The badges.mjs id that unlocks a badge item.
   badge   text check (badge is null or badge ~ '^[a-z0-9-]{1,40}$'),
@@ -31,10 +31,23 @@ alter table public.shop_items add constraint shop_items_price_fits_rarity check 
   case rarity
     when 'free' then price is null and badge is null
     when 'badge' then price is null and badge is not null
+    -- A supporter item is not bought with coins and is not a badge reward: it comes with the one-off unlock.
+    when 'supporter' then price is null and badge is null
     else price is not null and badge is null
   end);
 
 -- The launch catalog (SHOP.md 6.2; shop-catalog.mjs's SHOP_ITEMS, which tests/test-shop-sql.mjs checks this against).
+-- v2.5.0 adds the celebration kind. The "create table if not exists" above leaves an existing table's constraint
+-- exactly as it was, so a database seeded before this release still refuses the new rows - the seed below is
+-- what fails, loudly, on the first re-run. Widened here rather than there because the check belongs to the
+-- table, and dropping it by name is safe: it is the one Postgres generated for that column.
+-- v2.6.0 adds the supporter rarity, for the same reason the kind check is re-added below: an existing
+-- table keeps the constraint it was made with.
+alter table public.shop_items drop constraint if exists shop_items_rarity_check;
+alter table public.shop_items add constraint shop_items_rarity_check check (rarity in ('free', 'common', 'rare', 'epic', 'legendary', 'badge', 'supporter'));
+alter table public.shop_items drop constraint if exists shop_items_kind_check;
+alter table public.shop_items add constraint shop_items_kind_check check (kind in ('frame', 'card', 'title', 'nameplate', 'celebration', 'avatar_pack'));
+
 insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('frame-ink', 'frame', 'free', null, null, 10),
   ('frame-lime', 'frame', 'common', 750, null, 20),
@@ -60,6 +73,24 @@ insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('title-undefeated', 'title', 'badge', null, 'undefeated', 90),
   ('title-daily-winner', 'title', 'badge', null, 'daily-winner', 100),
   ('title-cinderella', 'title', 'badge', null, 'cinderella', 110),
+  ('title-supporter', 'title', 'supporter', null, null, 120),
+  ('plate-ink', 'nameplate', 'free', null, null, 10),
+  ('plate-lime', 'nameplate', 'common', 750, null, 20),
+  ('plate-turf', 'nameplate', 'rare', 2000, null, 30),
+  ('plate-blue', 'nameplate', 'rare', 2000, null, 40),
+  ('plate-midnight', 'nameplate', 'rare', 2000, null, 50),
+  ('plate-gold', 'nameplate', 'epic', 6000, null, 60),
+  ('plate-inferno', 'nameplate', 'epic', 6000, null, 70),
+  ('plate-ember', 'nameplate', 'legendary', 15000, null, 80),
+  ('plate-emerald', 'nameplate', 'legendary', 15000, null, 90),
+  ('plate-dynasty', 'nameplate', 'badge', null, 'dynasty', 100),
+  ('plate-aurora', 'nameplate', 'supporter', null, null, 110),
+  ('cel-confetti', 'celebration', 'free', null, null, 10),
+  ('cel-spotlight', 'celebration', 'common', 750, null, 20),
+  ('cel-fireworks', 'celebration', 'rare', 2000, null, 30),
+  ('cel-gold-rain', 'celebration', 'epic', 6000, null, 40),
+  ('cel-champion', 'celebration', 'badge', null, 'undefeated', 50),
+  ('cel-supernova', 'celebration', 'supporter', null, null, 60),
   ('pack-sideline', 'avatar_pack', 'common', 750, null, 10),
   ('pack-trophy-room', 'avatar_pack', 'rare', 2000, null, 20),
   ('pack-night-game', 'avatar_pack', 'epic', 6000, null, 30),
@@ -95,11 +126,88 @@ insert into public.avatar_presets (key, pack, free) values
   ('gold-jacket', 'hall-of-fame', false), ('bust', 'hall-of-fame', false), ('laurels', 'hall-of-fame', false), ('the-hall', 'hall-of-fame', false)
 on conflict (key) do nothing;
 
+-- ---------- Supporter (v2.6.0) ----------
+-- One row per account that has supported the game. A ONE-OFF unlock, not a subscription: there is no expiry,
+-- nothing renews, and nothing lapses - which is most of why this is a table and a trigger rather than a
+-- billing system. It unlocks the supporter cosmetics and, when there are ads, turns them off.
+--
+-- Never readable or writable by a client. RLS on and no policy at all, like wallets and inventory: the row IS
+-- the entitlement, and an entitlement a modified browser can write is a shop with no door. It is written by
+-- the service role (a payment webhook) or by hand in the SQL editor.
+--
+-- `source` is which door it came in by, because an account gains this once but may buy it anywhere: 'stripe'
+-- on the web, 'play' or 'apple' from a store build (digital goods in those apps have to go through their own
+-- billing), and 'grant' for a gift or a correction. `reference` is the payment's own id, so a refund can find
+-- the row again. Designed for the stores now rather than retrofitted later, while it costs one column.
+create table if not exists public.supporters (
+  user_id     uuid primary key references public.profiles(id) on delete cascade,
+  granted_at  timestamptz not null default now(),
+  source      text not null default 'grant' check (source in ('stripe', 'play', 'apple', 'grant')),
+  reference   text,
+  note        text
+);
+alter table public.supporters enable row level security;
+revoke all on table public.supporters from anon, authenticated;
+
+-- ...and the same fact on `profiles`, which every client already reads and nobody can write. Two reasons it is
+-- worth denormalising rather than joining: a supporter chip beside a name is public, like the guest chip; and
+-- turning ads off has to be decided before anything renders, not after a shop call. The trigger below is the
+-- only writer, so the pair cannot drift the way two hand-maintained columns would.
+alter table public.profiles add column if not exists supporter boolean not null default false;
+
+create or replace function public.supporters_sync()
+returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if tg_op = 'DELETE' then
+    update public.profiles set supporter = false where id = old.user_id;
+    -- ...and take off anything they were wearing that came with the unlock. Without this a refund leaves the
+    -- item equipped: shop_state would say they do not own it while their profile went on showing it, because
+    -- the card renders what is in the column and asks nobody. Owned-but-unequipped is the rule everywhere
+    -- else; here there is nothing to own any more, so it is simply taken off. Nothing is deleted: buy again
+    -- and every one of these is theirs to wear again.
+    update public.profile_details d set
+      frame = case when fi.rarity = 'supporter' then null else d.frame end,
+      card_theme = case when ci.rarity = 'supporter' then null else d.card_theme end,
+      title = case when ti.rarity = 'supporter' then null else d.title end,
+      nameplate = case when ni.rarity = 'supporter' then null else d.nameplate end,
+      celebration = case when ei.rarity = 'supporter' then null else d.celebration end,
+      updated_at = now()
+      from (select 1) as _
+      left join public.shop_items fi on fi.id = (select frame from public.profile_details where user_id = old.user_id)
+      left join public.shop_items ci on ci.id = (select card_theme from public.profile_details where user_id = old.user_id)
+      left join public.shop_items ti on ti.id = (select title from public.profile_details where user_id = old.user_id)
+      left join public.shop_items ni on ni.id = (select nameplate from public.profile_details where user_id = old.user_id)
+      left join public.shop_items ei on ei.id = (select celebration from public.profile_details where user_id = old.user_id)
+     where d.user_id = old.user_id;
+    return old;
+  end if;
+  update public.profiles set supporter = true where id = new.user_id;
+  return new;
+end;
+$$;
+-- Nobody but the owner may call it: it is the trigger's, and it writes profiles.supporter.
+revoke execute on function public.supporters_sync() from public, anon, authenticated;
+drop trigger if exists supporters_sync on public.supporters;
+create trigger supporters_sync after insert or delete on public.supporters
+  for each row execute function public.supporters_sync();
+
+-- A database that already has rows (a re-run) gets the column filled from them, and any profile whose flag
+-- disagrees corrected - the table is the truth.
+update public.profiles p
+   set supporter = exists (select 1 from public.supporters s where s.user_id = p.id)
+ where p.supporter is distinct from exists (select 1 from public.supporters s where s.user_id = p.id);
+
+
 -- What a player wears. Null is the default: the Ink frame, the Navy card, no title.
 alter table public.profile_details add column if not exists frame text references public.shop_items(id);
 alter table public.profile_details add column if not exists card_theme text references public.shop_items(id);
 alter table public.profile_details add column if not exists title text references public.shop_items(id);
 -- The badges chosen for the card, in order. set_showcase checks each id; the card shows only earned ones.
+-- v2.5.0: which win celebration plays over the result screen. Null is the free Confetti, the same way a null
+-- frame is Ink - DEFAULT_ITEM in shop-catalog.mjs holds both, so nothing has to be backfilled.
+-- v2.6.0: the banner behind the name on the player card. Null is no plate at all, not a default one.
+alter table public.profile_details add column if not exists nameplate text references public.shop_items(id);
+alter table public.profile_details add column if not exists celebration text references public.shop_items(id);
 alter table public.profile_details add column if not exists showcase text[] not null default '{}';
 alter table public.profile_details drop constraint if exists profile_details_showcase_shape;
 alter table public.profile_details add constraint profile_details_showcase_shape check (cardinality(showcase) <= 3);
@@ -126,7 +234,7 @@ revoke all on table public.inventory from anon, authenticated;
 --   { "balance", "items": [{ "id", "kind", "rarity", "price", "badge", "active", "sort", "owned" }],
 --     "equipped": { "frame", "card", "title", "showcase" } }
 -- The items are everything on sale plus anything you own that's been taken off sale (you can still wear it), in
--- shop order: kind (frame, card, title, avatar_pack), then sort, then id - in plain code-point order, since the
+-- shop order: kind (frame, card, title, celebration, avatar_pack), then sort, then id - in plain code-point order, since the
 -- default collation differs between installs. It takes no wallet lock, because a stable function can't and
 -- nothing is decided on this balance, so a player with no wallet yet reads 0. Stable, so the browser reads it as
 -- a GET. No details row means nothing is worn: nulls and no showcase.
@@ -146,19 +254,25 @@ begin
       select jsonb_agg(jsonb_build_object(
                'id', s.id, 'kind', s.kind, 'rarity', s.rarity, 'price', s.price, 'badge', s.badge,
                'active', s.active, 'sort', s.sort, 'owned', s.owned)
-             order by array_position(array['frame', 'card', 'title', 'avatar_pack'], s.kind), s.sort, s.id collate "C")
+             order by array_position(array['frame', 'card', 'title', 'nameplate', 'celebration', 'avatar_pack'], s.kind), s.sort, s.id collate "C")
         from (
           select i.*,
                  i.rarity = 'free'
                  or exists (select 1 from public.inventory v where v.user_id = v_uid and v.item_id = i.id)
                  or (i.badge is not null
-                     and exists (select 1 from public.badge_awards b where b.user_id = v_uid and b.badge = i.badge)) as owned
+                     and exists (select 1 from public.badge_awards b where b.user_id = v_uid and b.badge = i.badge))
+                 or (i.rarity = 'supporter'
+                     and exists (select 1 from public.supporters sp where sp.user_id = v_uid)) as owned
             from public.shop_items i
         ) s
        where s.active or s.owned
     ), '[]'::jsonb),
+    -- The caller's own entitlement, so the shop can say what is theirs without a second call. It is on
+    -- profiles too, for the reads that happen before a shop call - see the supporters table above.
+    'supporter', exists (select 1 from public.supporters sp where sp.user_id = v_uid),
     'equipped', jsonb_build_object(
       'frame', v_worn.frame, 'card', v_worn.card_theme, 'title', v_worn.title,
+      'nameplate', v_worn.nameplate, 'celebration', v_worn.celebration,
       'showcase', to_jsonb(coalesce(v_worn.showcase, '{}'::text[])))
   );
 end;
@@ -197,6 +311,11 @@ begin
   end if;
   if v_item.badge is not null then
     raise exception 'badge_only' using errcode = 'P0001';
+  end if;
+  -- Coins cannot buy this one either. It is refused before the balance is looked at, so the words a player
+  -- reads are "supporters only" and never "not enough coins" for something no amount of coins can reach.
+  if v_item.rarity = 'supporter' then
+    raise exception 'supporter_only' using errcode = 'P0001';
   end if;
   if v_item.rarity = 'free' or exists (select 1 from public.inventory where user_id = v_uid and item_id = v_item.id) then
     raise exception 'owned' using errcode = 'P0001';
@@ -239,7 +358,7 @@ begin
   if exists (select 1 from public.profiles where id = v_uid and guest) then
     raise exception 'guest_not_allowed' using errcode = 'P0001';
   end if;
-  if p_slot is null or p_slot not in ('frame', 'card', 'title') then
+  if p_slot is null or p_slot not in ('frame', 'card', 'title', 'nameplate', 'celebration') then
     raise exception 'bad_slot' using errcode = 'P0001';
   end if;
   if p_item is not null then
@@ -250,13 +369,23 @@ begin
     if not (v_item.rarity = 'free'
             or exists (select 1 from public.inventory where user_id = v_uid and item_id = v_item.id)
             or (v_item.badge is not null
-                and exists (select 1 from public.badge_awards where user_id = v_uid and badge = v_item.badge))) then
+                and exists (select 1 from public.badge_awards where user_id = v_uid and badge = v_item.badge))
+            or (v_item.rarity = 'supporter'
+                and exists (select 1 from public.supporters where user_id = v_uid))) then
       raise exception 'not_owned' using errcode = 'P0001';
     end if;
   end if;
   if p_slot = 'frame' then
     insert into public.profile_details as d (user_id, frame) values (v_uid, p_item)
     on conflict (user_id) do update set frame = excluded.frame, updated_at = now()
+    returning d.* into v_row;
+  elsif p_slot = 'nameplate' then
+    insert into public.profile_details as d (user_id, nameplate) values (v_uid, p_item)
+    on conflict (user_id) do update set nameplate = excluded.nameplate, updated_at = now()
+    returning d.* into v_row;
+  elsif p_slot = 'celebration' then
+    insert into public.profile_details as d (user_id, celebration) values (v_uid, p_item)
+    on conflict (user_id) do update set celebration = excluded.celebration, updated_at = now()
     returning d.* into v_row;
   elsif p_slot = 'card' then
     insert into public.profile_details as d (user_id, card_theme) values (v_uid, p_item)

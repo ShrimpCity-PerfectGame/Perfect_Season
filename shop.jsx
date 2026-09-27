@@ -16,7 +16,7 @@ import { fetchShop, fetchWallet, fetchPlayerProfile, buyItem, equipItem, setShow
 import { SHOP_KINDS, KIND_LABEL, SHOP_ITEM_BY_ID, DEFAULT_ITEM, SHOWCASE_MAX, RARITY_LABEL, PACK_BY_ITEM } from "./shop-catalog.mjs";
 import { BADGES, BADGE_BY_ID, badgeProgress } from "./badges.mjs";
 import { Avatar } from "./avatars.jsx";
-import { FramedAvatar, CardTheme, TitleLine, Coins, ItemPreview } from "./cosmetics.jsx";
+import { FramedAvatar, CardTheme, TitleLine, NamePlate, Coins, ItemPreview } from "./cosmetics.jsx";
 import { cardBadges } from "./profile.jsx";
 import { fmtDate } from "./ui-common.jsx";
 import { TEAMS } from "./game-logic.mjs";
@@ -225,10 +225,13 @@ const sameList = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]
 // A long name takes a smaller size in a card preview rather than breaking mid-word.
 const longName = (name) => String(name || "").length > 12;
 
-// equipped (it's worn), owned, buy (you can afford it), short (you can't yet) or locked (a badge item you don't have).
+// equipped (it's worn), owned, buy (you can afford it), short (you can't yet), or locked - a badge item you
+// have not earned, or a supporter item and you have not supported the game.
+// Supporter items have no price and no badge, so without the second test here they read as "buy" at any
+// balance and the button would fail with supporter_only - a button that cannot work is worse than no button.
 export function itemState(item, shop) {
   if (item.owned) return item.kind !== "avatar_pack" && worn(shop.equipped, item.kind) === item.id ? "equipped" : "owned";
-  if (item.badge) return "locked";
+  if (item.badge || item.rarity === "supporter") return "locked";
   return shop.balance >= (item.price || 0) ? "buy" : "short";
 }
 
@@ -284,7 +287,7 @@ function CardPreview({ username, details, team, wear, badges = [], compact = fal
         <FramedAvatar frame={wear.frame} team={team} size={compact ? 44 : 72} username={username} photoUrl={details?.avatarUrl ?? null}
           preset={details?.avatarPreset ?? null} decorative />
         <div className="sh-who">
-          <p className="sh-name">{username}</p>
+          <p className="sh-name"><NamePlate plate={wear.nameplate}>{username}</NamePlate></p>
           <TitleLine title={wear.title} />
         </div>
       </div>
@@ -401,6 +404,7 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
     frame: sel?.kind === "frame" ? sel.id : shop.equipped.frame,
     card: sel?.kind === "card" ? sel.id : shop.equipped.card,
     title: sel?.kind === "title" ? sel.id : shop.equipped.title,
+    nameplate: sel?.kind === "nameplate" ? sel.id : shop.equipped.nameplate,
   };
   const trying = !!(sel && (selPack || worn(shop.equipped, sel.kind) !== sel.id)) || (picks != null && !sameList(picks, savedPicks));
   const cardProps = { username, details, team, wear, badges: cardBadges(chosen, progress) };
@@ -446,7 +450,7 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
       if (res.reason === "not_enough") say(item.id, "You don't have enough coins for that.", true);
       else if (res.reason === "guest") say(item.id, GUEST_ONLY, true);
       else if (res.reason === "signed_out") say(item.id, SIGNED_OUT, true);
-      else if (!["owned", "unavailable", "badge_only"].includes(res.reason)) {
+      else if (!["owned", "unavailable", "badge_only", "supporter_only"].includes(res.reason)) {
         say(item.id, FAILED, true);
         return;
       }
@@ -539,7 +543,8 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
     // Free items are everyone's, so only a bought or awarded one says it's owned.
     const tag = state === "equipped" ? "Equipped" : state === "owned" && item.rarity !== "free" ? "Owned" : null;
     const line = state === "short" ? `${num(item.price - shop.balance)} more coins`
-      : state === "locked" ? (earned.has(item.badge) ? "Unlocks after your next finished season" : `Earn the ${badge?.name || item.badge} badge`)
+      : state === "locked" ? (item.rarity === "supporter" ? "Comes with the one-off Supporter unlock"
+        : earned.has(item.badge) ? "Unlocks after your next finished season" : `Earn the ${badge?.name || item.badge} badge`)
         : null;
     const note = msg && msg.at === item.id ? msg : null;
     return (

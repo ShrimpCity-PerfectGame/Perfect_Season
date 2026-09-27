@@ -32,7 +32,7 @@ import { PICKER_CSS } from "./avatar-picker.jsx";
 import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
 // The one definition of the event the Android shell asks Back with; the website never sends it.
 import { BACK_EVENT } from "./app-shell.mjs";
-import { COSMETICS_CSS, FramedAvatar, Coin } from "./cosmetics.jsx";
+import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
@@ -4560,6 +4560,15 @@ export default function PerfectSeason() {
 
             {result && (
               <>
+                {/* The equipped win celebration, over the whole screen, on a title. The little Confetti inside
+                    .cel below stays: that one belongs to the panel and has been there since the result screen
+                    had one, and this plays over everything.
+                    A title, not every finished season - roughly one run in eleven - because a celebration that
+                    fires on a 12-8 is not a celebration. It is fixed, aria-hidden and pointer-events:none, so
+                    it cannot take a tap or read out over the result the screen already announces. */}
+                {finished && (result.perfect || result.champ) && (
+                  <WinCelebration celebration={myDetails?.celebration ?? null} />
+                )}
                 {/* Record first: it's the number people screenshot. Team score, points and this
                     season's rank share one strip under it, and the moments only appear when they
                     happened. */}

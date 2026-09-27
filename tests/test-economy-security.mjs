@@ -177,6 +177,10 @@ const NEW_FUNCTIONS = {
   "set_showcase(p_badges text[])": [true, "v", PG_TEMP_LAST, false, true, true],
   // The welcome coins' trigger on profiles.
   "create_wallet()": [true, "v", PG_TEMP_LAST, false, false, true],
+  // v2.6.0: the supporters table's trigger, which keeps profiles.supporter in step with it. Definer because
+  // it writes profiles, and reachable by nobody: the entitlement is the row, so the only writer is the
+  // service role inserting one.
+  "supporters_sync()": [true, "v", PG_TEMP_LAST, false, false, true],
 };
 // set_avatar learned the paid packs in migration-profiles.sql (SHOP.md 3.2); signed out, it answers not_signed_in.
 const SET_AVATAR = ["set_avatar(p_path text, p_preset text)", [true, "v", PG_TEMP_LAST, true, true, true]];
@@ -204,8 +208,16 @@ await runTest("1a. every function the wallet and shop migrations add has a delib
   const TRIGGERS = "select c.relname || '.' || t.tgname as name, pg_get_triggerdef(t.oid) as def from pg_trigger t join pg_class c on c.oid = t.tgrelid where not t.tgisinternal order by 1";
   const oldTriggers = new Set((await v111.query(TRIGGERS)).rows.map((t) => t.name));
   const newTriggers = (await owner(TRIGGERS)).filter((t) => !oldTriggers.has(t.name));
-  assert(newTriggers.length === 1 && newTriggers[0].name === "profiles.profiles_create_wallet"
-    && /AFTER INSERT ON public\.profiles FOR EACH ROW EXECUTE FUNCTION (public\.)?create_wallet\(\)/.test(newTriggers[0].def), `the one new trigger is the welcome coins': ${show(newTriggers)}`);
+  // Two now: the welcome coins on a new profile, and v2.6.0's, which keeps profiles.supporter in step with
+  // the supporters table. Named one by one rather than counted, so a third cannot arrive quietly.
+  assert(same(newTriggers.map((t) => t.name).sort(), ["profiles.profiles_create_wallet", "supporters.supporters_sync"]),
+    `the new triggers are the welcome coins' and the supporter sync: ${show(newTriggers.map((t) => t.name))}`);
+  const triggerDef = (name) => newTriggers.find((t) => t.name === name).def;
+  assert(/AFTER INSERT ON public\.profiles FOR EACH ROW EXECUTE FUNCTION (public\.)?create_wallet\(\)/.test(triggerDef("profiles.profiles_create_wallet")),
+    `the welcome coins' trigger: ${triggerDef("profiles.profiles_create_wallet")}`);
+  // Insert AND delete: taking the row away (a refund) has to take the flag with it.
+  assert(/AFTER INSERT OR DELETE ON public\.supporters FOR EACH ROW EXECUTE FUNCTION (public\.)?supporters_sync\(\)/.test(triggerDef("supporters.supporters_sync")),
+    `the supporter sync trigger: ${triggerDef("supporters.supporters_sync")}`);
   for (const who of [null, MALLORY]) {
     const r = await attempt(who, "select public.create_wallet()");
     assert(/permission denied for function create_wallet/.test(r.error || ""), `${who ? "a player" : "anon"} can't call the trigger function: ${show(r)}`);
@@ -224,7 +236,9 @@ await runTest("1b. every table, column, sequence and view they add: the coin tab
   const oldNames = new Set((await v111.query(TABLE_ROWS)).rows.map((t) => t.name));
   const added = rows.filter((t) => !oldNames.has(t.name));
   const CLOSED = { kind: "r", rls: true, policies: [], anon: [], authenticated: [] };
-  const want = { badge_awards: CLOSED, badge_rewards: CLOSED, finished_codes: CLOSED, inventory: CLOSED, wallet_ledger: CLOSED, wallets: CLOSED };
+  // supporters is CLOSED like the wallet tables: the row IS the entitlement, so no client may read or write
+  // it. What a player may know about themselves comes back through shop_state and profiles.supporter.
+  const want = { badge_awards: CLOSED, badge_rewards: CLOSED, finished_codes: CLOSED, inventory: CLOSED, supporters: CLOSED, wallet_ledger: CLOSED, wallets: CLOSED };
   assert(same(added.map((t) => t.name).sort(), [...Object.keys(want), "shop_items"].sort()), `tables the new migrations add: ${show(added.map((t) => t.name))}`);
   for (const t of added.filter((x) => want[x.name])) {
     assert(same({ kind: t.kind, rls: t.rls, policies: t.policies, anon: t.anon, authenticated: t.authenticated }, want[t.name]), `${t.name}: RLS on, no policies, no client privilege of any kind - got ${show(t)}`);
@@ -235,8 +249,12 @@ await runTest("1b. every table, column, sequence and view they add: the coin tab
   const COLUMNS = "select table_name || '.' || column_name as c from information_schema.columns where table_schema = 'public' order by 1";
   const oldColumns = new Set((await v111.query(COLUMNS)).rows.map((r) => r.c));
   const newColumns = (await owner(COLUMNS)).map((r) => r.c).filter((c) => !oldColumns.has(c) && oldNames.has(c.split(".")[0]));
-  assert(same(newColumns.sort(), ["profile_details.card_theme", "profile_details.frame", "profile_details.showcase", "profile_details.title"]),
-    `the only columns added to existing tables are what a player wears, which the card shows everyone - nothing about coins lands on profiles: ${show(newColumns)}`);
+  // What a player WEARS, plus - since v2.6.0 - whether they support the game, which is public the way the
+  // guest chip is and has to be readable before anything decides whether to show an ad. Still nothing about
+  // coins: a balance on a public table would be every player's wallet on every board.
+  assert(same(newColumns.sort(), ["profile_details.card_theme", "profile_details.celebration", "profile_details.frame",
+    "profile_details.nameplate", "profile_details.showcase", "profile_details.title", "profiles.supporter"]),
+    `the only columns added to existing tables are what a player wears and whether they support the game - nothing about coins lands on profiles: ${show(newColumns)}`);
 
   // The ledger's id sequence. Whoever holds it can set it to its last value, after which no ledger row can be written:
   // no welcome coins, so no signup, and no season's coins, claim or purchase, for anyone.

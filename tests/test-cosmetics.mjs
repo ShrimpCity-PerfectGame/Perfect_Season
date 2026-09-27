@@ -13,7 +13,7 @@ const { act } = await import("react-dom/test-utils");
 const React = (await import("react")).default;
 const h = React.createElement;
 const cosmetics = await loadModule("cosmetics.jsx");
-const { FramedAvatar, CardTheme, TitleLine, Coin, Coins, ItemPreview, COSMETICS_CSS, CARD_THEME_SCOPE, COLORS, cardPaint, teamCardColors, frameReach } = cosmetics;
+const { FramedAvatar, CardTheme, TitleLine, Coin, Coins, ItemPreview, COSMETICS_CSS, CARD_THEME_SCOPE, COLORS, cardPaint, platePaint, NAMEPLATES, teamCardColors, frameReach } = cosmetics;
 const { Avatar, AVATAR_PRESETS } = await loadModule("avatars.jsx");
 
 const FRAMES = SHOP_ITEMS.filter((i) => i.kind === "frame").map((i) => i.id);
@@ -304,4 +304,30 @@ await runTest("COSMETICS_CSS styles only cs- classes, base rules before media qu
 });
 
 if (shown) await act(async () => shown.reactRoot.unmount());
+await runTest("every nameplate's own text colour is AA-readable on its own fill", async () => {
+  // A plate carries a fill AND its text colour, held together, because the card underneath can be cs-dark,
+  // cs-night or cs-light - a plate that took the card's token would read on some cards and vanish on others.
+  // So the pair is what has to pass, and this is the only place it can be checked.
+  const plates = SHOP_ITEMS.filter((i) => i.kind === "nameplate");
+  assert(plates.length > 0, "there are nameplates to check");
+  const below = [];
+  for (const item of plates) {
+    const paint = platePaint(item.id);
+    // One colour for a flat plate, two for a gradient - and the ink clears AA against every one of them,
+    // because a drifting gradient can put any stop under any letter.
+    assert(paint && paint.behindText.length >= 1 && paint.ink, `${item.id} says what it paints and what it writes in`);
+    for (const bg of paint.behindText) {
+      assert(/^#[0-9A-F]{6}$/i.test(bg) && /^#[0-9A-F]{6}$/i.test(paint.ink), `${item.id}: solid colours, got ${bg} / ${paint.ink}`);
+      const r = contrast(paint.ink, bg);
+      if (r < 4.5) below.push(`${item.id}: ${paint.ink} on ${bg} is ${r.toFixed(2)}:1`);
+    }
+  }
+  assert(below.length === 0, `below AA:\n  ${below.join("\n  ")}`);
+  // Every nameplate in the catalog has a look, and every look is a nameplate in the catalog - a plate with no
+  // entry renders as a plain name and would look like nothing was equipped.
+  const ids = plates.map((i) => i.id).sort().join(",");
+  assert(Object.keys(NAMEPLATES).sort().join(",") === ids,
+    `NAMEPLATES matches the catalog: ${Object.keys(NAMEPLATES).sort().join(",")} vs ${ids}`);
+});
+
 console.log("test-cosmetics.mjs done");

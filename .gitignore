@@ -9,3 +9,6 @@ supabase/.temp/
 app/www/
 tools/app/env.local.json
 android/local.properties
+
+# Build scratch. esbuild --outfile=/tmp/... resolves here on Windows, not to the system temp.
+tmp/

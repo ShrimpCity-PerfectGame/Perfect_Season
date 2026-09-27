@@ -31,7 +31,7 @@ export async function fetchWallet() {
 }
 
 // Everything on sale (and anything you own that isn't anymore), what you own and what you wear.
-//   { balance, items: [{ id, kind, rarity, price, badge, active, sort, owned }], equipped: { frame, card, title, showcase } } | null
+//   { balance, items: [{ id, kind, rarity, price, badge, active, sort, owned }], equipped: { frame, card, title, celebration, showcase } } | null
 export async function fetchShop() {
   try {
     const { data, error } = await getClient().rpc("shop_state", {}, READ);
@@ -43,8 +43,13 @@ export async function fetchShop() {
         id: i.id, kind: i.kind, rarity: i.rarity, price: i.price == null ? null : num(i.price), badge: i.badge ?? null,
         active: i.active !== false, sort: num(i.sort), owned: !!i.owned,
       })),
+      // Whether the caller has the one-off supporter unlock. Carried explicitly, like every other field
+      // here: this mapping is a whitelist, so anything the server sends and this does not name simply vanishes.
+      supporter: data.supporter === true,
       equipped: {
         frame: worn.frame ?? null, card: worn.card ?? null, title: worn.title ?? null,
+        nameplate: worn.nameplate ?? null,
+        celebration: worn.celebration ?? null,
         showcase: Array.isArray(worn.showcase) ? worn.showcase.filter((id) => typeof id === "string") : [],
       },
     };
@@ -58,11 +63,14 @@ export async function fetchShop() {
 // guest_not_allowed: a guest has no profile screen to wear anything on, so the shop is refused in SQL rather
 // than only hidden in the app (SHOP.md). Unmapped it reads as "network" - "check your connection" for a rule.
 const BUY_REASONS = {
-  not_enough: "not_enough", owned: "owned", unavailable: "unavailable", badge_only: "badge_only", not_signed_in: "signed_out",
+  not_enough: "not_enough", owned: "owned", unavailable: "unavailable", badge_only: "badge_only",
+  // Coins cannot buy a supporter item at any balance, so it must not read as "check your connection".
+  supporter_only: "supporter_only", not_signed_in: "signed_out",
   purchase_conflict: "network", guest_not_allowed: "guest",
 };
 // Buys one item with coins.
-//   { ok: true, balance } | { ok: false, reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "guest" | "signed_out" | "network" }
+//   { ok: true, balance } | { ok: false, reason: "not_enough" | "owned" | "unavailable" | "badge_only"
+//                                        | "supporter_only" | "guest" | "signed_out" | "network" }
 export async function buyItem(id) {
   if (typeof id !== "string" || !id) return failed("unavailable");
   try {

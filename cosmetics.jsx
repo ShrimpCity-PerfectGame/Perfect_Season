@@ -65,6 +65,19 @@ export const COLORS = {
   dynasty: "#0C0B08",
   // the floor the Team colors card's fill deepens toward
   teamFloor: "#08090C",
+  // Win celebrations. Named here like every other paint, because tests/test-cosmetics.mjs refuses a colour in
+  // COSMETICS_CSS that is not in COLORS or PALETTE - the rule that keeps a cosmetic's palette reviewable
+  // rather than scattered through a stylesheet.
+  // Nameplates. ember is the loss red, deep enough to carry cream text; aurora is the violet Genius left
+  // behind when it moved to crimson - the bright PALETTE.violet is 3.85:1 under cream and 4.46 under ink, so
+  // neither way round passes, which is the same wall the 1v1 tile ran into.
+  plateEmber: "#B32F25",
+  plateInferno: "#8C1B10", // the deep end of Inferno's drift
+  plateEmerald: "#0A6E60", // the bright end of Emerald's, which is the rb teal
+  plateMidnight: "#1E2A5A", // Midnight's far end
+  plateAurora: "#6D3FD6",
+  celStage: "#0B1020", // the shop preview tile's little night sky
+  celBeam: "#FFFFFF", // a spotlight beam, which is white light and nothing else
 };
 
 // How strong each translucent layer is, where it's strongest. cardPaint flattens these onto their fills.
@@ -151,6 +164,45 @@ const WREATH = (() => {
 
 // Titles past rare trade the double stripe for a mark of their own: a spark on the epic ones, a crown on the legendary
 // ones. Keyed by id like every other look, so a price or rarity changed in the database never changes one.
+// ---------- Nameplates ----------
+// A banner behind the name on the player card. Each one is a fill and ITS OWN text colour, held together as a
+// pair: the card underneath can be cs-dark, cs-night or cs-light, so a plate that took the card's token would
+// read on some cards and vanish on others. tests/test-cosmetics.mjs holds every pair to AA, which is why the
+// bright violet and the flame red are not here - neither clears 4.5 either way round.
+// `trim` is a brighter partner used for the edge only, never behind text.
+// `stops` is every colour the plate paints behind its name - one for a flat plate, two for a gradient - and
+// the ink has to clear AA against ALL of them, because the gradient drifts and any stop can end up under a
+// letter. `lively` drifts the gradient; it does nothing on a flat plate and stops under reduced motion.
+//
+// This is where "animated names with different colours" ended up, and the measurement is why: NOT ONE colour
+// clears AA as text on all three card scopes - lime is 1.28:1 on cream, game blue is 3.19:1 on the dark card.
+// Coloured text alone cannot work in an app with a cream, a navy and a black surface. So the colour travels
+// with its own background, which is checkable and can be as vivid as we like.
+export const NAMEPLATES = {
+  "plate-ink": { stops: [COLORS.ink], ink: COLORS.cream, trim: COLORS.lime },
+  "plate-lime": { stops: [COLORS.lime], ink: COLORS.ink, trim: COLORS.ink },
+  "plate-turf": { stops: [COLORS.turfLight], ink: COLORS.cream, trim: COLORS.lime },
+  "plate-blue": { stops: [PALETTE.blue], ink: COLORS.cream, trim: COLORS.cream },
+  "plate-midnight": { stops: [COLORS.celStage, COLORS.plateMidnight], ink: COLORS.cream, trim: COLORS.lime, lively: true },
+  "plate-gold": { stops: [COLORS.gold], ink: COLORS.ink, trim: COLORS.goldDeep },
+  "plate-inferno": { stops: [COLORS.plateInferno, COLORS.plateEmber], ink: COLORS.cream, trim: COLORS.flameYellow, lively: true },
+  "plate-ember": { stops: [COLORS.plateEmber], ink: COLORS.cream, trim: COLORS.flameYellow },
+  "plate-emerald": { stops: [COLORS.turfDark, COLORS.plateEmerald], ink: COLORS.cream, trim: COLORS.lime, lively: true },
+  "plate-dynasty": { stops: [COLORS.dynasty], ink: COLORS.gold, trim: COLORS.goldDeep },
+  "plate-aurora": { stops: [COLORS.plateAurora, PALETTE.blue], ink: COLORS.cream, trim: COLORS.lime, lively: true },
+};
+
+// The background a plate paints: one colour, or the gradient its stops describe.
+export const plateFill = (look) => (look.stops.length === 1 ? look.stops[0]
+  : `linear-gradient(100deg,${look.stops.join(",")},${look.stops[0]})`);
+
+// What a plate paints behind its name, in the shape cardPaint answers in, so the contrast test can read both
+// the same way: { behindText: [fill], ink }.
+export function platePaint(id) {
+  const plate = NAMEPLATES[id];
+  return plate ? { behindText: [...plate.stops], ink: plate.ink } : null;
+}
+
 export const TITLE_MARK = {
   "title-war-room": "spark", "title-sleeper-agent": "spark",
   "title-first-overall": "crown", "title-the-goat": "crown",
@@ -266,12 +318,114 @@ export const COSMETICS_CSS = `
 
 /* Under 360px the shop's two columns leave a thumbnail about 121px wide. A one-word title can't wrap, so
    "Undefeated" and "Cinderella" were cut off at both ends: a tighter tag there. */
+/* ---------- Nameplates ----------
+   A banner behind the name. The fill and the text colour arrive together as custom properties, because the
+   pair is what was held to AA - splitting them would let a later change move one and not the other. */
+/* nowrap, and a narrower gutter than looks right on its own: the cards size a name for a bare word, so a
+   plate's padding is width taken away from it - "shrimpcity" broke to "shrimpc / ity" the first time this
+   rendered. The name is one word and stays one word; a card that cannot fit it shrinks the type, which is
+   what .pf-long and .sh-long already do. */
+.cs-plate{display:inline-block;border-radius:8px;padding:2px 8px 3px;background:var(--cs-plate);
+  white-space:nowrap;color:var(--cs-plate-ink);box-shadow:inset 0 0 0 1.5px var(--cs-plate-trim)}
+.cs-plate-preview{display:inline-flex;align-items:center;justify-content:center;width:64px;height:26px;
+  border-radius:6px;font-family:var(--display);font-size:13px;letter-spacing:.02em}
+/* The animated ones drift their gradient. Background-position only - nothing moves, nothing reflows, and the
+   colours under the letters stay the colours the contrast test measured, because a drift only slides which
+   stop is where. */
+.cs-plate.cs-lively{background-size:220% 100%;animation:cs-plate-drift 7s ease-in-out infinite}
+@keyframes cs-plate-drift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+
+/* ---------- Win celebrations ----------
+   An overlay over the whole result screen, not a panel in it: the moment is the screen, and .cel (the lime
+   block) is already the panel. Fixed, pointer-events:none and aria-hidden, so it never takes a tap or reads
+   out - the result is announced by the text underneath, which was there before any of this.
+   CSS only, no canvas: it has to run on a phone mid-animation on the same screen as the season ticking in,
+   and a canvas would also be invisible to tests/test-cosmetics.mjs, which reads the DOM. */
+.cs-cel{position:fixed;inset:0;z-index:35;pointer-events:none;overflow:hidden}
+.cs-cel i{position:absolute;display:block;will-change:transform,opacity}
+/* Confetti and Gold rain: pieces falling from above the fold, each one's lane and delay set inline so the
+   pattern is a pure function of its index - no Math.random anywhere near a screen that also shows a seeded
+   season. */
+.cs-cel-fall i{top:-8%;width:9px;height:14px;border-radius:2px;animation:cs-fall 2.4s linear forwards}
+.cs-cel-gold-rain i{width:13px;height:13px;border-radius:50%;box-shadow:inset 0 -2px 0 ${rgba(C.ink, 0.25)}}
+@keyframes cs-fall{
+  0%{opacity:0;transform:translateY(0) rotate(0deg)}
+  8%{opacity:1}
+  85%{opacity:1}
+  100%{opacity:0;transform:translateY(112vh) rotate(620deg)}
+}
+/* Spotlight: two beams sweeping in from the top corners and settling. */
+.cs-cel-spotlight i{top:-30%;width:34vw;height:150vh;transform-origin:50% 0;
+  background:linear-gradient(to bottom,${rgba(C.celBeam, 0.34)},${rgba(C.celBeam, 0)} 72%);
+  filter:blur(6px);animation:cs-sweep 2.4s ease-out forwards}
+@keyframes cs-sweep{
+  0%{opacity:0;transform:rotate(var(--from))}
+  22%{opacity:1}
+  80%{opacity:1;transform:rotate(var(--to))}
+  100%{opacity:0;transform:rotate(var(--to))}
+}
+/* Fireworks: each burst is one ring scaling out and fading, with a second inside it. */
+.cs-cel-fireworks i{width:16px;height:16px;border-radius:50%;animation:cs-burst 1.5s ease-out forwards}
+@keyframes cs-burst{
+  0%{opacity:0;transform:scale(.2)}
+  12%{opacity:1}
+  100%{opacity:0;transform:scale(11);box-shadow:0 0 0 2px currentColor inset}
+}
+/* Champion: rotating gold rays behind everything, the belt-glow of the set. */
+.cs-cel-champion i{top:50%;left:50%;width:180vmax;height:180vmax;margin:-90vmax 0 0 -90vmax;border-radius:50%;
+  background:conic-gradient(from 0deg,${rgba(C.gold, 0.3)} 0deg 8deg,transparent 8deg 30deg,
+    ${rgba(C.gold, 0.22)} 30deg 38deg,transparent 38deg 60deg);
+  animation:cs-rays 2.6s linear forwards}
+@keyframes cs-rays{
+  0%{opacity:0;transform:rotate(0deg)}
+  15%{opacity:1}
+  78%{opacity:1}
+  100%{opacity:0;transform:rotate(120deg)}
+}
+/* Supernova, the supporter one: a bloom of light out of the middle, rings behind it. Its own shape rather
+   than a brighter Champion - a supporter item is different, not better. */
+.cs-cel-supernova i{top:50%;left:50%;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;
+  background:radial-gradient(circle,${C.celBeam} 0%,${rgba(C.lime, 0.85)} 26%,${rgba(PALETTE.violet, 0.5)} 52%,transparent 72%);
+  animation:cs-nova 2.4s ease-out forwards}
+@keyframes cs-nova{
+  0%{opacity:0;transform:scale(.2)}
+  10%{opacity:1}
+  70%{opacity:.7}
+  100%{opacity:0;transform:scale(26)}
+}
+
+/* The shop's little preview tile: the same looks, held still and sized for a swatch. Every piece gets its
+   dimensions again here, because the overlay's come from .cs-cel-fall and the rest, which the tile does not
+   wear - without these, confetti's pieces have no width or height at all and the tile is simply empty. */
+.cs-cel-preview{position:relative;width:64px;height:40px;border-radius:8px;overflow:hidden;background:${C.celStage}}
+.cs-cel-preview i{position:absolute;display:block;animation:none}
+.cs-cel-preview.cs-cel-confetti i{width:5px;height:8px;border-radius:1px}
+.cs-cel-preview.cs-cel-gold-rain i{width:7px;height:7px;border-radius:50%}
+.cs-cel-preview.cs-cel-spotlight i{top:-20%;width:16px;height:60px;transform-origin:50% 0;
+  background:linear-gradient(to bottom,${rgba(C.celBeam, 0.5)},${rgba(C.celBeam, 0)} 78%);filter:blur(2px)}
+.cs-cel-preview.cs-cel-fireworks i{width:14px;height:14px;border-radius:50%;background:none}
+.cs-cel-preview.cs-cel-supernova i{top:50%;left:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;
+  background:radial-gradient(circle,${C.celBeam} 0%,${rgba(C.lime, 0.85)} 26%,${rgba(PALETTE.violet, 0.5)} 52%,transparent 72%)}
+.cs-cel-preview.cs-cel-champion i{top:50%;left:50%;width:96px;height:96px;margin:-48px 0 0 -48px;border-radius:50%;
+  background:conic-gradient(from 0deg,${rgba(C.gold, 0.55)} 0deg 10deg,transparent 10deg 32deg,
+    ${rgba(C.gold, 0.4)} 32deg 42deg,transparent 42deg 64deg)}
 @media (max-width:359px){
   .cs-chip{padding:7px 8px 7px 7px}
   .cs-chip .cs-title{gap:6px;letter-spacing:.03em}
 }
 @media (prefers-reduced-motion:reduce){
   .cs-frame-flame::before,.cs-frame-flame::after{animation:none}
+  /* A celebration is motion and nothing else, so under reduced motion it does not play at all rather than
+     snapping to a final frame: the final frame of confetti is an empty screen. The result text says what
+     happened either way, which is what somebody reading with motion off is there for.
+     Hiding the parent alone would have been enough to stop it being seen - but every animated selector
+     also says animation:none here, because that is the rule test-cosmetics.mjs actually enforces, and it
+     enforces it per selector so a new animation cannot hide behind a parent that happens to be hidden.
+     (This comment is inside a template literal. A backtick here ends the stylesheet.) */
+  .cs-cel{display:none}
+  .cs-cel-fall i,.cs-cel-spotlight i,.cs-cel-fireworks i,.cs-cel-champion i,.cs-cel-supernova i{animation:none}
+  /* A drifting plate holds still and keeps its colours - unlike a celebration, there is something to look at. */
+  .cs-plate.cs-lively{animation:none}
 }
 `;
 
@@ -372,6 +526,120 @@ export function Coins({ amount = 0, size = 16, className = "" }) {
 
 // The thumbnail a shop tile shows for an item. Decorative: the tile names the item. Only inline elements, so
 // it can sit inside a button.
+// The plate itself. Wraps whatever it is given - a name - so the caller keeps owning the element and its
+// heading level; without a plate it renders nothing at all and the name is untouched.
+export function NamePlate({ plate = null, children, className = "" }) {
+  const look = NAMEPLATES[known(plate, "nameplate")];
+  if (!look) return children ?? null;
+  return (
+    <span className={`cs-plate ${look.lively ? "cs-lively" : ""} ${className}`.trim()} data-plate={plate}
+          style={{ "--cs-plate": plateFill(look), "--cs-plate-ink": look.ink, "--cs-plate-trim": look.trim }}>
+      {children}
+    </span>
+  );
+}
+
+// ---------- Win celebrations ----------
+// Fixed colours, like every other cosmetic here: an item looks the same wherever it is worn, and the result
+// screen is the dark scope in every theme anyway.
+// Built from the named paints rather than written out again: these reach the DOM as inline styles, so no test
+// parses them, and a second spelling of the brand lime is exactly the sort of thing that drifts unnoticed.
+export const CEL_COLORS = {
+  confetti: [COLORS.lime, PALETTE.blue, PALETTE.orange, PALETTE.violet, COLORS.celBeam],
+  gold: [COLORS.gold, COLORS.goldMid, COLORS.goldLight],
+  firework: [COLORS.lime, PALETTE.orange, PALETTE.violet, PALETTE.blue, COLORS.gold, COLORS.celBeam],
+};
+
+// What each celebration puts on the screen. Everything is a pure function of the piece's index, so the same
+// celebration draws the same picture every time - the one thing a seeded game should not have to wonder about.
+//
+// `preview` lays the same pieces out for the shop's 64x40 swatch instead of the viewport, from this one place
+// so a celebration cannot look like one thing in the shop and another on the screen. The overlay's geometry is
+// viewport geometry - pieces starting above the fold, beams 150vh tall, rays 180vmax across - and dropped into
+// a swatch it shows an empty tile, which is what the first version of this did.
+export function celebrationPieces(id, { preview = false } = {}) {
+  if (id === "cel-confetti" || id === "cel-gold-rain") {
+    const gold = id === "cel-gold-rain";
+    const palette = gold ? CEL_COLORS.gold : CEL_COLORS.confetti;
+    // Spread across the tile rather than queued above it, and fewer of them: eighteen in a swatch is a smear.
+    if (preview) {
+      return Array.from({ length: 8 }, (_, i) => ({
+        key: i,
+        style: {
+          left: `${6 + ((i * 29) % 76)}%`,
+          top: `${8 + ((i * 37) % 64)}%`,
+          background: palette[i % palette.length],
+          transform: `rotate(${(i * 47) % 90}deg)`,
+        },
+      }));
+    }
+    return Array.from({ length: 18 }, (_, i) => ({
+      key: i,
+      style: {
+        left: `${((i * 53) % 97) + 1}%`,
+        background: palette[i % palette.length],
+        animationDelay: `${((i * 7) % 12) / 10}s`,
+        animationDuration: `${2 + (((i * 3) % 7) / 10)}s`,
+      },
+    }));
+  }
+  if (id === "cel-spotlight") {
+    if (preview) {
+      return [
+        { key: 0, style: { left: "6%", transform: "rotate(-20deg)" } },
+        { key: 1, style: { right: "6%", transform: "rotate(20deg)" } },
+      ];
+    }
+    return [
+      { key: 0, style: { left: "-6vw", "--from": "-52deg", "--to": "-14deg" } },
+      { key: 1, style: { right: "-6vw", "--from": "52deg", "--to": "14deg" } },
+    ];
+  }
+  if (id === "cel-fireworks") {
+    const colour = (i) => CEL_COLORS.firework[i % CEL_COLORS.firework.length];
+    if (preview) {
+      // Held mid-burst: a ring at its widest says "firework" where a dot says nothing.
+      return [0, 1, 2].map((i) => ({
+        key: i,
+        style: {
+          left: `${14 + i * 28}%`, top: `${20 + ((i * 23) % 40)}%`,
+          boxShadow: `0 0 0 2px ${colour(i)} inset`, color: colour(i),
+        },
+      }));
+    }
+    return Array.from({ length: 7 }, (_, i) => ({
+      key: i,
+      style: {
+        left: `${10 + ((i * 29) % 78)}%`,
+        top: `${14 + ((i * 17) % 48)}%`,
+        color: colour(i),
+        boxShadow: `0 0 0 2px ${colour(i)} inset`,
+        animationDelay: `${((i * 4) % 11) / 8}s`,
+      },
+    }));
+  }
+  if (id === "cel-champion") return [{ key: 0, style: {} }];
+  if (id === "cel-supernova") {
+    const n = preview ? 2 : 3;
+    return Array.from({ length: n }, (_, i) => ({ key: i, style: { animationDelay: `${i * 0.22}s` } }));
+  }
+  return [];
+}
+
+// The overlay itself. The caller mounts it for the length of the moment and unmounts it - there is no timer in
+// here, because the result screen already owns when the celebration starts.
+export function WinCelebration({ celebration = null, className = "" }) {
+  const id = known(celebration, "celebration") || DEFAULT_ITEM.celebration;
+  const pieces = celebrationPieces(id);
+  if (!pieces.length) return null;
+  return (
+    <div className={`cs-cel cs-cel-${id.replace(/^cel-/, "")} ${id === "cel-confetti" || id === "cel-gold-rain" ? "cs-cel-fall" : ""} ${className}`}
+         aria-hidden="true" data-celebration={id}>
+      {pieces.map((p) => <i key={p.key} style={p.style} />)}
+    </div>
+  );
+}
+
 export function ItemPreview({ id, team = null, username = "", photoUrl = null, preset = null }) {
   const item = SHOP_ITEM_BY_ID[id];
   if (!item) return null;
@@ -389,6 +657,26 @@ export function ItemPreview({ id, team = null, username = "", photoUrl = null, p
           <span className="cs-swatch-name" />
           <span className="cs-swatch-line" />
         </CardTheme>
+      </span>
+    );
+  }
+  if (item.kind === "nameplate") {
+    const look = NAMEPLATES[id];
+    return (
+      <span className="cs-preview" aria-hidden="true" data-preview={id}>
+        <span className={`cs-plate cs-plate-preview ${look.lively ? "cs-lively" : ""}`.trim()} data-plate={id}
+              style={{ "--cs-plate": plateFill(look), "--cs-plate-ink": look.ink, "--cs-plate-trim": look.trim }}>Name</span>
+      </span>
+    );
+  }
+  if (item.kind === "celebration") {
+    // Held still: the shop lists every celebration at once, and five overlays playing behind each other is
+    // not a preview of any of them. The Equip button is the way to see one for real.
+    return (
+      <span className="cs-preview" aria-hidden="true" data-preview={id}>
+        <span className={`cs-cel-preview cs-cel-${id.replace(/^cel-/, "")}`}>
+          {celebrationPieces(id, { preview: true }).map((pc) => <i key={pc.key} style={pc.style} />)}
+        </span>
       </span>
     );
   }

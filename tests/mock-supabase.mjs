@@ -63,7 +63,10 @@ export function makeMockAuth() {
     notify("SIGNED_IN");
     return { id, email };
   };
-  const state = { profiles, runs, dailyRuns, souRuns, builds, createProfile, renameAccount, currentUserId: () => session?.user?.id ?? null, isModerator: () => false, ownsAvatarPack: () => false };
+  // The supporters table (migration-shop.sql): the one-off unlock, service-role only in the database, so a
+  // test grants it the way the SQL editor would - auth._supporters.add(id).
+  const supporters = new Set();
+  const state = { profiles, runs, dailyRuns, souRuns, builds, supporters, createProfile, renameAccount, currentUserId: () => session?.user?.id ?? null, isModerator: () => false, ownsAvatarPack: () => false };
   const profileData = makeProfileData(state, { playerStats });
   const moderation = makeModeration(state, profileData);
   state.isModerator = moderation.isModerator;
@@ -663,7 +666,8 @@ export function makeMockAuth() {
     _pauseBeforeProfileWrite: (fn) => { beforeProfileWrite = fn; },
     _versus: versus, // test-only: 1v1's matches, and the state of one as versus-logic sees it
     _googleSignIn: googleSignIn, // test-only: the session Google's return leaves behind, with no browser
-    _profiles: profiles, // test-only escape hatch for setup/assertions
+    _profiles: profiles,
+    _supporters: supporters, // test-only escape hatch for setup/assertions
     _runs: runs, // test-only escape hatch for setup/assertions
     _builds: builds, // test-only escape hatch for setup/assertions
     _dailyRuns: dailyRuns, // test-only escape hatch for setup/assertions

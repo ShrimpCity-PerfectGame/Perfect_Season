@@ -13,7 +13,7 @@ const fail = (code) => {
 };
 const ID = /^[a-z0-9-]{1,40}$/;
 // equip_item's slot -> the profile_details column it writes.
-const SLOT_COLUMN = { frame: "frame", card: "card_theme", title: "title" };
+const SLOT_COLUMN = { frame: "frame", card: "card_theme", title: "title", nameplate: "nameplate", celebration: "celebration" };
 
 // state:       tests/mock-supabase.mjs's shared state
 // wallet:      tests/mock-wallet.mjs's makeWallet(state)
@@ -43,8 +43,12 @@ export function makeShop(state, { wallet, profileData }) {
     return uid;
   };
   // Free items are everyone's; a badge item is whoever's badge_awards has its badge; the rest need a purchase.
+  // The supporters table, mirroring migration-shop.sql: a one-off unlock, no expiry, written only by the
+  // service role or by hand. Held on the mock's shared state so a test can grant it the way SQL would.
+  const isSupporter = (uid) => !!(uid && state.supporters?.has(uid));
   const owns = (uid, item) => item.rarity === "free" || inventory.has(`${uid}|${item.id}`)
-    || (item.badge != null && wallet.tables.badge_awards.has(`${uid}|${item.badge}`));
+    || (item.badge != null && wallet.tables.badge_awards.has(`${uid}|${item.badge}`))
+    || (item.rarity === "supporter" && isSupporter(uid));
   const byShopOrder = (a, b) => SHOP_KINDS.indexOf(a.kind) - SHOP_KINDS.indexOf(b.kind) || a.sort - b.sort || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
   const rpcs = {
@@ -56,7 +60,9 @@ export function makeShop(state, { wallet, profileData }) {
         items: [...items.values()].map((item) => ({ ...item, owned: owns(uid, item) })).filter((item) => item.active || item.owned)
           .sort(byShopOrder)
           .map(({ id, kind, rarity, price, badge, active, sort, owned }) => ({ id, kind, rarity, price, badge, active, sort, owned })),
-        equipped: { frame: worn?.frame ?? null, card: worn?.card_theme ?? null, title: worn?.title ?? null, showcase: [...(worn?.showcase || [])] },
+        supporter: isSupporter(uid),
+        equipped: { frame: worn?.frame ?? null, card: worn?.card_theme ?? null, title: worn?.title ?? null,
+                    nameplate: worn?.nameplate ?? null, celebration: worn?.celebration ?? null, showcase: [...(worn?.showcase || [])] },
       };
     },
     shop_buy({ p_item = null } = {}) {
@@ -67,6 +73,7 @@ export function makeShop(state, { wallet, profileData }) {
       const item = items.get(p_item);
       if (!item || !item.active) fail("unavailable");
       if (item.badge != null) fail("badge_only");
+      if (item.rarity === "supporter") fail("supporter_only");
       if (owns(uid, item)) fail("owned");
       if (wallet.balanceOf(uid) < item.price) fail("not_enough");
       const key = `${uid}|${item.id}`;

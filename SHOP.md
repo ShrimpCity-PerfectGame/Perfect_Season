@@ -166,7 +166,7 @@ The database's own numbers (250, 15, 10,000, the starting formula, the 24-hour w
 | column | type | rule |
 |---|---|---|
 | `id` | text pk | `^[a-z0-9-]{1,40}$` |
-| `kind` | text not null | `frame` \| `card` \| `title` \| `avatar_pack` |
+| `kind` | text not null | `frame` \| `card` \| `title` \| `nameplate` \| `celebration` \| `avatar_pack` |
 | `rarity` | text not null | `free` \| `common` \| `rare` \| `epic` \| `legendary` \| `badge` |
 | `price` | integer | null for free and badge items, otherwise 1–1,000,000 (named check `shop_items_price_fits_rarity`) |
 | `badge` | text | the badges.mjs id that unlocks a badge item; null otherwise |
@@ -198,7 +198,7 @@ frame, the Navy card, no title) and `showcase text[] not null default '{}'` (nam
 
 | function | returns | notes / raises |
 |---|---|---|
-| `shop_state()` | jsonb `{ "balance", "items": [{ "id", "kind", "rarity", "price", "badge", "active", "sort", "owned" }], "equipped": { "frame", "card", "title", "showcase" } }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. Items: every active item plus any inactive one the player owns, ordered by kind (frame, card, title, avatar_pack), then `sort`, then `id`. `owned`: free, or an inventory row, or a badge item whose badge is in `badge_awards`. `equipped`: the caller's profile_details columns (nulls and `[]` without a row). |
+| `shop_state()` | jsonb `{ "balance", "items": [{ "id", "kind", "rarity", "price", "badge", "active", "sort", "owned" }], "equipped": { "frame", "card", "title", "nameplate", "celebration", "showcase" } }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. Items: every active item plus any inactive one the player owns, ordered by kind (frame, card, title, nameplate, celebration, avatar_pack), then `sort`, then `id`. `owned`: free, or an inventory row, or a badge item whose badge is in `badge_awards`. `equipped`: the caller's profile_details columns (nulls and `[]` without a row). |
 | `shop_buy(p_item text)` | jsonb `{ "ok": true, "balance", "item" }` | security definer; `authenticated` only. Raises, checked in this order: `not_signed_in`; `unavailable` (no such item, or not active); `badge_only`; `owned` (free, or already owned); `not_enough`. Takes the wallet lock **before** reading the item, ownership or the balance, then inserts the inventory row and `wallet_apply(uid, -price, 'purchase', id)`, all in one transaction. If `wallet_apply` doesn't charge the full price (the ledger already records that purchase but the inventory row is gone — only possible after rows were edited by hand) it raises `purchase_conflict` and rolls back, rather than hand the item over free. |
 | `equip_item(p_slot text, p_item text)` | jsonb: the details row (`to_jsonb`, like `save_profile`) | security definer; `authenticated` only. Raises `not_signed_in`; `bad_slot` (not `frame`, `card` or `title`); `bad_item` (no such item, or its kind isn't the slot's — each slot takes its own kind); `not_owned`. Null `p_item` clears the slot. Upserts the caller's row and changes only that column (`card` → `card_theme`) plus `updated_at`. |
 | `set_showcase(p_badges text[])` | jsonb: the details row | security definer; `authenticated` only. Raises `not_signed_in`; `bad_showcase` (more than 3, a null, a duplicate, a multi-dimensional array, or an id not matching `^[a-z0-9-]{1,40}$`). Null saves `{}`; the ids are saved in order, numbered from 1. It doesn't check the badges are earned: the card shows only the earned ones, because badges are worked out in the browser and one earned since the player's last season isn't in `badge_awards` yet. |
@@ -300,7 +300,7 @@ The app imports these from `./storage.js`. **Nothing throws.** Reads use `READ` 
 ```js
 fetchWallet()            → { balance, earned, spent, recent: [{ amount, kind, ref, createdAt }] } | null
 fetchShop()              → { balance, items: [{ id, kind, rarity, price, badge, active, sort, owned }],
-                             equipped: { frame, card, title, showcase } } | null
+                             equipped: { frame, card, title, nameplate, celebration, showcase } } | null
 buyItem(id)              → { ok: true, balance } | { ok: false, reason }
     // reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "signed_out" | "network"
     // (purchase_conflict arrives as "network": nothing the player can do clears it)
@@ -330,9 +330,9 @@ claimMinigameCoins(game, date) → { ok: true, credited, balance } | { ok: false
 ### 6.2 `shop-catalog.mjs` (phase 0, lead)
 
 ```js
-SHOP_KINDS    = ["frame", "card", "title", "avatar_pack"]
-KIND_LABEL    = { frame: "Frames", card: "Card themes", title: "Titles", avatar_pack: "Avatar packs" }
-EQUIP_SLOTS   = ["frame", "card", "title"]        // each slot takes items of its own kind
+SHOP_KINDS    = ["frame", "card", "title", "nameplate", "celebration", "avatar_pack"]
+KIND_LABEL    = { frame: "Frames", card: "Card themes", title: "Titles", nameplate: "Nameplates", celebration: "Win celebrations", avatar_pack: "Avatar packs" }
+EQUIP_SLOTS   = ["frame", "card", "title", "nameplate", "celebration"]        // each slot takes items of its own kind
 DEFAULT_ITEM  = { frame: "frame-ink", card: "card-navy", title: null }
 RARITIES, RARITY_LABEL                           // free, common, rare, epic, legendary, badge ("Badge reward")
 SHOWCASE_MAX  = 3
@@ -371,6 +371,24 @@ Names and looks live in the browser (cosmetics.jsx draws each id); price, rarity
 | `title-undefeated` | title | Undefeated | badge | – | undefeated |
 | `title-daily-winner` | title | Daily Winner | badge | – | daily-winner |
 | `title-cinderella` | title | Cinderella | badge | – | cinderella |
+| `title-supporter` | title | Supporter | supporter | – | |
+| `plate-ink` | nameplate | Ink | free | – | |
+| `plate-lime` | nameplate | Lime | common | 750 | |
+| `plate-turf` | nameplate | Turf | rare | 2,000 | |
+| `plate-blue` | nameplate | Game blue | rare | 2,000 | |
+| `plate-midnight` | nameplate | Midnight | rare | 2,000 | |
+| `plate-gold` | nameplate | Gold | epic | 6,000 | |
+| `plate-inferno` | nameplate | Inferno | epic | 6,000 | |
+| `plate-ember` | nameplate | Ember | legendary | 15,000 | |
+| `plate-emerald` | nameplate | Emerald | legendary | 15,000 | |
+| `plate-dynasty` | nameplate | Dynasty | badge | – | `dynasty` |
+| `plate-aurora` | nameplate | Aurora | supporter | – | |
+| `cel-confetti` | celebration | Confetti | free | — | |
+| `cel-spotlight` | celebration | Spotlight | common | 750 | |
+| `cel-fireworks` | celebration | Fireworks | rare | 2,000 | |
+| `cel-gold-rain` | celebration | Gold rain | epic | 6,000 | |
+| `cel-champion` | celebration | Champion | badge | — | `undefeated` |
+| `cel-supernova` | celebration | Supernova | supporter | — | |
 | `pack-sideline` | avatar_pack | Sideline | common | 750 | |
 | `pack-trophy-room` | avatar_pack | Trophy room | rare | 2,000 | |
 | `pack-night-game` | avatar_pack | Night game | epic | 6,000 | |

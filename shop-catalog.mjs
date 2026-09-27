@@ -6,16 +6,21 @@
 // the server's rarity and price - `rarity` here is only the launch value, for the harness and the seed
 // check in tests/test-shop-sql.mjs, which fails if this file and the seeds disagree.
 
-export const SHOP_KINDS = ["frame", "card", "title", "avatar_pack"];
-export const KIND_LABEL = { frame: "Frames", card: "Card themes", title: "Titles", avatar_pack: "Avatar packs" };
+export const SHOP_KINDS = ["frame", "card", "title", "nameplate", "celebration", "avatar_pack"];
+export const KIND_LABEL = { frame: "Frames", card: "Card themes", title: "Titles", nameplate: "Nameplates", celebration: "Win celebrations", avatar_pack: "Avatar packs" };
 // Each equip slot takes items of its own kind. Avatar packs aren't equipped: owning one unlocks its avatars
 // in the picture picker.
-export const EQUIP_SLOTS = ["frame", "card", "title"];
+export const EQUIP_SLOTS = ["frame", "card", "title", "nameplate", "celebration"];
 // What an empty slot shows. Null in profile_details means this.
-export const DEFAULT_ITEM = { frame: "frame-ink", card: "card-navy", title: null };
+// A null nameplate is no plate at all - the name as it has always looked - rather than a default one, so
+// nobody is given a banner they did not choose.
+export const DEFAULT_ITEM = { frame: "frame-ink", card: "card-navy", title: null, nameplate: null, celebration: "cel-confetti" };
 
-export const RARITIES = ["free", "common", "rare", "epic", "legendary", "badge"];
-export const RARITY_LABEL = { free: "Free", common: "Common", rare: "Rare", epic: "Epic", legendary: "Legendary", badge: "Badge reward" };
+// "badge" is earned by playing and "supporter" comes with the one-off unlock; neither is bought with coins.
+// They are deliberately parallel rather than a ladder: a supporter item is DIFFERENT, not better, because the
+// best thing in the game should still belong to somebody who has gone 20-0.
+export const RARITIES = ["free", "common", "rare", "epic", "legendary", "badge", "supporter"];
+export const RARITY_LABEL = { free: "Free", common: "Common", rare: "Rare", epic: "Epic", legendary: "Legendary", badge: "Badge reward", supporter: "Supporter" };
 
 // How many badges the showcase holds.
 export const SHOWCASE_MAX = 3;
@@ -92,7 +97,35 @@ export const SHOP_ITEMS = [
   { id: "title-undefeated", kind: "title", name: "Undefeated", rarity: "badge", badge: "undefeated" },
   { id: "title-daily-winner", kind: "title", name: "Daily Winner", rarity: "badge", badge: "daily-winner" },
   { id: "title-cinderella", kind: "title", name: "Cinderella", rarity: "badge", badge: "cinderella" },
+  { id: "title-supporter", kind: "title", name: "Supporter", rarity: "supporter" },
 
+
+  // Win celebrations: an overlay that plays over the result screen when a season wins the title. Confetti is
+  // free and the default, so every player has one - an empty celebration slot would be the only equip slot
+  // that shows nothing, and the moment is the point of the mode.
+  // Nameplates: a banner behind the name on the player card. Each carries its OWN text colour rather than
+  // taking the card's, because the card underneath can be any of three scopes - see NAMEPLATES in cosmetics.jsx,
+  // where the pair is held to AA.
+  { id: "plate-ink", kind: "nameplate", name: "Ink", rarity: "free" },
+  { id: "plate-lime", kind: "nameplate", name: "Lime", rarity: "common" },
+  { id: "plate-turf", kind: "nameplate", name: "Turf", rarity: "rare" },
+  { id: "plate-blue", kind: "nameplate", name: "Game blue", rarity: "rare" },
+  { id: "plate-midnight", kind: "nameplate", name: "Midnight", rarity: "rare" },
+  { id: "plate-gold", kind: "nameplate", name: "Gold", rarity: "epic" },
+  { id: "plate-inferno", kind: "nameplate", name: "Inferno", rarity: "epic" },
+  { id: "plate-ember", kind: "nameplate", name: "Ember", rarity: "legendary" },
+  { id: "plate-emerald", kind: "nameplate", name: "Emerald", rarity: "legendary" },
+  { id: "plate-dynasty", kind: "nameplate", name: "Dynasty", rarity: "badge", badge: "dynasty" },
+  { id: "plate-aurora", kind: "nameplate", name: "Aurora", rarity: "supporter" },
+
+  { id: "cel-confetti", kind: "celebration", name: "Confetti", rarity: "free" },
+  { id: "cel-spotlight", kind: "celebration", name: "Spotlight", rarity: "common" },
+  { id: "cel-fireworks", kind: "celebration", name: "Fireworks", rarity: "rare" },
+  { id: "cel-gold-rain", kind: "celebration", name: "Gold rain", rarity: "epic" },
+  // Earned, not bought, like the frame and title that share its badge: the best celebration in the game
+  // belongs to somebody who has gone 20-0, which is 4.5% of finished seasons.
+  { id: "cel-champion", kind: "celebration", name: "Champion", rarity: "badge", badge: "undefeated" },
+  { id: "cel-supernova", kind: "celebration", name: "Supernova", rarity: "supporter" },
   ...AVATAR_PACKS.map((p) => ({ id: p.item, kind: "avatar_pack", name: p.name, rarity: p.rarity })),
 ].map((item) => ({ badge: null, ...item }));
 export const SHOP_ITEM_BY_ID = Object.fromEntries(SHOP_ITEMS.map((item) => [item.id, item]));
