@@ -5,7 +5,7 @@
 // text (cardPaint), so tests/test-cosmetics.mjs can hold each theme's text to WCAG AA without parsing CSS.
 // The scope tokens (--ink, --muted, ...) still come from theme.mjs through the cs-dark, cs-night and cs-light
 // classes, which perfect-season.jsx maps to its scopes.
-import { Avatar } from "./avatars.jsx";
+import { Avatar, SPACE } from "./avatars.jsx";
 import { PALETTE, THEME, TEXT_TOKENS } from "./theme.mjs";
 import { TEAMS } from "./game-logic.mjs";
 import { teamVars } from "./ui-common.jsx";
@@ -16,6 +16,7 @@ import { SHOP_ITEM_BY_ID, DEFAULT_ITEM, PACK_BY_ITEM } from "./shop-catalog.mjs"
 export const CARD_THEME_SCOPE = {
   "card-navy": "dark", "card-night": "night", "card-turf": "dark", "card-team": "dark",
   "card-ticket": "light", "card-gold-foil": "light", "card-dynasty": "night",
+  "card-cosmos": "night",
 };
 
 // ---------- Color math ----------
@@ -78,6 +79,13 @@ export const COLORS = {
   plateAurora: "#6D3FD6",
   celStage: "#0B1020", // the shop preview tile's little night sky
   celBeam: "#FFFFFF", // a spotlight beam, which is white light and nothing else
+  // Supporter's cosmic line (v2.6.0 Aurora and Supernova, v2.7.0 Nebula, v2.8.0 Orbit and Cosmos). A supporter
+  // can now dress entirely in it, which is the point: it reads as one thing across the frame, the card, the
+  // plate, the name and the avatar rather than as five unrelated purchases.
+  cosmosVoid: SPACE, // deep space, shared with the Stargazer avatars that are worn with it (avatars.jsx)
+  cosmosHaze: "#241046", // the violet nebula washed across it
+  orbitRing: "#2A1458",  // the Orbit frame's ring
+  orbitEdge: "#150A2E",  // and the edge inside it
   // Name colours (the boards, NAME_LOOKS below). Each look is named twice: a deep value that clears AA on
   // cream and a bright one that clears it on true black. The pairs are the same colour as far as anyone
   // reading the board is concerned - Ember is Ember - and the two exist because the surface underneath is
@@ -129,6 +137,13 @@ const LAYER = {
   nightDots: 0.06,
   foilLines: 0.5, // the glint's fine diagonal lines on the foil
   dynastyWreath: 0.1, // the gold laurel watermark
+  // Cosmos (v2.8.0). ONE star layer, deliberately: two would overlap on some pixels and the brightest thing
+  // behind a letter would be a value nothing declared. At 6% a star is as bright as Night's dots, and the
+  // haze at 70% keeps every night text token clear of AA on all four surfaces a letter can land on - the void,
+  // a star, the haze, and a star inside the haze. Raising either fails tests/test-cosmetics.mjs, which is how
+  // these two numbers were chosen rather than picked.
+  cosmosStars: 0.06,
+  cosmosHaze: 0.7,
 };
 
 // The brightest fill the dark scope's text reads on (every text token at 4.6:1, a little over AA so rounding
@@ -168,6 +183,13 @@ export function cardPaint(theme, team = null) {
     case "card-ticket": return { scope, behindText: [COLORS.paper] };
     case "card-gold-foil": return { scope, behindText: [COLORS.foil, COLORS.foilGlint, COLORS.foilShade, mixHex(COLORS.foilGlint, COLORS.foilShade, LAYER.foilLines)] };
     case "card-dynasty": return { scope, behindText: [COLORS.dynasty, mixHex(COLORS.gold, COLORS.dynasty, LAYER.dynastyWreath)] };
+    case "card-cosmos": {
+      // Four surfaces, because the haze covers part of the card and a star can fall anywhere: the void, a star
+      // on it, the haze, and a star inside the haze - which is the brightest thing a letter can sit on.
+      const wash = mixHex(COLORS.cosmosHaze, COLORS.cosmosVoid, LAYER.cosmosHaze);
+      return { scope, behindText: [COLORS.cosmosVoid, mixHex(t.ink, COLORS.cosmosVoid, LAYER.cosmosStars),
+        wash, mixHex(t.ink, wash, LAYER.cosmosStars)] };
+    }
     default: {
       // Navy, today's card: --bg, the dots, and the lime --glow in the top-left corner.
       const glow = String(t.glow).match(/rgba?\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
@@ -357,6 +379,16 @@ export const COSMETICS_CSS = `
   animation:cs-spin 3.2s linear infinite}
 .cs-frame-flame::after{content:"";background:radial-gradient(closest-side,${C.flameTip} 84%,${rgba(C.flameYellow, 0.9)} 89%,${rgba(C.flameOrange, 0.3)} 95%,transparent 100%);
   animation:cs-flicker 1.3s ease-in-out infinite alternate}
+/* Orbit (supporter): a deep violet ring with one bright body going round it. The sweep is a conic gradient
+   turned by the same cs-spin Flame uses - one keyframe, not a second one that does the same thing - and it is
+   slow, because this sits beside a name at 24px in the header and a fast one there is a distraction. */
+.cs-frame-orbit{--av-edge:${C.orbitEdge};background:conic-gradient(from 220deg,${C.orbitEdge},${C.orbitRing} 45%,${C.orbitEdge} 88%,${C.orbitEdge});
+  box-shadow:inset 0 0 0 var(--cs-edge) ${C.orbitEdge}}
+/* The ring is kept dark all the way round so the body going over it is the only bright thing on the frame.
+   With the ring itself carrying a bright violet the sweep had nothing to stand out against, and at 24px the
+   whole thing read as a plain purple circle. */
+.cs-frame-orbit::before{content:"";background:conic-gradient(transparent 0 54%,${rgba(C.plateAurora, 0.85)} 66%,${C.nameNebulaLilac} 73%,${C.cream} 77%,${C.nameNebulaLilac} 81%,${rgba(C.plateAurora, 0.85)} 88%,transparent 96%);
+  animation:cs-spin 7s linear infinite}
 @keyframes cs-spin{to{transform:rotate(1turn)}}
 @keyframes cs-flicker{0%{opacity:.45}35%{opacity:1}60%{opacity:.7}100%{opacity:.95}}
 /* Undefeated: twenty lime segments, one for every game of a perfect season, on ink; the card-sized picture
@@ -405,6 +437,15 @@ export const COSMETICS_CSS = `
 .cs-card-dynasty{background:${WREATH} right calc(12px*var(--cs-s)) bottom calc(10px*var(--cs-s))/calc(132px*var(--cs-s)) no-repeat,${C.dynasty};
   box-shadow:calc(4px*var(--cs-s)) calc(4px*var(--cs-s)) 0 ${C.gold},inset 0 0 0 calc(4px*var(--cs-s)) ${C.dynasty},inset 0 0 0 calc(6px*var(--cs-s)) ${C.gold},
     inset 0 0 0 calc(8px*var(--cs-s)) ${C.dynasty},inset 0 0 0 calc(9px*var(--cs-s)) ${C.goldDeep}}
+/* Cosmos (supporter): deep space with a violet nebula in one corner and a single field of stars. One star
+   layer, because two would overlap and put a brighter value behind a letter than cardPaint declares - see
+   LAYER.cosmosStars. Nothing here animates: a card is behind a name and a bio, and a moving background under
+   text is the one place in this app where motion would cost legibility rather than add anything. */
+.cs-card-cosmos{background:
+  radial-gradient(${rgba(C.cream, LAYER.cosmosStars)} .9px,transparent 1.3px) 0 0/19px 19px,
+  radial-gradient(125% 95% at 14% 0%,${rgba(C.cosmosHaze, LAYER.cosmosHaze)} 0%,transparent 64%),
+  ${C.cosmosVoid};
+  box-shadow:calc(4px*var(--cs-s)) calc(4px*var(--cs-s)) 0 ${C.ink},inset 0 0 0 calc(2px*var(--cs-s)) ${rgba(C.plateAurora, 0.5)}}
 
 /* A title under a name: small, letter-spaced, with a slanted double-stripe marker. */
 .cs-title{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;font-weight:800;line-height:1.2;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-ink)}
@@ -452,8 +493,9 @@ export const COSMETICS_CSS = `
    what .pf-long and .sh-long already do.
    The outer ring is what stops a plate vanishing into a card of nearly its own colour - Turf on the Turf card
    is #092B12 on #06200D - so every plate reads as a banner rather than an outline round a name. */
-.cs-nameplate{display:block;width:fit-content;max-width:100%;border-radius:8px;padding:3px 9px 4px;
-  background:var(--cs-nameplate);white-space:nowrap;color:var(--cs-nameplate-ink);line-height:1.08;
+.cs-nameplate{display:block;width:fit-content;max-width:100%;min-width:0;border-radius:8px;padding:3px 9px 4px;
+  background:var(--cs-nameplate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  color:var(--cs-nameplate-ink);line-height:1.08;
   box-shadow:inset 0 0 0 1.5px var(--cs-nameplate-trim),0 0 0 2px ${rgba(C.ink, 0.35)}}
 .cs-nameplate-preview{display:inline-flex;align-items:center;justify-content:center;width:64px;height:26px;
   border-radius:6px;font-family:var(--display);font-size:13px;letter-spacing:.02em}
@@ -582,6 +624,8 @@ export const COSMETICS_CSS = `
   /* A drifting name holds still and keeps its colours, for the same reason a plate does: there is something
      to read underneath, and it is somebody's name. */
   .cs-name-grad.cs-lively{animation:none}
+  /* Orbit stops with its body wherever it is - a ring with a bright arc in it, which is still the frame. */
+  .cs-frame-orbit::before{animation:none}
 }
 `;
 

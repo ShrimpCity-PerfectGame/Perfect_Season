@@ -242,7 +242,16 @@ export function makeProfileData(state, { playerStats }) {
       if (!isClean(p_username)) return "blocked";
       if ([...state.profiles.values()].some((r) => r.username === p_username)) return "taken";
       if (!row) state.createProfile(uid, p_username);
-      else state.renameAccount(uid, p_username); // a guest keeping what it played, under its own name
+      else {
+        // A guest keeping what it played, under its own name - but only once a credential is attached to the
+        // session. Mirrors the auth.users test in migration-profiles.sql: clearing `guest` is what opens the
+        // daily, the shop, duels, reports and the avatars bucket, so an anonymous session calling this RPC
+        // directly would promote itself past every one of those refusals.
+        const u = state.currentUser?.() || null;
+        const attached = !!(u && (u.email || u.phone || u.is_anonymous === false));
+        if (!attached) return "still_anonymous";
+        state.renameAccount(uid, p_username);
+      }
       return "ok";
     },
     check_username({ p_username = null } = {}) {

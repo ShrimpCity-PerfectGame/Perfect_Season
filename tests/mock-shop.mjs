@@ -128,6 +128,20 @@ export function makeShop(state, { wallet, profileData }) {
   return {
     tables: { shop_items: items, inventory },
     rpcs,
+    // The DELETE half of migration-shop.sql's supporters_sync: a refund takes off everything supporter-rarity
+    // the account was wearing, including a picture from a supporter pack. The card renders the column and asks
+    // nobody about ownership, so anything left equipped would go on showing after the unlock was gone.
+    stripSupporterItems: (uid) => {
+      const worn = profileData.tables.profile_details.get(uid);
+      if (!worn) return;
+      const isSupporterItem = (id) => !!id && items.get(id)?.rarity === "supporter";
+      for (const [slot, column] of Object.entries(SLOT_COLUMN)) {
+        void slot;
+        if (isSupporterItem(worn[column])) worn[column] = null;
+      }
+      const pack = worn.avatar_preset ? profileData.tables.avatar_presets.get(worn.avatar_preset)?.pack : null;
+      if (pack && isSupporterItem(packItem(pack))) worn.avatar_preset = null;
+    },
     // set_avatar's check for a paid pack's avatar (state.ownsAvatarPack): the pack's shop item, owned the way
     // shop_state says it is, as migration-profiles.sql checks it.
     ownsAvatarPack: (uid, pack) => {

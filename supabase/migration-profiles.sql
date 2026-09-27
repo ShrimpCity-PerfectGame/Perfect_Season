@@ -266,6 +266,7 @@ declare
   v_uid uuid := auth.uid();
   v_preset public.avatar_presets;
   v_row public.profile_details;
+  v_supporter boolean := false;
 begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
@@ -298,6 +299,14 @@ begin
       if to_regclass('public.inventory') is null then
         raise exception 'bad_preset' using errcode = 'P0001';
       end if;
+      -- Whether the caller has the one-off unlock, for a supporter pack (v2.8.0). Read HERE, into a variable,
+      -- and through EXECUTE: the query below names public.supporters, and plpgsql plans a statement whole, so
+      -- an arm guarded by to_regclass inside that condition would still fail to plan on a database that has
+      -- not had migration-shop.sql re-run. Same reasoning as the inventory check immediately above - which is
+      -- why the two migrations go shop first, then this one.
+      if to_regclass('public.supporters') is not null then
+        execute 'select exists (select 1 from public.supporters where user_id = $1)' into v_supporter using v_uid;
+      end if;
       -- The same ownership rule as shop_state's (migration-shop.sql): the picker unlocks a pack from that answer,
       -- so anything narrower here would offer avatars this then refuses.
       if not exists (
@@ -306,7 +315,8 @@ begin
            and (s.rarity = 'free'
                 or exists (select 1 from public.inventory i where i.user_id = v_uid and i.item_id = s.id)
                 or (s.badge is not null
-                    and exists (select 1 from public.badge_awards b where b.user_id = v_uid and b.badge = s.badge)))) then
+                    and exists (select 1 from public.badge_awards b where b.user_id = v_uid and b.badge = s.badge))
+                or (s.rarity = 'supporter' and v_supporter))) then
         raise exception 'bad_preset' using errcode = 'P0001';
       end if;
     end if;
@@ -406,7 +416,7 @@ $$;
 -- same reason: a modified browser can call this directly, so the form's own checks exist only to say why
 -- sooner. Everyone else is refused, so this is never a rename - that stays a moderator's job (mod_act).
 -- The codes are check_username's, plus two for the states only this function can be in:
---   ok | invalid | taken | blocked | already_named | not_signed_in
+--   ok | invalid | taken | blocked | already_named | not_signed_in | still_anonymous
 create or replace function public.claim_username(p_username text)
 returns text language plpgsql security definer set search_path = public, pg_temp as $$
 declare
@@ -435,6 +445,27 @@ begin
   else
     -- A guest keeping what it has played: the same account, under its own name from now on. The name
     -- snapshots on the boards follow it, exactly as a moderator's rename moves them (mod_act).
+    --
+    -- ...but only once a real credential is attached to the session, and THIS is where that is enforced.
+    -- Clearing `guest` is what opens the daily, the shop, a duel, reports and the avatars bucket: every one
+    -- of those refusals reads profiles.guest and nothing else. The email and password step lives in the
+    -- browser (KeepSeasons), which is manners - an anonymous session could call this RPC on its own and
+    -- promote itself for the price of one sign-in and one POST, handing back everything a guest is refused,
+    -- one throwaway account at a time. mod_act's rename was given a guest gate for a smaller version of
+    -- this; this function never had one.
+    -- Any attached identity counts, and the test is deliberately permissive: with email confirmation ON the
+    -- new address can sit in email_change while is_anonymous stays true until it is confirmed, so gating on
+    -- is_anonymous alone would refuse the real trade-up on staging, where confirmation is on.
+    if not exists (
+      select 1 from auth.users u
+       where u.id = v_uid
+         and (coalesce(u.is_anonymous, false) = false
+              or nullif(u.email, '') is not null
+              or nullif(u.email_change, '') is not null
+              or nullif(u.phone, '') is not null)
+    ) then
+      return 'still_anonymous';
+    end if;
     update public.profiles set username = p_username, guest = false where id = v_uid;
     update public.runs set username = p_username where user_id = v_uid;
     update public.daily_runs set username = p_username where user_id = v_uid;

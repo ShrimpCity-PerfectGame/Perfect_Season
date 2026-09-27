@@ -355,6 +355,7 @@ Names and looks live in the browser (cosmetics.jsx draws each id); price, rarity
 | `frame-gold` | frame | Gold | epic | 6,000 | |
 | `frame-flame` | frame | Flame (animated) | legendary | 15,000 | |
 | `frame-undefeated` | frame | Undefeated | badge | – | undefeated |
+| `frame-orbit` | frame | Orbit | supporter | – | |
 | `card-navy` | card | Navy | free | – | |
 | `card-night` | card | Night | common | 750 | |
 | `card-turf` | card | Turf | rare | 2,000 | |
@@ -362,6 +363,7 @@ Names and looks live in the browser (cosmetics.jsx draws each id); price, rarity
 | `card-ticket` | card | Ticket stub | epic | 6,000 | |
 | `card-gold-foil` | card | Gold foil | legendary | 15,000 | |
 | `card-dynasty` | card | Dynasty | badge | – | dynasty |
+| `card-cosmos` | card | Cosmos | supporter | – | |
 | `title-film-room` | title | Film Room | common | 750 | |
 | `title-waiver-hawk` | title | Waiver Hawk | common | 750 | |
 | `title-draft-guru` | title | Draft Guru | rare | 2,000 | |
@@ -405,6 +407,7 @@ Names and looks live in the browser (cosmetics.jsx draws each id); price, rarity
 | `pack-night-game` | avatar_pack | Night game | epic | 6,000 | |
 | `pack-draft-day` | avatar_pack | Draft day (v1.13.0) | legendary | 15,000 | |
 | `pack-hall-of-fame` | avatar_pack | Hall of Fame (v1.13.0) | legendary | 15,000 | |
+| `pack-stargazer` | avatar_pack | Stargazer (v2.8.0) | supporter | – | |
 
 Seed `sort` is 10, 20, 30… in this order within each kind. The packs' avatars: **Sideline** — `headset` Headset,
 `cooler` Water cooler, `pylon` Pylon, `penalty-flag` Penalty flag; **Trophy room** — `title-ring` Title ring,

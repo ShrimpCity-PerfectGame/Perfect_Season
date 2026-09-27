@@ -34,7 +34,7 @@ export function makeMockAuth() {
   // A profile as the database makes one, and what happens around it: migration-wallet.sql's trigger on
   // profiles pays the welcome coins. Both ways in - the signup trigger and claim_username - come through here.
   const createProfile = (id, username, guest = false) => {
-    profiles.set(id, { id, username, guest, rev: 0, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
+    profiles.set(id, { id, username, guest, supporter: false, rev: 0, runs: 0, dnf: 0, wins: 0, losses: 0, champs: 0, perfect: 0, playoffs: 0, recent: [], daily_streak: 0, daily_best_streak: 0, created_at: new Date().toISOString() });
     wallet.welcome(id);
     return profiles.get(id);
   };
@@ -65,8 +65,34 @@ export function makeMockAuth() {
   };
   // The supporters table (migration-shop.sql): the one-off unlock, service-role only in the database, so a
   // test grants it the way the SQL editor would - auth._supporters.add(id).
-  const supporters = new Set();
-  const state = { profiles, runs, dailyRuns, souRuns, builds, supporters, createProfile, renameAccount, currentUserId: () => session?.user?.id ?? null, isModerator: () => false, ownsAvatarPack: () => false };
+  //
+  // It is not a bare Set, because the real table has a TRIGGER on it. supporters_sync keeps
+  // profiles.supporter in step and, on a delete, takes off anything supporter-rarity the account was
+  // wearing. Without that here, a test could revoke the unlock and get a state the database cannot reach -
+  // shop_state saying the item is not owned while the card still renders it, which is the exact
+  // contradiction the trigger exists to prevent - and every such test would pass against behaviour the live
+  // site does not have. profiles.supporter was also never set at all, so storage-core.js's `supporter`
+  // mapping read false in every test, and the ad decision that will be built on it would test as working.
+  const supporterIds = new Set();
+  const supporters = {
+    has: (id) => supporterIds.has(id),
+    add(id) {
+      supporterIds.add(id);
+      const row = profiles.get(id);
+      if (row) row.supporter = true;
+      return this;
+    },
+    delete(id) {
+      const had = supporterIds.delete(id);
+      const row = profiles.get(id);
+      if (row) row.supporter = false;
+      state.stripSupporterItems?.(id);
+      return had;
+    },
+    get size() { return supporterIds.size; },
+    [Symbol.iterator]: () => supporterIds[Symbol.iterator](),
+  };
+  const state = { profiles, runs, dailyRuns, souRuns, builds, supporters, createProfile, renameAccount, currentUserId: () => session?.user?.id ?? null, currentUser: () => session?.user ?? null, isModerator: () => false, ownsAvatarPack: () => false };
   const profileData = makeProfileData(state, { playerStats });
   const moderation = makeModeration(state, profileData);
   state.isModerator = moderation.isModerator;
@@ -74,6 +100,8 @@ export function makeMockAuth() {
   const wallet = makeWallet(state);
   const shop = makeShop(state, { wallet, profileData });
   state.ownsAvatarPack = shop.ownsAvatarPack;
+  // The DELETE half of supporters_sync, now that the shop knows which items are supporter-rarity.
+  state.stripSupporterItems = shop.stripSupporterItems;
   // 1v1 (VERSUS.md), the same way: its two tables, its three database functions and the match-pick function.
   // Every write to a match reaches both screens over Realtime, which here means firing the channel the
   // screens subscribed to. A channel nobody has opened is simply nobody listening.
@@ -85,7 +113,8 @@ export function makeMockAuth() {
   // Reads, the same way: reports and moderators have RLS on and no select policy, so a client sees no rows;
   // blocked_words and the coin tables have their table grants revoked too, so a client's read is refused outright.
   const HIDDEN_ROWS = new Set(["reports", "moderators"]);
-  const REFUSED_READS = new Set(["blocked_words", "wallets", "wallet_ledger", "badge_awards", "finished_codes", "inventory"]);
+  const REFUSED_READS = new Set(["blocked_words", "wallets", "wallet_ledger", "badge_awards", "badge_rewards",
+    "finished_codes", "inventory", "supporters"]);
   function refusedRead(table) {
     const result = { data: null, error: { code: "42501", message: `permission denied for table ${table}` } };
     const query = {

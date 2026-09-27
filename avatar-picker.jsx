@@ -56,6 +56,11 @@ export const PICKER_CSS = `
    a phone's screen, hiding half the avatars. */
 .ap-picker{display:flex;flex-direction:column;gap:14px;min-width:0;width:100%}
 .ap-tabs{display:flex;align-self:flex-start;max-width:100%;border:2px solid var(--btn-line);border-radius:10px;overflow:hidden;background:var(--surface)}
+/* The focus ring is drawn 3px OUTSIDE the button, which lands exactly in this container's overflow:hidden -
+   so tabbing into the picker's tabs showed no focus indicator at all. The app's own .seg has the identical
+   widget and the identical fix; this one never got it. axe cannot see a clipped ring, which is why
+   test-a11y.mjs passes either way. */
+.ap-tab:focus-visible{outline-offset:-3px}
 .ap-tab{flex:1 1 auto;background:none;border:none;padding:8px 14px;font-weight:700;font-size:14px;line-height:1.2;color:var(--muted);transition:background-color .12s,color .12s}
 .ap-tab+.ap-tab{border-left:2px solid var(--btn-line)}
 .ap-tab[aria-selected=true]{background:var(--accent);color:var(--on-accent)}

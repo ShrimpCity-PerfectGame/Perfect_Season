@@ -10,15 +10,19 @@ one-off $3.99 Supporter unlock that removes ads and unlocks cosmetics of its own
 
 ## 1. Where it stands
 
-**Built, in the working tree, not shipped** (this is the first slice of the revamp, held back to go out as one
-update):
+**Shipped to staging** (2.5.0 through 2.8.0), not yet on production:
 
 - **Win celebrations** — a fifth item kind and a fifth equip slot. An overlay over the result screen when a
   season wins the title. Five items; Champion is earned by the Undefeated badge, not sold.
 - **Supporter** — the entitlement itself: a `supporters` row, `profiles.supporter` kept in step by a trigger,
-  the `supporter` rarity gated in `shop_state` / `shop_buy` / `equip_item`, and two items behind it.
+  the `supporter` rarity gated in `shop_state` / `shop_buy` / `equip_item`.
+- **Name colours** (2.7.0) — nine looks on the boards, the duel screen and the header. See Phase 2.
+- **The supporter set is complete** (2.8.0) — Orbit (frame), Cosmos (card), Stargazer (avatar pack) join the
+  title, the nameplate, the name colour and the celebration, so supporter fills **every slot**. That matters
+  for §3: $3.99 needs enough behind it to be worth paying, and "two items" was the reason Phase 3 was told to
+  wait. It no longer is.
 
-**Not built:** payment, ads, and everything in §4.
+**Not built:** payment, ads, and everything else in §4.
 
 ---
 

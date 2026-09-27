@@ -915,7 +915,13 @@ export function nextStreak(stats, date) {
   if (prev === date) return stats.dailyStreak || 1;
   const y = new Date(date + "T00:00:00"); y.setDate(y.getDate() - 1);
   const yk = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, "0")}-${String(y.getDate()).padStart(2, "0")}`;
-  return prev === yk ? (stats.dailyStreak || 0) + 1 : 1;
+  if (prev === yk) return (stats.dailyStreak || 0) + 1;
+  // A daily for a date EARLIER than the last one recorded doesn't break anything - it just isn't new. The
+  // date is the player's own calendar date and submit-run accepts UTC yesterday, today and tomorrow, so the
+  // same account on two devices an ocean apart can legitimately finish D and then D-1 - and that used to
+  // return 1 and throw away a nine-day streak for a day the player had not missed.
+  if (prev && date < prev) return stats.dailyStreak || 1;
+  return 1;
 }
 
 // ---------- Profile merge ----------
@@ -953,9 +959,12 @@ export const BEST_FIELDS = {
 export function applyRun(prev, run, day) {
   const s = {
     ...prev,
-    runs: prev.runs + 1, wins: prev.wins + run.w, losses: prev.losses + run.l,
-    champs: prev.champs + (run.champ ? 1 : 0), perfect: prev.perfect + (run.perfect ? 1 : 0),
-    playoffs: prev.playoffs + (run.playoffs ? 1 : 0),
+    // Defaulted the way applyDnf's counters are: both real callers hand over a fully defaulted row, but a
+    // partial one here would write NaN into six columns rather than failing, and this is the pair's only
+    // half without the guard.
+    runs: (prev.runs || 0) + 1, wins: (prev.wins || 0) + run.w, losses: (prev.losses || 0) + run.l,
+    champs: (prev.champs || 0) + (run.champ ? 1 : 0), perfect: (prev.perfect || 0) + (run.perfect ? 1 : 0),
+    playoffs: (prev.playoffs || 0) + (run.playoffs ? 1 : 0),
     recent: [run, ...(prev.recent || [])].slice(0, 10), updated: Date.now(),
   };
 

@@ -588,7 +588,7 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
 /* The supporter star. --accent-ink is the one accent token that is AA in every scope (game blue on cream,
    lime on the dark and night ones), which is exactly what an accent-coloured mark beside text needs. It is
    role="img" with a label, so it is not a meaning carried by colour alone. */
-.supchip{margin-left:5px;font-size:11px;line-height:1;color:var(--accent-ink);vertical-align:2px}
+.supchip{margin-left:5px;font-size:12px;line-height:1;color:var(--accent-ink);vertical-align:2px}
 .guestchip{margin-left:6px;padding:1px 6px;border:1px solid var(--line2);border-radius:999px;font-size:10.5px;
   font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);vertical-align:2px}
 @media (hover:hover){.namelink:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
@@ -821,7 +821,7 @@ p.gamecoins .earned{display:flex}
 .modechip.genius{color:var(--genius);border-color:color-mix(in srgb,var(--genius) 60%,transparent);background:color-mix(in srgb,var(--genius) 16%,transparent)}
 .modechip.gm{color:var(--gm);border-color:color-mix(in srgb,var(--gm) 60%,transparent);background:color-mix(in srgb,var(--gm) 16%,transparent)}
 .reel{position:relative;overflow:hidden;margin-bottom:10px;padding:18px 20px 16px 22px;border-radius:16px;
-  background:linear-gradient(102deg,var(--tc1) 0%,color-mix(in srgb,var(--tc1) 62%,var(--bg)) 46%,color-mix(in srgb,var(--tc1) 18%,var(--bg)) 82%);
+  background:linear-gradient(102deg,var(--tc-deep,var(--tc1)) 0%,color-mix(in srgb,var(--tc-deep,var(--tc1)) 62%,var(--bg)) 46%,color-mix(in srgb,var(--tc-deep,var(--tc1)) 18%,var(--bg)) 82%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 12px 30px rgba(0,0,0,.35)}
 .reel::before,.result-hero::before,.champion::before{content:'';position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1.4px);background-size:6px 6px;pointer-events:none}
 .reel>*{position:relative;z-index:1}
@@ -836,7 +836,7 @@ p.gamecoins .earned{display:flex}
 .reel.spin .team,.reel.spin .years{opacity:.8;filter:blur(.6px)}
 .rerolls{display:flex;gap:8px;margin-bottom:22px;flex-wrap:wrap}
 .sticky{position:fixed;top:0;left:0;right:0;z-index:30;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
-  background:linear-gradient(102deg,color-mix(in srgb,var(--tc1) 78%,var(--bg)) 0%,color-mix(in srgb,var(--bg) 95%,transparent) 58%);transform:translateY(-110%);transition:transform .18s ease-out}
+  background:linear-gradient(102deg,color-mix(in srgb,var(--tc-deep,var(--tc1)) 78%,var(--bg)) 0%,color-mix(in srgb,var(--bg) 95%,transparent) 58%);transform:translateY(-110%);transition:transform .18s ease-out}
 .sticky.show{transform:none}
 .sticky .in{position:relative;max-width:900px;margin:0 auto;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;
   padding:calc(8px + var(--sa-top,0px)) calc(16px + var(--sa-right,0px)) 8px calc(24px + var(--sa-left,0px))}
@@ -851,7 +851,10 @@ p.gamecoins .earned{display:flex}
 .chip-slot{opacity:.75;letter-spacing:.04em}
 /* Reads as the h3 it used to be: it's a heading level, not a size (the level below the screen's own name). */
 .locked-h{margin:0 0 4px;font-size:1.17em;font-weight:700}
-.chip.on{border:1px solid transparent;color:var(--pc,var(--accent-ink));background:color-mix(in srgb,var(--pc,var(--accent)) 16%,transparent)}
+/* 6%, not 16%: the chip tints its background with its OWN colour, so the tint eats the contrast of the text
+   sitting on it. At 16% three positions failed AA on cream - TE 3.96, QB 4.01, RB 4.45 - and the theme test
+   never saw it, because it measures tokens against the scope's surfaces, not against a tint of themselves. */
+.chip.on{border:1px solid transparent;color:var(--pc,var(--accent-ink));background:color-mix(in srgb,var(--pc,var(--accent)) 6%,transparent)}
 .brk{display:none}
 .sec{margin:0 0 22px}
 .sec .hd{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 8px;flex-wrap:wrap}
@@ -1231,7 +1234,11 @@ p.gamecoins .earned{display:flex}
   .mb::after{content:'';position:absolute;left:-3px;right:-3px;top:-6px;bottom:-6px}
   .whoami::after{content:'';position:absolute;left:-4px;right:-4px;top:-10px;bottom:-4px}
   /* Names sit in rows about 40px apart, so their hit areas stop short of the next row's. */
-  .namelink::after{content:'';position:absolute;left:-6px;right:-6px;top:-10px;bottom:-10px;min-width:44px}
+  /* Height as well as width. min-width guarded one axis and the other was left at whatever the line box
+     happened to be - 36.8px on Stats, 37.6px in a leaderboard row - and these are now the main way into a
+     profile from every board. The ::after is centred on the button so it grows both ways. */
+  .namelink::after{content:'';position:absolute;left:-6px;right:-6px;top:50%;transform:translateY(-50%);
+    min-width:44px;height:44px}
   /* The header chips sit just above the tab grid on phones: keep their hit areas off the tabs. */
   .nav button.pill::after{bottom:-4px}
   /* 40, not the 44 the rule above sets: six tabs and two header chips share the top of a 320px
@@ -1549,6 +1556,7 @@ function PickName({ email, onClaimed, onSignOut }) {
       invalid: USERNAME_RULE,
       already_named: "This account already has a name. Reload the page to use it.",
       not_signed_in: "You've been signed out. Sign in again.",
+      still_anonymous: "This account has no email yet. Keep your seasons from the Account tab instead.",
     }[answer] || "Something went wrong. Try again.");
   }
 
@@ -1626,8 +1634,16 @@ function KeepSeasons({ name, onKept, onUseAnother }) {
     const answer = await claimUsername(username);
     setBusy(false);
     if (answer === "ok") return onKept(username);
-    setErr({ taken: "That username is taken. Try another one.", blocked: NAME_NOT_ALLOWED, invalid: USERNAME_RULE }[answer]
-      || "Something went wrong. Try again.");
+    // still_anonymous means the email never landed on the account, so the database refused to clear `guest`
+    // - it is the gate, not this form. It should be unreachable from here (the email step above has to
+    // succeed first), but a rule that reaches a player as "something went wrong" is the failure this app
+    // keeps having, so it gets words.
+    setErr({
+      taken: "That username is taken. Try another one.",
+      blocked: NAME_NOT_ALLOWED,
+      invalid: USERNAME_RULE,
+      still_anonymous: "Your email didn't save, so the account can't be kept yet. Try the email and password again.",
+    }[answer] || "Something went wrong. Try again.");
   }
 
   return (
@@ -2203,7 +2219,14 @@ export default function PerfectSeason() {
   // reads the board format at call time - a ref, so it can't pick up a stale value the way
   // reading the state variable through a closure would.
   const boardFormatRef = useRef("fantasy");
+  // ...and the same treatment for `stats`, for the same reason. finish() fires the post-season refresh as
+  // `saving.then(() => loadLeaderboard(fmt))`, which is that render's loadLeaderboard, holding the `stats`
+  // from BEFORE the season - so the board asked the server for the rank of the old best score and showed it
+  // beside the new one ("You're #40 with a best score of 104.2" when 104.2 is top ten). Assigned during
+  // render, so any later continuation reads what was last rendered.
   function showBoardFormat(f) { boardFormatRef.current = f; setBoardFormat(f); }
+  const statsRef = useRef(null);
+  statsRef.current = stats;
   const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
   // Why a code was turned away before any boards were dealt - today, only a code that is a daily's own seed.
@@ -2659,18 +2682,22 @@ export default function PerfectSeason() {
     if (k === "profile") setProfileOf(null);
     setView(k);
     if (k === "home") refreshWip();
-    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }
-    if (k === "stats") { if (!siteStats.loaded) loadSiteStats(); }
   }
-  // Who is wearing what, for the screens that show other people's names. An effect on the VIEW, not a call in
-  // openTab, because a tab click is only ONE way to arrive: landing on /leaderboard, and Back or Forward to it,
-  // open the screen without going through openTab at all - and every one of those loads drew a board with the
-  // stars and the colours missing, until the player happened to leave the screen and come back. Found on
-  // staging by opening /leaderboard directly, which is the address the site puts in front of search engines.
-  // Over/Under's board renders names too and was never loading them by any route.
+  // Everything a screen needs when it opens, keyed on the VIEW rather than on a tab click - because a tab
+  // click is only ONE way to arrive. Landing on /leaderboard (the address in the sitemap, the one search
+  // results point at), Back or Forward to it, and the two "See the leaderboard" buttons under a finished
+  // season all open the screen without going through openTab at all.
+  // 2.7.1 moved only the name colours and stars here and left the three board loads behind, so those routes
+  // still drew a Leaderboard whose Points ladder said "No one has earned points in Unlimited yet" and whose
+  // Duel board said "Nobody has duelled yet" - the empty states claim a fact, because `loading` starts false.
+  // Arriving by the tab was the one path that worked, which is also why no test caught it.
+  // `userId` is a dependency because the board's "You're #N" line is computed from who is asking: the mount
+  // load runs before the session lands, so a signed-in player who opened /leaderboard directly never got it.
   useEffect(() => {
+    if (view === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }
+    if (view === "stats" && !siteStats.loaded) loadSiteStats();
     if (view === "board" || view === "stats" || view === "statsou") loadBoardWear();
-  }, [view]);
+  }, [view, userId]);
   function openProfile(name) {
     leftAt.current = window.scrollY || 0;
     setProfileOf(name);
@@ -2832,7 +2859,7 @@ export default function PerfectSeason() {
       const [top, totals] = await Promise.all([fetchLeaderboardTop(10, boardFormat), fetchSiteTotals()]);
       let myRank = -1;
       if (userId) {
-        const mine = scoreOf(stats, boardFormat);
+        const mine = scoreOf(statsRef.current, boardFormat);
         // Rows are keyed by the account's id - comparing against the username never matched.
         const idx = top.findIndex((q) => q.id === userId);
         // A rank that couldn't be counted (null) is left out, like no score at all.
@@ -4452,7 +4479,7 @@ export default function PerfectSeason() {
                   )}
                   {/* resumeFree, not restart: the draft in the Unlimited slot, whatever its variant, is resumed rather than charged as a DNF. */}
                   <button className="btn" onClick={() => resumeFree()}>Play an unlimited draft</button>
-                  <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>Today's leaderboard</button>
+                  <button className="btn" onClick={ () => setView("board")}>Today's leaderboard</button>
                 </div>
               </div>
             )}
@@ -4663,7 +4690,7 @@ export default function PerfectSeason() {
                   <div className="frow resultactions">
                     <button className="btn solid" onClick={doShare}>{share.state === "copied" ? "Copied to clipboard" : share.state === "shared" ? "Shared" : "Share result"}</button>
                     <button className="btn" onClick={runItBack}>Run it back 🔁</button>
-                    <button className="btn" onClick={() => { setView("board"); loadLeaderboard(); loadDailyBoard(); }}>See the leaderboard</button>
+                    <button className="btn" onClick={ () => setView("board")}>See the leaderboard</button>
                   </div>
                 )}
                 {finished && share.state === "manual" && (

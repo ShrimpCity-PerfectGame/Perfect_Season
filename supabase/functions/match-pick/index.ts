@@ -156,7 +156,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   };
 
   if (decided.action === "respin") {
-    const respins = [...(match.respins || []), { pickNo: decided.pickNo, kind: decided.kind, by: decided.side, key: decided.key }];
+    const respins = [...(match.respins || []), { pickNo: decided.pickNo, kind: decided.kind, by: decided.side, key: decided.key, n: decided.n }];
     return (await bump({ respins })) || json({ ok: true, board: decided.key });
   }
   if (decided.action === "dip") {
@@ -228,8 +228,17 @@ async function finish(service: any, match: any, state: any, json: (body: unknown
   }
   const result = V.matchResult({ code: match.code, format: match.format, host: state.roster.host, guest: state.roster.guest });
   if (!result) {
-    console.error("failed to grade", match.code);
-    return json({ error: "failed to grade", reason: "grading" }, 500);
+    // The same brick as `missing` above, by a different route, and it has to end the same way. matchResult is
+    // pure over the rosters the replay just derived, so it will answer null again on every later request - and
+    // because finishing is the first thing this handler does, EVERY request from either player then answers
+    // 500 forever, both screens sit on "Working out the result...", and create_match hands both players back
+    // into the dead match for every duel afterwards. Retrying a deterministic failure is not recovery.
+    // It is reachable without a dropped pick: a roster with an empty scored slot grades to null while
+    // `missing` is empty - and nothing in the database stops one, since match_picks_one_per_slot was dropped
+    // in v1.19.0 and `decideMove` is the only thing holding one pick per slot.
+    console.error("cannot be graded - abandoning", match.code, JSON.stringify(state.roster));
+    await service.rpc("abandon_match", { p_match: match.id });
+    return json({ error: "unplayable", reason: "unplayable" }, 409);
   }
   const winnerId = result.winner ? idOf(match, result.winner) : null;
   // The result and both records land together, or neither does - one locked transaction in the database rather

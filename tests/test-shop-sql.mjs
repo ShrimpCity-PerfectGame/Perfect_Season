@@ -1033,6 +1033,7 @@ await runTest("supporter: the one-off unlock owns its items, coins never buy the
   const P = await newPlayer("patron");
   const kindOf = Object.fromEntries(SHOP_ITEMS.map((i) => [i.id, i.kind]));
   const gated = SHOP_ITEMS.filter((i) => i.rarity === "supporter").map((i) => i.id);
+  const presetOf = (item) => AVATAR_PACKS.find((k) => k.item === item).presets[0].key;
   assert(gated.length > 0, "there are supporter items to gate");
 
   // Before: owned by nobody, and no balance reaches them. The refusal is supporter_only and never not_enough -
@@ -1042,7 +1043,17 @@ await runTest("supporter: the one-off unlock owns its items, coins never buy the
   for (const id of gated) {
     assert(itemOf(s, id).owned === false, `${id} is not owned`);
     assert((await call(P, "shop_buy", { p_item: id })).error === "supporter_only", `${id} is not for sale`);
-    assert((await call(P, "equip_item", { p_slot: kindOf[id], p_item: id })).error === "not_owned", `${id} cannot be worn`);
+    // An avatar pack is not an equip slot - owning it unlocks its avatars in the picker - so what has to be
+    // refused for a pack is set_avatar, not equip_item. That is the half that went missing the first time a
+    // supporter pack was written: shop_state called it owned and the picker offered it, and set_avatar in
+    // migration-profiles.sql had no supporter arm and refused the save as bad_preset.
+    if (kindOf[id] === "avatar_pack") {
+      assert((await call(P, "equip_item", { p_slot: kindOf[id], p_item: id })).error === "bad_slot", `${id} is not a slot`);
+      assert((await call(P, "set_avatar", { p_path: null, p_preset: presetOf(id) })).error === "bad_preset",
+        `${id}'s avatars are refused before the unlock`);
+    } else {
+      assert((await call(P, "equip_item", { p_slot: kindOf[id], p_item: id })).error === "not_owned", `${id} cannot be worn`);
+    }
   }
   assert((await owner("select supporter from profiles where id = $1", [P]))[0].supporter === false, "and profiles agrees");
 
@@ -1053,7 +1064,12 @@ await runTest("supporter: the one-off unlock owns its items, coins never buy the
   assert(s.supporter === true, "and shop_state says so");
   for (const id of gated) {
     assert(itemOf(s, id).owned === true, `${id} is theirs now`);
-    assert(!(await call(P, "equip_item", { p_slot: kindOf[id], p_item: id })).error, `${id} can be worn`);
+    if (kindOf[id] === "avatar_pack") {
+      assert(!(await call(P, "set_avatar", { p_path: null, p_preset: presetOf(id) })).error,
+        `${id}'s avatars can be worn now`);
+    } else {
+      assert(!(await call(P, "equip_item", { p_slot: kindOf[id], p_item: id })).error, `${id} can be worn`);
+    }
     // Still not for sale: it came with the unlock, it was never a purchase, and buying it would take coins
     // for something already owned.
     assert((await call(P, "shop_buy", { p_item: id })).error === "supporter_only", `${id} is still not bought with coins`);
@@ -1071,6 +1087,10 @@ await runTest("supporter: the one-off unlock owns its items, coins never buy the
   assert((await owner("select supporter from profiles where id = $1", [P]))[0].supporter === false, "the trigger clears the flag");
   const after = (await owner("select frame, card_theme, title, celebration from profile_details where user_id = $1", [P]))[0];
   assert(!Object.values(after).some((v) => gated.includes(v)), `nothing gated is still worn, got ${show(after)}`);
+  // And the picture, which is not an equip slot but is just as visible: a supporter pack's avatar has to come
+  // off with everything else, or the card goes on showing an avatar the account no longer owns.
+  const pic = (await owner("select avatar_preset from profile_details where user_id = $1", [P]))[0].avatar_preset;
+  assert(pic === null, `a supporter pack's avatar came off too, got ${show(pic)}`);
   s = (await call(P, "shop_state")).data;
   for (const id of gated) assert(itemOf(s, id).owned === false, `${id} is not theirs after a refund`);
   // What they bought with coins is untouched - a refund of the unlock is not a wipe.

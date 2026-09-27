@@ -451,6 +451,18 @@ await runTest("a supporter's name carries a star on the boards, and nobody else'
   const chip = container.querySelector(".supchip");
   assert(chip && chip.getAttribute("role") === "img" && /supporter/i.test(chip.getAttribute("aria-label") || ""),
     `the star names itself, got ${chip && chip.outerHTML}`);
+
+  // The mock carries the table's TRIGGER, not just its rows. profiles.supporter is what the app reads before
+  // anything renders (the ad decision will), and a refund has to take the worn items off - or a test can reach
+  // a state the database cannot: shop_state saying the item is not owned while the card still shows it.
+  assert(auth._profiles.get(backer.id).supporter === true, "granting the unlock sets profiles.supporter");
+  const details = auth._profileDetails.get(backer.id) || { user_id: backer.id };
+  auth._profileDetails.set(backer.id, { ...details, frame: "frame-orbit", namecolor: "name-nebula" });
+  auth._supporters.delete(backer.id);
+  assert(auth._profiles.get(backer.id).supporter === false, "a refund clears profiles.supporter");
+  const after = auth._profileDetails.get(backer.id);
+  assert(after.frame === null && after.namecolor === null,
+    `and takes the supporter items off, got ${JSON.stringify({ frame: after.frame, namecolor: after.namecolor })}`);
 });
 
 await runTest("landing straight on /leaderboard shows the stars and the colours, not a bare board", async () => {
@@ -476,6 +488,15 @@ await runTest("landing straight on /leaderboard shows the stars and the colours,
   const ink = [...container.querySelectorAll(".cs-name")].find((n) => n.textContent === painted.username);
   assert(ink, `and the name colour: painted ${[...container.querySelectorAll(".cs-name")].length} names`);
   assert(ink.dataset.nameLook === "name-vapor", `the look they wear, got ${ink.dataset.nameLook}`);
+
+  // ...and the BOARDS themselves, not only their decorations. The Points ladder and the Duel board were
+  // loaded by a tab click and by nothing else, so arriving at this address drew them claiming, as fact, that
+  // nobody had ever played - their empty states say so because `loading` starts false. 2.7.1 moved only the
+  // stars and colours onto the view and left these behind.
+  const shown = text(container);
+  assert(!shown.includes("No one has earned points"),
+    `the points ladder loaded rather than claiming nobody has played: ${shown.slice(0, 200)}`);
+  assert(shown.includes("laddergal"), "and it shows who is actually on it");
 });
 
 console.log("test-profile-links.mjs done");

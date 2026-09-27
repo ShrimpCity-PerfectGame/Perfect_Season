@@ -20,6 +20,10 @@ const GOLD = THEME.light.tierGoldFill;
 const NIGHT = THEME.dark.bg;
 // The light scope's deep badge gold, for the Hall of Fame pack's folds and seams on gold.
 const GOLD_DEEP = THEME.light.tierGold;
+// Deep space, for the Stargazer pack (v2.8.0). Exported because the Cosmos card paints the same void and the
+// two are worn together - one definition, and it lives here because cosmetics.jsx imports this module, never
+// the other way round.
+export const SPACE = "#0A0714";
 
 // Straight rays from a center, as one path: a firework burst.
 const burst = (cx, cy, count, from, to, turn = 0) => Array.from({ length: count }, (_, i) => {
@@ -452,6 +456,95 @@ const ART = {
     ),
   },
   // A gold laurel wreath around a football, tied with a ribbon.
+  // ---------- Stargazer (supporter) ----------
+  // Football seen from a long way off. Each one is the sport and the sky in the same picture, which is what
+  // keeps a cosmic pack from looking like it wandered in from another game.
+  comet: {
+    bg: SPACE,
+    art: (
+      <g>
+        {/* The tail first, so the ball sits on top of it: three streaks thinning as they fall behind. */}
+        <g stroke={VIOLET} strokeLinecap="round" fill="none">
+          <path d="M9 12L26 29" strokeWidth="4" opacity=".75" />
+          <path d="M6 27L23 36" strokeWidth="3" opacity=".55" />
+          <path d="M21 5L30 22" strokeWidth="3" opacity=".55" />
+        </g>
+        <g transform="rotate(45 40 40)">
+          <ellipse cx="40" cy="40" rx="15.5" ry="10" fill={SPACE} />
+          <ellipse cx="40" cy="40" rx="14" ry="8.8" fill={CREAM} />
+          {/* One seam down the long axis with four short ticks across it. The ticks are SHORT on purpose: at
+              64px they crossed most of the short axis and the ball read as a hash sign rather than a ball. */}
+          <path d="M33 40H47" stroke={SPACE} strokeWidth="2" strokeLinecap="round" />
+          <path d="M36.5 38V42M40 38V42M43.5 38V42" stroke={SPACE} strokeWidth="1.8" strokeLinecap="round" />
+        </g>
+        <circle cx="15" cy="19" r="1.7" fill={CREAM} />
+        <circle cx="52" cy="13" r="1.4" fill={CREAM} opacity=".8" />
+      </g>
+    ),
+  },
+  moonlight: {
+    bg: SPACE,
+    art: (
+      <g>
+        {/* The crescent is one circle with another taken out of it, which is how a moon is actually lit. */}
+        {/* Both radii have to be at least half the distance between the arc's ends, or SVG grows the smaller
+            one to fit - the two arcs then coincide and the moon has no area at all, which is exactly what the
+            first attempt drew: nothing. */}
+        <path d="M29 6a20 20 0 1 0 20 20a15 15 0 0 1-20-20z" fill={CREAM} />
+        <circle cx="12" cy="13" r="1.8" fill={CREAM} opacity=".9" />
+        <circle cx="54" cy="22" r="1.5" fill={CREAM} opacity=".7" />
+        <circle cx="10" cy="33" r="1.3" fill={CREAM} opacity=".6" />
+        {/* Goalposts under it, clear of the moon: the uprights stop where the sky starts. */}
+        <g stroke={LIME} strokeWidth="3.2" strokeLinecap="round" fill="none">
+          <path d="M32 59V52" />
+          <path d="M21 52H43" />
+          <path d="M21 52V43M43 52V43" />
+        </g>
+      </g>
+    ),
+  },
+  constellation: {
+    bg: SPACE,
+    art: (
+      <g>
+        {/* A football drawn the way a constellation is: the stars are real points, the lines are the joining. */}
+        <path d="M11 32L23 20L41 20L53 32L41 44L23 44Z" fill="none" stroke={VIOLET} strokeWidth="1.6" opacity=".75" />
+        {/* The seam, not a pair of crossing diagonals - those made it a molecule. */}
+        <path d="M26 32H38" fill="none" stroke={VIOLET} strokeWidth="1.4" opacity=".6" />
+        <path d="M29 29.5V34.5M33 29.5V34.5" fill="none" stroke={VIOLET} strokeWidth="1.2" opacity=".6" />
+        <g fill={CREAM}>
+          <circle cx="11" cy="32" r="3.2" />
+          <circle cx="53" cy="32" r="3.2" />
+          <circle cx="23" cy="20" r="2.5" />
+          <circle cx="41" cy="20" r="2.5" />
+          <circle cx="23" cy="44" r="2.5" />
+          <circle cx="41" cy="44" r="2.5" />
+        </g>
+      </g>
+    ),
+  },
+  satellite: {
+    bg: SPACE,
+    art: (
+      <g>
+        {/* The game going out to everybody, which is roughly what a supporter is paying for. */}
+        <g stroke={VIOLET} strokeWidth="2.6" fill="none" strokeLinecap="round" opacity=".8">
+          <path d="M44 14A12 12 0 0 1 52 22" />
+          <path d="M41 8A20 20 0 0 1 57 24" />
+        </g>
+        <g fill={CREAM}>
+          <rect x="26" y="28" width="13" height="16" rx="2.5" />
+          <rect x="7" y="31" width="15" height="10" rx="1.5" />
+          <rect x="43" y="31" width="15" height="10" rx="1.5" />
+        </g>
+        <g stroke={SPACE} strokeWidth="1.6">
+          <path d="M12 31V41M17 31V41M48 31V41M53 31V41M7 36H22M43 36H58" />
+        </g>
+        <path d="M32 28V22" stroke={CREAM} strokeWidth="2.4" strokeLinecap="round" />
+        <circle cx="32" cy="19" r="4.5" fill={LIME} />
+      </g>
+    ),
+  },
   laurels: {
     bg: INK,
     art: (

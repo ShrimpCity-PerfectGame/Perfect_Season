@@ -33,7 +33,10 @@ export async function freshDb({ migrations = MIGRATIONS } = {}) {
     create schema auth;
     -- raw_app_meta_data is how Supabase records which provider made the account ("email", "google"),
     -- which the signup trigger reads: only a provider's account may arrive without a username.
+    -- email/email_change/phone are here because claim_username reads them: an anonymous session has none
+    -- of the three, and attaching any one of them is what turns a guest into an account.
     create table auth.users (id uuid primary key, raw_user_meta_data jsonb, raw_app_meta_data jsonb,
+      email text, email_change text default '', phone text,
       is_anonymous boolean not null default false);
     create function auth.uid() returns uuid language sql stable
       as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
@@ -80,6 +83,12 @@ export async function addAccount(db, row) {
 export async function addGuestAccount(db, id) {
   await db.query("insert into auth.users (id, raw_user_meta_data, raw_app_meta_data, is_anonymous) values ($1, null, $2, true)",
     [id, { provider: "anonymous", providers: ["anonymous"] }]);
+}
+
+// What KeepSeasons does in the browser before it claims a name: an email lands on the account, so it is no
+// longer an anonymous session. claim_username refuses to clear `guest` until one of these is attached.
+export async function attachEmail(db, id, email = "kept@example.test") {
+  await db.query("update auth.users set email = $2, is_anonymous = false where id = $1", [id, email]);
 }
 
 // An account as signing in with Google leaves one: no username, so the signup trigger writes no profile

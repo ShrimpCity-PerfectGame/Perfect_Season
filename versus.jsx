@@ -64,6 +64,14 @@ export const VERSUS_CSS = `
 .vs-reelclock.low{color:var(--loss)}
 .vs-tick.low{color:var(--loss)}
 .vs-tick{font-variant-numeric:tabular-nums}
+/* Whose clock it is, on its own solid pill - the same answer the clock above got, for the same reason. Both
+   of these lines sit on the team's colour: the reel's left edge is --tc-deep at full strength and the sticky
+   bar is 78% of it, and a name colour is a bright custom colour chosen to read on the app's own surfaces, not
+   on 32 team colours. Flame on Pittsburgh measured 1.00:1 - the same luminance, an invisible name.
+   --surface is deliberate: it is one of the surfaces tests/test-cosmetics.mjs already measures every name
+   colour against, so the pill puts the name somewhere the contrast test has covered rather than somewhere new. */
+.vs-who{background:var(--surface);border-radius:8px;padding:1px 7px;display:inline-block;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:baseline}
 .vs-link{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .vs-link code{font-size:15px;padding:8px 10px;border:2px solid var(--line);border-radius:10px;background:var(--surface);word-break:break-all}
 .vs-wait{display:flex;gap:10px;align-items:center;font-weight:700}
@@ -1012,7 +1020,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
       <div className={`sticky ${stuck ? "show" : ""}`} aria-hidden={!stuck} style={teamVars(boardTeam)}>
         <div className="in">
           <div className="stripe" style={{ background: TEAMS[boardTeam][2] }} />
-          <span className="tm">{myTurn ? "Your pick" : <><DuelName match={match} side={state.turn.side} /> is picking</>}</span>
+          <span className="tm">{myTurn ? "Your pick" : <><span className="vs-who"><DuelName match={match} side={state.turn.side} /></span> is picking</>}</span>
           {left != null ? <span className={`yr vs-tick ${left <= 10 ? "low" : ""}`}>{left}s</span> : null}
           <span className="pk">Board {Math.min(state.boardIdx + 1, MATCH_BOARDS)} of {MATCH_BOARDS}</span>
           <span className="brk" />
@@ -1077,7 +1085,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           key={state.boardKey}
           boardKey={state.boardKey} taken={state.taken} roster={state.roster[side || "host"]}
           myTurn={myTurn} busy={busy} selected={selected} setSelected={setSelected}
-          turnLabel={myTurn ? "Your pick" : <><DuelName match={match} side={state.turn.side} /> is picking</>} seconds={left}
+          turnLabel={myTurn ? "Your pick" : <><span className="vs-who"><DuelName match={match} side={state.turn.side} /></span> is picking</>} seconds={left}
           controls={side ? (
             <div className="rerolls vs-powers">
               {POWERUPS.map((pu) => {
@@ -1241,7 +1249,6 @@ const ERRORS = {
   unplayable: "This match can't be worked out, so it's been ended. Nothing was recorded for either player.",
   "failed to grade": "The server couldn't work out the result. The match may need to be abandoned.",
   // playMove reads `reason` before `error`, so this is the one the screen actually sees for that 500.
-  grading: "The server couldn't work out the result. The match may need to be abandoned.",
   unauthorized: "Sign in to play.",
   signed_out: "Sign in to play.",
   network: "Couldn't reach the server. Try again.",

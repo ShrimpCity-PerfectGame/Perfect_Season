@@ -136,7 +136,12 @@ functions' own source, so a new code cannot arrive unmapped. PROFILES.md, "What 
 list. A guest stops being one from the Account
 tab (`KeepSeasons`): an email and password go onto the same account, then `claim_username` trades the given name
 for a real one and rewrites the name snapshots on the boards, the way a moderator's rename does - the one time
-that function is allowed to change an existing name. Everything played, earned and counted stays. The known cost
+that function is allowed to change an existing name. **`claim_username` is the gate, not that form** (v2.8.1):
+clearing `guest` is what opens all of the above, so it refuses unless a credential is actually attached to the
+`auth.users` row - otherwise an anonymous session calls the RPC itself and gets a full account for one sign-in
+and one POST, over and over. The check is permissive on purpose (email, a pending email change, phone, or no
+longer anonymous): with email confirmation ON, which staging has, the address can sit in `email_change` while
+`is_anonymous` stays true, so gating on that flag alone would refuse the real trade-up. Everything played, earned and counted stays. The known cost
 is leaderboard pressure: one person can make guests freely, so **turn on a CAPTCHA for anonymous sign-ins** in
 each Supabase project before this is busy, and remember anonymous users count toward Supabase's monthly actives.
 `tests/test-guest-accounts.mjs` covers the game's side; the naming and the trade-up are held to the real SQL in
@@ -581,6 +586,16 @@ overwrite each other.
 - **Card themes set the card's text scope.** `CardTheme` adds `cs-dark`, `cs-night` or `cs-light`, which
   perfect-season.jsx maps to theme.mjs's scopes; each theme's painted colors are data in `cosmetics.jsx`, so
   `tests/test-cosmetics.mjs` can hold its text to WCAG AA, for all 32 teams on Team colors.
+- **A supporter can dress entirely in supporter items (v2.8.0)**, and that is the point: Orbit (frame), Cosmos
+  (card), Supporter (title), Aurora (nameplate), Nebula (name colour), Supernova (celebration) and Stargazer
+  (avatar pack) fill **every slot**, in one cosmic line, so the set reads as one thing rather than as seven
+  unrelated purchases. Two things a supporter pack drags with it that no other kind does: `set_avatar` in
+  migration-profiles.sql needed a **supporter arm** - shop_state calls the pack owned and the picker offers its
+  avatars, so without it the save came back `bad_preset`, which is the exact drift the comment above that check
+  warns about - and it has to read the entitlement into a **variable through EXECUTE**, because plpgsql plans a
+  statement whole and an arm naming `public.supporters` inside that condition fails to plan on a database that
+  has not had migration-shop.sql re-run. `supporters_sync` also clears a supporter pack's **avatar** on a
+  refund: a picture is not an equip slot, but it is just as visible, and the card renders the column.
 - **Supporter (v2.6.0) is a one-off unlock, not a subscription**, and the only thing in the game that costs
   real money. It unlocks the `supporter`-rarity items and, once there are ads, turns them off. The entitlement
   is a row in `supporters` - RLS on, no policy at all, like `wallets`: written by the service role (a payment
@@ -939,6 +954,16 @@ suite and still broke the live Leaderboard for every existing account.
   and the function have to agree on, and the scoring half decides what a season is worth. `match-pick` changes
   on its own account too: it finishes a match before it looks at what was asked for, writes every change against
   the revision it read, and ends a match it cannot grade (VERSUS.md 4).
+  v2.8.0's: re-run **`migration-shop.sql`**, then **`migration-profiles.sql`**, then **deploy both Edge
+  Functions**, then the client - shop first, the way v1.12.0's list runs them, because profiles' `set_avatar` is what learns the new
+  supporter pack and shop is what creates the pack and the `supporters` table it asks about. (The EXECUTE guard
+  means the other order cannot fail either; it would just refuse a supporter's pack avatars until shop caught
+  up.) Shop adds three items and four `avatar_presets` rows and teaches `supporters_sync` to take a supporter
+  pack's avatar off on a refund; profiles replaces `set_avatar` **and `claim_username`**, which no longer clears
+  `guest` for a session with no credential attached - that one is a security fix and wants to land before the
+  client. The Edge Functions change on their own account this time (submit-run gives the duplicate guard back on
+  a thrown error, match-pick abandons a match it cannot grade) **and** because `versus-logic.mjs` and
+  `game-logic.mjs` did, which is the drift the section above warns about.
   v2.7.0's (name colours): re-run **`migration-shop.sql`**, then the client. It adds the `namecolor` kind and
   its `profile_details` column, nine items, and `board_looks()` - which it **drops and re-creates**, because the
   signature gained `p_names` before it had shipped anywhere and `create or replace` cannot change one. Same file as v2.5.0's and v2.6.0's, so one

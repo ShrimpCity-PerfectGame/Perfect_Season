@@ -84,6 +84,11 @@ export const SHOP_CSS = `
 .sh-r-epic{--rar:var(--violet)}
 .sh-r-legendary{--rar:var(--tier-gold-fill)}
 .sh-r-badge{--rar:var(--orange)}
+/* Supporter, added with the rarity in v2.6.0 and missed here - so every supporter item's tile asked for an
+   undefined --rar. That is invalid at computed-value time, which kills the WHOLE declaration rather than just
+   the colour: .sh-win lost its background (surface and all), .sh-detail lost its hard offset shadow, and the
+   rarity edge and diamond went unpainted. A supporter item read as a hole in the grid. */
+.sh-r-supporter{--rar:var(--violet)}
 .sh-tile{position:relative;display:grid;grid-template-areas:"win" "pick" "info" "bar";align-content:start;min-width:0;padding:7px 7px 12px;
   border-radius:16px;background:var(--surface);border:2px solid var(--ink);box-shadow:3px 3px 0 var(--hard);transition:transform .12s ease,box-shadow .12s ease}
 .sh-tile:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--hard)}

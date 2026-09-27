@@ -185,8 +185,8 @@ await runTest("every catalog item has a decorative thumbnail made only of inline
 });
 
 await runTest("the avatar packs: four more presets each, not free, named from the catalog, every one drawn", async () => {
-  assert(AVATAR_PACKS.length === 5 && AVATAR_PACKS.every((p) => p.presets.length === 4), `five packs of four, got ${AVATAR_PACKS.map((p) => p.presets.length)}`);
-  assert(AVATAR_PRESETS.length === FREE_AVATAR_PRESETS.length + 20, `expected 32 presets, got ${AVATAR_PRESETS.length}`);
+  assert(AVATAR_PACKS.length === 6 && AVATAR_PACKS.every((p) => p.presets.length === 4), `six packs of four, got ${AVATAR_PACKS.map((p) => p.presets.length)}`);
+  assert(AVATAR_PRESETS.length === FREE_AVATAR_PRESETS.length + 24, `expected 36 presets, got ${AVATAR_PRESETS.length}`);
   assert(new Set(AVATAR_PRESETS.map((p) => p.key)).size === AVATAR_PRESETS.length, "preset keys are unique");
   const starter = AVATAR_PRESETS.filter((p) => p.pack === "starter");
   assert(JSON.stringify(starter) === JSON.stringify(FREE_AVATAR_PRESETS.map((p) => ({ ...p, pack: "starter", free: true }))), "the starter set is unchanged and first");

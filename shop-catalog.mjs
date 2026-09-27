@@ -64,6 +64,16 @@ export const AVATAR_PACKS = [
       { key: "laurels", name: "Laurels" }, { key: "the-hall", name: "The Hall" },
     ],
   },
+  // v2.8.0. The supporter pack, and the only one that is not bought: it comes with the unlock, like Aurora and
+  // Nebula. Football seen from a long way off, which is what lets it share the cosmic line the rest of the
+  // supporter items are in without becoming a set of space stickers in a football game.
+  {
+    pack: "stargazer", item: "pack-stargazer", name: "Stargazer", rarity: "supporter",
+    presets: [
+      { key: "comet", name: "Comet" }, { key: "moonlight", name: "Moonlight" },
+      { key: "constellation", name: "Constellation" }, { key: "satellite", name: "Satellite" },
+    ],
+  },
 ];
 export const packItem = (pack) => `pack-${pack}`;
 export const PACK_BY_ITEM = Object.fromEntries(AVATAR_PACKS.map((p) => [p.item, p]));
@@ -77,6 +87,7 @@ export const SHOP_ITEMS = [
   { id: "frame-gold", kind: "frame", name: "Gold", rarity: "epic" },
   { id: "frame-flame", kind: "frame", name: "Flame", rarity: "legendary" },
   { id: "frame-undefeated", kind: "frame", name: "Undefeated", rarity: "badge", badge: "undefeated" },
+  { id: "frame-orbit", kind: "frame", name: "Orbit", rarity: "supporter" },
 
   { id: "card-navy", kind: "card", name: "Navy", rarity: "free" },
   { id: "card-night", kind: "card", name: "Night", rarity: "common" },
@@ -85,6 +96,7 @@ export const SHOP_ITEMS = [
   { id: "card-ticket", kind: "card", name: "Ticket stub", rarity: "epic" },
   { id: "card-gold-foil", kind: "card", name: "Gold foil", rarity: "legendary" },
   { id: "card-dynasty", kind: "card", name: "Dynasty", rarity: "badge", badge: "dynasty" },
+  { id: "card-cosmos", kind: "card", name: "Cosmos", rarity: "supporter" },
 
   { id: "title-film-room", kind: "title", name: "Film Room", rarity: "common" },
   { id: "title-waiver-hawk", kind: "title", name: "Waiver Hawk", rarity: "common" },

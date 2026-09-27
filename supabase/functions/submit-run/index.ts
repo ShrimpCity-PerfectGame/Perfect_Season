@@ -332,26 +332,48 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   // duplicate guard between the two is a whole round trip, and another submission can land inside it.
   // Everything the season itself decided (the replay, the score, the sim) is already settled; this
   // only folds it into whatever counters the row holds now.
-  const applied = await applyToProfile(service, user.id, (existing) => {
-    // The best-of-the-day window is keyed on THIS function's own UTC date, never the client's, so
-    // the window can't be widened by claiming a different day.
-    let next = GL.applyRun(existing, run, utcDateKey(new Date()));
-    if (mode.kind === "daily") {
-      const streak = GL.nextStreak(existing, mode.date);
-      next = { ...next, dailyLast: mode.date, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
-    }
-    return next;
-  });
-  const updated = applied.profile;
-  if (!applied.ok) {
-    // The season didn't count, so give back what the duplicate guard took - the challenge code, or
-    // this Daily's daily_runs row - and let a retry count it. Best effort: if this fails as well, a
-    // retry answers "already recorded" (as a failed Daily save always did before v1.12.0).
+  // Giving the guard back, as its own function: it has to happen on a THROWN error as well as on a failed
+  // write. Only the failed-write path used to do it, so anything that threw between the guard insert and a
+  // successful profile write stranded the guard and made that season permanently unrecordable - the player
+  // is told "already recorded" forever, and a Daily leaves a row on the public board with w/l/score for a
+  // season `profiles` never counted. It is reachable without an attacker: applyRun throws outright on a
+  // profile whose `recent` is not an array (nothing constrains that column), and an isolate killed
+  // mid-request between the two writes does the same with no catch at all.
+  const releaseGuard = async () => {
     const release = mode.kind === "daily"
       ? service.from("daily_runs").delete().eq("date", mode.date).eq("format", format).eq("user_id", user.id)
       : service.from("finished_codes").delete().eq("user_id", user.id).eq("code", mode.code);
     const { error: releaseError } = await release;
     if (releaseError) console.error("duplicate guard release failed:", releaseError.message);
+  };
+
+  let applied;
+  try {
+    applied = await applyToProfile(service, user.id, (existing) => {
+    // The best-of-the-day window is keyed on THIS function's own UTC date, never the client's, so
+    // the window can't be widened by claiming a different day.
+    let next = GL.applyRun(existing, run, utcDateKey(new Date()));
+    if (mode.kind === "daily") {
+      const streak = GL.nextStreak(existing, mode.date);
+      // dailyLast never moves backwards. The date is the player's own calendar date and this function accepts
+      // UTC yesterday/today/tomorrow, so a later date can already be recorded; overwriting it with the earlier
+      // one made the NEXT day look like a gap and reset the streak a second time.
+      const last = existing.dailyLast && existing.dailyLast > mode.date ? existing.dailyLast : mode.date;
+      next = { ...next, dailyLast: last, dailyStreak: streak, dailyBestStreak: Math.max(streak, existing.dailyBestStreak || 0) };
+    }
+    return next;
+    });
+  } catch (e) {
+    // Thrown, not answered: give the guard back and let the outer catch answer, so a retry can count.
+    await releaseGuard();
+    throw e;
+  }
+  const updated = applied.profile;
+  if (!applied.ok) {
+    // The season didn't count, so give back what the duplicate guard took - the challenge code, or
+    // this Daily's daily_runs row - and let a retry count it. Best effort: if this fails as well, a
+    // retry answers "already recorded" (as a failed Daily save always did before v1.12.0).
+    await releaseGuard();
     return json({ error: "failed to save" }, 500);
   }
   await logRun(service, GL.runLogRow(user.id, existingRow.username, run, mode.kind === "daily" ? mode.date : null));

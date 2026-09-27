@@ -55,6 +55,7 @@ insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('frame-gold', 'frame', 'epic', 6000, null, 40),
   ('frame-flame', 'frame', 'legendary', 15000, null, 50),
   ('frame-undefeated', 'frame', 'badge', null, 'undefeated', 60),
+  ('frame-orbit', 'frame', 'supporter', null, null, 70),
   ('card-navy', 'card', 'free', null, null, 10),
   ('card-night', 'card', 'common', 750, null, 20),
   ('card-turf', 'card', 'rare', 2000, null, 30),
@@ -62,6 +63,7 @@ insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('card-ticket', 'card', 'epic', 6000, null, 50),
   ('card-gold-foil', 'card', 'legendary', 15000, null, 60),
   ('card-dynasty', 'card', 'badge', null, 'dynasty', 70),
+  ('card-cosmos', 'card', 'supporter', null, null, 80),
   ('title-film-room', 'title', 'common', 750, null, 10),
   ('title-waiver-hawk', 'title', 'common', 750, null, 20),
   ('title-draft-guru', 'title', 'rare', 2000, null, 30),
@@ -106,7 +108,9 @@ insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('pack-trophy-room', 'avatar_pack', 'rare', 2000, null, 20),
   ('pack-night-game', 'avatar_pack', 'epic', 6000, null, 30),
   ('pack-draft-day', 'avatar_pack', 'legendary', 15000, null, 40),
-  ('pack-hall-of-fame', 'avatar_pack', 'legendary', 15000, null, 50)
+  ('pack-hall-of-fame', 'avatar_pack', 'legendary', 15000, null, 50),
+  -- v2.8.0: the supporter pack. Never sold, so no price - price_fits_rarity refuses one on a supporter item.
+  ('pack-stargazer', 'avatar_pack', 'supporter', null, null, 60)
 on conflict (id) do nothing;
 
 -- v1.13.0 put four titles ahead of the badge titles, which a database seeded by v1.12.0 has at 50, 60 and 70 - the new
@@ -134,7 +138,8 @@ insert into public.avatar_presets (key, pack, free) values
   ('title-ring', 'trophy-room', false), ('medal', 'trophy-room', false), ('banner', 'trophy-room', false), ('game-ball', 'trophy-room', false),
   ('floodlights', 'night-game', false), ('scoreboard', 'night-game', false), ('fireworks', 'night-game', false), ('blimp', 'night-game', false),
   ('podium', 'draft-day', false), ('draft-card', 'draft-day', false), ('the-call', 'draft-day', false), ('draft-cap', 'draft-day', false),
-  ('gold-jacket', 'hall-of-fame', false), ('bust', 'hall-of-fame', false), ('laurels', 'hall-of-fame', false), ('the-hall', 'hall-of-fame', false)
+  ('gold-jacket', 'hall-of-fame', false), ('bust', 'hall-of-fame', false), ('laurels', 'hall-of-fame', false), ('the-hall', 'hall-of-fame', false),
+  ('comet', 'stargazer', false), ('moonlight', 'stargazer', false), ('constellation', 'stargazer', false), ('satellite', 'stargazer', false)
 on conflict (key) do nothing;
 
 -- ---------- Supporter (v2.6.0) ----------
@@ -183,6 +188,11 @@ begin
       nameplate = case when ni.rarity = 'supporter' then null else d.nameplate end,
       namecolor = case when mi.rarity = 'supporter' then null else d.namecolor end,
       celebration = case when ei.rarity = 'supporter' then null else d.celebration end,
+      avatar_preset = case when ai.rarity = 'supporter' then null else d.avatar_preset end,
+      -- ...and the picture, if it came from a supporter pack (v2.8.0). An avatar is not an equip slot - it is
+      -- a preset key, and the pack behind it is 'pack-' || its pack - but a refund has to take it off for the
+      -- same reason it takes off a frame: the card renders the column and asks nobody about ownership. Null is
+      -- the player's initial, which is what an account with no picture has always shown.
       updated_at = now()
       from (select 1) as _
       left join public.shop_items fi on fi.id = (select frame from public.profile_details where user_id = old.user_id)
@@ -191,6 +201,8 @@ begin
       left join public.shop_items ni on ni.id = (select nameplate from public.profile_details where user_id = old.user_id)
       left join public.shop_items mi on mi.id = (select namecolor from public.profile_details where user_id = old.user_id)
       left join public.shop_items ei on ei.id = (select celebration from public.profile_details where user_id = old.user_id)
+      left join public.shop_items ai on ai.id = 'pack-' || (select p.pack from public.avatar_presets p
+        where p.key = (select avatar_preset from public.profile_details where user_id = old.user_id))
      where d.user_id = old.user_id;
     return old;
   end if;

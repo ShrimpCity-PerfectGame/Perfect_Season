@@ -5,7 +5,7 @@
 // but as text on cream it's about 1.2:1. A single `color: var(--accent)` in the light scope would
 // ship invisible text, and nothing else in the suite would notice.
 import { readFileSync } from "node:fs";
-import { assert, runTest } from "./helpers.mjs";
+import { assert, runTest, loadModule } from "./helpers.mjs";
 import { THEME, PALETTE, TEXT_TOKENS, SURFACE_TOKENS, cssVars } from "../theme.mjs";
 
 const luminance = (hex) => {
@@ -85,6 +85,52 @@ await runTest("every var(--x) the app paints with is a token or is set somewhere
   const missing = [...used.keys()].filter((v) => !tokens.has(v) && !set.has(v));
   assert(missing.length === 0, `painted with a custom property nothing ever sets:\n  ${
     missing.map((v) => `${v} (in ${[...used.get(v)].join(", ")})`).join("\n  ")}`);
+});
+
+// The board header paints the TEAM's colour and prints over it, so its readability is decided by data rather
+// than by a token - which is why the checks above never saw it. Eleven of the 32 teams failed outright before
+// v2.8.1: on Pittsburgh's gold, "Pick 1 of 6" measured 1.52:1 against a floor of 4.5, on the screen the game
+// is played on. --tc-deep (ui-common.jsx) is what fixed it, and this is what holds it.
+await runTest("every team's board header carries the text it prints, on every stop of its gradient", async () => {
+  // .jsx has to go through the transpiler, the way every other test reads one.
+  const { teamVars } = await loadModule("ui-common.jsx");
+  const { TEAMS } = await import("../game-logic.mjs");
+  const chan = (hex) => hex.replace("#", "").match(/../g).map((x) => parseInt(x, 16));
+  const lum = (hex) => {
+    const [r, g, b] = chan(hex).map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ratio = (a, b) => {
+    const x = lum(a), y = lum(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  };
+  const mix = (a, b, p) => `#${chan(a).map((v, i) => Math.round(v * p + chan(b)[i] * (1 - p)).toString(16).padStart(2, "0")).join("")}`;
+  // The four things .reel writes: the team and the years at full white/cream, and "Pick N of 6" and the city
+  // translucent. The faint pair are the ones that failed, so they set the bar.
+  const weakest = (bg) => Math.min(
+    ratio(mix("#FFFFFF", bg, 0.75), bg),
+    ratio(mix(PALETTE.cream, bg, 0.78), bg),
+    ratio(PALETTE.cream, bg),
+    ratio("#FFFFFF", bg),
+  );
+  const below = [];
+  for (const code of Object.keys(TEAMS)) {
+    const deep = teamVars(code)["--tc-deep"];
+    assert(/^#[0-9a-f]{6}$/i.test(deep), `${code} has a solid deep colour, got ${deep}`);
+    // The three stops .reel and .sticky paint, in the scope they are painted in (the play screen is dark).
+    for (const stop of [deep, mix(deep, THEME.dark.bg, 0.62), mix(deep, THEME.dark.bg, 0.18)]) {
+      const r = weakest(stop);
+      if (r < 4.5) below.push(`${code}: ${stop} is ${r.toFixed(2)}:1`);
+    }
+  }
+  assert(below.length === 0, `board headers below AA:\n  ${below.join("\n  ")}`);
+  // And the brand colours are left alone wherever they already carried the text - this is a floor, not a
+  // restyle. Most of the league is untouched.
+  const kept = Object.keys(TEAMS).filter((c) => teamVars(c)["--tc-deep"].toLowerCase() === TEAMS[c][2].toLowerCase());
+  assert(kept.length >= 20, `most teams keep their own colour, only ${kept.length} did`);
 });
 
 console.log("test-theme-contrast.mjs done");
