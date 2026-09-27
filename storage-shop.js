@@ -49,6 +49,7 @@ export async function fetchShop() {
       equipped: {
         frame: worn.frame ?? null, card: worn.card ?? null, title: worn.title ?? null,
         nameplate: worn.nameplate ?? null,
+        namecolor: worn.namecolor ?? null,
         celebration: worn.celebration ?? null,
         showcase: Array.isArray(worn.showcase) ? worn.showcase.filter((id) => typeof id === "string") : [],
       },

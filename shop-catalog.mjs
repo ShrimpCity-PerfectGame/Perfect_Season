@@ -6,15 +6,16 @@
 // the server's rarity and price - `rarity` here is only the launch value, for the harness and the seed
 // check in tests/test-shop-sql.mjs, which fails if this file and the seeds disagree.
 
-export const SHOP_KINDS = ["frame", "card", "title", "nameplate", "celebration", "avatar_pack"];
-export const KIND_LABEL = { frame: "Frames", card: "Card themes", title: "Titles", nameplate: "Nameplates", celebration: "Win celebrations", avatar_pack: "Avatar packs" };
+export const SHOP_KINDS = ["frame", "card", "title", "nameplate", "namecolor", "celebration", "avatar_pack"];
+export const KIND_LABEL = { frame: "Frames", card: "Card themes", title: "Titles", nameplate: "Nameplates", namecolor: "Name colors", celebration: "Win celebrations", avatar_pack: "Avatar packs" };
 // Each equip slot takes items of its own kind. Avatar packs aren't equipped: owning one unlocks its avatars
 // in the picture picker.
-export const EQUIP_SLOTS = ["frame", "card", "title", "nameplate", "celebration"];
+export const EQUIP_SLOTS = ["frame", "card", "title", "nameplate", "namecolor", "celebration"];
 // What an empty slot shows. Null in profile_details means this.
 // A null nameplate is no plate at all - the name as it has always looked - rather than a default one, so
-// nobody is given a banner they did not choose.
-export const DEFAULT_ITEM = { frame: "frame-ink", card: "card-navy", title: null, nameplate: null, celebration: "cel-confetti" };
+// nobody is given a banner they did not choose. A null namecolor is the same: the name in the scope's own ink,
+// which is what every account has always had and what every account without this keeps.
+export const DEFAULT_ITEM = { frame: "frame-ink", card: "card-navy", title: null, nameplate: null, namecolor: null, celebration: "cel-confetti" };
 
 // "badge" is earned by playing and "supporter" comes with the one-off unlock; neither is bought with coins.
 // They are deliberately parallel rather than a ladder: a supporter item is DIFFERENT, not better, because the
@@ -117,6 +118,20 @@ export const SHOP_ITEMS = [
   { id: "plate-emerald", kind: "nameplate", name: "Emerald", rarity: "legendary" },
   { id: "plate-dynasty", kind: "nameplate", name: "Dynasty", rarity: "badge", badge: "dynasty" },
   { id: "plate-aurora", kind: "nameplate", name: "Aurora", rarity: "supporter" },
+
+  // Name colours: the name itself, on the boards. Nine looks, six of them drifting a gradient. Each is three
+  // palettes rather than one colour (NAME_LOOKS in cosmetics.jsx) because the surface behind a name is the
+  // page - cream on Stats, true black on the Leaderboard - and no one colour is readable on both.
+  { id: "name-blue", kind: "namecolor", name: "Game blue", rarity: "common" },
+  { id: "name-ember", kind: "namecolor", name: "Ember", rarity: "common" },
+  { id: "name-toxic", kind: "namecolor", name: "Toxic", rarity: "rare" },
+  { id: "name-vapor", kind: "namecolor", name: "Vaporwave", rarity: "rare" },
+  { id: "name-flame", kind: "namecolor", name: "Flame", rarity: "epic" },
+  { id: "name-frost", kind: "namecolor", name: "Frost", rarity: "epic" },
+  { id: "name-prism", kind: "namecolor", name: "Prism", rarity: "legendary" },
+  // The fourth item on the undefeated badge, and the loudest: a gold name on every board you appear on.
+  { id: "name-trophy", kind: "namecolor", name: "Undefeated", rarity: "badge", badge: "undefeated" },
+  { id: "name-nebula", kind: "namecolor", name: "Nebula", rarity: "supporter" },
 
   { id: "cel-confetti", kind: "celebration", name: "Confetti", rarity: "free" },
   { id: "cel-spotlight", kind: "celebration", name: "Spotlight", rarity: "common" },

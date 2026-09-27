@@ -181,6 +181,10 @@ const NEW_FUNCTIONS = {
   // it writes profiles, and reachable by nobody: the entitlement is the row, so the only writer is the
   // service role inserting one.
   "supporters_sync()": [true, "v", PG_TEMP_LAST, false, false, true],
+  // v2.7.0: who is wearing what, for the boards. INVOKER and stable - it reads only what is already public
+  // (profiles.username, profiles.supporter, profile_details.namecolor), so it needs no privilege of its own and
+  // goes out as a GET. anon may call it because a signed-out visitor reads the Leaderboard too.
+  "board_looks(p_limit integer, p_names text[])": [false, "s", PG_TEMP_LAST, true, true, true],
 };
 // set_avatar learned the paid packs in migration-profiles.sql (SHOP.md 3.2); signed out, it answers not_signed_in.
 const SET_AVATAR = ["set_avatar(p_path text, p_preset text)", [true, "v", PG_TEMP_LAST, true, true, true]];
@@ -203,7 +207,20 @@ await runTest("1a. every function the wallet and shop migrations add has a delib
   }
   for (const [sig, want] of [...Object.entries(NEW_FUNCTIONS), SET_AVATAR]) assert(same(attrs(now.get(sig)), want), `${sig}: expected ${show(want)}, got ${show(attrs(now.get(sig)))}`);
   for (const r of rows.filter((x) => x.definer)) assert(r.search_path === PG_TEMP_LAST, `${r.sig} is security definer, so it must search pg_temp last`);
-  assert(Object.entries(NEW_FUNCTIONS).every(([, w]) => w[3] === false), "no new function is callable signed out");
+  // Nothing the wallet or the shop adds is callable signed out, with ONE named exception: board_looks, which
+  // reads what the boards already show to everybody (a username, a supporter flag, an equipped id) and has to
+  // answer a signed-out visitor reading the Leaderboard. Every other function here spends coins or changes what
+  // an account wears, so anon is a bug in all of them - the exception is a list, not a relaxed rule, and a
+  // second one has to be argued for here.
+  const ANON_OK = ["board_looks(p_limit integer, p_names text[])"];
+  const anonCallable = Object.entries(NEW_FUNCTIONS).filter(([, w]) => w[3]).map(([sig]) => sig).sort();
+  assert(same(anonCallable, ANON_OK), `only ${show(ANON_OK)} is callable signed out, got ${show(anonCallable)}`);
+  // And the exception earns it by being a read that owns no privilege: invoker, so RLS still applies as the
+  // caller, and stable, so it cannot write.
+  for (const sig of ANON_OK) {
+    const r = now.get(sig);
+    assert(r.definer === false && r.volatility !== "v", `${sig} is callable signed out, so it must be invoker and non-volatile`);
+  }
 
   const TRIGGERS = "select c.relname || '.' || t.tgname as name, pg_get_triggerdef(t.oid) as def from pg_trigger t join pg_class c on c.oid = t.tgrelid where not t.tgisinternal order by 1";
   const oldTriggers = new Set((await v111.query(TRIGGERS)).rows.map((t) => t.name));
@@ -253,7 +270,8 @@ await runTest("1b. every table, column, sequence and view they add: the coin tab
   // guest chip is and has to be readable before anything decides whether to show an ad. Still nothing about
   // coins: a balance on a public table would be every player's wallet on every board.
   assert(same(newColumns.sort(), ["profile_details.card_theme", "profile_details.celebration", "profile_details.frame",
-    "profile_details.nameplate", "profile_details.showcase", "profile_details.title", "profiles.supporter"]),
+    "profile_details.namecolor", "profile_details.nameplate", "profile_details.showcase", "profile_details.title",
+    "profiles.supporter"]),
     `the only columns added to existing tables are what a player wears and whether they support the game - nothing about coins lands on profiles: ${show(newColumns)}`);
 
   // The ledger's id sequence. Whoever holds it can set it to its last value, after which no ledger row can be written:
@@ -1213,8 +1231,11 @@ await runTest("the rules that only exist in the deployed files are in the deploy
   };
   // Measured, across the five files below. 22 of them were in the original sweep's two files; the 23rd is
   // versus_top, which this list never opened. 24 and 25 are ladder_best (v2.4.0), which orders by username
-  // twice - once to pick the ten rows and once to order them inside jsonb_agg - and both collate.
-  const TEXT_ORDERINGS = 25;
+  // twice - once to pick the ten rows and once to order them inside jsonb_agg - and both collate. 26 and 27
+  // are board_looks (v2.7.0), the same pair for the same reason: one ordering decides WHICH rows the limit
+  // keeps, the other the order they come back in, and a board that ties differently on two runs shows a
+  // different set of stars.
+  const TEXT_ORDERINGS = 27;
   const uncollated = [];
   let clauses = 0;
   for (const [file, text] of Object.entries(files)) {

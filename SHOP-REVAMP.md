@@ -127,8 +127,12 @@ select id, 'grant', 'why' from profiles where username = 'NAME';
 
 ### Phase 2 — names ✅ built, unshipped
 
-The highest-visibility cosmetic in the game: names render on every board, the duel screen and every profile,
-through `NameLink` and `PlayerName` — two components, so the rendering is small.
+The highest-visibility cosmetic in the game. The rendering turned out to be three places, not two: `NameLink`
+for every board, `DuelName` for the duel screen (colour only — a name there is never a profile link, because
+that screen is a draft on a clock), and the header's own name, which is painted from what YOU have equipped
+rather than from the boards' read. That last one is why the play screen has one at all: it is the only name on
+it. The context they share, `BoardWear`, had to move to ui-common.jsx, because versus.jsx reads it and a screen
+file never imports the main component back.
 
 - **Nameplates** — a banner behind the name. Easier than coloured text: the plate is a fill, the text stays a
   token, so contrast is unchanged.
@@ -136,10 +140,22 @@ through `NameLink` and `PlayerName` — two components, so the rendering is smal
   validated against all three scopes; animation off under reduced motion; the **guest chip** must stay legible
   beside it.
 
-Done, and the contrast fight had a clear answer: **no colour clears AA as text on all three card scopes**
-(lime 1.28:1 on cream, game blue 3.19:1 on the dark card), so "coloured animated names" became eleven
-nameplates, four of them drifting a gradient. The colour carries its own background, every gradient stop is
-checked against the ink, and the drift is `background-position` only.
+Done, both halves, and the second half is the one worth writing down. The contrast fight had a clear answer
+first: **no colour clears AA as text on all three CARD scopes** (lime 1.28:1 on cream, game blue 3.19:1 on the
+dark card), so on the player card "coloured animated names" became eleven nameplates, four of them drifting a
+gradient - the colour carries its own background, every stop is checked against the ink, and the drift is
+`background-position` only.
+
+Then it shipped to staging, and the answer to "where is the animated name text" was that there wasn't any.
+**The conclusion had been drawn one step too wide.** "No colour works on all three scopes" is only fatal if a
+look has to BE one colour - and it doesn't. A look can be named once per scope, exactly as theme.mjs names
+every token three times, with the app handing in the scope it is drawing. Deep on cream, bright on black, the
+same identity either way, and every stop stays measurable because each is measured against one known surface
+instead of three at once. That is v2.7.0: nine name colours on the boards, six of them drifting.
+
+What stays true from the first pass: **a colour picker still cannot ship.** Free choice and a contrast
+guarantee are not both true. A curated, pre-validated set is a different thing, and the earlier note here
+overstated the limit by not making that distinction.
 
 The **supporter star** is done too, and the plan was wrong about what it would cost. There is no eight-board
 pass: every name renders through one `NameLink`, so the flag arrives there in a context and the six board

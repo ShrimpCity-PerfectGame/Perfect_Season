@@ -13,7 +13,7 @@ const { act } = await import("react-dom/test-utils");
 const React = (await import("react")).default;
 const h = React.createElement;
 const cosmetics = await loadModule("cosmetics.jsx");
-const { FramedAvatar, CardTheme, TitleLine, Coin, Coins, ItemPreview, COSMETICS_CSS, CARD_THEME_SCOPE, COLORS, cardPaint, platePaint, NAMEPLATES, teamCardColors, frameReach } = cosmetics;
+const { FramedAvatar, CardTheme, TitleLine, Coin, Coins, ItemPreview, COSMETICS_CSS, CARD_THEME_SCOPE, COLORS, cardPaint, platePaint, NAMEPLATES, namePaint, nameFill, NAME_LOOKS, NAME_SCOPES, NameInk, teamCardColors, frameReach } = cosmetics;
 const { Avatar, AVATAR_PRESETS } = await loadModule("avatars.jsx");
 
 const FRAMES = SHOP_ITEMS.filter((i) => i.kind === "frame").map((i) => i.id);
@@ -328,6 +328,92 @@ await runTest("every nameplate's own text colour is AA-readable on its own fill"
   const ids = plates.map((i) => i.id).sort().join(",");
   assert(Object.keys(NAMEPLATES).sort().join(",") === ids,
     `NAMEPLATES matches the catalog: ${Object.keys(NAMEPLATES).sort().join(",")} vs ${ids}`);
+});
+
+// ---------- name colours ----------
+// Every surface a name on a BOARD can sit on, per scope, and the whole reason a name colour is three palettes
+// instead of one colour. bg/surface/surface2 are theme.mjs's own; the light scope has two more, because
+// `.lb tr.me td` washes your own row with 30% lime and a name still has to be readable in it. The night scope's
+// extra is the shop's preview chip, a shade deeper than the Leaderboard itself.
+// ADD TO THIS LIST when a board gains a painted background: a colour is only as checked as this list is honest.
+const mixed = (a, b, p) => "#" + [0, 1, 2].map((i) => {
+  const v = (h) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  return Math.round(v(a) * p + v(b) * (1 - p)).toString(16).padStart(2, "0");
+}).join("").toUpperCase();
+const NAME_SURFACES = {
+  light: [THEME.light.bg, THEME.light.surface, THEME.light.surface2,
+    mixed(THEME.light.accent, THEME.light.bg, 0.3), mixed(THEME.light.accent, THEME.light.surface, 0.3)],
+  dark: [THEME.dark.bg, THEME.dark.surface, THEME.dark.surface2],
+  night: [THEME.night.bg, THEME.night.surface, THEME.night.surface2, COLORS.teamFloor],
+};
+
+await runTest("every name colour is AA-readable on every board surface, in all three scopes", async () => {
+  const looks = SHOP_ITEMS.filter((i) => i.kind === "namecolor");
+  assert(looks.length > 0, "there are name colours to check");
+  const below = [];
+  for (const item of looks) {
+    for (const scope of NAME_SCOPES) {
+      const paint = namePaint(item.id, scope);
+      assert(paint && paint.inks.length >= 1, `${item.id} has a palette for the ${scope} scope`);
+      // EVERY stop, not just the first: a drifting gradient puts any stop under any letter, the same reason a
+      // nameplate's ink is measured against every stop of its fill.
+      for (const ink of paint.inks) {
+        assert(/^#[0-9A-F]{6}$/i.test(ink), `${item.id} ${scope}: a solid colour, got ${ink}`);
+        for (const bg of NAME_SURFACES[scope]) {
+          const r = contrast(ink, bg);
+          if (r < 4.5) below.push(`${item.id} ${scope}: ${ink} on ${bg} is ${r.toFixed(2)}:1`);
+        }
+      }
+    }
+  }
+  assert(below.length === 0, `below AA:\n  ${below.join("\n  ")}`);
+  // Every name colour in the catalog has a look and every look is in the catalog. One without the other renders
+  // as a plain name, which reads as "nothing happened" to whoever just bought it.
+  const ids = looks.map((i) => i.id).sort().join(",");
+  assert(Object.keys(NAME_LOOKS).sort().join(",") === ids,
+    `NAME_LOOKS matches the catalog: ${Object.keys(NAME_LOOKS).sort().join(",")} vs ${ids}`);
+  // And each one answers for all three scopes: a look missing one falls back to nothing on a whole screen.
+  for (const [id, look] of Object.entries(NAME_LOOKS)) {
+    for (const scope of NAME_SCOPES) {
+      assert(Array.isArray(look[scope]) && look[scope].length >= 1, `${id} names its ${scope} palette`);
+    }
+  }
+});
+
+await runTest("NameInk paints the name and nothing else: a flat look is a colour, a gradient is clipped to the letters", async () => {
+  // A flat look must NOT get the clipped-gradient class: that class makes the text fill transparent, so a
+  // browser that did not clip it would leave a name with nothing to read.
+  const flat = await renderComponent(() => h(NameInk, { look: "name-blue", scope: "night" }, "shrimpcity"));
+  const flatSpan = flat.container.querySelector(".cs-name");
+  assert(flatSpan && flatSpan.textContent === "shrimpcity", "the name is still the name");
+  assert(!flatSpan.classList.contains("cs-name-grad"), "a flat look is not clipped to the letters");
+  assert(flatSpan.style.getPropertyValue("--cs-name-1") === NAME_LOOKS["name-blue"].night[0],
+    "it wears the night palette it was handed");
+  await act(async () => flat.reactRoot.unmount());
+
+  // A gradient look: clipped, drifting, and its first stop set too, so a browser without the clip has a colour
+  // to fall back to rather than an invisible name.
+  const grad = await renderComponent(() => h(NameInk, { look: "name-vapor", scope: "light" }, "shrimpcity"));
+  const gradSpan = grad.container.querySelector(".cs-name");
+  assert(gradSpan.classList.contains("cs-name-grad") && gradSpan.classList.contains("cs-lively"),
+    `a drifting gradient is clipped and lively, got "${gradSpan.className}"`);
+  assert(gradSpan.style.getPropertyValue("--cs-name-fill") === nameFill(NAME_LOOKS["name-vapor"].light),
+    "the fill is the scope's own gradient");
+  assert(gradSpan.style.getPropertyValue("--cs-name-1") === NAME_LOOKS["name-vapor"].light[0], "and its first stop");
+  await act(async () => grad.reactRoot.unmount());
+
+  // The same look in another scope is another palette. This is the whole feature: one identity, three values.
+  assert(NAME_LOOKS["name-vapor"].light[0] !== NAME_LOOKS["name-vapor"].night[0],
+    "a look's cream palette is not its black one");
+
+  // No look, and an id of the wrong kind - a nameplate is the easiest thing to pass by mistake: the name,
+  // unchanged and unwrapped.
+  for (const look of [null, "plate-aurora", "no-such-item"]) {
+    const bare = await renderComponent(() => h(NameInk, { look, scope: "night" }, "shrimpcity"));
+    assert(!bare.container.querySelector(".cs-name"), `${look}: no colour is applied`);
+    assert(bare.container.textContent === "shrimpcity", `${look}: the name is shown anyway`);
+    await act(async () => bare.reactRoot.unmount());
+  }
 });
 
 console.log("test-cosmetics.mjs done");

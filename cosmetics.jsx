@@ -78,6 +78,49 @@ export const COLORS = {
   plateAurora: "#6D3FD6",
   celStage: "#0B1020", // the shop preview tile's little night sky
   celBeam: "#FFFFFF", // a spotlight beam, which is white light and nothing else
+  // Name colours (the boards, NAME_LOOKS below). Each look is named twice: a deep value that clears AA on
+  // cream and a bright one that clears it on true black. The pairs are the same colour as far as anyone
+  // reading the board is concerned - Ember is Ember - and the two exist because the surface underneath is
+  // the page, not a plate the look brought with it.
+  nameBlueDeep: "#1B44C8",
+  nameBlueBright: "#8FB8FF",
+  nameEmberDeep: "#A3350B",
+  nameEmberBright: "#FF9E63",
+  nameToxicDeep: "#2F6B00",
+  nameToxicMoss: "#0F5E2E",
+  nameToxicMint: "#6FE8A0",
+  nameMagentaDeep: "#A8126A",
+  nameVioletDeep: "#6326CE",
+  nameTealDeep: "#0D5F7C",
+  namePink: "#FF84C8",
+  nameLilac: "#C4A0FF",
+  nameAqua: "#6FE4FF",
+  nameFlameDeep: "#A63C00",
+  nameFlameRedDeep: "#96110F",
+  nameFlameBrown: "#7A2A00",
+  nameFlameBlush: "#FF6B6B",
+  nameFrostDeep: "#0E5B78",
+  nameFrostInk: "#25489E",
+  nameFrostIce: "#A8ECFF",
+  nameFrostSky: "#7FD0FF",
+  nameFrostMist: "#D6EBFF",
+  namePrismRose: "#9C1055",
+  namePrismViolet: "#7A2AB8",
+  namePrismBlue: "#12558C",
+  namePrismGreen: "#0F6238",
+  namePrismPink: "#FF8FB8",
+  namePrismLilac: "#C9A0FF",
+  namePrismSky: "#7FC8FF",
+  namePrismMint: "#8FEFA8",
+  nameGoldDeep: "#6E4A00",
+  nameGoldMid: "#875D05",
+  nameGoldGlow: "#FFD84D",
+  nameGoldPale: "#FFEFA3",
+  nameNebulaViolet: "#5423B8",
+  nameNebulaMagenta: "#96126E",
+  nameNebulaLilac: "#C9A6FF",
+  nameNebulaPink: "#FF9AD5",
+  nameNebulaBlue: "#93C4FF",
 };
 
 // How strong each translucent layer is, where it's strongest. cardPaint flattens these onto their fills.
@@ -203,6 +246,80 @@ export function platePaint(id) {
   return plate ? { behindText: [...plate.stops], ink: plate.ink } : null;
 }
 
+// ---------- Name colours ----------
+// Curated, animated colours for a name ON THE BOARDS - the other half of the answer the nameplates gave for
+// the player card, and the part people actually ask for.
+//
+// A name on a board is text with the page behind it, so unlike a plate it cannot bring its own background,
+// and the measurement that sent coloured names to plates in the first place still stands: no single colour
+// clears AA on cream AND on true black. What makes this work is that a look does not have to BE one colour.
+// Each one is named once per app scope, exactly as theme.mjs names every token three times, and the scope the
+// app is already in picks: deep on cream (Stats), bright on black (the Leaderboard), bright on navy. Ember is
+// Ember on all three; only its lightness moves, which is the one thing the surface forces.
+//
+// `stops` per scope: one colour for a flat look, several for a gradient that drifts. EVERY stop has to clear
+// AA against every surface a board name can sit on in that scope - tests/test-cosmetics.mjs owns that list
+// (NAME_SURFACES), and it includes the lime wash the leaderboard paints over your own row. Measuring the
+// first stop is not enough: a drift slides any stop under any letter.
+//
+// `lively` drifts the gradient. Background-position only, like a plate, so nothing moves, nothing reflows,
+// and the colours under the letters stay the colours that were measured. It stops under reduced motion.
+//
+// This is the boards only, and deliberately: the player card wears a nameplate instead, because a card is one
+// of six themes over 32 team colours and a text colour clearing all of those does not exist.
+export const NAME_LOOKS = {
+  "name-blue": { light: [C.nameBlueDeep], dark: [C.nameBlueBright], night: [C.nameBlueBright] },
+  "name-ember": { light: [C.nameEmberDeep], dark: [C.nameEmberBright], night: [C.nameEmberBright] },
+  "name-toxic": {
+    light: [C.nameToxicDeep, C.nameToxicMoss],
+    dark: [C.lime, C.nameToxicMint], night: [C.lime, C.nameToxicMint], lively: true,
+  },
+  "name-vapor": {
+    light: [C.nameMagentaDeep, C.nameVioletDeep, C.nameTealDeep],
+    dark: [C.namePink, C.nameLilac, C.nameAqua], night: [C.namePink, C.nameLilac, C.nameAqua], lively: true,
+  },
+  "name-flame": {
+    light: [C.nameFlameDeep, C.nameFlameRedDeep, C.nameFlameBrown],
+    dark: [C.flameYellow, C.flameOrange, C.nameFlameBlush],
+    night: [C.flameYellow, C.flameOrange, C.nameFlameBlush], lively: true,
+  },
+  "name-frost": {
+    light: [C.nameFrostDeep, C.nameFrostInk],
+    dark: [C.nameFrostIce, C.nameFrostSky, C.nameFrostMist],
+    night: [C.nameFrostIce, C.nameFrostSky, C.nameFrostMist], lively: true,
+  },
+  "name-prism": {
+    light: [C.namePrismRose, C.namePrismViolet, C.namePrismBlue, C.namePrismGreen],
+    dark: [C.namePrismPink, C.namePrismLilac, C.namePrismSky, C.namePrismMint],
+    night: [C.namePrismPink, C.namePrismLilac, C.namePrismSky, C.namePrismMint], lively: true,
+  },
+  "name-trophy": {
+    light: [C.nameGoldDeep, C.nameGoldMid],
+    dark: [C.nameGoldGlow, C.nameGoldPale], night: [C.nameGoldGlow, C.nameGoldPale], lively: true,
+  },
+  "name-nebula": {
+    light: [C.nameNebulaViolet, C.nameNebulaMagenta, C.nameFrostInk],
+    dark: [C.nameNebulaLilac, C.nameNebulaPink, C.nameNebulaBlue],
+    night: [C.nameNebulaLilac, C.nameNebulaPink, C.nameNebulaBlue], lively: true,
+  },
+};
+
+// The three scopes a look has to answer for - the app's own, from theme.mjs. A look missing one is a look
+// that would fall back to nothing on a whole screen, so tests/test-cosmetics.mjs holds every look to all three.
+export const NAME_SCOPES = ["light", "dark", "night"];
+
+// The gradient a look paints across its letters. One stop is not a gradient at all; it is set as `color` and
+// no background is involved, so a flat look needs nothing clipped to text.
+export const nameFill = (stops) => (stops.length === 1 ? null
+  : `linear-gradient(100deg,${stops.join(",")},${stops[0]})`);
+
+// What a look paints as text in one scope, in the shape cardPaint and platePaint answer in - except that here
+// the colours ARE the text, so they come back as `inks` rather than as something behind it.
+export function namePaint(id, scope) {
+  const look = NAME_LOOKS[id];
+  return look && look[scope] ? { inks: [...look[scope]], lively: !!look.lively } : null;
+}
+
 export const TITLE_MARK = {
   "title-war-room": "spark", "title-sleeper-agent": "spark",
   "title-first-overall": "crown", "title-the-goat": "crown",
@@ -325,15 +442,51 @@ export const COSMETICS_CSS = `
    plate's padding is width taken away from it - "shrimpcity" broke to "shrimpc / ity" the first time this
    rendered. The name is one word and stays one word; a card that cannot fit it shrinks the type, which is
    what .pf-long and .sh-long already do. */
-.cs-plate{display:inline-block;border-radius:8px;padding:2px 8px 3px;background:var(--cs-plate);
-  white-space:nowrap;color:var(--cs-plate-ink);box-shadow:inset 0 0 0 1.5px var(--cs-plate-trim)}
-.cs-plate-preview{display:inline-flex;align-items:center;justify-content:center;width:64px;height:26px;
+/* A BLOCK sized to its content, not an inline-block. Both cards put the name in a grid whose name is
+   a line-height of .95 - a line box shorter than the plate - and an inline-block's padding does not grow it, so
+   the name measured ZERO high and the plate drew straight over the title beneath it. A block takes its own
+   height, and fit-content keeps the banner the width of the name rather than the width of the column.
+   nowrap, and a narrower gutter than looks right on its own: the cards size a name for a bare word, so a
+   plate's padding is width taken away from it - "shrimpcity" broke to "shrimpc / ity" the first time this
+   rendered. The name is one word and stays one word; a card that cannot fit it shrinks the type, which is
+   what .pf-long and .sh-long already do.
+   The outer ring is what stops a plate vanishing into a card of nearly its own colour - Turf on the Turf card
+   is #092B12 on #06200D - so every plate reads as a banner rather than an outline round a name. */
+.cs-nameplate{display:block;width:fit-content;max-width:100%;border-radius:8px;padding:3px 9px 4px;
+  background:var(--cs-nameplate);white-space:nowrap;color:var(--cs-nameplate-ink);line-height:1.08;
+  box-shadow:inset 0 0 0 1.5px var(--cs-nameplate-trim),0 0 0 2px ${rgba(C.ink, 0.35)}}
+.cs-nameplate-preview{display:inline-flex;align-items:center;justify-content:center;width:64px;height:26px;
   border-radius:6px;font-family:var(--display);font-size:13px;letter-spacing:.02em}
 /* The animated ones drift their gradient. Background-position only - nothing moves, nothing reflows, and the
    colours under the letters stay the colours the contrast test measured, because a drift only slides which
    stop is where. */
-.cs-plate.cs-lively{background-size:220% 100%;animation:cs-plate-drift 7s ease-in-out infinite}
+.cs-nameplate.cs-lively{background-size:220% 100%;animation:cs-plate-drift 7s ease-in-out infinite}
 @keyframes cs-plate-drift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+
+/* ---------- Name colours ----------
+   The colours arrive as inline vars rather than as rules of their own. A look is three palettes and only the
+   app knows which screen this is, so cosmetics.jsx has no business naming .night in here - and the stylesheet
+   stays cs- classes only, which is a rule the tests keep.
+   A flat look is nothing but a color. A gradient has to be clipped to the letters, which means the fill goes
+   transparent - so they are separate classes, and a flat look never goes near text-fill-color, where a
+   browser without the clip would leave nothing at all to read.
+   text-decoration-color is set defensively, not for a bug seen: a decoration is painted by whatever element
+   declares it, and the leaderboard's hover underline is declared on the .namelink button, which keeps its own
+   colour. This only matters if a decoration is ever set on the name itself, where currentColor would be the
+   transparent fill and the underline would vanish. */
+.cs-name{color:var(--cs-name-1);text-decoration-color:var(--cs-name-1)}
+.cs-name-grad{background-image:var(--cs-name-fill);-webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent}
+.cs-name-grad.cs-lively{background-size:220% 100%;animation:cs-name-drift 7s ease-in-out infinite}
+@keyframes cs-name-drift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+/* The shop shows a look on both surfaces at once: it is not one colour, and a preview of half of it would
+   misdescribe the other half. The chips are the two ends - cream, and a black a shade deeper than the
+   Leaderboard's own, so anything readable there is readable here. */
+.cs-name-preview{display:inline-flex;gap:4px;align-items:center}
+.cs-name-chip{display:inline-flex;align-items:center;justify-content:center;width:52px;height:24px;
+  border-radius:5px;font-family:var(--display);font-size:12px;letter-spacing:.02em}
+.cs-name-chip-light{background:${C.cream}}
+.cs-name-chip-night{background:${C.teamFloor}}
 
 /* ---------- Win celebrations ----------
    An overlay over the whole result screen, not a panel in it: the moment is the screen, and .cel (the lime
@@ -425,7 +578,10 @@ export const COSMETICS_CSS = `
   .cs-cel{display:none}
   .cs-cel-fall i,.cs-cel-spotlight i,.cs-cel-fireworks i,.cs-cel-champion i,.cs-cel-supernova i{animation:none}
   /* A drifting plate holds still and keeps its colours - unlike a celebration, there is something to look at. */
-  .cs-plate.cs-lively{animation:none}
+  .cs-nameplate.cs-lively{animation:none}
+  /* A drifting name holds still and keeps its colours, for the same reason a plate does: there is something
+     to read underneath, and it is somebody's name. */
+  .cs-name-grad.cs-lively{animation:none}
 }
 `;
 
@@ -528,12 +684,29 @@ export function Coins({ amount = 0, size = 16, className = "" }) {
 // it can sit inside a button.
 // The plate itself. Wraps whatever it is given - a name - so the caller keeps owning the element and its
 // heading level; without a plate it renders nothing at all and the name is untouched.
+// A name in the colour its account wears, for the boards. The scope is handed in rather than read from a
+// class because a look is three palettes and only the app knows which screen this is - perfect-season.jsx
+// computes exactly this scope for the root already. No look, or an id the catalog does not know: the name
+// itself, unchanged, which is what every account without one gets.
+export function NameInk({ look = null, scope = "light", children }) {
+  const paint = namePaint(known(look, "namecolor"), scope);
+  if (!paint) return children ?? null;
+  const fill = nameFill(paint.inks);
+  const cls = ["cs-name", fill ? "cs-name-grad" : "", fill && paint.lively ? "cs-lively" : ""].filter(Boolean).join(" ");
+  return (
+    <span className={cls} data-name-look={look}
+          style={{ "--cs-name-1": paint.inks[0], ...(fill ? { "--cs-name-fill": fill } : {}) }}>
+      {children}
+    </span>
+  );
+}
+
 export function NamePlate({ plate = null, children, className = "" }) {
   const look = NAMEPLATES[known(plate, "nameplate")];
   if (!look) return children ?? null;
   return (
-    <span className={`cs-plate ${look.lively ? "cs-lively" : ""} ${className}`.trim()} data-plate={plate}
-          style={{ "--cs-plate": plateFill(look), "--cs-plate-ink": look.ink, "--cs-plate-trim": look.trim }}>
+    <span className={`cs-nameplate ${look.lively ? "cs-lively" : ""} ${className}`.trim()} data-plate={plate}
+          style={{ "--cs-nameplate": plateFill(look), "--cs-nameplate-ink": look.ink, "--cs-nameplate-trim": look.trim }}>
       {children}
     </span>
   );
@@ -664,8 +837,23 @@ export function ItemPreview({ id, team = null, username = "", photoUrl = null, p
     const look = NAMEPLATES[id];
     return (
       <span className="cs-preview" aria-hidden="true" data-preview={id}>
-        <span className={`cs-plate cs-plate-preview ${look.lively ? "cs-lively" : ""}`.trim()} data-plate={id}
-              style={{ "--cs-plate": plateFill(look), "--cs-plate-ink": look.ink, "--cs-plate-trim": look.trim }}>Name</span>
+        <span className={`cs-nameplate cs-nameplate-preview ${look.lively ? "cs-lively" : ""}`.trim()} data-plate={id}
+              style={{ "--cs-nameplate": plateFill(look), "--cs-nameplate-ink": look.ink, "--cs-nameplate-trim": look.trim }}>Name</span>
+      </span>
+    );
+  }
+  if (item.kind === "namecolor") {
+    // Both ends of it. A name colour is a deep value on cream and a bright one on black, so a single swatch
+    // would be a preview of one screen and a lie about the other.
+    return (
+      <span className="cs-preview" aria-hidden="true" data-preview={id}>
+        <span className="cs-name-preview">
+          {["light", "night"].map((scope) => (
+            <span key={scope} className={`cs-name-chip cs-name-chip-${scope}`}>
+              <NameInk look={id} scope={scope}>Name</NameInk>
+            </span>
+          ))}
+        </span>
       </span>
     );
   }

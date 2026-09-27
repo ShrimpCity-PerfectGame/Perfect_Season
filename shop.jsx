@@ -642,6 +642,15 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
             ))}
           </div>
           <div className="sh-panel" role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-${tab}`}>
+            {tab === "namecolor" && (
+              /* Said here because the card above cannot show it: a name colour is worn on the boards, and the
+                 card wears a nameplate instead (NAME_LOOKS in cosmetics.jsx has the reason). Without this line
+                 equipping one looks like it did nothing at all. */
+              <p className="note" style={{ marginTop: 0 }}>
+                Name colors show on the leaderboards and the Stats boards, not on your card. Each one is drawn
+                to read on both the cream boards and the black ones.
+              </p>
+            )}
             {tab === "showcase" ? showcasePanel() : <div className="sh-items">{items.filter((i) => i.kind === tab).map(renderItem)}</div>}
           </div>
         </div>

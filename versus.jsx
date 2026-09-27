@@ -36,7 +36,9 @@ import {
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
 import {
   SLOT_LABEL, teamVars, teamLabel, shortYr, POS_NAME, cityRange, statCells, useCloseOnBack, keepFocusInside, Confetti,
+  useNameLook, useWearScope,
 } from "./ui-common.jsx";
+import { NameInk } from "./cosmetics.jsx";
 
 // The two slots 1v1 adds, beside the six every other mode already labels. A chip says which slot a pick filled
 // in letters, never by colour alone - the accessibility floor tests/test-a11y.mjs keeps.
@@ -449,10 +451,13 @@ export function useFlash(event) {
 // `onSteal(slot)` turns the filled slots into buttons, which is how a steal picks its target - the powerup
 // takes any one player off the other roster, so the roster itself has to be the thing you tap. Passed only
 // while a steal is actually being spent, so the strip is a display the rest of the time.
-function RosterStrip({ roster, label, sub, them, onSteal, busy }) {
+// `label` stays the plain string and `labelNode` is what is SHOWN, when the name is wearing a colour. Two
+// props rather than one because label is also written to data-side, where a React element would land as
+// "[object Object]" and take the test hook with it.
+function RosterStrip({ roster, label, labelNode, sub, them, onSteal, busy }) {
   return (
     <div className={`vs-side ${them ? "vs-them" : ""} ${onSteal ? "vs-picking" : ""}`}>
-      <p className="vs-side-hd">{label}{sub ? <span className="vs-sub"> {sub}</span> : null}</p>
+      <p className="vs-side-hd">{labelNode || label}{sub ? <span className="vs-sub"> {sub}</span> : null}</p>
       <div className="roster" data-side={label}>
         {VERSUS_SLOTS.map((slot) => {
           const o = roster[slot];
@@ -621,7 +626,7 @@ function Board({ boardKey, taken, roster, myTurn, onPick, selected, setSelected,
   );
 }
 
-export function VersusScreen({ userId, username, code: codeFromAddress, format = "fantasy", onBack, onCode, onShare, siteUrl }) {
+export function VersusScreen({ userId, username, code: codeFromAddress, format = "fantasy", onBack, onCode, onShare, onPlayers, siteUrl }) {
   const [match, setMatch] = useState(null);
   const [code, setCode] = useState(codeFromAddress || null);
   const [busy, setBusy] = useState(false);
@@ -739,6 +744,12 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   // whatever just happened.
   const mine = state && side ? powerupsFor(match, side) : null;
   const theirs = state && side ? powerupsFor(match, side === "host" ? "guest" : "host") : null;
+  // Tell the app which two accounts are on this screen, so it can fetch exactly THEIR name colours rather than
+  // hope both sit inside the boards' first few hundred wearers. Keyed on the pair rather than on the match,
+  // which changes on every pick and every tick of the clock.
+  const players = [match?.hostName, match?.guestName].filter(Boolean).join(" ");
+  useEffect(() => { if (players) onPlayers?.(players.split(" ")); }, [players, onPlayers]);
+
   const flash = useFlash(latestEvent(match, state, (s) => name(match, s), side));
   // Armed, and still your turn. The effect below clears `stealing` when the turn moves, but an effect runs
   // after the frame it is reacting to: for that one frame their roster still said "Take one of theirs" and
@@ -957,7 +968,9 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           {/* Who beat whom, in names rather than sides - the heading says how it went for you, this says what
               happened. Both, because the scoreline alone doesn't say which number was yours. */}
           <p className="vs-beat">
-            {tied ? `${name(match, mine)} and ${name(match, theirs)} tied` : `${name(match, hi)} beat ${name(match, lo)}`}
+            {tied
+              ? <><DuelName match={match} side={mine} /> and <DuelName match={match} side={theirs} /> tied</>
+              : <><DuelName match={match} side={hi} /> beat <DuelName match={match} side={lo} /></>}
           </p>
           {/* The roster scores are NOT repeated here. Each one is already the subtitle on its own roster strip
               below, which is where it belongs - attached to the eight picks that earned it. Said twice, and
@@ -971,8 +984,10 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           ) : null}
         </div>
         <div className="vs-rosters">
-          <RosterStrip roster={state.roster[mine]} label={name(match, mine)} sub={`${result[mine].score}`} />
-          <RosterStrip roster={state.roster[theirs]} label={name(match, theirs)} sub={`${result[theirs].score}`} />
+          <RosterStrip roster={state.roster[mine]} label={name(match, mine)} sub={`${result[mine].score}`}
+            labelNode={<DuelName match={match} side={mine} />} />
+          <RosterStrip roster={state.roster[theirs]} label={name(match, theirs)} sub={`${result[theirs].score}`}
+            labelNode={<DuelName match={match} side={theirs} />} />
         </div>
         <div className="vs-powers">
           <button className="btn" onClick={() => onShare?.(versusShareText(match, result, mine, siteUrl))}>Share</button>
@@ -997,7 +1012,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
       <div className={`sticky ${stuck ? "show" : ""}`} aria-hidden={!stuck} style={teamVars(boardTeam)}>
         <div className="in">
           <div className="stripe" style={{ background: TEAMS[boardTeam][2] }} />
-          <span className="tm">{myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`}</span>
+          <span className="tm">{myTurn ? "Your pick" : <><DuelName match={match} side={state.turn.side} /> is picking</>}</span>
           {left != null ? <span className={`yr vs-tick ${left <= 10 ? "low" : ""}`}>{left}s</span> : null}
           <span className="pk">Board {Math.min(state.boardIdx + 1, MATCH_BOARDS)} of {MATCH_BOARDS}</span>
           <span className="brk" />
@@ -1044,6 +1059,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
               their players, so the roster is what you aim it at. */}
           <RosterStrip them roster={state.roster[side === "host" ? "guest" : "host"]}
             label={arming ? "Take one of theirs" : `${name(match, side === "host" ? "guest" : "host")}'s roster`}
+            labelNode={arming ? null : <><DuelName match={match} side={side === "host" ? "guest" : "host"} />'s roster</>}
             onSteal={arming ? grab : null} busy={busy} />
           {theirs ? <PowerupTrack left={theirs} label={name(match, side === "host" ? "guest" : "host")} /> : null}
           {arming ? (
@@ -1061,7 +1077,7 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           key={state.boardKey}
           boardKey={state.boardKey} taken={state.taken} roster={state.roster[side || "host"]}
           myTurn={myTurn} busy={busy} selected={selected} setSelected={setSelected}
-          turnLabel={myTurn ? "Your pick" : `${name(match, state.turn.side)} is picking`} seconds={left}
+          turnLabel={myTurn ? "Your pick" : <><DuelName match={match} side={state.turn.side} /> is picking</>} seconds={left}
           controls={side ? (
             <div className="rerolls vs-powers">
               {POWERUPS.map((pu) => {
@@ -1152,6 +1168,18 @@ export function versusShareText(match, result, side, siteUrl) {
 }
 
 const name = (match, side) => (side === "host" ? match.hostName || "Host" : side === "guest" ? match.guestName || "Opponent" : "");
+// A duel name in the colour that account wears. A component rather than a helper because it reads the context,
+// which means it works wherever this screen renders it - inside Board, inside RosterStrip, anywhere.
+// It is NOT a profile link, unlike a name on a board: this screen is a live draft on a clock, and opening a
+// profile from it would push a history entry and take the player off the match mid-turn.
+// The fallback scope is dark, which is what this screen is (perfect-season.jsx gives 1v1 the draft's scope);
+// useWearScope answers with the app's real one whenever there is a provider above.
+export function DuelName({ match, side }) {
+  const who = name(match, side);
+  const look = useNameLook(who);
+  const scope = useWearScope();
+  return <NameInk look={look} scope={scope === "light" ? "dark" : scope}>{who}</NameInk>;
+}
 // What the invite button says once it has been pressed. Only ever what happened: a closed share sheet is
 // not a send, and it keeps the button where it was.
 const INVITE_SAID = { shared: "Invite sent", copied: "Copied", manual: "Couldn't share" };

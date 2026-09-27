@@ -13,7 +13,7 @@ const fail = (code) => {
 };
 const ID = /^[a-z0-9-]{1,40}$/;
 // equip_item's slot -> the profile_details column it writes.
-const SLOT_COLUMN = { frame: "frame", card: "card_theme", title: "title", nameplate: "nameplate", celebration: "celebration" };
+const SLOT_COLUMN = { frame: "frame", card: "card_theme", title: "title", nameplate: "nameplate", namecolor: "namecolor", celebration: "celebration" };
 
 // state:       tests/mock-supabase.mjs's shared state
 // wallet:      tests/mock-wallet.mjs's makeWallet(state)
@@ -52,6 +52,24 @@ export function makeShop(state, { wallet, profileData }) {
   const byShopOrder = (a, b) => SHOP_KINDS.indexOf(a.kind) - SHOP_KINDS.indexOf(b.kind) || a.sort - b.sort || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
   const rpcs = {
+    // Mirrors migration-shop.sql's board_looks(): who is wearing what, for the boards. Ordered by name with
+    // the SQL's own collate "C" (a plain codepoint compare), and only the accounts wearing something, because
+    // tests/test-shop-sql.mjs holds this and the real function to identical JSON.
+    board_looks({ p_limit = 500, p_names = null } = {}) {
+      // p_names asks about exactly those accounts and ignores the limit - the duel screen's two players, who
+      // may sit outside the boards' first `limit` wearers. Capped, like the SQL, because it comes from a browser.
+      const lim = p_names ? Math.min(p_names.length, 100) : Math.max(1, Math.min(p_limit ?? 500, 2000));
+      return [...state.profiles.values()]
+        .map((p) => ({
+          username: p.username,
+          supporter: !!(state.supporters?.has(p.id)),
+          namecolor: profileData.tables.profile_details.get(p.id)?.namecolor ?? null,
+        }))
+        .filter((r) => typeof r.username === "string" && (r.supporter || r.namecolor != null)
+          && (!p_names || p_names.includes(r.username)))
+        .sort((a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0))
+        .slice(0, lim);
+    },
     shop_state() {
       const uid = player();
       const worn = profileData.tables.profile_details.get(uid);
@@ -62,7 +80,8 @@ export function makeShop(state, { wallet, profileData }) {
           .map(({ id, kind, rarity, price, badge, active, sort, owned }) => ({ id, kind, rarity, price, badge, active, sort, owned })),
         supporter: isSupporter(uid),
         equipped: { frame: worn?.frame ?? null, card: worn?.card_theme ?? null, title: worn?.title ?? null,
-                    nameplate: worn?.nameplate ?? null, celebration: worn?.celebration ?? null, showcase: [...(worn?.showcase || [])] },
+                    nameplate: worn?.nameplate ?? null, namecolor: worn?.namecolor ?? null,
+                    celebration: worn?.celebration ?? null, showcase: [...(worn?.showcase || [])] },
       };
     },
     shop_buy({ p_item = null } = {}) {

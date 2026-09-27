@@ -17,7 +17,7 @@
 
 create table if not exists public.shop_items (
   id      text primary key check (id ~ '^[a-z0-9-]{1,40}$'),
-  kind    text not null check (kind in ('frame', 'card', 'title', 'nameplate', 'celebration', 'avatar_pack')),
+  kind    text not null check (kind in ('frame', 'card', 'title', 'nameplate', 'namecolor', 'celebration', 'avatar_pack')),
   rarity  text not null check (rarity in ('free', 'common', 'rare', 'epic', 'legendary', 'badge', 'supporter')),
   price   integer check (price is null or price between 1 and 1000000),
   -- The badges.mjs id that unlocks a badge item.
@@ -46,7 +46,7 @@ alter table public.shop_items add constraint shop_items_price_fits_rarity check 
 alter table public.shop_items drop constraint if exists shop_items_rarity_check;
 alter table public.shop_items add constraint shop_items_rarity_check check (rarity in ('free', 'common', 'rare', 'epic', 'legendary', 'badge', 'supporter'));
 alter table public.shop_items drop constraint if exists shop_items_kind_check;
-alter table public.shop_items add constraint shop_items_kind_check check (kind in ('frame', 'card', 'title', 'nameplate', 'celebration', 'avatar_pack'));
+alter table public.shop_items add constraint shop_items_kind_check check (kind in ('frame', 'card', 'title', 'nameplate', 'namecolor', 'celebration', 'avatar_pack'));
 
 insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('frame-ink', 'frame', 'free', null, null, 10),
@@ -85,6 +85,17 @@ insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('plate-emerald', 'nameplate', 'legendary', 15000, null, 90),
   ('plate-dynasty', 'nameplate', 'badge', null, 'dynasty', 100),
   ('plate-aurora', 'nameplate', 'supporter', null, null, 110),
+  -- v2.7.0: name colours, the name itself on the boards. Prices track the nameplates - the same ladder, and a
+  -- name is seen by more people than a card is.
+  ('name-blue', 'namecolor', 'common', 750, null, 10),
+  ('name-ember', 'namecolor', 'common', 750, null, 20),
+  ('name-toxic', 'namecolor', 'rare', 2000, null, 30),
+  ('name-vapor', 'namecolor', 'rare', 2000, null, 40),
+  ('name-flame', 'namecolor', 'epic', 6000, null, 50),
+  ('name-frost', 'namecolor', 'epic', 6000, null, 60),
+  ('name-prism', 'namecolor', 'legendary', 15000, null, 70),
+  ('name-trophy', 'namecolor', 'badge', null, 'undefeated', 80),
+  ('name-nebula', 'namecolor', 'supporter', null, null, 90),
   ('cel-confetti', 'celebration', 'free', null, null, 10),
   ('cel-spotlight', 'celebration', 'common', 750, null, 20),
   ('cel-fireworks', 'celebration', 'rare', 2000, null, 30),
@@ -170,6 +181,7 @@ begin
       card_theme = case when ci.rarity = 'supporter' then null else d.card_theme end,
       title = case when ti.rarity = 'supporter' then null else d.title end,
       nameplate = case when ni.rarity = 'supporter' then null else d.nameplate end,
+      namecolor = case when mi.rarity = 'supporter' then null else d.namecolor end,
       celebration = case when ei.rarity = 'supporter' then null else d.celebration end,
       updated_at = now()
       from (select 1) as _
@@ -177,6 +189,7 @@ begin
       left join public.shop_items ci on ci.id = (select card_theme from public.profile_details where user_id = old.user_id)
       left join public.shop_items ti on ti.id = (select title from public.profile_details where user_id = old.user_id)
       left join public.shop_items ni on ni.id = (select nameplate from public.profile_details where user_id = old.user_id)
+      left join public.shop_items mi on mi.id = (select namecolor from public.profile_details where user_id = old.user_id)
       left join public.shop_items ei on ei.id = (select celebration from public.profile_details where user_id = old.user_id)
      where d.user_id = old.user_id;
     return old;
@@ -207,6 +220,9 @@ alter table public.profile_details add column if not exists title text reference
 -- frame is Ink - DEFAULT_ITEM in shop-catalog.mjs holds both, so nothing has to be backfilled.
 -- v2.6.0: the banner behind the name on the player card. Null is no plate at all, not a default one.
 alter table public.profile_details add column if not exists nameplate text references public.shop_items(id);
+-- v2.7.0: the colour the name itself is drawn in, on the boards. Null is the scope's own ink, which is what
+-- every account has always had - so nothing is backfilled and nobody is handed a colour they did not pick.
+alter table public.profile_details add column if not exists namecolor text references public.shop_items(id);
 alter table public.profile_details add column if not exists celebration text references public.shop_items(id);
 alter table public.profile_details add column if not exists showcase text[] not null default '{}';
 alter table public.profile_details drop constraint if exists profile_details_showcase_shape;
@@ -254,7 +270,7 @@ begin
       select jsonb_agg(jsonb_build_object(
                'id', s.id, 'kind', s.kind, 'rarity', s.rarity, 'price', s.price, 'badge', s.badge,
                'active', s.active, 'sort', s.sort, 'owned', s.owned)
-             order by array_position(array['frame', 'card', 'title', 'nameplate', 'celebration', 'avatar_pack'], s.kind), s.sort, s.id collate "C")
+             order by array_position(array['frame', 'card', 'title', 'nameplate', 'namecolor', 'celebration', 'avatar_pack'], s.kind), s.sort, s.id collate "C")
         from (
           select i.*,
                  i.rarity = 'free'
@@ -272,7 +288,7 @@ begin
     'supporter', exists (select 1 from public.supporters sp where sp.user_id = v_uid),
     'equipped', jsonb_build_object(
       'frame', v_worn.frame, 'card', v_worn.card_theme, 'title', v_worn.title,
-      'nameplate', v_worn.nameplate, 'celebration', v_worn.celebration,
+      'nameplate', v_worn.nameplate, 'namecolor', v_worn.namecolor, 'celebration', v_worn.celebration,
       'showcase', to_jsonb(coalesce(v_worn.showcase, '{}'::text[])))
   );
 end;
@@ -358,7 +374,7 @@ begin
   if exists (select 1 from public.profiles where id = v_uid and guest) then
     raise exception 'guest_not_allowed' using errcode = 'P0001';
   end if;
-  if p_slot is null or p_slot not in ('frame', 'card', 'title', 'nameplate', 'celebration') then
+  if p_slot is null or p_slot not in ('frame', 'card', 'title', 'nameplate', 'namecolor', 'celebration') then
     raise exception 'bad_slot' using errcode = 'P0001';
   end if;
   if p_item is not null then
@@ -382,6 +398,10 @@ begin
   elsif p_slot = 'nameplate' then
     insert into public.profile_details as d (user_id, nameplate) values (v_uid, p_item)
     on conflict (user_id) do update set nameplate = excluded.nameplate, updated_at = now()
+    returning d.* into v_row;
+  elsif p_slot = 'namecolor' then
+    insert into public.profile_details as d (user_id, namecolor) values (v_uid, p_item)
+    on conflict (user_id) do update set namecolor = excluded.namecolor, updated_at = now()
     returning d.* into v_row;
   elsif p_slot = 'celebration' then
     insert into public.profile_details as d (user_id, celebration) values (v_uid, p_item)
@@ -434,7 +454,43 @@ begin
 end;
 $$;
 
+-- Who is wearing what, for the boards (v2.7.0). One read for every decoration a name can carry: the supporter
+-- star and the name colour. One function rather than two selects because the two live in different tables - the
+-- flag is on profiles, the colour in profile_details - so something has to join them, and because a board that
+-- had to ask twice would show one decoration before the other.
+--
+-- Only accounts wearing something come back, so this is the length of "how many people bought one", not of the
+-- account table. It is stable and read-only, so the client calls it as GET and supabase-js retries it on a
+-- dropped network like every other read. Nothing here is private: both are public the way the guest chip is.
+-- p_names asks about exactly those accounts and ignores the limit. The boards want "everybody wearing
+-- something, up to a limit"; the duel screen wants two people by name, who may be anywhere in the alphabet and
+-- so may sit outside that limit - without this a duel between two players who both bought a colour could show
+-- neither. It is capped too, because the argument comes from a browser.
+-- The parameter list changed after v2.7.0 was written and before it shipped anywhere, so the old one-argument
+-- version is dropped rather than left beside it: create or replace cannot change a signature, and two
+-- overloads both taking p_limit would make every call by name ambiguous.
+drop function if exists public.board_looks(integer);
+create or replace function public.board_looks(p_limit integer default 500, p_names text[] default null)
+returns jsonb language sql stable security invoker set search_path = public, pg_temp as $$
+  select coalesce(jsonb_agg(jsonb_build_object('username', t.username, 'supporter', t.supporter,
+                                               'namecolor', t.namecolor)
+                            order by t.username collate "C"), '[]'::jsonb)
+    from (
+      select p.username, p.supporter, d.namecolor
+        from public.profiles p
+        left join public.profile_details d on d.user_id = p.id
+       where (p.supporter or d.namecolor is not null)
+         and (p_names is null or p.username = any(p_names))
+       order by p.username collate "C"
+       limit case when p_names is null then greatest(1, least(coalesce(p_limit, 500), 2000))
+                  else least(cardinality(p_names), 100) end
+    ) t;
+$$;
+
 revoke execute on function public.shop_state(), public.shop_buy(text), public.equip_item(text, text),
   public.set_showcase(text[]) from public, anon;
 grant execute on function public.shop_state(), public.shop_buy(text), public.equip_item(text, text),
   public.set_showcase(text[]) to authenticated;
+-- board_looks is a read of what is already public, so a signed-out visitor reading the Leaderboard gets it too.
+revoke execute on function public.board_looks(integer, text[]) from public;
+grant execute on function public.board_looks(integer, text[]) to anon, authenticated;

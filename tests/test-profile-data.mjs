@@ -33,8 +33,8 @@ const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 // Every default avatar: the free starter set, plus v1.12.0's paid packs (migration-shop.sql).
 const ALL_PRESETS = FREE_AVATAR_PRESETS.length + AVATAR_PACKS.reduce((n, p) => n + p.presets.length, 0);
 // A profile_details row's columns, v1.12.0's cosmetics included.
-const DETAILS_COLUMNS = ["avatar_path", "avatar_preset", "bio", "card_theme", "celebration", "favorite_team", "frame", "nameplate", "showcase", "title", "updated_at", "user_id"];
-const EMPTY_DETAILS = { bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null, title: null, nameplate: null, celebration: null, showcase: [], updatedAt: null };
+const DETAILS_COLUMNS = ["avatar_path", "avatar_preset", "bio", "card_theme", "celebration", "favorite_team", "frame", "namecolor", "nameplate", "showcase", "title", "updated_at", "user_id"];
+const EMPTY_DETAILS = { bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null, title: null, nameplate: null, namecolor: null, celebration: null, showcase: [], updatedAt: null };
 
 // What each refusal these two functions raise means to the app - storage-profile.js's SAVE_REASONS and
 // AVATAR_REASONS. Checked twice against two different things: below, that the SQL raises exactly these codes

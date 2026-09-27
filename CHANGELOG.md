@@ -10,6 +10,52 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.7.0] — 2026-09-27
+
+**Needs `migration-shop.sql` re-run in each environment BEFORE the client.** It adds the `namecolor` kind and
+its `profile_details` column, nine items, and `board_looks()`. Same file as 2.5.0's and 2.6.0's, so one re-run
+carries all three. No Edge Function change.
+
+### Added
+
+- **Name colours: the name itself, coloured and drifting, on the boards.** Nine looks, six of them animated -
+  Vaporwave, Flame, Frost, Prism, Toxic, Nebula, plus flat Game blue and Ember, and Undefeated for the badge.
+  They render on the Leaderboard and the Stats boards through the one `NameLink` every name already goes
+  through; on the **duel screen**, where both players' names are painted wherever the screen says them - on the
+  clock banner, over each roster, and in "X beat Y" at the end; and on **your own name in the header**, on every
+  screen, which is what puts one on the play screen, where it is the only name there is.
+  **The contrast wall that sent coloured names to nameplates in 2.6.0 is still there, and this is what gets round
+  it.** No single colour clears WCAG AA on cream and on true black - lime is 1.28:1 on cream, game blue 3.19:1 on
+  the dark card - so a look is not a colour: each one is named **once per app scope**, the way theme.mjs names
+  every token three times, and the app hands in the scope it is drawing. Deep on cream, bright on black, the same
+  look either way. Every stop of every palette is held to AA against every surface a board name can sit on,
+  including the 30% lime wash the Leaderboard paints over your own row, because a drifting gradient puts any stop
+  under any letter. The drift is `background-position` only - nothing moves, nothing reflows - and it stops under
+  reduced motion.
+  The colour goes on the name and nothing else: the supporter star and the guest chip stay outside it in their
+  own tokens, so the one thing that has to stay legible does. **The player card keeps its nameplate instead** -
+  six card themes over 32 team colours has no readable text colour - so the two split the game rather than
+  compete, and the shop's tab says so rather than leaving an equip looking like it did nothing.
+  Every price tracks the nameplates: 750 common, 2,000 rare, 6,000 epic, 15,000 legendary. Undefeated is the
+  fourth item on that badge and is never sold; Nebula comes with Supporter.
+- **`board_looks(p_limit, p_names)`**: one read for both things a board decorates a name with. The supporter flag lives on
+  `profiles` and the name colour in `profile_details`, so something had to join them - and a board that asked
+  twice would show one decoration before the other. It is the only function in `migration-shop.sql` a signed-out
+  caller may run, because a visitor reads the Leaderboard too, and it reads nothing that isn't already public.
+  It replaces 2.6.0's unshipped supporters read.
+  `p_names` asks about exactly those accounts and ignores the limit - the duel's two players, who may be
+  anywhere in the alphabet and so may sit outside the boards' first few hundred wearers. Without it a duel
+  between two players who had both bought a colour could show neither.
+
+### Fixed
+
+- **A nameplate drew over the title on the player card.** `.cs-plate` was already taken - the avatar artwork has
+  used it since v1.11.0 - so the plate inherited `position:absolute`, the name measured zero pixels high and the
+  banner landed on top of the title beneath it. Renamed to `.cs-nameplate`; the artwork had the name first.
+  A plate is also a block sized to its content now, with an outer ring, so it can't vanish into a card of nearly
+  its own colour (Turf is `#092B12` on a `#06200D` card). Not shipped in 2.6.0 - the whole shop revamp goes out
+  together.
+
 ## [2.6.0] — 2026-09-27
 
 **Needs `migration-shop.sql` re-run in each environment BEFORE the client.** It adds the `supporters` table

@@ -166,7 +166,7 @@ The database's own numbers (250, 15, 10,000, the starting formula, the 24-hour w
 | column | type | rule |
 |---|---|---|
 | `id` | text pk | `^[a-z0-9-]{1,40}$` |
-| `kind` | text not null | `frame` \| `card` \| `title` \| `nameplate` \| `celebration` \| `avatar_pack` |
+| `kind` | text not null | `frame` \| `card` \| `title` \| `nameplate` \| `namecolor` \| `celebration` \| `avatar_pack` |
 | `rarity` | text not null | `free` \| `common` \| `rare` \| `epic` \| `legendary` \| `badge` |
 | `price` | integer | null for free and badge items, otherwise 1–1,000,000 (named check `shop_items_price_fits_rarity`) |
 | `badge` | text | the badges.mjs id that unlocks a badge item; null otherwise |
@@ -198,10 +198,12 @@ frame, the Navy card, no title) and `showcase text[] not null default '{}'` (nam
 
 | function | returns | notes / raises |
 |---|---|---|
-| `shop_state()` | jsonb `{ "balance", "items": [{ "id", "kind", "rarity", "price", "badge", "active", "sort", "owned" }], "equipped": { "frame", "card", "title", "nameplate", "celebration", "showcase" } }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. Items: every active item plus any inactive one the player owns, ordered by kind (frame, card, title, nameplate, celebration, avatar_pack), then `sort`, then `id`. `owned`: free, or an inventory row, or a badge item whose badge is in `badge_awards`. `equipped`: the caller's profile_details columns (nulls and `[]` without a row). |
+| `shop_state()` | jsonb `{ "balance", "items": [{ "id", "kind", "rarity", "price", "badge", "active", "sort", "owned" }], "equipped": { "frame", "card", "title", "nameplate", "namecolor", "celebration", "showcase" } }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. Items: every active item plus any inactive one the player owns, ordered by kind (frame, card, title, nameplate, namecolor, celebration, avatar_pack), then `sort`, then `id`. `owned`: free, or an inventory row, or a badge item whose badge is in `badge_awards`. `equipped`: the caller's profile_details columns (nulls and `[]` without a row). |
 | `shop_buy(p_item text)` | jsonb `{ "ok": true, "balance", "item" }` | security definer; `authenticated` only. Raises, checked in this order: `not_signed_in`; `unavailable` (no such item, or not active); `badge_only`; `owned` (free, or already owned); `not_enough`. Takes the wallet lock **before** reading the item, ownership or the balance, then inserts the inventory row and `wallet_apply(uid, -price, 'purchase', id)`, all in one transaction. If `wallet_apply` doesn't charge the full price (the ledger already records that purchase but the inventory row is gone — only possible after rows were edited by hand) it raises `purchase_conflict` and rolls back, rather than hand the item over free. |
-| `equip_item(p_slot text, p_item text)` | jsonb: the details row (`to_jsonb`, like `save_profile`) | security definer; `authenticated` only. Raises `not_signed_in`; `bad_slot` (not `frame`, `card` or `title`); `bad_item` (no such item, or its kind isn't the slot's — each slot takes its own kind); `not_owned`. Null `p_item` clears the slot. Upserts the caller's row and changes only that column (`card` → `card_theme`) plus `updated_at`. |
+| `equip_item(p_slot text, p_item text)` | jsonb: the details row (`to_jsonb`, like `save_profile`) | security definer; `authenticated` only. Raises `not_signed_in`; `bad_slot` (not one of `frame`, `card`, `title`, `nameplate`, `namecolor`, `celebration`); `bad_item` (no such item, or its kind isn't the slot's — each slot takes its own kind); `not_owned`. Null `p_item` clears the slot. Upserts the caller's row and changes only that column (`card` → `card_theme`) plus `updated_at`. |
 | `set_showcase(p_badges text[])` | jsonb: the details row | security definer; `authenticated` only. Raises `not_signed_in`; `bad_showcase` (more than 3, a null, a duplicate, a multi-dimensional array, or an id not matching `^[a-z0-9-]{1,40}$`). Null saves `{}`; the ids are saved in order, numbered from 1. It doesn't check the badges are earned: the card shows only the earned ones, because badges are worked out in the browser and one earned since the player's last season isn't in `badge_awards` yet. |
+
+| `board_looks(p_limit integer default 500, p_names text[] default null)` | jsonb `[{ "username", "supporter", "namecolor" }]` | **stable, security INVOKER**, `anon` and `authenticated` - the only function in this file a signed-out caller may run, because it reads what the boards already show everybody and a visitor reads the Leaderboard too. Only accounts wearing something come back, ordered by `username collate "C"` (twice: once to pick the rows the limit keeps, once for the order they come back in). `p_names` asks about exactly those accounts and ignores the limit, capped at 100 - the duel screen's two players, who may be anywhere in the alphabet and so may sit outside the first `p_limit` wearers. It exists because the supporter flag is on `profiles` and the name colour in `profile_details`, and because a board that asked twice would show one decoration before the other. `guest` accounts can wear neither, so none appear. |
 
 **`set_avatar` in `migration-profiles.sql` (agent J):** a preset that isn't free is allowed when the caller owns
 its pack's item, `'pack-' || pack`, by the same rule as `shop_state` (free, an inventory row, or a badge item whose
@@ -300,7 +302,7 @@ The app imports these from `./storage.js`. **Nothing throws.** Reads use `READ` 
 ```js
 fetchWallet()            → { balance, earned, spent, recent: [{ amount, kind, ref, createdAt }] } | null
 fetchShop()              → { balance, items: [{ id, kind, rarity, price, badge, active, sort, owned }],
-                             equipped: { frame, card, title, nameplate, celebration, showcase } } | null
+                             equipped: { frame, card, title, nameplate, namecolor, celebration, showcase } } | null
 buyItem(id)              → { ok: true, balance } | { ok: false, reason }
     // reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "signed_out" | "network"
     // (purchase_conflict arrives as "network": nothing the player can do clears it)
@@ -330,9 +332,9 @@ claimMinigameCoins(game, date) → { ok: true, credited, balance } | { ok: false
 ### 6.2 `shop-catalog.mjs` (phase 0, lead)
 
 ```js
-SHOP_KINDS    = ["frame", "card", "title", "nameplate", "celebration", "avatar_pack"]
-KIND_LABEL    = { frame: "Frames", card: "Card themes", title: "Titles", nameplate: "Nameplates", celebration: "Win celebrations", avatar_pack: "Avatar packs" }
-EQUIP_SLOTS   = ["frame", "card", "title", "nameplate", "celebration"]        // each slot takes items of its own kind
+SHOP_KINDS    = ["frame", "card", "title", "nameplate", "namecolor", "celebration", "avatar_pack"]
+KIND_LABEL    = { frame: "Frames", card: "Card themes", title: "Titles", nameplate: "Nameplates", namecolor: "Name colors", celebration: "Win celebrations", avatar_pack: "Avatar packs" }
+EQUIP_SLOTS   = ["frame", "card", "title", "nameplate", "namecolor", "celebration"] // each slot takes items of its own kind
 DEFAULT_ITEM  = { frame: "frame-ink", card: "card-navy", title: null }
 RARITIES, RARITY_LABEL                           // free, common, rare, epic, legendary, badge ("Badge reward")
 SHOWCASE_MAX  = 3
@@ -383,6 +385,15 @@ Names and looks live in the browser (cosmetics.jsx draws each id); price, rarity
 | `plate-emerald` | nameplate | Emerald | legendary | 15,000 | |
 | `plate-dynasty` | nameplate | Dynasty | badge | – | `dynasty` |
 | `plate-aurora` | nameplate | Aurora | supporter | – | |
+| `name-blue` | namecolor | Game blue | common | 750 | |
+| `name-ember` | namecolor | Ember | common | 750 | |
+| `name-toxic` | namecolor | Toxic | rare | 2,000 | |
+| `name-vapor` | namecolor | Vaporwave | rare | 2,000 | |
+| `name-flame` | namecolor | Flame | epic | 6,000 | |
+| `name-frost` | namecolor | Frost | epic | 6,000 | |
+| `name-prism` | namecolor | Prism | legendary | 15,000 | |
+| `name-trophy` | namecolor | Undefeated | badge | – | `undefeated` |
+| `name-nebula` | namecolor | Nebula | supporter | – | |
 | `cel-confetti` | celebration | Confetti | free | — | |
 | `cel-spotlight` | celebration | Spotlight | common | 750 | |
 | `cel-fireworks` | celebration | Fireworks | rare | 2,000 | |
@@ -424,6 +435,8 @@ rules before media queries, hover inside `(hover:hover)`, every animation stoppe
 <Coin size />                        // decorative
 <Coins amount size className />     // coin + "1,240"; its accessible text reads "1,240 coins"
 <ItemPreview id team username photoUrl preset />   // the thumbnail a shop tile shows; decorative
+<NamePlate plate className>{username}</NamePlate>   // the banner behind a name on the player card
+<NameInk look scope>{username}</NameInk>            // the name itself, coloured, on the boards
 COSMETICS_CSS
 CARD_THEME_SCOPE                    // { [card id]: "dark" | "night" | "light" }
 ```
@@ -442,6 +455,25 @@ CARD_THEME_SCOPE                    // { [card id]: "dark" | "night" | "light" }
   also gets `cs-title-spark` or `cs-title-crown`, on the card and on the shop's chip: the mark replaces the double
   stripe, as a mask painted in the title's own color, so its contrast is the text's. Keyed by id, never by the
   database's rarity.
+- **NamePlate** (v2.6.0): the banner behind the name on the player card, as `<span class="cs-nameplate"
+  data-plate="<id>">`; the name unchanged for null or an unknown id. A plate is a fill AND its own text colour
+  (`NAMEPLATES`, `platePaint`), never the card's token, because the card underneath can be any of three scopes.
+  The class is `cs-nameplate`, not `cs-plate` - **that one was already taken** by the avatar artwork, and
+  inheriting its `position:absolute` made the name measure zero high and the plate draw over the title.
+- **NameInk** (v2.7.0): the name itself, in the colour its account wears, on the BOARDS - `<span class="cs-name">`,
+  plus `cs-name-grad` when the look is a gradient (clipped to the letters) and `cs-lively` when it drifts. The
+  name unchanged for null, an unknown id, or an id of another kind. **A look is three palettes, not a colour**
+  (`NAME_LOOKS`, `namePaint`): no single colour clears AA on cream and on true black, so each look is named once
+  per app scope and the app hands in which scope it is drawing - deep on cream, bright on black, the same look
+  either way. Every stop is held to AA against every surface a board name can sit on (`NAME_SURFACES` in
+  tests/test-cosmetics.mjs, the lime wash on your own leaderboard row included), because a drift puts any stop
+  under any letter. The player card does NOT wear one: six themes over 32 team colours has no readable text
+  colour, which is what nameplates are for. **Where they show:** every board, through `NameLink`; the duel
+  screen, through `DuelName` in versus.jsx (colour only - never a profile link, because that screen is a draft
+  on a clock and opening a profile would take the player off it mid-turn); and your own name in the header, on
+  every screen, from `myDetails.namecolor` rather than the boards' read - it is you, and the app already holds
+  what you have equipped. The context they arrive through, `BoardWear`, lives in **ui-common.jsx** so the duel
+  screen can read it without importing perfect-season.jsx back.
 - **avatars.jsx**: `AVATAR_PRESETS` adds the pack avatars (`pack`, `free: false`, names from `AVATAR_PACKS`),
   drawn to the starter set's rules — no team marks, readable at 24px.
 - **avatar-picker.jsx**: a new prop `ownedPacks` (pack names; `starter` is always owned). Choose an avatar groups

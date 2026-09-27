@@ -36,6 +36,7 @@ export function mapDetails(row) {
     cardTheme: row?.card_theme ?? null,
     title: row?.title ?? null,
     nameplate: row?.nameplate ?? null,
+    namecolor: row?.namecolor ?? null,
     celebration: row?.celebration ?? null,
     showcase: Array.isArray(row?.showcase) ? row.showcase.filter((id) => typeof id === "string") : [],
     updatedAt: row?.updated_at ?? null,

@@ -2,9 +2,29 @@
 // files (profile.jsx, moderation.jsx, ...). Moved here out of perfect-season.jsx so those files don't
 // have to import the main component module back - everything below is a plain function, constant or
 // stateless component, with no app state, apart from the register of open dialogs at the bottom.
-import { useEffect, useMemo, useRef } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { TEAMS, BEST_FIELDS, normFormat, WINDOWS, passerRating } from "./game-logic.mjs";
 import { PALETTE } from "./theme.mjs";
+
+// What the screens decorate a name with, and the scope they are drawing in:
+// { supporters: Set of names, looks: Map of name -> name-colour id, scope }. A context rather than props
+// threaded through every board, because every name on a board renders through one NameLink - and it lives
+// HERE rather than in perfect-season.jsx because the duel screen needs it too, and a screen file never
+// imports the main component back.
+// The scope rides along because a name colour is three palettes, one per scope, and only the app knows which
+// screen is being drawn (NAME_LOOKS in cosmetics.jsx has the reason it has to be three).
+export const BoardWear = createContext(null);
+// The look an account wears, by NAME - which is what every board and the duel screen have; ids never reach
+// them. Null for an account wearing nothing, which is almost all of them.
+export function useNameLook(name) {
+  const wear = useContext(BoardWear);
+  return (name && wear?.looks?.get(name)) || null;
+}
+// The scope to paint a name in. Light is the right default: it is what every screen except the play, duel and
+// leaderboard screens is, and what a component rendered outside the provider (a test, a preview) should get.
+export function useWearScope() {
+  return useContext(BoardWear)?.scope || "light";
+}
 
 export const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
 export const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };

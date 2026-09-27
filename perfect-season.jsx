@@ -1,7 +1,7 @@
-import { Fragment, useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest, fetchSupporters,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest, fetchBoardLooks,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
@@ -24,7 +24,7 @@ import {
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
-  POS_NAME, cityRange, statCells, Confetti,
+  POS_NAME, cityRange, statCells, Confetti, BoardWear,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -32,7 +32,7 @@ import { PICKER_CSS } from "./avatar-picker.jsx";
 import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
 // The one definition of the event the Android shell asks Back with; the website never sends it.
 import { BACK_EVENT } from "./app-shell.mjs";
-import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration } from "./cosmetics.jsx";
+import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
@@ -1416,23 +1416,26 @@ function PlayerIndex() {
 // module-scope components (PlayerName, RankRows, ...) with no route to the app's navigation, so the
 // app hands its openProfile down through this context instead of threading a prop through each board.
 const OpenProfile = createContext(null);
-// Who has the Supporter unlock, by name. A context rather than a prop threaded through every board: every
-// name in the game renders through NameLink below, so this is the one place that has to know - and the eight
-// boards that carry the guest flag row by row needed none of it.
-const Supporters = createContext(null);
+// BoardWear - who is wearing what, and the scope being drawn - lives in ui-common.jsx, because the duel screen
+// reads it too and a screen file never imports this module back. NameLink below is the one place a board name
+// is rendered, which is why neither the star nor the colour needed threading through a single board function.
 function NameLink({ name, guest }) {
   const openProfile = useContext(OpenProfile);
-  const supporters = useContext(Supporters);
+  const wear = useContext(BoardWear);
   // A guest has no profile screen to open - no picture, no bio, nothing it could set - so its name is
   // shown as what it is instead of offering an empty page. A guest is never a supporter: the shop refuses
   // one, so there is no star to show either.
   if (guest) return <>{name}<span className="guestchip">guest</span></>;
-  if (!name || !openProfile) return name || null;
-  const star = supporters?.has(name)
+  const look = wear?.looks?.get(name) || null;
+  // The colour goes on the name and nothing else. The star and the guest chip stay outside it, in their own
+  // tokens, or a drifting gradient would take the chip with it and the one thing it has to stay is legible.
+  const inked = <NameInk look={look} scope={wear?.scope || "light"}>{name}</NameInk>;
+  if (!name || !openProfile) return name ? inked : null;
+  const star = wear?.supporters?.has(name)
     ? <span className="supchip" role="img" aria-label="Supporter">{"★"}</span>
     : null;
   return <>
-    <button type="button" className="namelink" onClick={() => openProfile(name)}>{name}</button>
+    <button type="button" className="namelink" onClick={() => openProfile(name)}>{inked}</button>
     {star}
   </>;
 }
@@ -2221,7 +2224,7 @@ export default function PerfectSeason() {
   // another mode's heading while a slower request is still in flight.
   // Who has the Supporter unlock, as a Set of names, read once when a screen full of names opens. Empty
   // until then and empty if the read fails - a missing star is nothing, where a wrong one is a claim.
-  const [supporters, setSupporters] = useState(() => new Set());
+  const [boardLooks, setBoardLooks] = useState(() => ({ supporters: new Set(), looks: new Map() }));
   const [lbMode, setLbMode] = useState("all");
   const [best, setBest] = useState({ loading: false, rows: [], mode: "all", format: "fantasy" });
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: 0, topBuilds: [] });
@@ -2656,8 +2659,8 @@ export default function PerfectSeason() {
     if (k === "profile") setProfileOf(null);
     setView(k);
     if (k === "home") refreshWip();
-    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); loadSupporters(); }
-    if (k === "stats") { if (!siteStats.loaded) loadSiteStats(); loadSupporters(); }
+    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); loadBoardWear(); }
+    if (k === "stats") { if (!siteStats.loaded) loadSiteStats(); loadBoardWear(); }
   }
   function openProfile(name) {
     leftAt.current = window.scrollY || 0;
@@ -3907,8 +3910,27 @@ export default function PerfectSeason() {
 
   // Cheap and rarely changing, so it rides along with whichever board screen was opened rather than having
   // a refresh of its own.
-  async function loadSupporters() {
-    try { setSupporters(new Set(await fetchSupporters())); } catch (e) { /* no star is the safe answer */ }
+  // The duel screen's two players, by name. Stable, because it is an effect's dependency over there and a
+  // function rebuilt every render would re-fire it on every pick. It closes over nothing that changes.
+  const notePlayers = useCallback((names) => { loadBoardWear(names); }, []);
+  async function loadBoardWear(names = null) {
+    try {
+      const rows = await fetchBoardLooks(names ? { names } : undefined);
+      setBoardLooks((was) => {
+        // A boards read replaces what we know; a read for named accounts adds to it, because it only asked
+        // about those names and says nothing about anybody else.
+        const supporters = new Set(names ? was.supporters : []);
+        const looks = new Map(names ? was.looks : []);
+        // It does answer for the names it asked about, though - including "nothing any more". Without this,
+        // taking a colour off would leave the old one on screen for as long as the tab stayed open.
+        if (names) for (const who of names) { supporters.delete(who); looks.delete(who); }
+        for (const r of rows) {
+          if (r.supporter) supporters.add(r.username);
+          if (r.namecolor) looks.set(r.username, r.namecolor);
+        }
+        return { supporters, looks };
+      });
+    } catch (e) { /* plain names are the safe answer: no star, no colour */ }
   }
 
   async function loadLadder(m) {
@@ -4127,7 +4149,7 @@ export default function PerfectSeason() {
 
   return (
     <OpenProfile.Provider value={openProfile}>
-      <Supporters.Provider value={supporters}>
+      <BoardWear.Provider value={{ ...boardLooks, scope }}>
     <div className={`ps${scope === "light" ? "" : ` ${scope}`}`}>
       <style>{APP_CSS}</style>
       <div className="wrap">
@@ -4149,7 +4171,10 @@ export default function PerfectSeason() {
                 {/* The button is labeled, so the picture beside the name is decorative. It wears your frame. */}
                 <FramedAvatar frame={myDetails?.frame ?? null} team={TEAMS[myDetails?.favoriteTeam] ? myDetails.favoriteTeam : null}
                   username={user} photoUrl={myDetails?.avatarUrl ?? null} preset={myDetails?.avatarPreset ?? null} size={24} decorative />
-                <span className="whoname">{user}</span>
+                {/* Your own name wears your own colour, on every screen - the play screen included, where it is
+                    the only name there is. It comes from myDetails rather than the boards' read: this is you,
+                    and the app already holds what you have equipped. */}
+                <span className="whoname"><NameInk look={myDetails?.namecolor ?? null} scope={scope}>{user}</NameInk></span>
               </button>
             )}
             <span className="ver" title={`Gridspin v${APP_VERSION}`}>v{APP_VERSION}</span>
@@ -4808,7 +4833,7 @@ export default function PerfectSeason() {
             <VersusScreen
               key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
               format={format} onBack={leaveVersus} onCode={setVersusCode}
-              onShare={sendShare} siteUrl={APP_SITE_URL}
+              onShare={sendShare} onPlayers={notePlayers} siteUrl={APP_SITE_URL}
             />
             )}
           </>
@@ -5393,7 +5418,7 @@ export default function PerfectSeason() {
         </main>
       </div>
     </div>
-      </Supporters.Provider>
+      </BoardWear.Provider>
     </OpenProfile.Provider>
   );
 }

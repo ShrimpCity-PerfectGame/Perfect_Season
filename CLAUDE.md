@@ -615,6 +615,32 @@ overwrite each other.
   under any letter. The lively ones animate `background-position` only, so nothing moves, nothing reflows, and
   the colours under the letters stay the ones that were measured. Plates render on the player card, where the
   frame, card theme and title already do, so no board query has to carry them.
+- **Name colours (v2.7.0)** are the name itself, coloured and drifting, **on the boards** - and they are where
+  "animated names with different colours" finally landed. The rule that sent them to nameplates first still holds:
+  no single colour clears AA on cream and on true black. What gets round it is that a look does not have to BE a
+  colour. `NAME_LOOKS` names each one **once per app scope**, the way theme.mjs names every token three times, and
+  `NameLink` hands `NameInk` the scope the app is already drawing in - deep on cream (Stats), bright on black
+  (the Leaderboard). Ember is Ember on both; only its lightness moves, which is the one thing the surface forces.
+  `tests/test-cosmetics.mjs` holds **every stop** to AA against **every surface a board name can sit on**
+  (`NAME_SURFACES`, which includes the 30% lime wash `.lb tr.me td` paints over your own row) - a drift slides any
+  stop under any letter, so measuring the first one proves nothing. The drift is `background-position` only and
+  stops under reduced motion. The colour goes on the name and nothing else: the supporter star and the guest chip
+  stay outside it in their own tokens. **The player card does not wear one** - six card themes over 32 team
+  colours has no readable text colour, which is exactly what nameplates are for, so the two features split the
+  game between them rather than competing.
+  **Where a name colour shows:** every board through `NameLink`; the **duel screen** through `DuelName`
+  (versus.jsx), which paints the name but never links it - that screen is a draft on a clock, and a profile link
+  would push a history entry and take the player off the match mid-turn; and **your own name in the header**, on
+  every screen including the play screen, where it is the only name there is. Your own comes from
+  `myDetails.namecolor`, not from the boards' read: it is you, and the app already holds what you equipped. The
+  context is `BoardWear` and it lives in **ui-common.jsx**, not here, because versus.jsx reads it and a screen
+  file never imports this module back.
+  Who wears what comes from **`board_looks(p_limit, p_names)`**, one read for both board decorations - the
+  supporter flag lives on `profiles` and the colour in `profile_details`, and a board that asked twice would show
+  one before the other. `p_names` is the duel's question: two people by name, who may sit outside the boards'
+  first few hundred wearers, so VersusScreen reports its pair up through `onPlayers` and the app asks for exactly
+  those two. It is the one function in migration-shop.sql `anon` may execute, because a signed-out visitor reads
+  the Leaderboard; `tests/test-economy-security.mjs` keeps that as a named one-item list rather than a relaxed rule.
 - **Win celebrations (v2.5.0)** are the fifth kind: an overlay (`WinCelebration`) over the whole result screen
   when a season wins the title, fixed, `aria-hidden` and `pointer-events:none`, so it never takes a tap or
   reads out over a result the screen already announces. The little `<Confetti>` inside `.cel` is a different
@@ -913,6 +939,12 @@ suite and still broke the live Leaderboard for every existing account.
   and the function have to agree on, and the scoring half decides what a season is worth. `match-pick` changes
   on its own account too: it finishes a match before it looks at what was asked for, writes every change against
   the revision it read, and ends a match it cannot grade (VERSUS.md 4).
+  v2.7.0's (name colours): re-run **`migration-shop.sql`**, then the client. It adds the `namecolor` kind and
+  its `profile_details` column, nine items, and `board_looks()` - which it **drops and re-creates**, because the
+  signature gained `p_names` before it had shipped anywhere and `create or replace` cannot change one. Same file as v2.5.0's and v2.6.0's, so one
+  re-run carries all three when they ship together. A client ahead of the migration shows no Name colors tab
+  worth opening and every name plain - `fetchBoardLooks` catches the missing function and answers with an empty
+  list, which is the same thing a board showed before any of this. No Edge Function change.
   v2.6.0's (supporter): re-run **`migration-shop.sql`**, then the client. It adds the `supporters` table and
   its trigger, `profiles.supporter`, the `supporter` rarity and two items behind it. Same file as v2.5.0's, so
   one re-run carries both when they ship together. No Edge Function change.

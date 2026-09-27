@@ -175,11 +175,12 @@ export function makeProfileData(state, { playerStats }) {
   const detailsJson = (d) => (d ? {
     user_id: d.user_id, bio: d.bio, avatar_path: d.avatar_path, avatar_preset: d.avatar_preset, favorite_team: d.favorite_team,
     frame: d.frame ?? null, card_theme: d.card_theme ?? null, title: d.title ?? null,
-    nameplate: d.nameplate ?? null, celebration: d.celebration ?? null, showcase: [...(d.showcase || [])], updated_at: d.updated_at,
+    nameplate: d.nameplate ?? null, namecolor: d.namecolor ?? null,
+    celebration: d.celebration ?? null, showcase: [...(d.showcase || [])], updated_at: d.updated_at,
   } : null);
   // Also used by tests/mock-shop.mjs's equip_item and set_showcase, which write the same row.
   function upsertDetails(uid, patch) {
-    const row = details.get(uid) || { user_id: uid, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: null, title: null, nameplate: null, celebration: null, showcase: [] };
+    const row = details.get(uid) || { user_id: uid, bio: "", avatar_path: null, avatar_preset: null, favorite_team: null, frame: null, card_theme: null, title: null, nameplate: null, namecolor: null, celebration: null, showcase: [] };
     Object.assign(row, patch, { updated_at: new Date().toISOString() });
     details.set(uid, row);
     return detailsJson(row);
