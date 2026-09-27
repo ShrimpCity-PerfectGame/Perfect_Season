@@ -141,8 +141,11 @@ Done, and the contrast fight had a clear answer: **no colour clears AA as text o
 nameplates, four of them drifting a gradient. The colour carries its own background, every gradient stop is
 checked against the ink, and the drift is `background-position` only.
 
-Not done here: the **supporter icon on the boards**, which is the one piece of §5 that needs the eight-board
-pass. It is a flag beside a name rather than a cosmetic, so it can go with Phase 3 or on its own.
+The **supporter star** is done too, and the plan was wrong about what it would cost. There is no eight-board
+pass: every name renders through one `NameLink`, so the flag arrives there in a context and the six board
+functions were never touched. That is also the better design — `guest` is snapshotted onto a row because it
+was true when the row was written, but supporter changes when somebody buys, so a per-row copy would be stale
+on everything already written.
 
 ### Phase 3 — payment (§3.2)
 
@@ -171,8 +174,8 @@ Cheap and independent of the rest:
 
 **A supporter icon beside the name: yes.** Small, next to the name, the way the guest chip already works.
 
-*Cost worth knowing:* `guest` travels with the name through about eight boards, each of which had to be given
-it separately — `stats_card`, `best_gm`, `biggest_upsets`, `sou_runs` and `builds` carry it as a column, and
+*Turned out cheaper than this, see Phase 2 — kept for the reasoning.* `guest` travels with the name through
+about eight boards, each of which had to be given it separately — `stats_card`, `best_gm`, `biggest_upsets`, `sou_runs` and `builds` carry it as a column, and
 every board renders through one `NameLink`. A supporter icon needs the same treatment: `site_stats`,
 `ladder_best`, `versus_top`, `fetchLeaderboardTop`, the daily board and the minigame boards all have to carry
 the flag alongside the name, or the icon appears on some boards and not others. Do it as one pass, not per

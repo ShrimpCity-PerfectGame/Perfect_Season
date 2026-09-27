@@ -202,6 +202,23 @@ export async function fetchLadderBest(ladder = "unlimited", format = "fantasy", 
   }
 }
 
+// Everyone with the Supporter unlock, by name. One small read rather than a flag on every board row: the
+// boards that come from daily_runs, sou_runs and builds hold a SNAPSHOT of the name and the guest flag,
+// stamped when the row was written - and that is right for `guest`, which is a fact about the account at the
+// time, but wrong for this. Supporter changes the day somebody buys, and a snapshot would be stale on every
+// row already written. So the boards ask who the supporters are, now, and every name renders through one
+// NameLink that knows.
+// Names rather than ids because a name is what a board renders, and profiles.username is unique.
+export async function fetchSupporters(limit = 500) {
+  try {
+    const { data, error } = await getClient().from("profiles").select("username").eq("supporter", true).limit(limit);
+    if (error || !Array.isArray(data)) return [];
+    return data.map((r) => r.username).filter((n) => typeof n === "string");
+  } catch (e) {
+    return [];
+  }
+}
+
 // Both Stats functions only read, so they go out as GET (storage-core.js's READ) and get supabase-js's
 // automatic retry. Keep it that way for any new read-only RPC; writes stay POST and go out exactly once.
 

@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest, fetchSupporters,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
@@ -585,6 +585,10 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
   border-radius:10px;padding:8px 14px;font-weight:800;text-decoration:none;box-shadow:3px 3px 0 var(--hard)}
 .namelink{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit}
 /* A guest's name on a board: the name as plain text, with a quiet chip saying what it is. */
+/* The supporter star. --accent-ink is the one accent token that is AA in every scope (game blue on cream,
+   lime on the dark and night ones), which is exactly what an accent-coloured mark beside text needs. It is
+   role="img" with a label, so it is not a meaning carried by colour alone. */
+.supchip{margin-left:5px;font-size:11px;line-height:1;color:var(--accent-ink);vertical-align:2px}
 .guestchip{margin-left:6px;padding:1px 6px;border:1px solid var(--line2);border-radius:999px;font-size:10.5px;
   font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);vertical-align:2px}
 @media (hover:hover){.namelink:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}}
@@ -1412,13 +1416,25 @@ function PlayerIndex() {
 // module-scope components (PlayerName, RankRows, ...) with no route to the app's navigation, so the
 // app hands its openProfile down through this context instead of threading a prop through each board.
 const OpenProfile = createContext(null);
+// Who has the Supporter unlock, by name. A context rather than a prop threaded through every board: every
+// name in the game renders through NameLink below, so this is the one place that has to know - and the eight
+// boards that carry the guest flag row by row needed none of it.
+const Supporters = createContext(null);
 function NameLink({ name, guest }) {
   const openProfile = useContext(OpenProfile);
+  const supporters = useContext(Supporters);
   // A guest has no profile screen to open - no picture, no bio, nothing it could set - so its name is
-  // shown as what it is instead of offering an empty page.
+  // shown as what it is instead of offering an empty page. A guest is never a supporter: the shop refuses
+  // one, so there is no star to show either.
   if (guest) return <>{name}<span className="guestchip">guest</span></>;
   if (!name || !openProfile) return name || null;
-  return <button type="button" className="namelink" onClick={() => openProfile(name)}>{name}</button>;
+  const star = supporters?.has(name)
+    ? <span className="supchip" role="img" aria-label="Supporter">{"★"}</span>
+    : null;
+  return <>
+    <button type="button" className="namelink" onClick={() => openProfile(name)}>{name}</button>
+    {star}
+  </>;
 }
 
 // Coming back from Google with no session: the player changed their mind at Google's screen, or the
@@ -2203,6 +2219,9 @@ export default function PerfectSeason() {
   // `lb.top` (profiles); a single mode is fetched from the runs log, because profiles has no per-mode best.
   // Paired mode+format inside the state the way lb/lbFormat are, so a board can never render its rows under
   // another mode's heading while a slower request is still in flight.
+  // Who has the Supporter unlock, as a Set of names, read once when a screen full of names opens. Empty
+  // until then and empty if the read fails - a missing star is nothing, where a wrong one is a claim.
+  const [supporters, setSupporters] = useState(() => new Set());
   const [lbMode, setLbMode] = useState("all");
   const [best, setBest] = useState({ loading: false, rows: [], mode: "all", format: "fantasy" });
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: 0, topBuilds: [] });
@@ -2637,8 +2656,8 @@ export default function PerfectSeason() {
     if (k === "profile") setProfileOf(null);
     setView(k);
     if (k === "home") refreshWip();
-    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }
-    if (k === "stats" && !siteStats.loaded) loadSiteStats();
+    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); loadSupporters(); }
+    if (k === "stats") { if (!siteStats.loaded) loadSiteStats(); loadSupporters(); }
   }
   function openProfile(name) {
     leftAt.current = window.scrollY || 0;
@@ -3886,6 +3905,12 @@ export default function PerfectSeason() {
     } catch (e) { setBest({ loading: false, rows: [], mode: mk, format: fmt }); }
   }
 
+  // Cheap and rarely changing, so it rides along with whichever board screen was opened rather than having
+  // a refresh of its own.
+  async function loadSupporters() {
+    try { setSupporters(new Set(await fetchSupporters())); } catch (e) { /* no star is the safe answer */ }
+  }
+
   async function loadLadder(m) {
     const mk = LADDERS.includes(m) ? m : ladderMode;
     setLadder((l) => ({ loading: true, rows: l.mode === mk ? l.rows : [], mode: mk }));
@@ -4102,6 +4127,7 @@ export default function PerfectSeason() {
 
   return (
     <OpenProfile.Provider value={openProfile}>
+      <Supporters.Provider value={supporters}>
     <div className={`ps${scope === "light" ? "" : ` ${scope}`}`}>
       <style>{APP_CSS}</style>
       <div className="wrap">
@@ -5367,6 +5393,7 @@ export default function PerfectSeason() {
         </main>
       </div>
     </div>
+      </Supporters.Provider>
     </OpenProfile.Provider>
   );
 }

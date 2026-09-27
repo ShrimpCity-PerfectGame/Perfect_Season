@@ -422,4 +422,35 @@ await runTest("a player a moderator renames while they're signed in still gets t
 });
 
 await close();
+await runTest("a supporter's name carries a star on the boards, and nobody else's does", async () => {
+  // The star arrives through NameLink, which every board in the game renders names with - so this checks the
+  // one place rather than eight. That is why it is a context and not a column: `guest` is a fact about a row
+  // when it was written and is snapshotted onto it, but supporter changes the day somebody buys, and a
+  // snapshot would be stale on every row already there.
+  const auth = makeMockAuth();
+  seedSite(auth);
+  const backer = [...auth._profiles.values()][0];
+  const plain = [...auth._profiles.values()].find((p) => p.id !== backer.id && !p.guest);
+  // Granted the way the runbook grants it - a row only the service role can write.
+  auth._supporters.add(backer.id);
+  backer.supporter = true;
+
+  const container = await open("http://localhost/", auth);
+  await click(tab(container, "Leaderboard"));
+  await flush();
+  await flush();
+
+  const starOn = (name) => {
+    const link = [...container.querySelectorAll(".namelink")].find((b) => b.textContent.trim() === name);
+    if (!link) return null;
+    return !!(link.nextElementSibling && link.nextElementSibling.classList.contains("supchip"));
+  };
+  assert(starOn(backer.username) === true, `${backer.username} is a supporter and has one`);
+  assert(starOn(plain.username) === false, `${plain.username} is not, and has none`);
+  // It says what it is rather than being a colour somebody has to interpret.
+  const chip = container.querySelector(".supchip");
+  assert(chip && chip.getAttribute("role") === "img" && /supporter/i.test(chip.getAttribute("aria-label") || ""),
+    `the star names itself, got ${chip && chip.outerHTML}`);
+});
+
 console.log("test-profile-links.mjs done");

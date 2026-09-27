@@ -38,6 +38,14 @@ their columns, and eighteen items. No Edge Function change.
   No payment yet - grant it by hand:
   `insert into supporters (user_id, source, note) select id, 'grant', 'why' from profiles where username = 'NAME';`
 
+- **A star beside a supporter's name**, on every board. It arrives through `NameLink` — the one component
+  every name in the game renders through — rather than as a column on each board's rows, which is both smaller
+  and more correct: `guest` is snapshotted because it is a fact about the account when the row was written,
+  while supporter changes the day somebody buys, so a snapshot would be stale on every row already in
+  `daily_runs`, `sou_runs` and `builds` (whose foreign key points at `auth.users`, not `profiles`, so the flag
+  cannot be embedded either). The star is `--accent-ink`, the one accent token that is AA in all three scopes,
+  and carries a label so it is not meaning held in a colour.
+
 - **Nameplates**, including animated ones — a banner behind the name on the player card. Eleven, one for
   every way to unlock a thing: coins up the rarity ladder, the Dynasty badge, and the Supporter unlock. Four of
   them (Midnight, Inferno, Emerald, Aurora) drift a gradient.
