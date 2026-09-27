@@ -2659,9 +2659,18 @@ export default function PerfectSeason() {
     if (k === "profile") setProfileOf(null);
     setView(k);
     if (k === "home") refreshWip();
-    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); loadBoardWear(); }
-    if (k === "stats") { if (!siteStats.loaded) loadSiteStats(); loadBoardWear(); }
+    if (k === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }
+    if (k === "stats") { if (!siteStats.loaded) loadSiteStats(); }
   }
+  // Who is wearing what, for the screens that show other people's names. An effect on the VIEW, not a call in
+  // openTab, because a tab click is only ONE way to arrive: landing on /leaderboard, and Back or Forward to it,
+  // open the screen without going through openTab at all - and every one of those loads drew a board with the
+  // stars and the colours missing, until the player happened to leave the screen and come back. Found on
+  // staging by opening /leaderboard directly, which is the address the site puts in front of search engines.
+  // Over/Under's board renders names too and was never loading them by any route.
+  useEffect(() => {
+    if (view === "board" || view === "stats" || view === "statsou") loadBoardWear();
+  }, [view]);
   function openProfile(name) {
     leftAt.current = window.scrollY || 0;
     setProfileOf(name);

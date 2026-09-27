@@ -10,6 +10,22 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.7.1] — 2026-09-27
+
+Client only. No migration, no Edge Function change.
+
+### Fixed
+
+- **Landing straight on `/leaderboard` drew a board with no stars and no name colours.** They were loaded when
+  a tab was *clicked*, and a tab click is only one way onto that screen: the `/leaderboard` address itself, and
+  Back or Forward to it, open it without going through `openTab` at all. The board came up bare and stayed bare
+  until the player happened to leave and come back. That address is the one the site hands to search engines, so
+  an arrival that way is the likeliest first thing anybody sees. It now loads from the **view**, which covers
+  every route onto the screen. Over/Under's board shows names too and had never loaded them by any route.
+  The supporter star had the same gap in 2.6.0 and was never shipped with it; this is the first release where
+  either is right. Found by opening the real staging site at that address rather than by clicking through it -
+  the tab click, which is what every test did, was the one path that worked.
+
 ## [2.7.0] — 2026-09-27
 
 **Needs `migration-shop.sql` re-run in each environment BEFORE the client.** It adds the `namecolor` kind and

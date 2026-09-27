@@ -453,4 +453,29 @@ await runTest("a supporter's name carries a star on the boards, and nobody else'
     `the star names itself, got ${chip && chip.outerHTML}`);
 });
 
+await runTest("landing straight on /leaderboard shows the stars and the colours, not a bare board", async () => {
+  // The bug this keeps out: the boards' decorations were loaded when a TAB WAS CLICKED, so every other way of
+  // arriving drew the board with every star and colour missing - the /leaderboard address itself, and Back or
+  // Forward to it. It lasted until the player happened to leave the screen and come back. /leaderboard is the
+  // address this site hands to search engines, so an arrival that way is the likeliest first thing anyone sees.
+  // Found by opening the real staging site at that address rather than by clicking through it.
+  const auth = makeMockAuth();
+  seedSite(auth);
+  const backer = [...auth._profiles.values()][0];
+  const painted = [...auth._profiles.values()].find((p) => p.id !== backer.id && !p.guest);
+  auth._supporters.add(backer.id);
+  backer.supporter = true;
+  auth._profileDetails.set(painted.id, { ...(auth._profileDetails.get(painted.id) || { user_id: painted.id }), namecolor: "name-vapor" });
+
+  const container = await open(`http://localhost${BOARD_PATH}`, auth);
+  await flush(4);
+  assert(container.querySelector(".lb"), `the Leaderboard is the screen: ${text(container).slice(0, 120)}`);
+
+  const star = container.querySelector(".supchip");
+  assert(star, "the supporter's star is there on arrival, without a tab having been clicked");
+  const ink = [...container.querySelectorAll(".cs-name")].find((n) => n.textContent === painted.username);
+  assert(ink, `and the name colour: painted ${[...container.querySelectorAll(".cs-name")].length} names`);
+  assert(ink.dataset.nameLook === "name-vapor", `the look they wear, got ${ink.dataset.nameLook}`);
+});
+
 console.log("test-profile-links.mjs done");
