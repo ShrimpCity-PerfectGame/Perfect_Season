@@ -31,7 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMatch, joinMatch, fetchMatch, playMove, subscribeMatch, versusPath, sget, sset } from "./storage.js";
 import {
   replayMatch, optionsOn, optionId, optionFits, openSlots, matchResult, pickId,
-  VERSUS_SLOTS, MATCH_BOARDS, respinsLeft, dipsLeft, stealsLeft,
+  VERSUS_SLOTS, MATCH_BOARDS, respinsLeft, dipsLeft, stealsLeft, canDoubleDip, stealableSlots,
 } from "./versus-logic.mjs";
 import { TEAMS, WINDOWS } from "./game-logic.mjs";
 import {
@@ -196,7 +196,8 @@ export const VERSUS_CSS = `
   /* Wraps rather than ellipsising, the same as your own strip: "Trevor La..." is not a player you can pick out
      of a roster, and knowing who they hold is the entire job of this block. */
   .vs-them .slot .v{font-size:12px;margin-top:0;line-height:1.15}
-  .vs-them .slot .k{font-size:11px}
+  /* The same 12px floor the line above sets for your own side. These two were the last things under it. */
+.vs-them .slot .k{font-size:12px}
   .vs-them .slot[data-filled="1"]{border-style:solid}
   .vs-them .vs-track{margin-top:4px}
   .vs-powers .btn{padding:7px 9px}
@@ -210,7 +211,7 @@ export const VERSUS_CSS = `
 @media (pointer:coarse){
   .vs-rosters .vs-grab{min-height:44px;position:relative;z-index:1}
   .vs-them .vs-grab{min-height:44px}
-  .vs-them .vs-grab .sub{display:block;font-size:11px}
+  .vs-them .vs-grab .sub{display:block;font-size:12px}
 }
 `;
 
@@ -462,7 +463,12 @@ export function useFlash(event) {
 // `label` stays the plain string and `labelNode` is what is SHOWN, when the name is wearing a colour. Two
 // props rather than one because label is also written to data-side, where a React element would land as
 // "[object Object]" and take the test hook with it.
-function RosterStrip({ roster, label, labelNode, sub, them, onSteal, busy }) {
+// `canTake(slot)` decides which of their filled slots a steal may actually land on. Without it every filled
+// slot was a live button and the refusal arrived after the tap - "that doesn't fit a slot you have open" for a
+// player who could never have worked, or "a player can only change hands once" for the first thing a robbed
+// player tries. decideMove holds three rules here (already_stolen, bad_slot, would_strand) and the strip held
+// none of them.
+function RosterStrip({ roster, label, labelNode, sub, them, onSteal, busy, canTake }) {
   return (
     <div className={`vs-side ${them ? "vs-them" : ""} ${onSteal ? "vs-picking" : ""}`}>
       <p className="vs-side-hd">{labelNode || label}{sub ? <span className="vs-sub"> {sub}</span> : null}</p>
@@ -470,8 +476,9 @@ function RosterStrip({ roster, label, labelNode, sub, them, onSteal, busy }) {
         {VERSUS_SLOTS.map((slot) => {
           const o = roster[slot];
           if (o && onSteal) {
+            const takeable = !canTake || canTake(slot);
             return (
-              <button key={slot} type="button" disabled={busy}
+              <button key={slot} type="button" disabled={busy || !takeable}
                       className={`slot filled pos-${slot.startsWith("FLEX") ? "FLEX" : slot} vs-grab`}
                       data-slot={slot} data-filled="1" onClick={() => onSteal(slot)}>
                 <span className="vh">{`Steal ${optionName(o)} from their ${POS_NAME[slot.startsWith("FLEX") ? "FLEX" : slot] || VS_SLOT_LABEL[slot]}`}</span>
@@ -1068,7 +1075,18 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
           <RosterStrip them roster={state.roster[side === "host" ? "guest" : "host"]}
             label={arming ? "Take one of theirs" : `${name(match, side === "host" ? "guest" : "host")}'s roster`}
             labelNode={arming ? null : <><DuelName match={match} side={side === "host" ? "guest" : "host"} />'s roster</>}
-            onSteal={arming ? grab : null} busy={busy} />
+            onSteal={arming ? grab : null} busy={busy}
+            canTake={arming ? ((slot) => {
+              const option = state.roster[side === "host" ? "guest" : "host"][slot];
+              if (!option) return false;
+              // Already changed hands once - the rule the owner asked for the first time it came up.
+              // match.picks, the same rows grab() looks in - state has no `picks` of its own, so this read
+              // was undefined and the rule it was meant to enforce would have quietly never fired.
+              const from = (match.picks || []).find((pk) => pickId(pk) === optionId(option));
+              if (from && (match.steals || []).some((x) => x.pickNo === from.pickNo)) return false;
+              // And it has to fit somewhere you still have open: stealableSlots is what decideMove asks.
+              return !stealableSlots({ option, stealerRoster: mine }).reason;
+            }) : null} />
           {theirs ? <PowerupTrack left={theirs} label={name(match, side === "host" ? "guest" : "host")} /> : null}
           {arming ? (
             <p className="vs-note vs-grabnote">
@@ -1091,8 +1109,26 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
               {POWERUPS.map((pu) => {
                 const n = mine[pu.id];
                 const wrongTurn = !myTurn;
-                const illegal = (pu.id === "dip" && state.boardIdx >= MATCH_BOARDS - 1)
-                  || (pu.id === "steal" && !VERSUS_SLOTS.some((sl) => state.roster[side === "host" ? "guest" : "host"][sl]));
+                // Every refusal decideMove can give for this powerup that is computable from what this screen
+                // already holds. The file's own promise at the top - "a button the rules would refuse is
+                // disabled before it can be pressed" - and VersusHowTo repeats it to the player. Four of them
+                // were missing, all reachable in ordinary play: the commonest is your opponent doubling up on
+                // a board, after which your own Double dip is lit and answers "somebody has already doubled
+                // up on this board". Same shape as the GM cap being enforced on one of two doors.
+                const theirSide = side === "host" ? "guest" : "host";
+                const order = state.boards[state.boardIdx]?.order || [];
+                const illegal = (pu.id === "dip" && (
+                  state.boardIdx >= MATCH_BOARDS - 1
+                  || (match.dips || []).some((d) => d.boardIdx === state.boardIdx)
+                  || !canDoubleDip({
+                    key: state.boardKey, taken: state.taken, boardIdx: state.boardIdx,
+                    dipperRoster: mine, otherRoster: theirs,
+                    picksAfter: order.slice(order.indexOf(side) + 1).some((sl) => sl !== side),
+                  })))
+                  || (pu.id === "steal" && (
+                    !VERSUS_SLOTS.some((sl) => state.roster[theirSide][sl])
+                    || (match.respins || []).some((r) => r.pickNo === state.pickNo)))
+                  || ((pu.id === "team" || pu.id === "era") && !state.turn.ownFirst);
                 return (
                   <button key={pu.id} className="btn vs-pu" disabled={busy || n < 1 || illegal || wrongTurn}
                     title={`${pu.blurb} ${n} left.`}

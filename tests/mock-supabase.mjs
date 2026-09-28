@@ -8,6 +8,7 @@ import { makeModeration } from "./mock-moderation.mjs";
 import { makeWallet } from "./mock-wallet.mjs";
 import { makeShop } from "./mock-shop.mjs";
 import { makeVersus } from "./mock-versus.mjs";
+import { makeCentury } from "./mock-century.mjs";
 import { seasonReward, badgeRewards, coinsSummary } from "../rewards.mjs";
 import { badgeProgress } from "../badges.mjs";
 import { mapPlayerStats } from "../profile-rules.mjs";
@@ -106,7 +107,11 @@ export function makeMockAuth() {
   // Every write to a match reaches both screens over Realtime, which here means firing the channel the
   // screens subscribed to. A channel nobody has opened is simply nobody listening.
   const versus = makeVersus(state, { onMatchChange: (id) => channels.get(`match-${id}`)?._fireChange({ table: "matches" }) });
-  const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables };
+  // Century (v2.9.0), the same way: its one table, its two boards and the submit-century function. Its table has
+  // no client write policy at all - the Edge Function's service role is the only writer - so it joins extraTables,
+  // which is what makes a direct write answer the way row-level security would.
+  const century = makeCentury(state);
+  const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables, ...century.tables };
   // These have no client write policy at all - the app changes them only through database functions -
   // so a direct write gets the error RLS would give.
   const rlsDenied = () => Promise.resolve({ error: { code: "42501", message: "new row violates row-level security policy" } });
@@ -567,7 +572,11 @@ export function makeMockAuth() {
       perfect: rows.reduce((t, r) => t + (r.perfect || 0), 0),
     };
   }
-  function siteStats({ p_limit: limit = 10 } = {}) {
+  function siteStats({ p_limit } = {}) {
+    // Clamped exactly as the SQL clamps it. A JS default fires only on `undefined`, so `p_limit: null` used to
+    // mean slice(0, null) - zero rows - while SQL's `limit null` means no limit at all: the two disagreed on
+    // the one value a hand-rolled call is most likely to send.
+    const limit = Math.max(1, Math.min(p_limit ?? 10, 50));
     const all = [...profiles.values()];
     const played = all.filter((p) => (p.runs || 0) + (p.dnf || 0) > 0);
     const logged = [...runs.values()].filter((r) => !r.dnf);
@@ -647,6 +656,7 @@ export function makeMockAuth() {
 
   const rpcs = {
     site_totals: siteTotals, site_stats: siteStats, ladder_best: ladderBest,
+    ...century.rpcs,
     player_stats: ({ p_user_id } = {}) => playerStats(state, p_user_id),
     ...profileData.rpcs, ...moderation.rpcs, ...wallet.rpcs, ...shop.rpcs, ...versus.rpcs,
   };
@@ -658,6 +668,7 @@ export function makeMockAuth() {
       invoke: (name, opts) => {
         if (name === "submit-run") return invokeSubmitRun(opts?.body);
         if (name === "match-pick") return versus.invokeMatchPick(opts?.body, { now: opts?.now });
+        if (name === "submit-century") return century.submitCentury(opts?.body);
         return Promise.resolve({ error: { message: "unknown function" } });
       },
     },
@@ -693,6 +704,7 @@ export function makeMockAuth() {
     _failReads: (table, times = 1) => failReads.set(table, times),
     // test-only: a promise submit-run awaits between reading a profile and writing it back, used once.
     _pauseBeforeProfileWrite: (fn) => { beforeProfileWrite = fn; },
+    _century: century, // test-only: Century's runs, and the two boards over them
     _versus: versus, // test-only: 1v1's matches, and the state of one as versus-logic sees it
     _googleSignIn: googleSignIn, // test-only: the session Google's return leaves behind, with no browser
     _profiles: profiles,

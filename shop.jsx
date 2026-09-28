@@ -16,7 +16,7 @@ import { fetchShop, fetchWallet, fetchPlayerProfile, buyItem, equipItem, setShow
 import { SHOP_KINDS, KIND_LABEL, SHOP_ITEM_BY_ID, DEFAULT_ITEM, SHOWCASE_MAX, RARITY_LABEL, PACK_BY_ITEM } from "./shop-catalog.mjs";
 import { BADGES, BADGE_BY_ID, badgeProgress } from "./badges.mjs";
 import { Avatar } from "./avatars.jsx";
-import { FramedAvatar, CardTheme, TitleLine, NamePlate, Coins, ItemPreview } from "./cosmetics.jsx";
+import { FramedAvatar, CardTheme, TitleLine, NamePlate, Coins, ItemPreview, CARD_THEME_SCOPE, cardLook } from "./cosmetics.jsx";
 import { cardBadges } from "./profile.jsx";
 import { fmtDate } from "./ui-common.jsx";
 import { TEAMS } from "./game-logic.mjs";
@@ -292,7 +292,8 @@ function CardPreview({ username, details, team, wear, badges = [], compact = fal
         <FramedAvatar frame={wear.frame} team={team} size={compact ? 44 : 72} username={username} photoUrl={details?.avatarUrl ?? null}
           preset={details?.avatarPreset ?? null} decorative />
         <div className="sh-who">
-          <p className="sh-name"><NamePlate plate={wear.nameplate}>{username}</NamePlate></p>
+          <p className="sh-name"><NamePlate plate={wear.nameplate} look={wear.namecolor}
+            scope={CARD_THEME_SCOPE[cardLook(wear.card, team)]}>{username}</NamePlate></p>
           <TitleLine title={wear.title} />
         </div>
       </div>
@@ -410,6 +411,7 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
     card: sel?.kind === "card" ? sel.id : shop.equipped.card,
     title: sel?.kind === "title" ? sel.id : shop.equipped.title,
     nameplate: sel?.kind === "nameplate" ? sel.id : shop.equipped.nameplate,
+    namecolor: sel?.kind === "namecolor" ? sel.id : shop.equipped.namecolor,
   };
   const trying = !!(sel && (selPack || worn(shop.equipped, sel.kind) !== sel.id)) || (picks != null && !sameList(picks, savedPicks));
   const cardProps = { username, details, team, wear, badges: cardBadges(chosen, progress) };
@@ -423,7 +425,19 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
   }
   const say = (at, text, bad = false) => setMsg({ at, text, bad });
   // What a successful save changed, kept on screen even if the refresh after it fails.
-  const showDetails = (d) => setShop((s) => ({ ...s, equipped: { frame: d.frame ?? null, card: d.cardTheme ?? null, title: d.title ?? null, showcase: d.showcase || [] } }));
+  // Every slot, not the three this used to name. It rebuilds `equipped` from the saved row after a buy, an
+// equip or a showcase save - so the ones it forgot (nameplate, namecolor, celebration) came back as undefined,
+// `worn()` fell through to DEFAULT_ITEM, and the item you had just equipped showed as merely Owned with an
+// Equip button under it. The refresh behind it usually repaired that within a beat, which is why it read as a
+// flicker - but `load` keeps the old state when the refresh fails, and then it simply stayed wrong.
+const showDetails = (d) => setShop((s) => ({
+  ...s,
+  equipped: {
+    frame: d.frame ?? null, card: d.cardTheme ?? null, title: d.title ?? null,
+    nameplate: d.nameplate ?? null, namecolor: d.namecolor ?? null, celebration: d.celebration ?? null,
+    showcase: d.showcase || [],
+  },
+}));
 
   function chooseTab(next) {
     setTab(next);

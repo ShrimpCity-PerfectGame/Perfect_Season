@@ -10,6 +10,210 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.10.0] — 2026-09-28
+
+Modes has a shape. Client only — no migration, no Edge Function change.
+
+### Changed
+
+- **Modes is drafts, and a Mini games screen behind one tile.** It had grown to nine tiles and read as a list
+  rather than a shape. The drafts are the game and stay on the front screen under a **Drafts** heading — the
+  daily, Unlimited, Genius, GM, Duel and the challenge-code box. **Over/Under, Build-a-player and Century** move
+  to a Mini games screen of its own, opened from one tile, the way the Shop and Duel already open.
+  - The tile carries an **"N done today"** pill, because the one real cost of moving them off the front screen
+    was losing at a glance whether the day's Over/Under and Century were still to play.
+  - Duel stays with the drafts: it *is* a draft, two people off the same eight boards.
+  - Leaving any of the three now returns to Mini games rather than to Modes, since that is the only place they
+    can be opened from.
+- **Mini games joins the tile colour system** rather than sitting plain cream next to six coloured tiles
+  (`--mode: var(--win)`, the one colour token nothing else had claimed). Tint, never paint, like the rest.
+- `tests/helpers.mjs`'s **`clickMode` learned the route**: a tile that is not on Modes is looked for behind Mini
+  games. Every existing caller kept working, and a test that means "open Over/Under" still says that rather than
+  knowing where it now lives. The four files that clicked tile copy directly were converted to use it, which
+  CLAUDE.md already asked for.
+
+### Added
+
+- `tests/test-a11y.mjs` audits the Mini games screen, and reaches the three modes behind it by the same route a
+  player takes.
+
+## [2.9.1] — 2026-09-28
+
+Century, made to look like the rest of the game. Client only — no migration, no Edge Function change.
+
+### Changed
+
+- **The Century screens are now the draft's own.** A run had been built out of its own markup, and next to
+  Unlimited or Genius it read as a different app bolted on. It now uses the app's `.reel` (the board spins in,
+  with the team colour, the pick counter and the player count), the `.roster`/`.slot` tiles with their position
+  colours, the `.sec`/`.card` board with position pills and a **Lock in** row, and the `.result-hero` with the
+  same giant record type a finished season lands on. The menu deals the same `.mode` tiles the Modes screen
+  does: the featured lime block for the daily, the navy one for Unlimited.
+  The stat cells are just left off, which is exactly what Genius mode does to the same markup — so "a draft with
+  the numbers hidden" already had a shape here and Century takes it instead of inventing a second one.
+- **A run in progress is stadium-dark**, on the ROOT the way every other draft is, and so is its result. The
+  first attempt scoped only the container, which put dark-scope text on a cream page and left the position
+  headings nearly invisible.
+- **A second door onto a pick.** The roster tile is now clickable to place the player you have selected, as the
+  draft screen's is — and it asks `centuryBlock`, the same function the Lock in button asks.
+  `tests/test-century-screen.mjs` holds both doors to it, because the draft's equivalent tile enforced no rule
+  at all for three releases.
+- Century adds no touch-target or reduced-motion rules of its own any more: every control on these screens is
+  one of the app's, and those already carry them. A copy would be a second, quietly diverging set.
+
+### Fixed
+
+- The result screen was about 400px of empty space: `.rec` is ~96px type and every line in the hero is a `<p>`,
+  so the browser's default 1em margin was a 96px gap above and below the number.
+- `reducedMotion` had been a private copy in `perfect-season.jsx`; it moves to `ui-common.jsx` so the reel and
+  the draft's spin read the same check — the one `tests/helpers.mjs` forces on so boards resolve instantly.
+
+### Added
+
+- `tests/test-a11y.mjs` now audits the Century **result** screen as well as the menu and the board; the harness
+  gained `?screen=century&finish=1` to reach it, since nothing else opens it without playing seven picks.
+
+## [2.9.0] — 2026-09-28
+
+**Century** — a new mode, with a daily and an Unlimited. Seven slots, hidden stats, and 100 combined
+touchdowns from one real season. `CENTURY.md` is the reference.
+
+**Deploy order: run `migration-century.sql`, then re-run `migration-wallet.sql`, `migration-profiles.sql` and
+`migration-moderation.sql`, then deploy the Edge Functions (`node deploy-function.mjs <env>` — there are three
+now), then the client.** Century's migration has to go before the other three: it creates a trigger using
+`use_account_username` (profiles), while `claim_minigame` (wallet) reads its table and both `mod_act`
+(moderation) and `claim_username` (profiles) rewrite its name snapshots. Those bodies are plpgsql and are not
+validated when created, so the wrong order fails nothing until a guest trades up.
+`tests/test-migrations.mjs` runs the whole list on a bare database and holds the order.
+
+### Added
+
+- **Century.** You get a QB, two RB, two WR, a TE and a Flex. Every spin deals a random team and you fill one
+  slot from it — **with no stats shown** — until all seven are full. One team re-spin. The goal is 100
+  combined passing, rushing and receiving touchdowns from the 2025 regular season, and the end screen shows
+  what you got, whether you reached it, and what the seven teams you were dealt were worth at best.
+  - **Daily**: the same seven teams for everyone that day, one go, its own board. Not for guests, for the
+    reason the season's daily is not: a guest account costs nothing to make.
+  - **Unlimited**: new teams every time, as often as you like, and it counts on the all-time board.
+  - It pays the standard 15 minigame coins a game day, like Over/Under and Build-a-player. It is in no ladder,
+    earns no badges and cannot move a season leaderboard, a best score or a streak.
+- **`data/season-2025.json`**, built by `tools/data/build-season-pool.mjs` from public nflverse data. Century
+  needs every player's actual 2025, which `data/players.json` does not hold — that file keeps a player's BEST
+  season per five-year era, so filtering it to 2025 answers "whose best 2021–25 year happened to be 2025" and
+  returns 129 of 634 players, no Mahomes, and 18 of 31 teams with a quarterback. The new file has 435 players
+  across all 32 teams, every one fielding a QB, RB, WR and TE, and the builder refuses to write one that does
+  not.
+- **`century_runs`, and the first new board that no client can write.** Over/Under and Build-a-player are
+  browser-written because a guess leaves no trace a server could replay; a Century run leaves exactly that —
+  seven (slot, player) pairs and at most one re-spin — so the new `submit-century` Edge Function recomputes
+  the seven teams from the seed, checks every pick against the board it was really dealt from, and adds up the
+  touchdowns from its own copy of the data. Nothing the client says about its score, its teams or its roster is
+  used. The daily's seed is the function's own clock, so that variant cannot be ground for a lucky board.
+- **A code that hashes to a daily's seed is refused**, the protection the main daily already has. The prize is
+  the seven TEAMS, not the row, and `hashStr` is FNV-1a/32 and invertible — `tests/test-century-edge.mjs`
+  finds an ordinary-looking eight-character code that deals a given day's board in about a second, by meeting
+  in the middle, and then asserts it is turned away.
+
+### Notes
+
+- **The balance is measured, not guessed, and the test prints it.** Over 20,000 games played by a bot that
+  always takes the leading scorer for a slot it still needs — which, with the stats hidden, is what perfect
+  knowledge of the season looks like — the median is 80, the ninetieth centile 95, and 100 is reached 5.1% of
+  the time. The absolute ceiling is 133. `tests/test-century-logic.mjs` fails if the goal stops being reachable
+  or stops being hard.
+- **Not built, deliberately:** no share card (it would have to be spoiler-free about the seven teams, which has
+  not been designed), and nothing on the profile (`player_stats` does not count Century runs). Both are in
+  CENTURY.md §9 rather than half-done.
+
+## [2.8.3] — 2026-09-28
+
+The rest of the sweep's confirmed findings. Client and one SQL function; no Edge Function change.
+**Re-run `migration-runs-log.sql`** before the client - it clamps `site_stats`' limit and changes nothing else.
+
+### Fixed
+
+- **A failed read told you your account had saved nothing.** `fetchProfileDetails` answered `null` both for
+  "this read failed" and "there is no details row", so one dropped request - a 500, a 502, a 429, the errors
+  postgrest-js does not retry - left the header with no frame and no picture for the whole session, and the win
+  celebration the player bought, or earned with the undefeated badge, silently did not play when they went
+  20-0. Nothing on screen said a read had failed and only a reload fixed it. It throws now, the caller gives it
+  one more go, and failing that keeps what is on screen rather than claiming they wear nothing. The same
+  distinction `fetchProfile` was given in v2.0.0, for the same reason.
+- **Over/Under announced something that had not happened.** A dropped insert and a real duplicate were both
+  `false`, and the screen turned that into "Today's Over/Under was already recorded on another device" - to a
+  player on their only device, with no row anywhere. Because the coins are claimed only on a save, the day's 15
+  went unclaimed, and the device's own done-flag was written regardless, so there was no second try.
+  `upsertSouRun` answers "saved", "already" or "failed" now; `23505` is the only error that means recorded.
+- **The Stats screen printed "0 / Created players" when only that one query failed.** `fetchBuildCount`
+  returned `0` for a failed read, against the rule `fetchSiteTotals` states two functions above it: "a failed
+  request must not show up as '0 drafts'". It returns null and the tile shows a dash.
+- **Four duel powerup refusals were not on the buttons**, against the promise the file's own header makes and
+  `VersusHowTo` repeats to the player: `already_dipped`, `no_room`, `respin_too_late` and `one_at_a_time`. The
+  commonest is ordinary play - your opponent doubles up on a board, and your own Double dip stays lit and
+  answers "somebody has already doubled up on this board". Same shape as the GM cap being enforced on one of
+  the two doors into `draft()`.
+- **The steal's target buttons enforced no rule at all.** Every filled slot on the opponent's strip was
+  tappable, so the refusal arrived after the tap: "that doesn't fit a slot you have open" for a player who
+  could never have worked, and "a player can only change hands once" for the first thing a robbed player tries.
+  The strip now asks `stealableSlots`, which is what `decideMove` asks.
+- **`site_stats` was the one RPC with an unclamped limit**, while granted to `anon` over the public REST API -
+  nine subqueries using `p_limit` raw, where `null` means no limit at all in SQL. Clamped to 50, like
+  `ladder_best`, `versus_top` and `board_looks` already are. The mock is clamped identically: a JS default
+  fires only on `undefined`, so `p_limit: null` used to mean zero rows there and everything in SQL.
+- `ItemPreview` indexed `NAMEPLATES` without a guard, unlike `NamePlate` and `NameInk` beside it. A plate added
+  to the catalog and seeded but missing its drawing - the exact split the catalog file warns about - would have
+  thrown on render, and with no error boundary anywhere that is the whole shop screen for everyone.
+- `profile.jsx`'s `EMPTY_DETAILS` was missing the three newest fields, the same omission the shop had.
+- **Every title played two celebrations at once.** The equipped win celebration and the `.cel` panel's own
+  confetti were gated on the same condition, so a championship fired both - and since the default celebration
+  **is** Confetti, a player who had equipped nothing got confetti twice. The panel keeps its 🏆 stamp and the
+  celebration is the one you chose. Build-a-player's verdict keeps its own: different screen, no overlay.
+
+## [2.8.2] — 2026-09-27
+
+Client only. No migration, no Edge Function change.
+
+### Added
+
+- **A name colour now shows on the player card**, which it did not before. The reason it could not was real and
+  is now out of date: "no colour clears AA on cream, navy and black" was true of a single colour, and a look has
+  carried one palette per scope since 2.7.0 - and the card publishes its scope. Measured across every theme and
+  all 32 team colours: **1,073 colour-on-card pairs, none below AA.**
+- **A nameplate and a name colour work together.** The plate sits inside the colour, as a frame around it, and
+  because a frame is never behind a letter it carries the whole look - the full gradient, drifting if the look
+  drifts. The letters stay the plate's own ink, and that part is not a preference: painting the colour onto the
+  letters fails even when each pair is allowed to pick whichever of its three palettes suits that plate best -
+  **only 50 of 99 combinations clear AA**, and the 49 that fail are every mid-tone fill.
+- `plate=` and `namecolor=` in the UI harness, so any combination of the two can be looked at.
+
+### Changed
+
+- **Cosmos was a purple outline, and the reason was a mistake in how it was built.** Everything was behind text,
+  where everything has to clear AA, so the whole card had to be dark enough to read through. The other themes do
+  not do this: Turf's chalk, Ticket's barcode and Dynasty's wreath all live in the trim, the outer band the
+  card's padding keeps text out of. Rebuilt on that split - a brighter nebula behind text, real starlines in the
+  trim, and a four-ring edge. The binding constraint turned out to be a star landing inside the nebula, which is
+  why the stars behind text are a texture and the visible ones are in the trim.
+
+### Fixed
+
+- **Self-tinted chips ate their own contrast.** A chip tinted with its own colour at 16% put its text below AA:
+  the draft board's quarterback pill measured 3.71:1, Genius 4.30:1. All now 6%, the one value every position
+  and both mode chips clear on every scope.
+- Every label under the 12px floor `tools/ui-harness/audit.mjs` holds the app to - the position pill, the stat
+  labels, the result strip, the duel's opponent strip - raised to it.
+- The Reports queue's name button underlined in `--line2` at **1.39:1**, its only affordance. Now 6.67:1.
+- Three reduced-motion gaps closed per selector rather than by hiding a parent: `.ball.air` (which a media query
+  could never reach, being less specific than the rule meant to stop it), `.confetti i`, and the admin panel's
+  marker.
+- **The shop dropped three slots on every save.** `showDetails` rebuilt what you were wearing from the saved row
+  and named only frame, card and title - so the nameplate, name colour and celebration came back undefined, and
+  the item you had just equipped showed as merely Owned with an Equip button under it.
+- `name-flame`'s blush was 4.30:1 on the Leaderboard champion block's lime glow - a token painted over a token,
+  which no surface list had. The glow is in `NAME_SURFACES` now.
+- The UI harness rendered a blank page and a TypeError for `screen=shop&name=` with a name the seed already
+  holds or the username rule refuses. It says which, in the mock's own words.
+
 ## [2.8.1] — 2026-09-27
 
 **Order: `migration-shop.sql`, then `migration-profiles.sql`, then BOTH Edge Functions, then the client** -

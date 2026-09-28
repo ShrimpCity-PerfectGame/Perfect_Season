@@ -442,6 +442,7 @@ begin
     update public.daily_runs set username = p_username where user_id = v_uid;
     update public.sou_runs set username = p_username, guest = false where user_id = v_uid;
     update public.builds set username = p_username, guest = false where user_id = v_uid;
+    update public.century_runs set username = p_username, guest = false where user_id = v_uid;
   else
     -- A guest keeping what it has played: the same account, under its own name from now on. The name
     -- snapshots on the boards follow it, exactly as a moderator's rename moves them (mod_act).
@@ -471,6 +472,7 @@ begin
     update public.daily_runs set username = p_username where user_id = v_uid;
     update public.sou_runs set username = p_username, guest = false where user_id = v_uid;
     update public.builds set username = p_username, guest = false where user_id = v_uid;
+    update public.century_runs set username = p_username, guest = false where user_id = v_uid;
   end if;
   return 'ok';
 exception when unique_violation then

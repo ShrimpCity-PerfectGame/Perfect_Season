@@ -62,7 +62,7 @@ export const MODERATION_CSS = `
 .md-headtext{min-width:0}
 .md-name{margin:0;font-family:var(--display);font-weight:400;font-size:28px;line-height:1.05;overflow-wrap:anywhere}
 .md-link{background:none;border:0;padding:0;margin:0;font:inherit;color:var(--ink);text-align:left;text-decoration:underline;
-  text-decoration-thickness:2px;text-underline-offset:4px;text-decoration-color:var(--line2)}
+  text-decoration-thickness:2px;text-underline-offset:4px;text-decoration-color:var(--muted)}
 .md-queue .md-meta{margin:3px 0 0;font-size:13px;color:var(--muted)}
 .md-bio{margin:12px 0 0;padding-left:12px;border-left:3px solid var(--line2)}
 .md-label{display:block;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}

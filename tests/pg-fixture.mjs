@@ -16,9 +16,20 @@ import { readFileSync } from "node:fs";
 
 export const sql = (file) => readFileSync(new URL(`../supabase/${file}`, import.meta.url), "utf8");
 export const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-export const MIGRATIONS = ["migration-runs-log.sql", "migration-profiles.sql", "migration-moderation.sql", "migration-wallet.sql", "migration-shop.sql", "migration-versus.sql"];
-// Just v1.11.0's (PROFILES.md), for the tests whose every-function and every-table checks are about those.
-export const PROFILE_MIGRATIONS = MIGRATIONS.slice(0, 3);
+// The order tests/test-migrations.mjs holds the runbook to. migration-century.sql sits after profiles because it
+// needs use_account_username(), and before moderation because mod_act rewrites its name snapshots.
+export const MIGRATIONS = ["migration-runs-log.sql", "migration-profiles.sql", "migration-century.sql", "migration-moderation.sql", "migration-wallet.sql", "migration-shop.sql", "migration-versus.sql"];
+// Just v1.11.0's (PROFILES.md), for the tests that deliberately model a database from BEFORE the wallet and the
+// shop existed. Named rather than sliced off MIGRATIONS: a file inserted in the middle of that list used to
+// change what this meant, and these three are a release, not a prefix - adding v2.9.0's century migration to it
+// would have quietly given every "an old database" test a table that database could not have had.
+export const PROFILE_MIGRATIONS = ["migration-runs-log.sql", "migration-profiles.sql", "migration-moderation.sql"];
+// The same three plus the boards a RENAME has to reach. mod_act and claim_username rewrite the username snapshot
+// on every board, so that list grows with each new one, and from v2.9.0 one of those boards (century_runs) is
+// created by a migration of its own rather than by schema.sql. A test that exercises a rename needs this, not
+// PROFILE_MIGRATIONS - on that shorter list mod_act simply fails, which is a missing table rather than a
+// security finding. The runbook's own order (tests/test-migrations.mjs) is what guarantees this holds live.
+export const RENAME_MIGRATIONS = ["migration-runs-log.sql", "migration-profiles.sql", "migration-century.sql", "migration-moderation.sql"];
 
 export async function freshDb({ migrations = MIGRATIONS } = {}) {
   const db = new PGlite();

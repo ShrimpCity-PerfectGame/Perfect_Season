@@ -12,6 +12,7 @@ import {
 } from "./storage.js";
 import gameData from "./data/players.json";
 import versusPool from "./data/versus-pool.json";
+import seasonPool from "./data/season-2025.json";
 import { cssVars, PALETTE, THEME } from "./theme.mjs";
 import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
@@ -24,7 +25,7 @@ import {
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
-  POS_NAME, cityRange, statCells, Confetti, BoardWear,
+  POS_NAME, cityRange, statCells, Confetti, BoardWear, reducedMotion,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -36,6 +37,8 @@ import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk } from "./co
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
+import { CENTURY_CSS, CenturyScreen } from "./century.jsx";
+import { initCenturyData, CENTURY_GOAL } from "./century-logic.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
@@ -43,6 +46,9 @@ import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, parseSitePath } from "
 initGameData(gameData.players, gameData.opponents);
 // 1v1's defenses and kickers (VERSUS.md 6). Only versus.jsx reads them; single player never does.
 initVersusData(versusPool);
+// Century's one-season touchdown pool (v2.9.0). Only century.jsx and the submit-century Edge Function read it,
+// and it is NOT interchangeable with data/players.json - see the header of tools/data/build-season-pool.mjs.
+initCenturyData(seasonPool);
 
 // Baked in by build.mjs's esbuild `define` (same mechanism as SUPABASE_URL - see storage.js).
 const IS_STAGING = APP_ENV === "staging";
@@ -531,7 +537,7 @@ const CSS = `
 /* Stop the browser pinning the view to the bottom while a season's tiles tick in under it. */
 html:has(.result-hero){overflow-anchor:none}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
-.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.mode.m-versus,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
+.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.mode.m-versus,.mode.m-century,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
 /* Leaderboard scope: true black. After the dark list so its champion block takes night tokens. */
 .ps.night,.night .champion,.cs-night{${cssVars("night")};color:var(--ink)}
@@ -715,10 +721,14 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .mode.m-genius{--mode:var(--genius)}
 .mode.m-gm{--mode:var(--gm)}
 .mode.m-bap{--mode:var(--rb)}
-.mode.m-genius,.mode.m-gm,.mode.m-bap{
+/* Mini games joins the same system rather than staying plain cream, which read as an afterthought next to six
+   coloured tiles. --win is the one colour token nothing else here had claimed: genius and GM hold their own,
+   Build-a-player has --rb, 1v1 violet, Over/Under orange, Century navy and the daily lime. */
+.mode.m-mini{--mode:var(--win)}
+.mode.m-genius,.mode.m-gm,.mode.m-bap,.mode.m-mini{
   background:linear-gradient(135deg,color-mix(in srgb,var(--mode) 14%,var(--surface)),var(--surface));
   border-color:color-mix(in srgb,var(--mode) 45%,var(--ink))}
-.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon{
+.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon,.mode.m-mini .icon{
   background:color-mix(in srgb,var(--mode) 26%,var(--surface));
   border-color:color-mix(in srgb,var(--mode) 55%,var(--ink))}
 .mode .go{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--bg);background:var(--ink);
@@ -818,8 +828,8 @@ p.gamecoins .earned{display:flex}
    tiles, so the draft you're in reads at a glance. */
 .seedline{flex-wrap:wrap;justify-content:flex-end;row-gap:6px}
 .modechip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:800;line-height:1.2;white-space:nowrap;border-radius:999px;padding:3px 10px;border:1.5px solid var(--line2);color:var(--ink);background:var(--surface)}
-.modechip.genius{color:var(--genius);border-color:color-mix(in srgb,var(--genius) 60%,transparent);background:color-mix(in srgb,var(--genius) 16%,transparent)}
-.modechip.gm{color:var(--gm);border-color:color-mix(in srgb,var(--gm) 60%,transparent);background:color-mix(in srgb,var(--gm) 16%,transparent)}
+.modechip.genius{color:var(--genius);border-color:color-mix(in srgb,var(--genius) 60%,transparent);background:color-mix(in srgb,var(--genius) 6%,transparent)}
+.modechip.gm{color:var(--gm);border-color:color-mix(in srgb,var(--gm) 60%,transparent);background:color-mix(in srgb,var(--gm) 6%,transparent)}
 .reel{position:relative;overflow:hidden;margin-bottom:10px;padding:18px 20px 16px 22px;border-radius:16px;
   background:linear-gradient(102deg,var(--tc-deep,var(--tc1)) 0%,color-mix(in srgb,var(--tc-deep,var(--tc1)) 62%,var(--bg)) 46%,color-mix(in srgb,var(--tc-deep,var(--tc1)) 18%,var(--bg)) 82%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 12px 30px rgba(0,0,0,.35)}
@@ -875,13 +885,17 @@ p.gamecoins .earned{display:flex}
 .nm-row{display:flex;align-items:center;gap:8px}
 .card .nm{font-weight:700;font-size:16px}
 .card .meta{font-size:13px;color:var(--muted);margin-top:2px}
-.pp{font-size:11px;font-weight:800;color:var(--pc);background:color-mix(in srgb,var(--pc) 16%,transparent);border-radius:5px;padding:1px 6px}
+/* 12px and a 6% tint, both for the reasons .chip.on carries: 11px is under the floor tools/ui-harness's
+   audit holds the app to, and a chip tinted with its own colour eats the contrast of the text on it - the
+   quarterback pill measured 3.71:1 on the draft board's card. 6% is the one value every position and both
+   mode chips clear AA at, on every scope. */
+.pp{font-size:12px;font-weight:800;color:var(--pc);background:color-mix(in srgb,var(--pc) 6%,transparent);border-radius:5px;padding:1px 6px}
 .tdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--tc1);box-shadow:0 0 0 1.5px var(--tc2);margin-right:6px;vertical-align:middle}
 .cells{display:flex;flex-wrap:wrap;gap:6px 0}
 .cell{width:62px}
 .cell .n{font-weight:700;font-size:16px;line-height:1.1}
 .cell:first-child .n{color:var(--pc)}
-.cell .l{font-size:11px;color:var(--muted)}
+.cell .l{font-size:12px;color:var(--muted)}
 .drafts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 
 /* ===== LED numerals: the wrapper glows, the inner text is cut into bulbs ===== */
@@ -917,7 +931,7 @@ p.gamecoins .earned{display:flex}
 .strip .n{font-family:var(--display);font-weight:400;font-size:28px;line-height:1.05}
 .strip .n.up{color:var(--win)}
 .strip .n.down{color:var(--loss)}
-.strip .l{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.strip .l{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
 .strip .s{font-size:12px;color:var(--muted)}
 .moments{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:14px}
 .mo{font-size:13px;font-weight:700;color:var(--ink);border-radius:999px;padding:4px 11px;box-shadow:inset 0 0 0 1px var(--line2)}
@@ -1150,11 +1164,10 @@ p.gamecoins .earned{display:flex}
 .pickerbar{position:sticky;top:var(--sa-top,0px);z-index:5;background:var(--bg);padding-block:8px;margin-bottom:6px;box-shadow:0 1px 0 var(--line)}
 @media (max-width:720px) and (orientation:portrait){
   .cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;gap:8px 6px}.cell{width:auto}
-  .cell .l,.pp{font-size:12px}
 }
 @media (max-width:640px){
   .rc.rank{grid-template-columns:24px minmax(0,1fr) auto}.rc.rank .alt{grid-column:auto}
-  .cell .l,.pp,.slot .sub{font-size:12px}
+  .slot .sub{font-size:12px}
   .ps select.inp{flex:1 1 130px}
 }
 @media (max-width:480px){
@@ -1258,7 +1271,14 @@ p.gamecoins .earned{display:flex}
   .cel.perfect .big{animation:none;background:none;color:var(--accent)}
   .sou-timer.danger{animation:none}
   .g,.flash,.ball{animation:none}
-  .ball,.trail,.sticky{transition:none}
+  /* .ball.air is (0,2,0) and .ball is (0,1,0); a media query adds no specificity, so the line below never
+     reached it. Nothing shows it today - PlayoffGame is handed instant={reducedMotion()} and starts at the
+     end - but the CSS has to hold on its own, not on a JS gate somewhere else staying put. */
+  .ball,.trail,.sticky,.ball.air{transition:none}
+  /* Per selector, not by hiding the parent: the parent being display:none is what makes this invisible
+     today, and that is the pattern the cosmetics test forbids for exactly this reason. */
+  .confetti i{animation:none}
+  .adminpanel>summary::after{transition:none}
   .btn,.mode,.fmtbtn,.card,.tab{transition:none}
   .btn:hover:not(:disabled),.btn:active:not(:disabled),.mode:hover:not(.static),.mode:active:not(.static),.fmtbtn:hover,.card:hover:not(.off){transform:none}
 }
@@ -1266,9 +1286,9 @@ p.gamecoins .earned{display:flex}
 // The whole stylesheet the app renders, for previewing one screen on its own (the UI harness).
 // The screens in their own files bring their own rules, each scoped to its class prefix (pf-, av-, ap-,
 // md-), after the base stylesheet so they can reuse its tokens and classes.
-export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS;
+export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS;
 
-const reducedMotion = () => typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+// reducedMotion now lives in ui-common.jsx - century.jsx starts its reel from the same check.
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's
 // scroll offset. A no-op where nothing is scrolled (and in the test DOM, which has no layout).
 const scrollToTop = () => { try { if (typeof window !== "undefined" && window.scrollY > 0) window.scrollTo(0, 0); } catch (e) { /* no layout */ } };
@@ -1954,6 +1974,11 @@ function PlayerName({ name, mine, guest }) {
 }
 const HOWTO_KEY = "ps-howto-seen";
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
+// Century's own "today is played" hint, kept the same way Over/Under's is: a per-device key, so the Modes tile
+// can answer without a network read. It is a HINT, not the record - century_runs is, and the Century screen asks
+// it directly (fetchMyCentury) before offering the daily. The two can disagree across devices, exactly as
+// Over/Under's can, and the screen's answer is the one that decides.
+const CENTURY_DONE_KEY = (d) => `ps-century:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
 const findPlayer = (key, id, season) => (BOARDS[key] || []).find((p) => p.id === id && p.season === season);
 
@@ -2250,7 +2275,7 @@ export default function PerfectSeason() {
   const [boardLooks, setBoardLooks] = useState(() => ({ supporters: new Set(), looks: new Map() }));
   const [lbMode, setLbMode] = useState("all");
   const [best, setBest] = useState({ loading: false, rows: [], mode: "all", format: "fantasy" });
-  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: 0, topBuilds: [] });
+  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: null, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
   const siteActivity = useRef(null); // { unsubscribe, broadcastDraftFinished } from subscribeSiteActivity - finish() reaches it to announce a completed draft
@@ -2259,6 +2284,10 @@ export default function PerfectSeason() {
   const [sou, setSou] = useState(null);
   const [souIntro, setSouIntro] = useState(null); // rules screen pending a confirm - { date, roundIndex, lives, score }, the timer doesn't start until this is accepted
   const [souDone, setSouDone] = useState(null); // today's finished record, if any: { score }
+  const [centuryDone, setCenturyDone] = useState(null); // today's Century, if played on this device: { score, hit }
+  // Which stage the Century screen is on, reported up by CenturyScreen. It decides the ROOT scope, the same
+  // way `view === "play"` does for a draft: a run in progress is stadium-dark, its menu and boards are not.
+  const [centuryStage, setCenturyStage] = useState("menu");
   const [souCoins, setSouCoins] = useState(null); // { date, credited } - the coins a finished day's claim paid
   const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
@@ -2490,12 +2519,14 @@ export default function PerfectSeason() {
   const readDay = useRef(null);
   readDay.current = async () => {
     const today = todayKey();
-    const [fanDone, stdDone, sou] = await Promise.all([
+    const [fanDone, stdDone, sou, century] = await Promise.all([
       sget(DAILY_KEY(today, "fantasy"), false), sget(DAILY_KEY(today, "standard"), false), sget(SOU_DONE_KEY(today), false),
+      sget(CENTURY_DONE_KEY(today), false),
     ]);
     dayRead.current = today;
     setDailyDone({ fantasy: fanDone, standard: stdDone });
     setSouDone(sou);
+    setCenturyDone(century);
   };
 
   // Checked whenever the player comes back to the app, and on the screens those answers are shown on. A
@@ -2621,6 +2652,8 @@ export default function PerfectSeason() {
     historyScreen.current = s;
     if (s.ps === "profile") { setProfileOf(s.name); setView("profile"); }
     else if (s.view === "versus") { setVersusCode(s.code || null); openTab("versus"); }
+    else if (s.view === "minigames") openTab("minigames");
+    else if (s.view === "century") openTab("century");
     else if (s.view === "statsou") openSou();
     else if (s.view === "buildplayer") openBuildPicker();
     else openTab(s.view);
@@ -2723,6 +2756,30 @@ export default function PerfectSeason() {
   // new one - so the back() already queued walked straight into the entry it had just stamped. Every duel ends
   // on a screen whose Back is this function. The popstate handler sets the code and the view from whatever
   // entry we land on, so there is nothing to clear on the way out.
+  // Century (v2.9.0). Its own screen owns every bit of its state, including the run in progress, so this is
+  // only the door. A signed-out visitor is let in - the screen shows the boards and says which variant needs an
+  // account - which is why there is no userId gate here.
+  function openCentury() {
+    openTab("century");
+  }
+  function leaveCentury() {
+    openTab("minigames");
+  }
+  // Mini games: a screen of its own, the way the Shop and Duel are. The three side modes are reachable ONLY
+  // from it now, which is why each of them leaves back to it rather than to Modes - there is nowhere else they
+  // could have been opened from.
+  function openMinigames() {
+    openTab("minigames");
+  }
+  // A daily Century that the server accepted. The key is written for the day the RUN was for, not for today, so a
+  // run handed in either side of UTC midnight marks the day it belonged to - the same mistake the minigame coin
+  // keys were once keyed wrong by (SHOP.md).
+  async function onCenturyDaily({ day, score, hit }) {
+    if (!day) return;
+    await sset(CENTURY_DONE_KEY(day), { score, hit }, false);
+    if (day === todayKey()) setCenturyDone({ score, hit });
+  }
+
   function leaveVersus() {
     const here = window.history.state;
     const onVersusEntry = here?.ps === "view" && here.view === "versus";
@@ -2884,7 +2941,7 @@ export default function PerfectSeason() {
       const [data, buildCount, topBuilds] = await Promise.all([fetchSiteStats(10), fetchBuildCount(), fetchTopBuilds(10)]);
       setSiteStats({ loading: false, loaded: true, data, error: !data, buildCount, topBuilds });
     } catch (e) {
-      setSiteStats({ loading: false, loaded: true, data: null, error: true, buildCount: 0, topBuilds: [] });
+      setSiteStats({ loading: false, loaded: true, data: null, error: true, buildCount: null, topBuilds: [] });
     }
   }
 
@@ -3067,7 +3124,15 @@ export default function PerfectSeason() {
   function loadAccountExtras(uid) {
     const account = ++accountReq.current;
     const details = ++detailsReq.current;
-    fetchProfileDetails(uid).then((d) => { if (account === accountReq.current && details === detailsReq.current) setMyDetails(d); });
+    // One retry, then leave what is on screen alone. A failed read is not "this account has saved nothing":
+    // answering it with null cost the player their frame, their picture, their name colour and - the one that
+    // costs money - the win celebration they own, silently, for the rest of the session. The same second go
+    // adoptSession gives a dropped profile read, for the same reason.
+    const readDetails = () => fetchProfileDetails(uid).catch(() => new Promise((r) => setTimeout(r, 600)).then(() => fetchProfileDetails(uid)));
+    readDetails().then(
+      (d) => { if (account === accountReq.current && details === detailsReq.current) setMyDetails(d); },
+      () => { /* twice is enough: keep whatever is showing rather than claim they wear nothing */ },
+    );
     isModerator().then((m) => { if (account === accountReq.current) setIsMod(m); });
   }
   function clearAccountExtras() {
@@ -3657,7 +3722,7 @@ export default function PerfectSeason() {
 
   function leaveSou() {
     leaveSouState();
-    setView("home");
+    setView("minigames");
   }
 
   // The day is over: record it locally and show the result straight away, then post the score to
@@ -3675,8 +3740,11 @@ export default function PerfectSeason() {
       // there first - so the score on the board is the one that counts and this run is not it. Either
       // way the day is done; what must not happen is the silence it used to answer with.
       const saved = await upsertSouRun(date, userId, { username: user, score });
-      if (saved) claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
-      else setNotice("Today's Over/Under was already recorded on another device, so this one didn't count.");
+      if (saved === "saved") claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
+      else if (saved === "already") setNotice("Today's Over/Under was already recorded on another device, so this one didn't count.");
+      // A dropped request is not that, and saying so was a lie about the world: no row existed anywhere, and
+      // because the coins are claimed only on a save, the day's 15 went unclaimed with no way back to them.
+      else setNotice("That score didn't reach the board. Your round still counted - check the board in a moment.");
     }
     loadSouBoard(date);
   }
@@ -3720,7 +3788,7 @@ export default function PerfectSeason() {
   function cancelBap() {
     clearTimeout(bapTimer.current);
     setBap(null);
-    setView("home");
+    setView("minigames");
   }
 
   // Team spins first, then the player who plays that position for them - same "reel settles"
@@ -4069,7 +4137,44 @@ export default function PerfectSeason() {
 
   // 1v1 is a draft, so it wears the draft's scope: the stadium-dark one the play screen uses (Design system,
   // CLAUDE.md). It is the single biggest reason the two screens read as the same game rather than two.
-  const scope = view === "play" || view === "versus" ? "dark" : view === "board" ? "night" : "light";
+  // Century's run AND its result are stadium-dark, for the reason a season's are: the result screen a draft
+  // lands on is the play view, so it is dark there too. Only its menu and boards come back to cream.
+  // The three side modes, written once and rendered on the Mini games screen. They used to sit on Modes, which
+  // had grown to nine tiles and read as a list rather than a shape: the drafts are the game, and these are
+  // beside it. Defined here rather than as a component so they keep reaching the state they already read.
+  const miniGameTiles = (
+    <>
+      <button className="mode m-sou" onClick={openSou}>
+        <div className="mt">
+          <span className="icon" aria-hidden="true">📊</span>
+          <span className="mn">Over/Under</span>{souDone && <span className="pill">Done · {souDone.score}</span>}
+        </div>
+        <p>One shared daily set, {SOU_ROUND_SECONDS}s a guess, three lives - how many can you get right today?</p>
+        <span className="go">{souDone ? "See today's result" : "Play"}</span>
+      </button>
+
+      <button className="mode m-century" onClick={openCentury}>
+        <div className="mt">
+          <span className="icon" aria-hidden="true">💯</span>
+          <span className="mn">Century</span>{centuryDone && <span className="pill">Done · {centuryDone.score}</span>}
+        </div>
+        <p>Seven slots, a random team each spin and no stats until the end. Get to {CENTURY_GOAL} touchdowns from one real season.</p>
+        <span className="go">{centuryDone ? "See today's result" : "Play"}</span>
+      </button>
+
+      <button className="mode m-bap" onClick={openBuildPicker}>
+        <div className="mt"><span className="icon" aria-hidden="true">🧩</span><span className="mn">Build-a-player</span></div>
+        <p>Roll a team, roll their active player, and take one attribute from each until your build is complete - then see if he'd have won a real team the chip.</p>
+        <span className="go">Play</span>
+      </button>
+    </>
+  );
+  // What the Mini games tile says without opening it. Only the two with a daily can be "done", so this counts
+  // those - losing that at a glance was the one real cost of moving them off the front screen.
+  const miniDoneToday = [souDone, centuryDone].filter(Boolean).length;
+
+  const scope = view === "play" || view === "versus" || (view === "century" && centuryStage !== "menu")
+    ? "dark" : view === "board" ? "night" : "light";
 
   // The colour a browser paints around the page: the address bar on a phone, and the status bar when the site
   // has been installed to a home screen. Following the screen means an installed Gridspin is cream on Modes and
@@ -4306,6 +4411,9 @@ export default function PerfectSeason() {
               </p>
             </div>
 
+            {/* Two groups, not one list of nine tiles. The drafts are the game; the quick games sit behind one
+                tile of their own so the front screen stays short and says what this place is for. */}
+            <h2 className="h">Drafts</h2>
             <div className="modes">
               {/* The only tile with two CTAs: both formats' dailies are live at once, each its
                   own draft with its own boards, so one button can't express both states. */}
@@ -4361,21 +4469,6 @@ export default function PerfectSeason() {
                 <span className="go">{user && !isGuest ? "Open a lobby" : "Sign in to play"}</span>
               </button>
 
-              <button className="mode m-sou" onClick={openSou}>
-                <div className="mt">
-                  <span className="icon" aria-hidden="true">📊</span>
-                  <span className="mn">Over/Under</span>{souDone && <span className="pill">Done · {souDone.score}</span>}
-                </div>
-                <p>One shared daily set, {SOU_ROUND_SECONDS}s a guess, three lives - how many can you get right today?</p>
-                <span className="go">{souDone ? "See today's result" : "Play"}</span>
-              </button>
-
-              <button className="mode m-bap" onClick={openBuildPicker}>
-                <div className="mt"><span className="icon" aria-hidden="true">🧩</span><span className="mn">Build-a-player</span></div>
-                <p>Roll a team, roll their active player, and take one attribute from each until your build is complete - then see if he'd have won a real team the chip.</p>
-                <span className="go">Play</span>
-              </button>
-
               <div className="mode static">
                 <div className="mt"><span className="icon" aria-hidden="true">🔗</span><span className="mn">Challenge a friend</span></div>
                 <p>Enter a code to draft the exact same boards someone else had.</p>
@@ -4386,6 +4479,19 @@ export default function PerfectSeason() {
                 </div>
                 {codeError && <p className="note" role="status">{codeError}</p>}
               </div>
+            </div>
+
+            <div className="modes">
+              <button className="mode m-mini" onClick={openMinigames}>
+                <div className="mt">
+                  <span className="icon" aria-hidden="true">🎲</span>
+                  <span className="mn">Mini games</span>
+                  {miniDoneToday > 0 && <span className="pill">{miniDoneToday} done today</span>}
+                </div>
+                <p>The quick ones beside the drafts: Over/Under, Build-a-player and Century. They keep boards of
+                  their own and never touch your season stats.</p>
+                <span className="go">Open</span>
+              </button>
             </div>
 
             <div className="hometiles">
@@ -4647,9 +4753,12 @@ export default function PerfectSeason() {
 
             {result && (
               <>
-                {/* The equipped win celebration, over the whole screen, on a title. The little Confetti inside
-                    .cel below stays: that one belongs to the panel and has been there since the result screen
-                    had one, and this plays over everything.
+                {/* The equipped win celebration, over the whole screen, on a title. It is the ONLY one now:
+                    the .cel panel below used to shower its own confetti on the same condition, so every title
+                    played two celebrations at once - and since the default celebration is Confetti, a player
+                    who had equipped nothing got confetti twice. The panel keeps its stamp; the celebration is
+                    the one you chose. (Build-a-player's verdict still has its own Confetti - different screen,
+                    no overlay.)
                     A title, not every finished season - roughly one run in eleven - because a celebration that
                     fires on a 12-8 is not a celebration. It is fixed, aria-hidden and pointer-events:none, so
                     it cannot take a tap or read out over the result the screen already announces. */}
@@ -4662,7 +4771,6 @@ export default function PerfectSeason() {
                 <div className="result-hero" aria-live="polite" ref={heroRef} style={{ scrollMarginTop: 12 }}>
                   {finished && (result.perfect || result.champ) && (
                     <div className={`cel ${result.perfect ? "perfect" : ""}`}>
-                      <Confetti n={result.perfect ? 34 : 22} />
                       <span className="stamp">🏆 {result.perfect ? "Perfect season" : "Champions"}</span>
                     </div>
                   )}
@@ -4875,6 +4983,32 @@ export default function PerfectSeason() {
           </>
         )}
 
+        {/* ---------------- MINI GAMES (v2.10.0) ---------------- */}
+        {view === "minigames" && (
+          <>
+            <h1 className="h">Mini games</h1>
+            <p className="note">Quick ones beside the drafts. Nothing here counts towards your season stats or the
+              main leaderboard — Over/Under and Century keep boards of their own, and all three pay coins.</p>
+            <div className="modes">{miniGameTiles}</div>
+            <button className="btn" onClick={() => openTab("home")}>Back</button>
+          </>
+        )}
+
+        {/* ---------------- CENTURY (v2.9.0) ---------------- */}
+        {view === "century" && (
+          <>
+            {/* Names itself for a screen reader, as every screen does; the headings inside are the board's and
+                the result's. */}
+            <h1 className="vh">Century</h1>
+            <CenturyScreen
+              key={userId || "anon"} userId={userId} username={user} isGuest={!!stats?.guest}
+              onBack={leaveCentury}
+              onClaimCoins={(date, onCredited) => claimMinigame("century", date, onCredited)}
+              onDailySaved={onCenturyDaily} onStage={setCenturyStage}
+            />
+          </>
+        )}
+
         {/* ---------------- SHOP (SHOP.md 8) ---------------- */}
         {view === "shop" && user && userId && (
           <ShopScreen key={userId} userId={userId} username={user} onBack={leaveShop} onDetailsSaved={onDetailsSaved} onBalance={onShopBalance} />
@@ -5080,7 +5214,7 @@ export default function PerfectSeason() {
                   <div className="tile"><div className="n">{(liveDrafts ?? site.totals.runs).toLocaleString()}</div><div className="l">Drafts</div></div>
                   <div className="tile"><div className="n">{site.totals.perfect}</div><div className="l">Perfect seasons</div></div>
                   <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
-                  <div className="tile"><div className="n">{siteStats.buildCount}</div><div className="l">Created players</div></div>
+                  <div className="tile"><div className="n">{siteStats.buildCount == null ? "–" : siteStats.buildCount}</div><div className="l">Created players</div></div>
                 </div>
                 {siteStats.error && <p className="note">Stats couldn't be loaded. Try Refresh.</p>}
                 <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>

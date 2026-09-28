@@ -220,6 +220,58 @@ parts that are unlike every other mode:
   picks it could not replay. Take a farmed result back -
   delete the match row (its picks follow) and decrement `pvp_wins` / `pvp_losses` on the two profiles by hand.
 
+**Modes is two groups (v2.10.0).** The front screen is **Drafts** - the daily, Unlimited, Genius, GM, Duel and
+the challenge-code box - and one **Mini games** tile that opens a screen of its own holding **Over/Under,
+Build-a-player and Century**. It had grown to nine tiles and read as a list rather than a shape. Duel stays with
+the drafts because it is one. Three things to know before moving a tile again: the Mini games tile carries an
+"N done today" pill, because the cost of hiding those modes is losing at a glance whether the day's Over/Under
+and Century are still to play; leaving any of the three returns to Mini games, not Modes, since that is now the
+only door to them; and `tests/helpers.mjs`'s **`clickMode` looks behind Mini games** for a tile that is not on
+Modes, which is what kept every existing test working - prefer it over clicking tile copy, as this file already
+asked.
+
+**Century (v2.9.0).** A mode of its own: seven slots (QB, two RB, two WR, TE, Flex), a random team each spin,
+**stats hidden while you pick**, and a goal of 100 combined passing, rushing and receiving touchdowns from one
+real season. Daily and Unlimited. **`CENTURY.md` is the reference** - read it before touching any of it. The
+parts that are unlike everything else:
+
+- **Its data is a different SHAPE, and this is the trap.** `data/players.json` holds one row per player per team
+  per five-year era - his BEST season in that era. Filtering it to `season === 2025` therefore answers "whose
+  best 2021-25 season happened to be 2025": 129 of 634 players, no Mahomes, 18 of 31 teams with a quarterback.
+  Every number derived that way is measuring a biased subset, and an analysis was shipped on it before the owner
+  pointed out there are 32 teams and all of them had a quarterback. Century reads `data/season-2025.json`
+  instead, built by `tools/data/build-season-pool.mjs` from nflverse, one row per player per team for that ONE
+  year. The builder refuses to write a file that cannot deal a legal board - 32 teams, each fielding a QB, RB,
+  WR and TE - so a bad build is loud rather than a mode that strands a player mid-run.
+- **`century-logic.mjs` owns every rule**, and the browser, the Edge Function and the tests all import it; same
+  reasoning as game-logic.mjs and versus-logic.mjs. `centuryCeiling` is exact rather than greedy, because
+  spending the best team's quarterback on the Flex can cost more than it gains, and it is the only fair way to
+  read a score - a draw of seven weak teams cannot reach 100 however well it is played.
+- **The first board no client can write.** `sou_runs` and `builds` are browser-written because a guess leaves no
+  trace a server could replay. A Century run leaves exactly that - seven (slot, player) pairs and at most one
+  re-spin - so `century_runs` has RLS on with a public select and **no insert or update policy at all**, and the
+  new `submit-century` Edge Function's service role is the only writer. It recomputes the seven teams from the
+  seed and adds up the touchdowns itself; nothing the client claims about its score is used. It never touches
+  `profiles`, which is why it is a function of its own rather than an arm of submit-run, and it pays no coins -
+  the client claims those with `claim_minigame('century', day)`, so every coin still moves in one place.
+- **The daily's seed is the function's clock**, and a code that HASHES to one is refused, the protection the main
+  daily has. `tests/test-century-edge.mjs` finds such a collision in about a second by meeting in the middle, and
+  then asserts it is turned away.
+- **`migration-century.sql` goes after profiles and before moderation and wallet.** It creates a trigger using
+  `use_account_username`; `claim_minigame` reads its table and both `mod_act` and `claim_username` rewrite its
+  name snapshots. All of those bodies are plpgsql, so the wrong order fails nothing until a guest trades up -
+  which is the worst shape a runbook can be in, and why `tests/test-migrations.mjs` holds the order.
+- **The screens ARE the draft's** (v2.9.1): the same `.reel`, `.roster`/`.slot`, `.sec`/`.card` and Lock in
+  controls, the same `.mode` tiles on its menu, the same `.result-hero` at the end - with the stat cells left off,
+  which is precisely what Genius mode does to that markup. The root takes the dark scope while a run is in
+  progress (`onStage` reports the stage up), because scoping only the container puts dark text on a cream page.
+  Reusing those classes is also why Century carries no touch-target or reduced-motion rules of its own.
+- **A rule belongs in one function both doors ask.** `centuryBlock` is what the board's `disabled` state, the
+  Lock in button AND the roster tile call, because the GM cap's history is that a screen can look right and
+  enforce nothing.
+- **Not built:** no share card, nothing on the profile (`player_stats` does not count Century runs), no badges.
+  CENTURY.md 9 says so rather than leaving them half-done.
+
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
 Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`
 only allows that for a provider - an email signup still brings its name and passes every check), and the game
@@ -406,6 +458,13 @@ node tests/test-versus-rules.mjs       # every refusal decideMove makes, then a 
 node tests/test-versus-sql.mjs         # the migration in PGlite: nobody writes the tables, lobbies, invites, match_state's shape, the 1v1 board
 node tests/test-versus-flow.mjs        # a whole match through the mock client: create, join, the clock, the records, the share card
 node tests/test-versus-screen.mjs      # the screens in the real app: the tile, the lobby's link, a shared board, a re-spin, the board
+
+# Century (v2.9.0). See CENTURY.md. century-logic.mjs holds the rules, so the first of these needs no database
+# and no browser - and it PRINTS the balance numbers the goal of 100 rests on.
+node tests/test-century-logic.mjs      # every rule and refusal, 3,000 seeds for stranding, the exact ceiling, and the balance
+node tests/test-century-edge.mjs       # the real submit-century, executed: the daily's clock, the duplicate, a found hash collision, and that the score is the server's
+node tests/test-century-sql.mjs        # the migration in PGlite: nobody writes the table, the daily's unique index, both boards == the mock, a rename, the coin claim
+node tests/test-century-screen.mjs     # the buttons: the tile, both variants, seven picks clicked, the re-spin, resume, the guest, and the refusal map
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards

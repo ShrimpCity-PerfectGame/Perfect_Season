@@ -2,7 +2,8 @@
 // and walking away while the clock runs costs that round's life. Both used to be exploitable - the
 // saved progress pointed at the round just answered (answer it again for another point), and
 // leaving through the nav left the round, and its timer, running in the background.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, clickMode,
+} from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -16,7 +17,7 @@ const progress = () => {
   return key ? JSON.parse(window.storage.data[key]) : null;
 };
 const openSou = async () => {
-  await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Over/Under").closest("button"));
+  await clickMode(container, "Over/Under");
   await flush(4);
 };
 

@@ -305,7 +305,7 @@ begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
   end if;
-  if p_game is null or p_game not in ('over_under', 'build') then
+  if p_game is null or p_game not in ('over_under', 'build', 'century') then
     raise exception 'bad_game' using errcode = 'P0001';
   end if;
   -- to_char, not ::text, which would follow the session's DateStyle.
@@ -318,6 +318,15 @@ begin
     v_played := exists (select 1 from public.sou_runs where user_id = v_uid and date = p_date);
   elsif p_game = 'over_under' then
     v_played := exists (select 1 from public.sou_runs where user_id = v_uid and created_at > now() - interval '24 hours');
+  -- Century (v2.9.0). Its daily is keyed by `day`, the same shape Over/Under's is, so a player either side of UTC
+  -- midnight claims the day they played rather than the day the server is having. An Unlimited Century counts as
+  -- having played too: the mode is one game either way, and the claim is still 15 coins for the day whichever
+  -- variant it was. This reads public.century_runs, which migration-century.sql creates - run that file FIRST.
+  elsif p_game = 'century' and p_date is not null then
+    v_played := exists (select 1 from public.century_runs where user_id = v_uid
+                         and (day = p_date or created_at > now() - interval '24 hours'));
+  elsif p_game = 'century' then
+    v_played := exists (select 1 from public.century_runs where user_id = v_uid and created_at > now() - interval '24 hours');
   else
     v_played := exists (select 1 from public.builds where user_id = v_uid and created_at > now() - interval '24 hours');
   end if;

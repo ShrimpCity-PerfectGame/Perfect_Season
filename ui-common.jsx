@@ -26,6 +26,12 @@ export function useWearScope() {
   return useContext(BoardWear)?.scope || "light";
 }
 
+// Whether the player has asked for less motion. Shared, because two screens now start animations from it and
+// tests/helpers.mjs makes it TRUE so a board resolves immediately instead of ticking a reel for 900ms - a copy
+// that drifted from that would make one screen's tests wait on real timers.
+export const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia
+  && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 export const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
 export const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };
 export const LADDER_LABEL = { daily: "Daily", unlimited: "Unlimited", genius: "Genius", gm: "GM" };

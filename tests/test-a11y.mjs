@@ -39,6 +39,8 @@ const SCREENS = [
   ["the duel board", "?screen=versus", null],
   ["the duel board while the other player picks", "?screen=versus&waiting=1", null],
   ["Modes as a guest", "?as=guest", null],
+  // The Mini games screen itself (v2.10.0), which is now the only way to any of the three side modes.
+  ["Mini games", "?as=player", { tile: "Mini games" }],
   ["the rules", "?as=player&howto=1", null],
   ["the Draft screen", "?as=player", "Draft"],
   ["the Leaderboard", "?as=player", "Leaderboard"],
@@ -53,6 +55,15 @@ const SCREENS = [
   ["the draft board", "?as=player", { tile: "Unlimited" }],
   ["Over/Under", "?as=player", { tile: "Over/Under" }],
   ["Build-a-player", "?as=player", { tile: "Build-a-player" }],
+  // Century (v2.9.0), both halves, for the reason the duel has two entries: the menu and the BOARD are different
+  // screens, and the board is where the mode lives - a heading order over four position sections, a roster strip
+  // that has to name its slots rather than colour them, and a board of buttons whose disabled ones have to say
+  // why. It goes on this list from its first release rather than being added after something ships broken.
+  ["Century", "?as=player", { tile: "Century" }],
+  ["the Century board", "?screen=century", null],
+  // And the result, which is the payoff and the one Century screen with big lime type on a dark hero. Nothing
+  // else opens it without playing seven picks by hand, so the harness locks the last slot in on load.
+  ["the Century result", "?screen=century&finish=1", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {
@@ -60,6 +71,16 @@ for (const [name, query, tab] of SCREENS) {
     await page.goto(HARNESS + query, { waitUntil: "load" });
     await sleep(1600);
     if (tab && tab.tile) {
+      // Since v2.10.0 the three side modes sit behind a Mini games tile rather than on Modes. A tile that is
+      // not on screen is looked for there, the same indirection tests/helpers.mjs's clickMode does - so an
+      // entry above still names the screen it means rather than the route to it.
+      await page.evaluate((label) => {
+        const find = () => [...document.querySelectorAll(".mode .mn")].find((e) => e.textContent === label)?.closest("button");
+        if (find()) { find().click(); return; }
+        const mini = [...document.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Mini games")?.closest("button");
+        if (mini) mini.click();
+      }, tab.tile);
+      await sleep(1400);
       await page.evaluate((label) => [...document.querySelectorAll(".mode .mn")].find((e) => e.textContent === label)?.closest("button")?.click(), tab.tile);
       await sleep(2200);
     } else if (tab) {

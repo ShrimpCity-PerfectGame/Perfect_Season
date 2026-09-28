@@ -230,6 +230,11 @@ await runTest("a forced title shows the Champions stamp and 🏆, with no rank t
   }
 
   assert(container.querySelector(".result-hero .cel .stamp")?.textContent === "🏆 Champions", "expected the Champions stamp");
+  // ONE celebration on a title, not two. The .cel panel used to shower its own confetti on the same condition
+  // the equipped celebration fires on, so every title played both at once - and because the default celebration
+  // IS Confetti, a player who had equipped nothing got confetti twice. The panel keeps its stamp.
+  assert(!container.querySelector(".result-hero .cel .confetti"), "the panel no longer runs its own confetti");
+  assert(container.querySelectorAll(".cs-cel").length === 1, "the equipped celebration is the only one");
   assert(container.querySelector(".result-hero .oe")?.textContent === "🏆", "expected 🏆 beside the outcome");
   assert(container.querySelector(".result-hero .outcome")?.textContent.startsWith("Won the championship"), "the outcome text itself carries no emoji");
   assert(!stripCell("This season"), "a forced ending is never saved, so there's no rank cell");

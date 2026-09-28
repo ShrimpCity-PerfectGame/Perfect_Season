@@ -263,9 +263,21 @@ export async function broadcast(auth, channelName, event, payload) {
 
 // Opens a home-screen mode by its tile name ("Unlimited", "Genius mode", "GM mode", ...). Tests use
 // this rather than clicking a tile's call-to-action text, because that copy is designed to change.
+// Opens a mode by the name on its tile. Since v2.10.0 the three side modes (Over/Under, Build-a-player,
+// Century) live on a Mini games screen rather than on Modes, so a tile that is not on screen is looked for
+// there: this goes through Mini games once and tries again. Every caller keeps working, and a test that means
+// "open Over/Under" still says so rather than knowing the route.
 export async function clickMode(container, name) {
-  const tile = [...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === name)?.closest("button");
-  if (!tile) throw new Error(`no "${name}" mode tile on screen`);
+  const find = () => [...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === name)?.closest("button");
+  let tile = find();
+  if (!tile) {
+    const mini = [...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Mini games")?.closest("button");
+    if (mini) {
+      await click(mini);
+      tile = find();
+    }
+  }
+  if (!tile) throw new Error(`no "${name}" mode tile on screen, and none behind Mini games either`);
   await click(tile);
 }
 
