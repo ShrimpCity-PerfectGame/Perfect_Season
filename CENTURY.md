@@ -183,7 +183,25 @@ offered twice.
 
 ## 6. The screen
 
-`century.jsx`. It draws the rules and holds none of them, with one exception that matters:
+`century.jsx`. **It is the draft screen**, deliberately, and that is the single most important thing about it:
+a run uses the app's own `.reel`, `.roster`/`.slot`, `.sec`/`.card` and `.drafts` "Lock in" controls, the menu
+deals the same `.mode` tiles the Modes screen does, and the result lands on `.result-hero` with the record type
+(`.rec`) the season's own result uses. The stat cells are simply left off - which is exactly what Genius mode
+does to the same markup, so "a draft with the numbers hidden" already had a shape in this game and Century
+takes it rather than inventing a second one.
+
+Two things follow from that and are worth stating, because both were got wrong first:
+
+- **The root takes the dark scope while a run is in progress**, not the container. Scoping only `.ce-play` gave
+  dark-scope text on a cream page and left the position headings nearly invisible. `CenturyScreen` reports its
+  stage up through `onStage`, and `perfect-season.jsx` puts `view === "century" && centuryStage !== "menu"` into
+  the same expression that darkens the play and duel views. The result screen is dark too, because a season's is.
+- **Reusing a class means inheriting its rules, which is the point.** Century adds no `pointer: coarse` or
+  reduced-motion block of its own: every control on these screens is one of the app's, and those already carry
+  their touch targets and their motion rules. A copy would be a second, quietly diverging set. The only override
+  is the roster's column count, because seven slots do not fit a grid built for six.
+
+It draws the rules and holds none of them, with one exception that matters:
 
 **`centuryBlock(player, slot, roster)` is the only place a pick is judged**, and both the board's `disabled`
 state and its click handler call it. CLAUDE.md records what getting this wrong costs: the GM salary cap was
@@ -194,6 +212,10 @@ every disabled one has nowhere — if the disabled state came from anything else
 
 Other things worth knowing:
 
+- **The reel is cosmetic and nothing seeded reads it.** It cycles nine team faces at 70ms; the team it settles
+  on was decided by `centuryPlan` long before. `reducedMotion()` (ui-common.jsx, shared with the main component)
+  skips it entirely - which is also what makes the tests instant, since `tests/helpers.mjs` makes that media
+  query match. While it runs the board is not rendered at all, exactly as the draft withholds one.
 - **A run in progress is per device, not per account** (`ps-century-wip`, through `sget`/`sset`/`clearDraft`).
   It resumes, which is the rule for every daily in the game. Clearing it overwrites with an unusable snapshot
   before deleting, because a delete that does not land must never bring a finished run back as a resumable one.
@@ -223,8 +245,10 @@ Other things worth knowing:
 | `tests/test-a11y.mjs` | the menu and the board, both under axe-core |
 | `tests/test-migrations.mjs` | the migration's place in the runbook order |
 
-The UI harness serves it at `?screen=century[&picks=N]` — a run part-played, written into the same per-device
-slot the screen resumes from, so it exercises the resume path on the way in.
+The UI harness serves it at `?screen=century[&picks=N][&finish=1]` - a run part-played, written into the same
+per-device slot the screen resumes from, so it exercises the resume path on the way in. `finish=1` locks the
+seventh slot in on load, which is the only way anything automated reaches the result screen without playing seven
+picks by hand; `tests/test-a11y.mjs` audits all three.
 
 ---
 

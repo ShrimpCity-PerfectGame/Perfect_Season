@@ -27,12 +27,12 @@
 //                                                  badge earned but not yet paid (its item says it unlocks next season)
 //   screen=versus[&waiting=1][&done=1][&boom=1][&picks=N]   a duel on the mock: mid-board, from the other side, played
 //                                                  out, or with a powerup announcement firing on load
-//   screen=century[&picks=N]                       Century mid-run: the board a run is actually played on, with N
+//   screen=century[&picks=N][&finish=1]            Century mid-run: the board a run is actually played on, with N
 //                                                  slots already filled (default 3). The menu is reachable from the
 //                                                  Modes tile instead, the way a player reaches it.
 //   screen=picker[&owned=sideline,night-game][&current=trophy]   the avatar picker on its own, on Choose an avatar,
 //                                                  owning the listed packs (default: sideline)
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import PerfectSeason, { APP_CSS } from "../../perfect-season.jsx";
 import { ProfileScreen } from "../../profile.jsx";
@@ -583,11 +583,29 @@ function PickerPreview() {
 // The menu is one Modes tile away, but the BOARD is two clicks in and is where the mode lives - a position
 // heading order, a roster strip that names its slots and a board of buttons that all have to read correctly. The
 // same reason the duel board and the draft board are on this list rather than just their lobbies.
-function CenturyPreview({ userId, username, picks }) {
+function CenturyPreview({ userId, username, finish }) {
+  // ?finish=1 locks the seventh slot in as soon as the board is up, so the RESULT screen can be audited too -
+  // it is the payoff, it is the one screen with big lime type on a dark hero, and nothing else ever opens it
+  // without playing a whole run by hand.
+  useEffect(() => {
+    if (!finish) return undefined;
+    const t = setTimeout(() => {
+      const card = [...document.querySelectorAll(".card")].find((c) => !c.classList.contains("off"));
+      if (!card) return;
+      card.querySelector(".hit").click();
+      setTimeout(() => {
+        const b = [...document.querySelectorAll(".drafts button")].find((x) => x.textContent.includes("Lock in"));
+        if (b) b.click();
+      }, 60);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [finish]);
   // The app shell's landmark and h1, exactly as perfect-season.jsx renders them around this screen, so axe judges
-  // the screen rather than the fixture.
+  // the screen rather than the fixture. `dark` because the app puts the ROOT in the dark scope while a run is in
+  // progress, the same as any other draft - without it this preview measures a colour combination that never
+  // ships, which is precisely what an accessibility pass must not do.
   return (
-    <div className="ps">
+    <div className="ps dark">
       <style>{APP_CSS}</style>
       <main id="content">
         <div className="wrap">
@@ -629,8 +647,9 @@ async function setUpCentury(howMany) {
 
 (async () => {
   if (params.get("screen") === "century") {
-    const { uid, username } = await setUpCentury(Number(params.get("picks") || 3));
-    createRoot(document.getElementById("root")).render(<CenturyPreview userId={uid} username={username} />);
+    const finish = params.get("finish") === "1";
+    const { uid, username } = await setUpCentury(finish ? 6 : Number(params.get("picks") || 3));
+    createRoot(document.getElementById("root")).render(<CenturyPreview userId={uid} username={username} finish={finish} />);
     return;
   }
   if (params.get("screen") === "versus") {

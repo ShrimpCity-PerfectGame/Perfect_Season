@@ -59,6 +59,9 @@ const SCREENS = [
   // why. It goes on this list from its first release rather than being added after something ships broken.
   ["Century", "?as=player", { tile: "Century" }],
   ["the Century board", "?screen=century", null],
+  // And the result, which is the payoff and the one Century screen with big lime type on a dark hero. Nothing
+  // else opens it without playing seven picks by hand, so the harness locks the last slot in on load.
+  ["the Century result", "?screen=century&finish=1", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {

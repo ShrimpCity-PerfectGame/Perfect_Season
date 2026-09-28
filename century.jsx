@@ -12,10 +12,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { TEAMS } from "./game-logic.mjs";
 import {
-  CENTURY_SLOTS, CENTURY_GOAL, CENTURY_BOARDS, CENTURY_SEASON, centuryFits, centurySlotPos,
-  centuryPlan, centuryRespinTeam, centuryScore, centuryHit, centuryTeamName, centuryReservedSeed,
+  CENTURY_SLOTS, CENTURY_GOAL, CENTURY_BOARDS, CENTURY_SEASON, CENTURY_TEAMS, CENTURY_FLEX,
+  centuryFits, centurySlotPos, centuryPlan, centuryRespinTeam, centuryScore, centuryHit,
+  centuryTeamName, centuryReservedSeed,
 } from "./century-logic.mjs";
-import { teamVars, POS_NAME } from "./ui-common.jsx";
+import { teamVars, POS_NAME, Confetti, reducedMotion } from "./ui-common.jsx";
 import { submitCentury, fetchCenturyTop, fetchCenturyBest, fetchMyCentury, sget, sset, clearDraft } from "./storage.js";
 
 // What a slot is called on screen. The numbers exist so a roster can be keyed by slot (CENTURY_SLOTS' own
@@ -63,7 +64,7 @@ export function centuryBlock(player, slot, roster) {
 
 // ---------- The screen ----------
 export function CenturyScreen({
-  userId, username, isGuest, onBack, onClaimCoins, onDailySaved,
+  userId, username, isGuest, onBack, onClaimCoins, onDailySaved, onStage,
 }) {
   // stage: "menu" a variant to choose | "play" seven slots to fill | "done" the result
   const [stage, setStage] = useState("menu");
@@ -72,7 +73,13 @@ export function CenturyScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [coins, setCoins] = useState(0);
-  const [chosen, setChosen] = useState(null); // the player tapped on the board, awaiting a slot
+  const [selected, setSelected] = useState(null); // the player tapped on the board, awaiting a slot
+  const [showDone, setShowDone] = useState({});   // positions with no room left, expanded again by hand
+  // The reel. A cosmetic cycle only - nothing seeded reads it, and the team it settles on was decided by
+  // centuryPlan long before. `reducedMotion` is what makes it resolve instantly for anyone who asked for
+  // less motion, and for the tests, which set that media query to match (tests/helpers.mjs).
+  const [spinFace, setSpinFace] = useState(null);
+  const spinTimer = useRef(null);
   const [board, setBoard] = useState({ day: [], best: [], loaded: false });
   const [dailyDone, setDailyDone] = useState(null);
   const [tab, setTab] = useState("day");
@@ -130,6 +137,13 @@ export function CenturyScreen({
     });
   }, [day]);
   useEffect(() => { if (stage !== "play") loadBoards(); }, [stage, loadBoards]);
+  // The play stage is stadium-dark, the way every other draft screen is - and that is decided on the ROOT,
+  // not here: scoping only this container left dark-scope text on a cream page, with the section headings
+  // near-invisible. The app owns the root class, so it has to be told which stage we are on.
+  useEffect(() => {
+    if (onStage) onStage(stage);
+    return () => { if (onStage) onStage("menu"); };
+  }, [stage, onStage]);
 
   // ---------- Derived state, all of it from the seed ----------
   const roster = useMemo(() => {
@@ -150,6 +164,10 @@ export function CenturyScreen({
   const respinSpent = respunAt >= 0 || respinPending;
   const team = run ? teamAt(run, step) : null;
   const open = CENTURY_SLOTS.filter((s) => !roster[s]);
+  const spinning = spinFace !== null;
+  // While the reel runs, the reel shows a team that is not yours yet. Everything else - the board, the
+  // heading, what a pick is judged against - reads `team`, so a click can never land on the face.
+  const shownTeam = spinFace || team;
 
   // The team dealt at a given step: the plan, unless the re-spin was spent there. One function, so the board, the
   // roster above and the server's replay can never disagree about which team a pick came from.
@@ -162,12 +180,33 @@ export function CenturyScreen({
     return plan[i];
   }
 
+  // A new board spins in, the way the draft screen deals one. Nine faces at 70ms is about two thirds of a
+  // second - long enough to read as a spin, short enough that nobody taps through it. The selection is
+  // dropped with it: the player you had picked out belonged to the last team.
+  useEffect(() => {
+    if (stage !== "play" || !team) return undefined;
+    setSelected(null);
+    setShowDone({});
+    if (reducedMotion()) { setSpinFace(null); return undefined; }
+    let n = 0;
+    const face = () => CENTURY_TEAMS[Math.floor(Math.random() * CENTURY_TEAMS.length)];
+    setSpinFace(face());
+    clearInterval(spinTimer.current);
+    spinTimer.current = setInterval(() => {
+      n += 1;
+      if (n >= 9) { clearInterval(spinTimer.current); setSpinFace(null); return; }
+      setSpinFace(face());
+    }, 70);
+    return () => clearInterval(spinTimer.current);
+  }, [team, stage]);
+
   // ---------- Starting and playing ----------
   function start(variant) {
     setError("");
     setResult(null);
     setCoins(0);
-    setChosen(null);
+    setSelected(null);
+    setShowDone({});
     const next = variant === "daily"
       ? { variant: "daily", day, seed: `century-${day}`, picks: [] }
       : { variant: "unlimited", day: null, seed: newCode(), picks: [] };
@@ -186,7 +225,7 @@ export function CenturyScreen({
       return;
     }
     setError("");
-    setChosen(null);
+    setSelected(null);
     const move = { slot, name: player.name };
     if (run.respinPending) move.respun = true;
     const next = { ...run, respinPending: false, picks: [...run.picks, move] };
@@ -198,7 +237,7 @@ export function CenturyScreen({
   function respin() {
     if (!run || respinSpent || saving) return;
     setError("");
-    setChosen(null);
+    setSelected(null);
     const next = { ...run, respinPending: true };
     setRun(next);
     saveWip(next);
@@ -245,90 +284,158 @@ export function CenturyScreen({
   });
 
   // ---------- Drawing ----------
+  // The play screen IS the draft screen, deliberately: the same .reel, .roster/.slot, .sec/.card and Lock in
+  // controls the main modes use, with the stat cells left off exactly as Genius mode leaves them off. Century is
+  // a draft, so it should not look like a different app - and reusing those classes means it inherits every
+  // phone rule, touch target and dark-scope token they already carry rather than growing a second, worse copy.
   if (stage === "play" && run) {
+    const board = CENTURY_BOARDS[team] || [];
+    // A position's three states, the same three the draft screen has: 0 a named slot of its own is open, 1 those
+    // are filled but the Flex can still take it, 2 nothing it fits is left. State 2 sinks to the bottom.
+    const secState = (pos) => {
+      if (CENTURY_SLOTS.some((s) => !roster[s] && s !== CENTURY_FLEX && centurySlotPos(s) === pos)) return 0;
+      return !roster[CENTURY_FLEX] && pos !== "QB" ? 1 : 2;
+    };
+    const left = respinSpent ? 0 : 1;
     return (
-      <div className="ce" data-view="play">
-        <CenturyRoster roster={roster} goal={CENTURY_GOAL} />
-        <div className="ce-spin" style={team ? teamVars(team) : undefined}>
-          <p className="ce-step">Slot {Math.min(step + 1, CENTURY_SLOTS.length)} of {CENTURY_SLOTS.length}</p>
-          <h2 className="ce-team">{team ? centuryTeamName(team) : ""}</h2>
-          <p className="note">
-            {respinPending ? "Re-spun. This is your team now." : "Fill one slot from this team. No stats until the end."}
-          </p>
-          <button className="btn" onClick={respin} disabled={respinSpent}>
-            {respinSpent ? "Re-spin used" : "Re-spin this team ↻"}
-          </button>
+      <div className="ce ce-play" data-view="play">
+        <div className="modebar">
+          <button className="mb on" aria-current="true">{run.variant === "daily" ? "Daily Century" : "Unlimited"}</button>
+          <button className="mb" onClick={onBack}>All modes</button>
+          <span className="seedline">
+            <span className="modechip fmt">{CENTURY_SEASON}</span>
+            {run.variant === "daily"
+              ? <span className="nowrap">{run.day} - same teams for everyone</span>
+              : <span className="codechip">Code <code>{run.seed}</code></span>}
+          </span>
         </div>
 
-        {error && <p className="note ce-err" role="status">{error}</p>}
-
-        <div className="ce-board">
-          {POS_ORDER.map((pos) => {
-            const men = (CENTURY_BOARDS[team] || []).filter((p) => p.pos === pos);
-            if (!men.length) return null;
+        <div className="roster" aria-label="Your roster">
+          {CENTURY_SLOTS.map((s) => {
+            const p = roster[s];
+            // The second door onto a pick, and it asks the SAME rule the Lock in button does. The draft screen's
+            // equivalent tile enforced nothing at all for three releases (CLAUDE.md), which is why this is
+            // centuryBlock and not a `disabled={!selected}`.
+            const block = selected ? centuryBlock(selected, s, roster) : "nothing selected";
+            const target = !!selected && !block;
             return (
-              <section key={pos} className="ce-pos">
-                <h3>{POS_NAME[pos]}</h3>
-                <ul>
-                  {men.map((p) => {
-                    // Every slot this man could fill, asked through the one rule function.
-                    const slots = CENTURY_SLOTS.filter((s) => !centuryBlock(p, s, roster));
-                    const picked = chosen === p.name;
-                    return (
-                      <li key={p.name}>
-                        <button
-                          className={`ce-man${picked ? " on" : ""}`}
-                          disabled={!slots.length}
-                          aria-expanded={picked}
-                          onClick={() => {
-                            if (!slots.length) return;
-                            // One legal slot is not a question worth asking.
-                            if (slots.length === 1) take(p, slots[0]);
-                            else setChosen(picked ? null : p.name);
-                          }}
-                        >
-                          <span className="ce-name">{p.name}</span>
-                          <span className="ce-pos-tag">{p.pos}</span>
-                          {!slots.length && <span className="ce-no">No room</span>}
-                        </button>
-                        {picked && slots.length > 1 && (
-                          <div className="ce-slots" role="group" aria-label={`Where does ${p.name} go?`}>
-                            {slots.map((s) => (
-                              <button key={s} className="btn solid ce-slot" onClick={() => take(p, s)}>
-                                {CENTURY_SLOT_LABEL[s]}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
+              <button key={s} className={`slot pos-${s === CENTURY_FLEX ? "FLEX" : centurySlotPos(s)} ${p ? "filled" : ""} ${target ? "target" : ""}`}
+                disabled={!target} onClick={() => target && take(selected, s)}
+                aria-label={p ? `${CENTURY_SLOT_LABEL[s]}: ${p.name}`
+                  : target ? `Lock ${selected.name} in at ${CENTURY_SLOT_LABEL[s]}`
+                  : `${CENTURY_SLOT_LABEL[s]} open`}>
+                <div className="k">{CENTURY_SLOT_LABEL[s]}</div>
+                <div className="v">{p ? p.name : target ? "Lock in here" : <span style={{ color: "var(--muted)", fontWeight: 400 }}>Open</span>}</div>
+                {p && <div className="sub">{TEAMS[p.team] ? TEAMS[p.team][0] : p.team}{s === CENTURY_FLEX ? `, ${p.pos}` : ""}</div>}
+              </button>
             );
           })}
         </div>
-        <p className="note">{CENTURY_SEASON} regular season · {open.length} slot{open.length === 1 ? "" : "s"} to fill</p>
-        <button className="btn" onClick={onBack}>Leave</button>
+
+        {/* The same reel the draft spins. aria-live, so the team that lands is announced rather than silently
+            swapped - the whole screen changes under it. */}
+        <div className={`reel ${spinning ? "spin" : ""}`} aria-live="polite" style={teamVars(shownTeam)}>
+          <div className="stripe" style={{ background: TEAMS[shownTeam][2] }} />
+          <div className="pickno">
+            <span>Pick {Math.min(step + 1, CENTURY_SLOTS.length)} of {CENTURY_SLOTS.length}</span>
+            <span>{spinning ? "Spinning" : `${board.length} players on the board`}</span>
+          </div>
+          <div className="team">{TEAMS[shownTeam][0]}</div>
+          <div>
+            <span className="years led-wrap"><span className="led">{CENTURY_SEASON}</span></span>
+            <span className="city">{TEAMS[shownTeam][1]}</span>
+          </div>
+        </div>
+
+        <div className="rerolls">
+          <button className="btn" aria-label={`Re-spin team (${left} left)`} disabled={spinning || respinSpent} onClick={respin}>
+            <span className="rs-long">Re-spin team <span className="left">({left} left)</span></span>
+            <span className="rs-short" aria-hidden="true">↻ Team <b>{left}</b></span>
+          </button>
+          <span className="note" style={{ marginLeft: "auto", alignSelf: "center" }}>
+            {run.variant === "daily" ? "One shot. No stats until the end." : "No stats until the end."}
+          </span>
+        </div>
+
+        {error && <p className="note ce-err" role="status" style={{ marginTop: 0 }}>{error}</p>}
+
+        {!spinning && (
+          <h2 className="vh">{TEAMS[team][1]} {TEAMS[team][0]}, pick {step + 1} of {CENTURY_SLOTS.length}</h2>
+        )}
+        {!spinning && [...POS_ORDER].sort((a, b) => (secState(a) === 2 ? 1 : 0) - (secState(b) === 2 ? 1 : 0)).map((pos) => {
+          const list = board.filter((p) => p.pos === pos);
+          if (!list.length) return null;
+          const st = secState(pos);
+          const collapsed = st === 2 && !showDone[pos];
+          return (
+            <section className={`sec pos-${pos} ${st === 2 ? "done" : ""}`} key={pos}>
+              <div className="hd">
+                <h3>{POS_NAME[pos]}</h3>
+                {st === 1 && <span className="nt">{pos} spots filled. These players can still go to Flex.</span>}
+                {st === 2 && (
+                  <button className="linkbtn" onClick={() => setShowDone({ ...showDone, [pos]: !showDone[pos] })}>
+                    {collapsed ? `No room. Show ${list.length} player${list.length > 1 ? "s" : ""}` : "Hide"}
+                  </button>
+                )}
+              </div>
+              {!collapsed && list.map((p) => {
+                const slotsFor = CENTURY_SLOTS.filter((s) => !centuryBlock(p, s, roster));
+                const off = !slotsFor.length;
+                const isSel = !!selected && selected.name === p.name;
+                return (
+                  <div key={p.id} className={`card ${isSel ? "sel" : ""} ${off ? "off" : ""}`}>
+                    <button className="hit" disabled={off} onClick={() => setSelected(isSel ? null : p)} aria-expanded={isSel}>
+                      <div className="row">
+                        <div>
+                          <div className="nm-row"><span className="pp">{p.pos}</span><span className="nm">{p.name}</span></div>
+                          {/* Games played, and nothing else. Genius mode keeps this line too: it is what he
+                              turned up for, not how well he did, and the touchdowns are the whole of the guess. */}
+                          <div className="meta">
+                            <span className="tdot" style={teamVars(p.team)} />
+                            {CENTURY_SEASON} {TEAMS[p.team] ? TEAMS[p.team][0] : p.team}, {p.games} games{off ? ", no open slot" : ""}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                    {isSel && (
+                      <div className="drafts">
+                        {slotsFor.map((s) => (
+                          <button key={s} className="btn solid" disabled={!!centuryBlock(p, s, roster)} onClick={() => take(p, s)}>
+                            🔒 Lock in · {CENTURY_SLOT_LABEL[s]}
+                          </button>
+                        ))}
+                        <button className="btn" onClick={() => setSelected(null)}>Cancel</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
+          );
+        })}
+        {!spinning && <button className="btn" onClick={onBack}>Leave</button>}
       </div>
     );
   }
 
   if (stage === "done" && result) {
     const short = Math.max(0, CENTURY_GOAL - result.score);
+    // .result-hero, the same block a finished season lands on - which also buys the scroll-anchoring rule
+    // html:has(.result-hero) already carries, so the number does not drag the view around as it ticks in.
     return (
       <div className="ce" data-view="done">
-        <div className={`ce-hero${result.hit ? " hit" : ""}`}>
+        <div className="result-hero ce-hero">
           <p className="ce-eyebrow">{result.hit ? "Century" : "Short"}</p>
-          <p className="ce-score">{result.score}</p>
-          <p className="ce-of">of {result.goal || CENTURY_GOAL} touchdowns</p>
-          {!result.hit && <p className="note">{short} short.</p>}
-          {result.ceiling != null && (
-            <p className="note ce-cap">Best possible from your teams: {result.ceiling}</p>
-          )}
+          <p className="rec ce-score">{result.score}</p>
+          <p className="outcome">of {result.goal || CENTURY_GOAL} touchdowns</p>
+          <p className="rating">
+            {result.hit ? "You got there." : `${short} short.`}
+            {result.ceiling != null && ` Best possible from your seven teams: ${result.ceiling}.`}
+          </p>
+          {result.hit && <Confetti />}
         </div>
         {coins > 0 && <p className="note ce-coins" role="status">+{coins} coins</p>}
-        {saving && <p className="note" role="status">Saving…</p>}
+        {saving && <p className="note" role="status">Saving...</p>}
         {error && <p className="note ce-err" role="status">{error}</p>}
         <table className="ce-card">
           <caption>Your seven, with what they actually scored</caption>
@@ -337,17 +444,17 @@ export function CenturyScreen({
           </thead>
           <tbody>
             {(result.roster || []).map((r) => (
-              <tr key={r.slot}>
+              <tr key={r.slot} className={`pos-${r.slot === CENTURY_FLEX ? "FLEX" : centurySlotPos(r.slot)}`}>
                 <th scope="row">{CENTURY_SLOT_LABEL[r.slot]}</th>
-                <td>{r.name || "—"}</td>
-                <td>{r.team ? TEAMS[r.team]?.[0] || r.team : "—"}</td>
+                <td>{r.name || "-"}</td>
+                <td>{r.team ? (TEAMS[r.team] ? TEAMS[r.team][0] : r.team) : "-"}</td>
                 <td className="ce-td">{r.td}</td>
               </tr>
             ))}
           </tbody>
         </table>
         <div className="ce-row">
-          <button className="btn solid" onClick={() => start("unlimited")}>Play again 🔁</button>
+          <button className="btn solid" onClick={() => start("unlimited")}>Run it back</button>
           <button className="btn" onClick={() => { setStage("menu"); loadBoards(); }}>Boards</button>
           <button className="btn" onClick={onBack}>Done</button>
         </div>
@@ -363,27 +470,39 @@ export function CenturyScreen({
         with no stats shown. Get to {CENTURY_GOAL} combined passing, rushing and receiving touchdowns from the{" "}
         {CENTURY_SEASON} season. One team re-spin.
       </p>
-      <div className="ce-modes">
-        <button className="ce-mode day" onClick={() => start("daily")} disabled={!userId || isGuest || !!dailyDone}>
-          <span className="ce-mt">Daily</span>
-          <span className="note">
-            {isGuest ? "The daily needs an account — a guest can be made again and again."
-              : !userId ? "Sign in to play the daily."
-              : dailyDone ? `Played · ${dailyDone.score} of ${CENTURY_GOAL}`
-              : "The same seven teams for everyone today. One go."}
+      {/* The same .mode tiles the Modes screen deals, so the two variants read as modes rather than as two
+          buttons: the daily takes the featured lime block every daily in the game takes, and Unlimited the navy
+          one its namesake has. */}
+      <div className="modes">
+        <button className="mode daily" onClick={() => start("daily")} disabled={!userId || isGuest || !!dailyDone}>
+          <div className="mt">
+            <span className="icon" aria-hidden="true">📅</span>
+            <span className="mn">Daily Century</span>
+            {isGuest && <span className="pill">Account needed</span>}
+            {dailyDone && <span className="pill">Done · {dailyDone.score}</span>}
+          </div>
+          <p>
+            {isGuest ? "The daily needs an account - a guest can be made again and again, and the day's teams are one go for everyone."
+              : !userId ? "The same seven teams for everyone today, one run, no resets. Sign in to play it."
+              : dailyDone ? `You scored ${dailyDone.score} of ${CENTURY_GOAL}. ${dailyDone.ceiling ? `The best those seven teams could give was ${dailyDone.ceiling}.` : ""}`
+              : "The same seven teams for everyone today. One run, no resets."}
+          </p>
+          <span className="go">
+            {dailyDone ? "Played" : isGuest || !userId ? "Sign in to play" : "Let's go"}
           </span>
         </button>
-        <button className="ce-mode free" onClick={() => start("unlimited")} disabled={!userId}>
-          <span className="ce-mt">Unlimited</span>
-          <span className="note">{userId ? "New teams every time, as often as you like." : "Sign in to play."}</span>
+
+        <button className="mode m-unlimited" onClick={() => start("unlimited")} disabled={!userId}>
+          <div className="mt">
+            <span className="icon" aria-hidden="true">♾️</span>
+            <span className="mn">Unlimited</span>
+          </div>
+          <p>Seven new teams every time, as often as you like. Your best run goes on the all-time board.</p>
+          <span className="go">{userId ? "Let's go" : "Sign in to play"}</span>
         </button>
       </div>
-      {dailyDone && (
-        <p className="note" role="status">
-          Today: {dailyDone.outcome}{dailyDone.ceiling ? ` Best possible from those teams was ${dailyDone.ceiling}.` : ""}
-        </p>
-      )}
 
+      <h2 className="h">Boards</h2>
       <div className="ce-tabs" role="tablist" aria-label="Century boards">
         {[["day", "Today"], ["best", "All time"]].map(([id, label]) => (
           <button key={id} role="tab" id={`ce-tab-${id}`} aria-selected={tab === id} aria-controls={`ce-panel-${id}`}
@@ -395,21 +514,6 @@ export function CenturyScreen({
       </div>
       <button className="btn" onClick={onBack}>Back</button>
     </div>
-  );
-}
-
-// The seven slots as they fill. Named so a screen reader reads the slot as well as seeing its colour - colour is
-// never the only thing carrying meaning (v1.18.0's pass).
-function CenturyRoster({ roster }) {
-  return (
-    <ul className="ce-strip" aria-label="Your roster">
-      {CENTURY_SLOTS.map((s) => (
-        <li key={s} className={`ce-chip${roster[s] ? " on" : ""}`} style={roster[s] ? teamVars(roster[s].team) : undefined}>
-          <span className="ce-cs">{CENTURY_SLOT_LABEL[s]}</span>
-          <span className="ce-cn">{roster[s] ? roster[s].name : "—"}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -464,53 +568,29 @@ export const CENTURY_CSS = `
 .ce { display: grid; gap: 14px; padding-bottom: 8px; }
 .ce-intro { max-width: 60ch; }
 
-.ce-modes { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
-.ce-mode { display: grid; gap: 4px; text-align: left; padding: 14px; border-radius: 14px; border: 2px solid var(--line);
-  background: var(--surface); color: var(--ink); cursor: pointer; }
-.ce-mode .ce-mt { font-family: var(--display); font-size: 20px; letter-spacing: .01em; }
-.ce-mode.day { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-.ce-mode.day .note { color: var(--on-accent); opacity: .85; }
-.ce-mode:disabled { opacity: .6; cursor: default; }
+/* The play screen borrows the draft's own .reel, .roster/.slot, .sec/.card and .drafts, so there is almost
+   nothing to style here. What is left is the two places seven slots do not fit a layout built for six. */
 
-.ce-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; list-style: none; margin: 0; padding: 0; }
-.ce-chip { display: grid; gap: 2px; padding: 6px 4px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--surface); min-width: 0; }
-.ce-chip.on { border-color: var(--tc1); box-shadow: inset 0 3px 0 var(--tc1); }
-.ce-cs { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-.ce-cn { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Seven slots, not six. This overrides only the column count, and only inside Century - the shared .roster is
+   otherwise untouched, which is the rule for reusing an app class (CLAUDE.md, Design system). */
+.ce-play .roster { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+/* Long surnames in a narrow tile break mid-word without this; the draft never hits it because six slots are
+   wider than seven. Break at spaces only, and let a single long name sit slightly proud rather than split. */
+.ce-play .slot .v { overflow-wrap: normal; word-break: normal; hyphens: none; }
 
-/* The spin panel and the result hero are stadium-dark wherever they appear, so both are named in
-   perfect-season.jsx's dark-scope selector list and take --bg / --ink / --accent from there rather than
-   hardcoding a navy. The team tints it through --tc-deep, which is that team's colour deepened until cream
-   text clears AA on it (ui-common.jsx's teamVars). */
-.ce-spin { display: grid; gap: 6px; justify-items: start; padding: 16px; border-radius: 16px;
-  background: linear-gradient(135deg, var(--tc-deep, var(--surface2)), var(--bg)); }
-.ce-spin .note { opacity: .8; }
-.ce-step { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; opacity: .75; margin: 0; }
-.ce-team { font-family: var(--display); font-size: 30px; line-height: 1; margin: 0; }
-
-.ce-board { display: grid; gap: 12px; }
-.ce-pos h3 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
-.ce-pos ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.ce-man { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 10px 12px;
-  border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
-.ce-man.on { border-color: var(--accent-ink); }
-.ce-man:disabled { opacity: .45; cursor: default; }
-.ce-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ce-pos-tag { font-size: 11px; color: var(--muted); }
-.ce-no { font-size: 11px; color: var(--muted); }
-.ce-slots { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 2px 12px; }
-.ce-slot { padding: 6px 12px; }
-.ce-err { color: var(--loss); }
-
-.ce-hero { display: grid; gap: 2px; justify-items: center; padding: 22px 16px; border-radius: 16px;
-  background: var(--bg); text-align: center; }
-.ce-hero.hit { background: var(--accent); color: var(--on-accent); }
+/* .result-hero paints the block; these are the three lines inside it. .rec is the draft's giant record type,
+   reused for the score, so a finished Century reads at the same size a finished season does. */
+.ce-hero { text-align: center; }
+/* Every line here is a <p>, and .rec is ~96px type - so the browser's default 1em margin is a 96px gap above
+   AND below the number. Each one is set explicitly instead; without this the hero was 400px of empty space. */
 .ce-eyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; opacity: .8; margin: 0; }
-.ce-score { font-family: var(--display); font-size: 68px; line-height: .9; margin: 0; font-variant-numeric: tabular-nums; }
-.ce-of { font-size: 13px; opacity: .85; margin: 0; }
-.ce-hero .note { color: inherit; opacity: .8; }
+.ce-hero .ce-score { font-variant-numeric: tabular-nums; margin: 2px 0 0; }
+.ce-hero .outcome { font-size: 15px; font-weight: 600; opacity: .9; margin: 6px 0 0; }
+.ce-hero .rating { margin: 6px 0 0; }
 .ce-coins { color: var(--accent-ink); }
+/* A refusal has to read as one. This was lost for a moment when the play screen's own styles were deleted in
+   favour of the draft's, which left every error rendering as an ordinary grey note. */
+.ce-err { color: var(--loss); }
 
 .ce-card, .ce-lb { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ce-card caption, .ce-lb caption { text-align: left; font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
@@ -524,17 +604,11 @@ export const CENTURY_CSS = `
 .ce-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
 @media (max-width: 520px) {
-  .ce-modes { grid-template-columns: 1fr; }
-  /* Seven chips do not fit a phone in one row - two rows of four and three, which keeps every slot visible
-     without a horizontal scroll. Base rules are above this block, never below it (CLAUDE.md). */
-  .ce-strip { grid-template-columns: repeat(4, 1fr); }
-  .ce-score { font-size: 56px; }
-  .ce-team { font-size: 24px; }
+  /* Seven slots do not fit a phone in one row - four then three, which keeps every one visible without a
+     horizontal scroll. Base rules are above this block, never below it (CLAUDE.md). */
+  .ce-play .roster { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
-@media (pointer: coarse) {
-  .ce-man, .ce-mode, .ce-slot { min-height: 44px; position: relative; z-index: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ce-man, .ce-mode { transition: none; }
-}
+/* No pointer:coarse or reduced-motion block of its own any more - every control on these screens is one of
+   the app's (.mode, .btn, .slot, .card, .linkbtn, .tab), and those already carry their touch targets and their
+   motion rules. A copy here would be a second, quietly diverging set. */
 `;

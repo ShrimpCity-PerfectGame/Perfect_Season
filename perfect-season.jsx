@@ -25,7 +25,7 @@ import {
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
-  POS_NAME, cityRange, statCells, Confetti, BoardWear,
+  POS_NAME, cityRange, statCells, Confetti, BoardWear, reducedMotion,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -537,7 +537,7 @@ const CSS = `
 /* Stop the browser pinning the view to the bottom while a season's tiles tick in under it. */
 html:has(.result-hero){overflow-anchor:none}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
-.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.mode.m-versus,.mode.m-century,.ce-spin,.ce-hero,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
+.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.mode.m-versus,.mode.m-century,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
 /* Leaderboard scope: true black. After the dark list so its champion block takes night tokens. */
 .ps.night,.night .champion,.cs-night{${cssVars("night")};color:var(--ink)}
@@ -1284,7 +1284,7 @@ p.gamecoins .earned{display:flex}
 // md-), after the base stylesheet so they can reuse its tokens and classes.
 export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS;
 
-const reducedMotion = () => typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+// reducedMotion now lives in ui-common.jsx - century.jsx starts its reel from the same check.
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's
 // scroll offset. A no-op where nothing is scrolled (and in the test DOM, which has no layout).
 const scrollToTop = () => { try { if (typeof window !== "undefined" && window.scrollY > 0) window.scrollTo(0, 0); } catch (e) { /* no layout */ } };
@@ -2281,6 +2281,9 @@ export default function PerfectSeason() {
   const [souIntro, setSouIntro] = useState(null); // rules screen pending a confirm - { date, roundIndex, lives, score }, the timer doesn't start until this is accepted
   const [souDone, setSouDone] = useState(null); // today's finished record, if any: { score }
   const [centuryDone, setCenturyDone] = useState(null); // today's Century, if played on this device: { score, hit }
+  // Which stage the Century screen is on, reported up by CenturyScreen. It decides the ROOT scope, the same
+  // way `view === "play"` does for a draft: a run in progress is stadium-dark, its menu and boards are not.
+  const [centuryStage, setCenturyStage] = useState("menu");
   const [souCoins, setSouCoins] = useState(null); // { date, credited } - the coins a finished day's claim paid
   const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
@@ -4123,7 +4126,10 @@ export default function PerfectSeason() {
 
   // 1v1 is a draft, so it wears the draft's scope: the stadium-dark one the play screen uses (Design system,
   // CLAUDE.md). It is the single biggest reason the two screens read as the same game rather than two.
-  const scope = view === "play" || view === "versus" ? "dark" : view === "board" ? "night" : "light";
+  // Century's run AND its result are stadium-dark, for the reason a season's are: the result screen a draft
+  // lands on is the play view, so it is dark there too. Only its menu and boards come back to cream.
+  const scope = view === "play" || view === "versus" || (view === "century" && centuryStage !== "menu")
+    ? "dark" : view === "board" ? "night" : "light";
 
   // The colour a browser paints around the page: the address bar on a phone, and the status bar when the site
   // has been installed to a home screen. Following the screen means an installed Gridspin is cream on Modes and
@@ -4950,7 +4956,7 @@ export default function PerfectSeason() {
               key={userId || "anon"} userId={userId} username={user} isGuest={!!stats?.guest}
               onBack={leaveCentury}
               onClaimCoins={(date, onCredited) => claimMinigame("century", date, onCredited)}
-              onDailySaved={onCenturyDaily}
+              onDailySaved={onCenturyDaily} onStage={setCenturyStage}
             />
           </>
         )}

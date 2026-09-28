@@ -10,6 +10,42 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.9.1] — 2026-09-28
+
+Century, made to look like the rest of the game. Client only — no migration, no Edge Function change.
+
+### Changed
+
+- **The Century screens are now the draft's own.** A run had been built out of its own markup, and next to
+  Unlimited or Genius it read as a different app bolted on. It now uses the app's `.reel` (the board spins in,
+  with the team colour, the pick counter and the player count), the `.roster`/`.slot` tiles with their position
+  colours, the `.sec`/`.card` board with position pills and a **Lock in** row, and the `.result-hero` with the
+  same giant record type a finished season lands on. The menu deals the same `.mode` tiles the Modes screen
+  does: the featured lime block for the daily, the navy one for Unlimited.
+  The stat cells are just left off, which is exactly what Genius mode does to the same markup — so "a draft with
+  the numbers hidden" already had a shape here and Century takes it instead of inventing a second one.
+- **A run in progress is stadium-dark**, on the ROOT the way every other draft is, and so is its result. The
+  first attempt scoped only the container, which put dark-scope text on a cream page and left the position
+  headings nearly invisible.
+- **A second door onto a pick.** The roster tile is now clickable to place the player you have selected, as the
+  draft screen's is — and it asks `centuryBlock`, the same function the Lock in button asks.
+  `tests/test-century-screen.mjs` holds both doors to it, because the draft's equivalent tile enforced no rule
+  at all for three releases.
+- Century adds no touch-target or reduced-motion rules of its own any more: every control on these screens is
+  one of the app's, and those already carry them. A copy would be a second, quietly diverging set.
+
+### Fixed
+
+- The result screen was about 400px of empty space: `.rec` is ~96px type and every line in the hero is a `<p>`,
+  so the browser's default 1em margin was a 96px gap above and below the number.
+- `reducedMotion` had been a private copy in `perfect-season.jsx`; it moves to `ui-common.jsx` so the reel and
+  the draft's spin read the same check — the one `tests/helpers.mjs` forces on so boards resolve instantly.
+
+### Added
+
+- `tests/test-a11y.mjs` now audits the Century **result** screen as well as the menu and the board; the harness
+  gained `?screen=century&finish=1` to reach it, since nothing else opens it without playing seven picks.
+
 ## [2.9.0] — 2026-09-28
 
 **Century** — a new mode, with a daily and an Unlimited. Seven slots, hidden stats, and 100 combined

@@ -18,8 +18,9 @@ import {
 import { readFileSync } from "node:fs";
 import {
   initCenturyData, CENTURY_SLOTS, CENTURY_GOAL, CENTURY_BOARDS, centuryPlan, centuryRespinTeam,
-  centuryFits, centuryTeamName, centuryDailySeed, centuryCeiling,
+  centuryFits, centuryDailySeed, centuryCeiling,
 } from "../century-logic.mjs";
+import { TEAMS } from "../game-logic.mjs";
 // Node cannot import .jsx, so the screen module comes through the same bundler helper the other screen tests use.
 const { centuryBlock, CENTURY_SLOT_LABEL } = await loadModule("century.jsx");
 import { CENTURY_REFUSALS } from "../storage-century.js";
@@ -74,6 +75,37 @@ async function openCentury() {
   return tile;
 }
 
+// The screen's markup IS the draft screen's: a .reel naming the team, a .roster of .slot tiles, and .card rows
+// with a .drafts row of Lock in buttons under the selected one. These read the screen the way a player sees it.
+const reelTeam = () => ce().querySelector(".reel .team").textContent;
+const teamCode = () => Object.keys(CENTURY_BOARDS).find((t) => TEAMS[t] && TEAMS[t][0] === reelTeam());
+const slotTiles = () => [...ce().querySelectorAll(".roster .slot")];
+// The menu deals the app's own .mode tiles, the same ones the Modes screen uses - Daily first, Unlimited second.
+const variantTiles = () => [...ce().querySelectorAll(".modes .mode")];
+const filledSlots = () => slotTiles().filter((b) => b.classList.contains("filled"));
+const openCards = () => [...ce().querySelectorAll(".card")].filter((c) => !c.classList.contains("off"));
+const cardFor = (name) => [...ce().querySelectorAll(".card")].find((c) => c.querySelector(".nm")?.textContent === name);
+// The roster as the tiles show it, not recomputed.
+function rosterOnScreen() {
+  const out = {};
+  slotTiles().forEach((tile, i) => {
+    if (tile.classList.contains("filled")) out[CENTURY_SLOTS[i]] = { name: tile.querySelector(".v").textContent };
+  });
+  return out;
+}
+// Select a card and press one of its Lock in buttons.
+async function lockIn(card, slot) {
+  await click(card.querySelector(".hit"));
+  await flush();
+  const drafts = card.querySelector(".drafts") || ce().querySelector(".drafts");
+  assert(drafts, "a Lock in row opened");
+  const buttons = [...drafts.querySelectorAll("button")];
+  const want = (slot && buttons.find((b) => b.textContent.includes(`Lock in - ${CENTURY_SLOT_LABEL[slot]}`)))
+    || buttons.find((b) => b.textContent.includes("Lock in"));
+  await click(want);
+  await flush();
+}
+
 // Play the whole run by clicking: for each board, take the highest scorer that fits a slot still open. The screen
 // hides the stats, so this is a test knowing what a player would have to remember - it is not reading the DOM for
 // a number that is not there.
@@ -82,22 +114,16 @@ async function openCentury() {
 async function playOut({ respinAt = -1 } = {}) {
   const taken = [];
   for (let guard = 0; ce().dataset.view === "play" && guard <= CENTURY_SLOTS.length; guard++) {
-    const stepNo = [...ce().querySelectorAll(".ce-chip.on")].length;
+    const stepNo = filledSlots().length;
     if (stepNo === respinAt) {
-      const again = findButtonByText(ce(), "Re-spin this team");
+      const again = findButtonByText(ce(), "Re-spin team");
       assert(again && !again.disabled, `the re-spin is offered at step ${stepNo}`);
       await click(again);
       await flush();
     }
-    const teamName = ce().querySelector(".ce-team").textContent;
-    const code = Object.keys(CENTURY_BOARDS).find((t) => centuryTeamName(t) === teamName);
-    assert(code, `the board names a real team: ${teamName}`);
-    // The roster as the screen has it, read off the chips rather than recomputed.
-    const roster = {};
-    ce().querySelectorAll(".ce-chip").forEach((li, i) => {
-      const name = li.querySelector(".ce-cn").textContent;
-      if (name !== "—") roster[CENTURY_SLOTS[i]] = { name, pos: null };
-    });
+    const code = teamCode();
+    assert(code, `the reel names a real team: ${reelTeam()}`);
+    const roster = rosterOnScreen();
     const filled = new Set(Object.values(roster).map((r) => r.name));
     let best = null, bestSlot = null;
     for (const p of CENTURY_BOARDS[code]) {
@@ -108,18 +134,9 @@ async function playOut({ respinAt = -1 } = {}) {
       }
     }
     assert(best, `something on ${code} fits a slot still open at step ${stepNo}`);
-    const row = [...ce().querySelectorAll(".ce-man")].find((b) => b.querySelector(".ce-name").textContent === best.name);
-    assert(row && !row.disabled, `${best.name} is offered and enabled`);
-    await click(row);
-    await flush();
-    // One legal slot goes straight in; more than one asks which.
-    const chooser = ce().querySelector(".ce-slots");
-    if (chooser) {
-      const want = [...chooser.querySelectorAll("button")].find((b) => b.textContent === CENTURY_SLOT_LABEL[bestSlot])
-        || chooser.querySelector("button");
-      await click(want);
-      await flush();
-    }
+    const card = cardFor(best.name);
+    assert(card && !card.classList.contains("off"), `${best.name} is on the board and pickable`);
+    await lockIn(card, bestSlot);
     taken.push({ name: best.name, td: best.td, team: code });
   }
   assert(ce().dataset.view === "done", `the run reached its end: ${ce().dataset.view}`);
@@ -134,19 +151,22 @@ await runTest("1. the Modes tile opens Century, and the screen says what the mod
   assert(ce().dataset.view === "menu", `it opens on the menu: ${ce().dataset.view}`);
   assert(text(container).includes("Seven slots"), "it explains the seven slots");
   assert(container.querySelector("h1.vh")?.textContent === "Century", "and it names itself for a screen reader");
-  const modes = [...ce().querySelectorAll(".ce-mode")].map((b) => b.textContent);
+  const modes = [...variantTiles()].map((b) => b.textContent);
   assert(modes.length === 2 && modes[0].includes("Daily") && modes[1].includes("Unlimited"),
     `both variants are offered: ${JSON.stringify(modes)}`);
 });
 
 await runTest("2. an Unlimited run is played by clicking and lands on the board", async () => {
   await openCentury();
-  await click([...ce().querySelectorAll(".ce-mode")][1]);
+  await click([...variantTiles()][1]);
   await flush();
   assert(ce().dataset.view === "play", `it deals a board: ${ce().dataset.view}`);
-  assert(ce().querySelectorAll(".ce-chip").length === CENTURY_SLOTS.length, "seven slots are shown");
+  assert(slotTiles().length === CENTURY_SLOTS.length, "seven slots are shown");
+  assert(ce().querySelector(".reel"), "the board spins in on the draft screen's own reel");
+  assert(ce().querySelector(".modebar"), "and carries the mode bar every draft screen has");
+  assert(!ce().querySelector(".cells"), "no stat cells are rendered, exactly as Genius mode renders none");
   // No stats anywhere on the board - that is the whole mode.
-  const board = ce().querySelector(".ce-board").textContent;
+  const board = [...ce().querySelectorAll(".sec")].map((x) => x.textContent).join(" ");
   assert(!/\bTD\b|touchdown/i.test(board), `the board shows no stats: ${board.slice(0, 120)}`);
 
   const taken = await playOut();
@@ -158,7 +178,7 @@ await runTest("2. an Unlimited run is played by clicking and lands on the board"
   const rows = [...ce().querySelectorAll(".ce-card tbody tr")];
   assert(rows.length === CENTURY_SLOTS.length, `seven rows on the card: ${rows.length}`);
   for (const p of taken) assert(ce().querySelector(".ce-card").textContent.includes(p.name), `${p.name} is on the card`);
-  assert(ce().textContent.includes("Best possible from your teams"), "and it says what the draw was worth at best");
+  assert(ce().textContent.includes("Best possible from your seven teams"), "and it says what the draw was worth at best");
 
   const runs = window.__ps_supabase__._century.runs();
   assert(runs.length === 1 && runs[0].score === expected, `the run was recorded: ${JSON.stringify(runs.map((r) => r.score))}`);
@@ -169,7 +189,7 @@ await runTest("2. an Unlimited run is played by clicking and lands on the board"
 await runTest("3. the score on screen is the server's, and the ceiling is for the teams dealt", async () => {
   await openCentury();
   const before = window.__ps_supabase__._century.runs().length;
-  await click([...ce().querySelectorAll(".ce-mode")][1]);
+  await click([...variantTiles()][1]);
   await flush();
   const seed = JSON.parse((await window.storage.get("ps-century-wip")).value).seed;
   const taken = await playOut();
@@ -184,20 +204,19 @@ await runTest("3. the score on screen is the server's, and the ceiling is for th
 
 await runTest("4. the re-spin is once, and changes the team", async () => {
   await openCentury();
-  await click([...ce().querySelectorAll(".ce-mode")][1]);
+  await click([...variantTiles()][1]);
   await flush();
   const wip = JSON.parse((await window.storage.get("ps-century-wip")).value);
   const plan = centuryPlan(wip.seed);
-  assert(ce().querySelector(".ce-team").textContent === centuryTeamName(plan[0]),
-    `the first board is the plan's: ${ce().querySelector(".ce-team").textContent}`);
-  await click(findButtonByText(ce(), "Re-spin this team"));
+  assert(teamCode() === plan[0], `the first board is the plan's: ${reelTeam()}`);
+  await click(findButtonByText(ce(), "Re-spin team"));
   await flush();
   const spare = centuryRespinTeam(wip.seed, 0, plan);
-  assert(ce().querySelector(".ce-team").textContent === centuryTeamName(spare),
-    `the re-spin deals the spare: ${ce().querySelector(".ce-team").textContent} wanted ${centuryTeamName(spare)}`);
+  assert(teamCode() === spare, `the re-spin deals the spare: ${reelTeam()} wanted ${TEAMS[spare][0]}`);
   assert(!plan.includes(spare), "which is never a team the plan already holds");
-  const again = findButtonByText(ce(), "Re-spin used");
+  const again = findButtonByText(ce(), "Re-spin team");
   assert(again && again.disabled, "and there is no second one");
+  assert(/0 left/.test(again.textContent), `and says none are left: ${again.textContent}`);
   // The rest of the run still finishes, and the server accepts it with the re-spin where it was spent.
   const before = window.__ps_supabase__._century.runs().length;
   await playOut();
@@ -209,24 +228,17 @@ await runTest("4. the re-spin is once, and changes the team", async () => {
 
 await runTest("5. a run in progress resumes; a finished one does not come back", async () => {
   await openCentury();
-  await click([...ce().querySelectorAll(".ce-mode")][1]);
+  await click([...variantTiles()][1]);
   await flush();
   // Two picks, then leave the screen entirely.
-  for (let i = 0; i < 2; i++) {
-    const row = [...ce().querySelectorAll(".ce-man")].find((b) => !b.disabled);
-    await click(row);
-    await flush();
-    const chooser = ce().querySelector(".ce-slots");
-    if (chooser) { await click(chooser.querySelector("button")); await flush(); }
-  }
+  for (let i = 0; i < 2; i++) await lockIn(openCards()[0]);
   const saved = JSON.parse((await window.storage.get("ps-century-wip")).value);
   assert(saved.picks.length === 2, `two picks are saved: ${saved.picks.length}`);
   await click(findButtonByText(ce(), "Leave"));
   await flush();
   await openCentury();
   assert(ce().dataset.view === "play", `it resumes rather than restarting: ${ce().dataset.view}`);
-  const filled = [...ce().querySelectorAll(".ce-chip.on")].length;
-  assert(filled === 2, `with the two picks still there: ${filled}`);
+  assert(filledSlots().length === 2, `with the two picks still there: ${filledSlots().length}`);
   // Finish it, and the snapshot is gone - a finished run must never resurface as a resumable one.
   await playOut();
   const after = await window.storage.get("ps-century-wip");
@@ -239,7 +251,7 @@ await runTest("5. a run in progress resumes; a finished one does not come back",
 
 await runTest("6. the daily is once, and the tile says so afterwards", async () => {
   await openCentury();
-  const daily = [...ce().querySelectorAll(".ce-mode")][0];
+  const daily = [...variantTiles()][0];
   assert(!daily.disabled, "an account may play the daily");
   await click(daily);
   await flush();
@@ -253,7 +265,7 @@ await runTest("6. the daily is once, and the tile says so afterwards", async () 
   // Back out and the daily is closed, on the screen and on the Modes tile.
   await click(findButtonByText(ce(), "Boards"));
   await flush();
-  const again = [...ce().querySelectorAll(".ce-mode")][0];
+  const again = [...variantTiles()][0];
   assert(again.disabled, "the daily is no longer offered");
   assert(again.textContent.includes(String(score)), `and it says what it scored: ${again.textContent}`);
   await click(findButtonByText(ce(), "Back"));
@@ -287,7 +299,7 @@ await runTest("8. a guest plays Unlimited and is refused the daily, with a reaso
   await auth.auth.signInAnonymously();
   await flush();
   await openCentury();
-  const [daily, free] = [...ce().querySelectorAll(".ce-mode")];
+  const [daily, free] = [...variantTiles()];
   assert(daily.disabled, "the daily is closed to a guest");
   assert(/needs an account/.test(daily.textContent), `and says why: ${daily.textContent}`);
   assert(!free.disabled, "Unlimited is open");
@@ -305,7 +317,7 @@ await runTest("9. a signed-out visitor reads the boards and is asked to sign in"
   await auth.auth.signOut();
   await flush();
   await openCentury();
-  const modes = [...ce().querySelectorAll(".ce-mode")];
+  const modes = [...variantTiles()];
   assert(modes.every((b) => b.disabled), "neither variant is playable");
   assert(/Sign in/.test(ce().textContent), `and it says to sign in: ${ce().textContent.slice(0, 200)}`);
   assert(ce().querySelector(".ce-lb") || /Nobody/.test(ce().textContent), "the boards still render");
@@ -331,36 +343,44 @@ await runTest("10. one function decides whether a pick is legal, and the board o
   // of these two counts would be wrong.
   await signUp("century2@example.test", "another");
   await openCentury();
-  await click([...ce().querySelectorAll(".ce-mode")][1]);
+  await click([...variantTiles()][1]);
   await flush();
   // Fill the two back slots and the Flex, so most backs have nowhere left.
-  let filledBacks = 0;
-  while (filledBacks < 3) {
-    const rows = [...ce().querySelectorAll(".ce-man")].filter((b) => !b.disabled);
-    if (!rows.length) break;
-    await click(rows[rows.length - 1]);
-    await flush();
-    const chooser = ce().querySelector(".ce-slots");
-    if (chooser) { await click(chooser.querySelector("button")); await flush(); }
-    filledBacks++;
+  for (let n = 0; n < 3; n++) {
+    const cards = openCards();
+    if (!cards.length) break;
+    await lockIn(cards[cards.length - 1]);
   }
-  const teamName = ce().querySelector(".ce-team").textContent;
-  const code = Object.keys(CENTURY_BOARDS).find((t) => centuryTeamName(t) === teamName);
-  const roster = {};
-  ce().querySelectorAll(".ce-chip").forEach((li, i) => {
-    const name = li.querySelector(".ce-cn").textContent;
-    if (name !== "—") roster[CENTURY_SLOTS[i]] = { name };
-  });
+  const code = teamCode();
+  const roster = rosterOnScreen();
   let checked = 0;
-  for (const row of ce().querySelectorAll(".ce-man")) {
-    const name = row.querySelector(".ce-name").textContent;
+  for (const card of ce().querySelectorAll(".card")) {
+    const name = card.querySelector(".nm").textContent;
     const p = CENTURY_BOARDS[code].find((q) => q.name === name);
     const legal = CENTURY_SLOTS.some((s) => !centuryBlock({ ...p }, s, rosterWith(roster, p)));
-    assert(row.disabled === !legal,
-      `${name} (${p.pos}): the board says ${row.disabled ? "no room" : "pickable"}, the rule says ${legal ? "pickable" : "no room"}`);
+    const off = card.classList.contains("off");
+    assert(off === !legal,
+      `${name} (${p.pos}): the board says ${off ? "no room" : "pickable"}, the rule says ${legal ? "pickable" : "no room"}`);
+    assert(card.querySelector(".hit").disabled === off, `${name}: the card and its own button agree`);
     checked++;
   }
   assert(checked > 5, `enough of the board was checked: ${checked}`);
+
+  // THE SECOND DOOR. A roster tile is the other way a pick is made, and the draft screen's equivalent enforced
+  // nothing at all for three releases. Select somebody, and every tile must agree with centuryBlock.
+  const pick = openCards()[0];
+  await click(pick.querySelector(".hit"));
+  await flush();
+  const who = CENTURY_BOARDS[code].find((q) => q.name === pick.querySelector(".nm").textContent);
+  let tiles = 0;
+  slotTiles().forEach((tile, i) => {
+    const slot = CENTURY_SLOTS[i];
+    const allowed = !centuryBlock(who, slot, rosterWith(roster, who));
+    assert(tile.disabled === !allowed,
+      `${who.name} -> ${slot}: the tile says ${tile.disabled ? "no" : "yes"}, the rule says ${allowed ? "yes" : "no"}`);
+    tiles++;
+  });
+  assert(tiles === CENTURY_SLOTS.length, `all seven tiles were checked: ${tiles}`);
 });
 // The roster centuryBlock is asked about, with the names the chips showed - the pos is not on a chip, so a filled
 // slot is what matters and a name is enough for the duplicate rule.
@@ -404,7 +424,7 @@ await runTest("12. a second daily is reported as already recorded, not shown as 
   await dropWip();
   await signUp("century3@example.test", "twice");
   await openCentury();
-  await click([...ce().querySelectorAll(".ce-mode")][0]);
+  await click([...variantTiles()][0]);
   await flush();
   await playOut();
   assert(ce().dataset.view === "done", "the first daily finishes");

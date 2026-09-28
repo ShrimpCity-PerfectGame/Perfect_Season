@@ -251,8 +251,14 @@ parts that are unlike everything else:
   `use_account_username`; `claim_minigame` reads its table and both `mod_act` and `claim_username` rewrite its
   name snapshots. All of those bodies are plpgsql, so the wrong order fails nothing until a guest trades up -
   which is the worst shape a runbook can be in, and why `tests/test-migrations.mjs` holds the order.
-- **A rule belongs in one function both doors ask.** `centuryBlock` is what the board's `disabled` state AND its
-  click handler call, because the GM cap's history is that a screen can look right and enforce nothing.
+- **The screens ARE the draft's** (v2.9.1): the same `.reel`, `.roster`/`.slot`, `.sec`/`.card` and Lock in
+  controls, the same `.mode` tiles on its menu, the same `.result-hero` at the end - with the stat cells left off,
+  which is precisely what Genius mode does to that markup. The root takes the dark scope while a run is in
+  progress (`onStage` reports the stage up), because scoping only the container puts dark text on a cream page.
+  Reusing those classes is also why Century carries no touch-target or reduced-motion rules of its own.
+- **A rule belongs in one function both doors ask.** `centuryBlock` is what the board's `disabled` state, the
+  Lock in button AND the roster tile call, because the GM cap's history is that a screen can look right and
+  enforce nothing.
 - **Not built:** no share card, nothing on the profile (`player_stats` does not count Century runs), no badges.
   CENTURY.md 9 says so rather than leaving them half-done.
 
