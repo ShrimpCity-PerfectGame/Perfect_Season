@@ -32,6 +32,15 @@ export function useWearScope() {
 export const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia
   && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+// Daily 1 is the day Gridspin launched, and the number counts up a day at a time, like Wordle's. Shared,
+// because every mode with a daily shares a card that names its number - perfect-season.jsx re-exports both so
+// tests/test-share.mjs keeps finding them where it always has.
+export const GRIDSPIN_DAY_ONE = "2026-09-14";
+export function dailyNumber(date) {
+  const utc = (key) => { const [y, m, d] = key.split("-").map(Number); return Date.UTC(y, m - 1, d); };
+  return Math.round((utc(date) - utc(GRIDSPIN_DAY_ONE)) / 86400000) + 1;
+}
+
 export const SLOT_LABEL = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX1: "Flex", FLEX2: "Flex" };
 export const FORMAT_LABEL = { fantasy: "Fantasy", standard: "Championship" };
 export const LADDER_LABEL = { daily: "Daily", unlimited: "Unlimited", genius: "Genius", gm: "GM" };

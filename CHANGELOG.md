@@ -10,6 +10,64 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.11.0] — 2026-09-28
+
+Century can be shared, and the seven teams you were dealt can be handed to somebody else. Plus the polish pass
+that went with it. Client only — no migration, no Edge Function change.
+
+### Added
+
+- **A share card for Century**, in the house style and under the house rule: it names **no player and no team**.
+  That rule matters more here than anywhere — the daily's seven teams are the same for everyone that day, so a
+  card hinting at one would spoil it for every reader. Everything on the card is derived from the score, which
+  the card states in words anyway, so the squares add nothing a reader could not already see.
+
+  ```
+  Gridspin Century 15 · 83/100
+  🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜
+  Best possible from my seven teams: 102
+  https://gridspin.app
+  ```
+
+  `tests/test-share.mjs` holds the card against the **real pool** — not one of the 435 players and not one of
+  the 32 teams may appear in it.
+- **An Unlimited card carries a playable link.** Century's seed *is* a code, so `/c/<seed>?mode=century&score=N`
+  deals a friend the same seven teams in the same order, and the Modes challenge card offers it as "Play these
+  teams". It reuses the `/c/:code` route `vercel.json` already serves, so there is no new address.
+  - Taking one **costs no season draft**: no DNF, no format change, because none of that is involved. The card
+    says so by not warning about it.
+  - **The daily never gets a link.** Its seed is `century-<date>`, and a link carrying that hands over the day's
+    seven teams — the whole reason `centuryReservedSeed` exists. The daily card gets the site link and nothing
+    else, and a test asserts the seed appears nowhere in it.
+- **`tests/test-a11y.mjs` refuses a dangling ARIA reference on every screen** — `aria-controls`,
+  `aria-labelledby`, `aria-describedby` and `aria-activedescendant` must all name an id that exists. axe does not
+  reliably report these and the failure is silent by nature. Century's board tabs were the only one in the app.
+
+### Fixed
+
+- **Today's Century was unreachable once you had played it.** The Mini games tile said "See today's result" and
+  the screen answered with a disabled tile saying "Played" — so the run you had just finished could not be
+  looked at again. The tile is live now and reopens that run from the stored roster; looking records nothing.
+- **"Sign in to play" was written on a button that refused the tap.** Both Century tiles were disabled for a
+  signed-out visitor, and the daily for a guest — a control that tells you what to do and then does nothing
+  reads as broken, which is the note CLAUDE.md already keeps about the Duel tile. They stay live and take you to
+  the Account tab with a sentence saying why.
+- **A dangling `aria-controls` on Century's board tabs.** Only the open panel was rendered, so the closed tab
+  pointed at an id that was not in the document. Both render now, the closed one `hidden`.
+- A challenge link with an empty `score=` claimed "They got 0" — `Number("")` is 0, which is finite and in
+  range. It wants digits now.
+
+### Notes
+
+- `GRIDSPIN_DAY_ONE` and `dailyNumber` move to `ui-common.jsx` so a screen file can number its own daily without
+  importing the main component back; `perfect-season.jsx` re-exports both, where everything has always looked.
+- Two contrast items an earlier sweep had deferred were examined and **left as they are**, with the reasoning
+  written at both rules so they are not re-raised: `.fifty` (2.11:1) is the "50" painted on turf inside an
+  `aria-hidden` field graphic — incidental text in a picture, which WCAG 1.4.3 exempts, and raising it makes it
+  compete with the ball; `.vs-tk.spent` (3.55:1) is an aria-hidden icon with a visually-hidden text label and a
+  line-through, so it answers to the 3:1 non-text rule rather than 4.5:1.
+- Century was swept at 320, 375, 430, 768 and 667×375: no overflow, no clipped text, no tap target under 44px.
+
 ## [2.10.0] — 2026-09-28
 
 Modes has a shape. Client only — no migration, no Edge Function change.

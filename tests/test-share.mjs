@@ -3,9 +3,13 @@
 // the exact boards (/c/CODE?beat=W-L), and opening one offers those boards on the Modes screen.
 import {
   setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto,
-  makeMockAuth, clickMode, loadAppModule,
+  makeMockAuth, clickMode, loadAppModule, loadModule,
 } from "./helpers.mjs";
 import { OPPS, TEAMS } from "../game-logic.mjs";
+import { readFileSync } from "node:fs";
+import { initCenturyData, CENTURY_TEAMS, CENTURY_BOARDS, centuryPlan } from "../century-logic.mjs";
+
+initCenturyData(JSON.parse(readFileSync(new URL("../data/season-2025.json", import.meta.url), "utf8")));
 
 setupDom();
 window.storage = makeStorage();
@@ -210,6 +214,81 @@ await runTest("the card's warning follows a draft started after the link opened,
   await flush(3);
   const warn = container.querySelector(".challenge .warn");
   assert(warn?.textContent.includes("replaces it"), "a guest should be told the dealt draft will be replaced, got: " + warn?.textContent);
+});
+
+// ---------- Century's card (v2.11.0) ----------
+// Same two promises the season card makes: it names nobody, and its link is playable. The first matters more
+// here than anywhere - the daily's seven teams are the same for everyone that day, so a card that hinted at
+// one of them would spoil it for every reader.
+const century = await loadModule("century.jsx");
+
+await runTest("Century's card names nobody, and draws the score it states", async () => {
+  const card = century.centuryShareText({
+    score: 83, hit: false, ceiling: 102, variant: "daily", day: "2026-09-28", siteUrl: "https://gridspin.test",
+  });
+  const lines = card.split("\n");
+  assert(/^Gridspin Century \d+ \u00b7 83\/100$/.test(lines[0]), `the title states the score: ${lines[0]}`);
+  // Ten squares, each worth a tenth of the goal. 83 of 100 fills eight.
+  assert(lines[1] === "\u{1F7E9}".repeat(8) + "\u2B1C".repeat(2), `eight of ten squares: ${lines[1]}`);
+  assert(/Best possible from my seven teams: 102/.test(card), "and what the draw was worth at best");
+  assert(card.endsWith("https://gridspin.test"), `the link goes last: ${card}`);
+  // The spoiler rule, checked against the real pool rather than against a fixture: not one player and not one
+  // team may appear anywhere in the card.
+  const names = new Set();
+  for (const t of CENTURY_TEAMS) {
+    names.add(TEAMS[t][0]);
+    names.add(TEAMS[t][1]);
+    for (const pl of CENTURY_BOARDS[t]) names.add(pl.name);
+  }
+  const leaked = [...names].filter((n) => n.length > 3 && card.includes(n));
+  assert(leaked.length === 0, `the card names nobody: leaked ${JSON.stringify(leaked)}`);
+});
+
+await runTest("a Century card that reached the goal says so, and fills every square", async () => {
+  const card = century.centuryShareText({
+    score: 104, hit: true, ceiling: 118, variant: "unlimited", seed: "9ZN52O8P", siteUrl: "https://gridspin.test",
+  });
+  assert(/\u{1F4AF} 104\/100/u.test(card), `it marks the century: ${card.split("\n")[0]}`);
+  assert(card.split("\n")[1] === "\u{1F7E9}".repeat(10), "and every square is filled");
+  // A score past the goal must not draw an eleventh square.
+  const over = century.centuryShareText({ score: 133, hit: true, ceiling: 133, variant: "unlimited", seed: "ABCD1234", siteUrl: "" });
+  assert(over.split("\n")[1].length === "\u{1F7E9}".repeat(10).length, "nor does a perfect one");
+});
+
+await runTest("an Unlimited Century card carries a link that deals the same seven teams", async () => {
+  const card = century.centuryShareText({
+    score: 83, hit: false, ceiling: 102, variant: "unlimited", seed: "9ZN52O8P", siteUrl: "https://gridspin.test",
+  });
+  const link = card.split("\n").pop();
+  assert(link.includes("https://gridspin.test/c/9ZN52O8P"), `the code is the seed: ${link}`);
+  const parsed = app.parseChallengeLink("/c/9ZN52O8P", link.slice(link.indexOf("?")));
+  assert(parsed && parsed.century, `and it parses back as Century: ${JSON.stringify(parsed)}`);
+  assert(parsed.code === "9ZN52O8P", `with the seed intact: ${parsed.code}`);
+  assert(parsed.score === 83, `and the score as a headline: ${parsed.score}`);
+  assert(!parsed.gm && !parsed.genius, "and never as a season variant");
+  // The teams a taker is dealt are the teams the sharer had - that is the whole promise of the link.
+  assert(centuryPlan(parsed.code).join(",") === centuryPlan("9ZN52O8P").join(","), "the same seven teams");
+});
+
+await runTest("the daily's Century card never carries its seed", async () => {
+  // Its seed is `century-<date>`, and a link holding that would hand over the day's seven teams - which is the
+  // whole reason centuryReservedSeed exists. The daily card gets the plain site link and nothing else.
+  const card = century.centuryShareText({
+    score: 91, hit: false, ceiling: 108, variant: "daily", day: "2026-09-28", seed: "century-2026-09-28",
+    siteUrl: "https://gridspin.test",
+  });
+  assert(!card.includes("/c/"), `no challenge link: ${card}`);
+  assert(!card.includes("century-2026-09-28"), `and the seed is not in it anywhere: ${card}`);
+  assert(card.endsWith("https://gridspin.test"), "just the site");
+});
+
+await runTest("a Century link with a nonsense score shows no score at all", async () => {
+  for (const bad of ["999", "-4", "abc", ""]) {
+    const parsed = app.parseChallengeLink("/c/ABCD1234", `?mode=century&score=${bad}`);
+    assert(parsed && parsed.century, `mode=century still parses with score=${JSON.stringify(bad)}`);
+    assert(parsed.score === null, `but ${JSON.stringify(bad)} is not shown as one: ${parsed.score}`);
+  }
+  assert(app.parseChallengeLink("/c/ABCD1234", "?mode=century&score=104").score === 104, "a real one is kept");
 });
 
 console.log("test-share.mjs done");

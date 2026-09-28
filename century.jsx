@@ -16,7 +16,7 @@ import {
   centuryFits, centurySlotPos, centuryPlan, centuryRespinTeam, centuryScore, centuryHit,
   centuryTeamName, centuryReservedSeed,
 } from "./century-logic.mjs";
-import { teamVars, POS_NAME, Confetti, reducedMotion } from "./ui-common.jsx";
+import { teamVars, POS_NAME, Confetti, reducedMotion, dailyNumber } from "./ui-common.jsx";
 import { submitCentury, fetchCenturyTop, fetchCenturyBest, fetchMyCentury, sget, sset, clearDraft } from "./storage.js";
 
 // What a slot is called on screen. The numbers exist so a roster can be keyed by slot (CENTURY_SLOTS' own
@@ -46,6 +46,48 @@ const newCode = () => {
   return "AAAAAAAA";
 };
 
+// ---------- Sharing ----------
+// How many squares the bar is drawn with. Ten, so each one is ten touchdowns and the row reads as a percentage
+// of the goal without anybody counting.
+const SHARE_SQUARES = 10;
+// sendShare answers in four words; only three of them are worth saying. A closed share sheet says NOTHING -
+// closing it is a choice, not a failure, and nothing was sent.
+export const SHARE_SAID = { shared: "", cancelled: "", copied: "Copied", manual: "Couldn't share - copy it by hand" };
+
+// A Century link somebody can actually play: the seed IS the code, so a friend gets the same seven teams in the
+// same order. It rides on /c/CODE, which vercel.json already serves, with mode=century telling the app to open
+// Century rather than deal a season from it. `score` is the sharer's own claim and is only ever a headline -
+// nothing scores from it, exactly as the season link's `beat` is.
+//
+// The DAILY never gets one. Its seed is `century-<date>`, and a link carrying that would hand over the day's
+// seven teams - which is the whole reason centuryReservedSeed exists.
+export function centuryChallengeLink(base, seed, score) {
+  const q = new URLSearchParams({ mode: "century", score: String(score) });
+  return `${base}/c/${seed}?${q}`;
+}
+
+// The Wordle-style card. It names no player and no team, for the reason shareText names none: the daily's seven
+// teams are the same for everyone that day, so a card that hinted at them would spoil it. Everything here is
+// derived from the score, which the card states in words anyway - the squares add nothing a reader could not
+// already see, which is what makes them safe.
+export function centuryShareText({ score, hit, ceiling, goal = CENTURY_GOAL, variant, day, seed, siteUrl }) {
+  const filled = hit ? SHARE_SQUARES : Math.max(0, Math.min(SHARE_SQUARES, Math.floor((score / goal) * SHARE_SQUARES)));
+  const bar = "\u{1F7E9}".repeat(filled) + "\u2B1C".repeat(SHARE_SQUARES - filled);
+  const n = variant === "daily" && day ? dailyNumber(day) : null;
+  const title = variant === "daily"
+    ? `Gridspin Century ${n >= 1 ? n : day}`
+    : "Gridspin Century";
+  const lines = [`${title} \u00b7 ${hit ? "\u{1F4AF} " : ""}${score}/${goal}`, bar];
+  if (ceiling) lines.push(`Best possible from my seven teams: ${ceiling}`);
+  // The link goes last, where chat apps turn it into a preview. A bare local build has no address to give.
+  if (variant !== "daily" && seed) {
+    lines.push(siteUrl ? `Same seven teams: ${centuryChallengeLink(siteUrl, seed, score)}` : `Same seven teams: code ${seed}`);
+  } else if (siteUrl) {
+    lines.push(siteUrl);
+  }
+  return lines.join("\n");
+}
+
 // ---------- The one place a pick is judged ----------
 // Returns null if the pick is legal, or a sentence saying why not. Both the board's disabled state and the click
 // handler call it, so a third door added later gets the rules for free.
@@ -64,7 +106,8 @@ export function centuryBlock(player, slot, roster) {
 
 // ---------- The screen ----------
 export function CenturyScreen({
-  userId, username, isGuest, onBack, onClaimCoins, onDailySaved, onStage,
+  userId, username, isGuest, onBack, onClaimCoins, onDailySaved, onStage, onNeedsAccount,
+  onShare, siteUrl, challenge, onChallengeTaken,
 }) {
   // stage: "menu" a variant to choose | "play" seven slots to fill | "done" the result
   const [stage, setStage] = useState("menu");
@@ -83,6 +126,7 @@ export function CenturyScreen({
   const [board, setBoard] = useState({ day: [], best: [], loaded: false });
   const [dailyDone, setDailyDone] = useState(null);
   const [tab, setTab] = useState("day");
+  const [shared, setShared] = useState(null); // what the share sheet did, in sendShare's own words
   const day = utcDay();
   // Nothing from a previous account may be shown: every ACCOUNT-scoped answer is checked against the request that
   // is current now, the way the main component's accountReq does it.
@@ -120,6 +164,16 @@ export function CenturyScreen({
     })();
     return () => { alive = false; };
   }, [day, saveWip]);
+
+  // A link somebody sent: its code IS the seed, so the seven teams come up in the order they came up for
+  // them. It replaces whatever was in progress, the way taking a season challenge abandons a draft - a run
+  // here is seven picks, not a record. Cleared as it is taken so it cannot re-deal on the next render.
+  useEffect(() => {
+    if (!challenge || !challenge.seed || !userId) return;
+    start("unlimited", challenge.seed);
+    if (onChallengeTaken) onChallengeTaken();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [challenge, userId]);
 
   // Has this account already played today's daily? Asked before anything is dealt, so the tile can say so rather
   // than the player finding out after seven picks.
@@ -201,7 +255,7 @@ export function CenturyScreen({
   }, [team, stage]);
 
   // ---------- Starting and playing ----------
-  function start(variant) {
+  function start(variant, seed) {
     setError("");
     setResult(null);
     setCoins(0);
@@ -209,7 +263,7 @@ export function CenturyScreen({
     setShowDone({});
     const next = variant === "daily"
       ? { variant: "daily", day, seed: `century-${day}`, picks: [] }
-      : { variant: "unlimited", day: null, seed: newCode(), picks: [] };
+      : { variant: "unlimited", day: null, seed: seed || newCode(), picks: [] };
     setRun(next);
     saveWip(next);
     setStage("play");
@@ -234,6 +288,18 @@ export function CenturyScreen({
     else saveWip(next);
   }
 
+  // Today's daily, played and looked at again. It was a dead end: the tile said "Played" and was disabled,
+  // while the Mini games tile promised "See today's result" - so the run you had just made was unreachable.
+  // fetchMyCentury already brings the roster back, so there was nothing to fetch, only somewhere to show it.
+  function showDailyResult() {
+    if (!dailyDone) return;
+    setError("");
+    setCoins(0);
+    setShared(null);
+    setResult({ ...dailyDone, goal: CENTURY_GOAL, replay: true, day });
+    setStage("done");
+  }
+
   function respin() {
     if (!run || respinSpent || saving) return;
     setError("");
@@ -254,7 +320,9 @@ export function CenturyScreen({
       if (p) local[finished.picks[i].slot] = p;
     }
     const score = centuryScore(local);
-    setResult({ local: true, score, hit: centuryHit(score), roster: rosterRows(local), goal: CENTURY_GOAL });
+    setShared(null);
+    setResult({ local: true, score, hit: centuryHit(score), roster: rosterRows(local), goal: CENTURY_GOAL,
+      day: finished.day, seed: finished.seed });
     setStage("done");
     saveWip(null);
     const mine = acct.current;
@@ -425,7 +493,7 @@ export function CenturyScreen({
     return (
       <div className="ce" data-view="done">
         <div className="result-hero ce-hero">
-          <p className="ce-eyebrow">{result.hit ? "Century" : "Short"}</p>
+          <p className="ce-eyebrow">{result.replay ? "Today's Century" : result.hit ? "Century" : "Short"}</p>
           <p className="rec ce-score">{result.score}</p>
           <p className="outcome">of {result.goal || CENTURY_GOAL} touchdowns</p>
           <p className="rating">
@@ -454,6 +522,16 @@ export function CenturyScreen({
           </tbody>
         </table>
         <div className="ce-row">
+          {onShare && (
+            <button className="btn" onClick={async () => {
+              const how = await onShare(centuryShareText({
+                score: result.score, hit: result.hit, ceiling: result.ceiling, goal: result.goal,
+                variant: result.day ? "daily" : "unlimited", day: result.day, seed: result.seed, siteUrl,
+              }));
+              setShared(how);
+            }}>Share</button>
+          )}
+          {shared && <span className="note ce-shared" role="status">{SHARE_SAID[shared] || ""}</span>}
           <button className="btn solid" onClick={() => start("unlimited")}>Run it back</button>
           <button className="btn" onClick={() => { setStage("menu"); loadBoards(); }}>Boards</button>
           <button className="btn" onClick={onBack}>Done</button>
@@ -474,7 +552,13 @@ export function CenturyScreen({
           buttons: the daily takes the featured lime block every daily in the game takes, and Unlimited the navy
           one its namesake has. */}
       <div className="modes">
-        <button className="mode daily" onClick={() => start("daily")} disabled={!userId || isGuest || !!dailyDone}>
+        {/* Never a disabled button that says "Sign in to play". A control that tells you what to do and then
+            refuses the tap reads as broken - the same note CLAUDE.md keeps about the Duel tile. It stays live
+            and takes you to the Account tab instead. */}
+        <button className="mode daily"
+          onClick={() => (dailyDone ? showDailyResult()
+            : !userId || isGuest ? onNeedsAccount && onNeedsAccount(isGuest ? "guest" : "signedout")
+            : start("daily"))}>
           <div className="mt">
             <span className="icon" aria-hidden="true">📅</span>
             <span className="mn">Daily Century</span>
@@ -488,11 +572,12 @@ export function CenturyScreen({
               : "The same seven teams for everyone today. One run, no resets."}
           </p>
           <span className="go">
-            {dailyDone ? "Played" : isGuest || !userId ? "Sign in to play" : "Let's go"}
+            {dailyDone ? "See how it went" : isGuest || !userId ? "Sign in to play" : "Let's go"}
           </span>
         </button>
 
-        <button className="mode m-unlimited" onClick={() => start("unlimited")} disabled={!userId}>
+        <button className="mode m-unlimited"
+          onClick={() => (userId ? start("unlimited") : onNeedsAccount && onNeedsAccount("signedout"))}>
           <div className="mt">
             <span className="icon" aria-hidden="true">♾️</span>
             <span className="mn">Unlimited</span>
@@ -509,9 +594,15 @@ export function CenturyScreen({
             className={`tab${tab === id ? " on" : ""}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
-      <div className="ce-panel" id={`ce-panel-${tab}`} role="tabpanel" aria-labelledby={`ce-tab-${tab}`}>
-        <CenturyBoard rows={tab === "day" ? board.day : board.best} loaded={board.loaded} username={username} allTime={tab === "best"} />
-      </div>
+      {/* BOTH panels exist, the inactive one hidden. Rendering only the open one left the other tab's
+          aria-controls pointing at an id that was not in the document - a reference a screen reader follows
+          and finds nothing at. tests/test-a11y.mjs now refuses a dangling ARIA reference on any screen. */}
+      {[["day", board.day], ["best", board.best]].map(([id, rows]) => (
+        <div key={id} className="ce-panel" id={`ce-panel-${id}`} role="tabpanel"
+          aria-labelledby={`ce-tab-${id}`} hidden={tab !== id}>
+          <CenturyBoard rows={rows} loaded={board.loaded} username={username} allTime={id === "best"} />
+        </div>
+      ))}
       <button className="btn" onClick={onBack}>Back</button>
     </div>
   );

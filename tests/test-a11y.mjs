@@ -87,6 +87,25 @@ for (const [name, query, tab] of SCREENS) {
       await page.evaluate((label) => [...document.querySelectorAll("nav .tab")].find((b) => b.textContent.startsWith(label))?.click(), tab);
       await sleep(2200);
     }
+    // An ARIA attribute that names an id nothing has. axe does not reliably report these, and a screen reader
+    // following one simply finds nothing - so it is a silent failure in exactly the place silence is worst.
+    // Century's own board tabs shipped one: only the open tab panel was rendered, so the other tab pointed at
+    // an id that was not in the document. Checked on every screen, because it costs nothing to.
+    const dangling = await page.evaluate(() => {
+      const out = [];
+      for (const attr of ["aria-controls", "aria-labelledby", "aria-describedby", "aria-activedescendant"]) {
+        for (const el of document.querySelectorAll(`[${attr}]`)) {
+          for (const id of el.getAttribute(attr).split(/\s+/).filter(Boolean)) {
+            if (!document.getElementById(id)) {
+              out.push(`<${el.tagName.toLowerCase()} class="${(el.className || "").toString().slice(0, 30)}"> ${attr}="${id}"`);
+            }
+          }
+        }
+      }
+      return [...new Set(out)];
+    });
+    assert(dangling.length === 0, `ARIA references point at nothing: ${dangling.join(" | ")}`);
+
     await page.evaluate(AXE);
     const violations = await page.evaluate(async () => {
       const run = await window.axe.run(document, { resultTypes: ["violations"] });
