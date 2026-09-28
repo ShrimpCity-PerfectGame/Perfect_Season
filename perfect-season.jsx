@@ -4668,9 +4668,12 @@ export default function PerfectSeason() {
 
             {result && (
               <>
-                {/* The equipped win celebration, over the whole screen, on a title. The little Confetti inside
-                    .cel below stays: that one belongs to the panel and has been there since the result screen
-                    had one, and this plays over everything.
+                {/* The equipped win celebration, over the whole screen, on a title. It is the ONLY one now:
+                    the .cel panel below used to shower its own confetti on the same condition, so every title
+                    played two celebrations at once - and since the default celebration is Confetti, a player
+                    who had equipped nothing got confetti twice. The panel keeps its stamp; the celebration is
+                    the one you chose. (Build-a-player's verdict still has its own Confetti - different screen,
+                    no overlay.)
                     A title, not every finished season - roughly one run in eleven - because a celebration that
                     fires on a 12-8 is not a celebration. It is fixed, aria-hidden and pointer-events:none, so
                     it cannot take a tap or read out over the result the screen already announces. */}
@@ -4683,7 +4686,6 @@ export default function PerfectSeason() {
                 <div className="result-hero" aria-live="polite" ref={heroRef} style={{ scrollMarginTop: 12 }}>
                   {finished && (result.perfect || result.champ) && (
                     <div className={`cel ${result.perfect ? "perfect" : ""}`}>
-                      <Confetti n={result.perfect ? 34 : 22} />
                       <span className="stamp">🏆 {result.perfect ? "Perfect season" : "Champions"}</span>
                     </div>
                   )}

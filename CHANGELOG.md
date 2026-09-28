@@ -10,7 +10,7 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
-## [2.8.3] — 2026-09-27
+## [2.8.3] — 2026-09-28
 
 The rest of the sweep's confirmed findings. Client and one SQL function; no Edge Function change.
 **Re-run `migration-runs-log.sql`** before the client - it clamps `site_stats`' limit and changes nothing else.
@@ -49,6 +49,10 @@ The rest of the sweep's confirmed findings. Client and one SQL function; no Edge
   to the catalog and seeded but missing its drawing - the exact split the catalog file warns about - would have
   thrown on render, and with no error boundary anywhere that is the whole shop screen for everyone.
 - `profile.jsx`'s `EMPTY_DETAILS` was missing the three newest fields, the same omission the shop had.
+- **Every title played two celebrations at once.** The equipped win celebration and the `.cel` panel's own
+  confetti were gated on the same condition, so a championship fired both - and since the default celebration
+  **is** Confetti, a player who had equipped nothing got confetti twice. The panel keeps its 🏆 stamp and the
+  celebration is the one you chose. Build-a-player's verdict keeps its own: different screen, no overlay.
 
 ## [2.8.2] — 2026-09-27
 
