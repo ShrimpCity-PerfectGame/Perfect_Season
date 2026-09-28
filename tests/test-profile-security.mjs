@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 import { StorageClient } from "@supabase/storage-js";
 import { assert, runTest, setupDom, makeMockAuth, loadModule, renderComponent, flush } from "./helpers.mjs";
-import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql, PROFILE_MIGRATIONS } from "./pg-fixture.mjs";
+import { freshDb, addAccount, asUser, asAnon, failure, uuid, sql, PROFILE_MIGRATIONS, RENAME_MIGRATIONS } from "./pg-fixture.mjs";
 import { BLOCKED_WORDS_SEED } from "./mock-profile-data.mjs";
 import { veteranProfile } from "./fixtures/profile-fixture.mjs";
 import { AVATAR_TYPES, AVATAR_MAX_BYTES, emptyPlayerStats } from "../profile-rules.mjs";
@@ -88,7 +88,9 @@ const INVALID_USERNAMES = [
 // ---------- The database ----------
 // v1.11.0's migrations only: this file's every-function and every-table checks are about profiles and moderation.
 // tests/test-economy-security.mjs does the same for v1.12.0's wallet and shop.
-const db = await freshDb({ migrations: PROFILE_MIGRATIONS });
+// RENAME_MIGRATIONS, not PROFILE_MIGRATIONS: 4c renames somebody, and mod_act rewrites the username snapshot
+// on every board including century_runs (v2.9.0), which a three-migration database does not have.
+const db = await freshDb({ migrations: RENAME_MIGRATIONS });
 await db.exec("insert into storage.buckets (id, name) values ('other', 'other') on conflict (id) do nothing");
 // Ids with letters in them, so a folder name in the wrong case is a different folder.
 const ALICE = "a11ce000-0000-4000-8000-00000000a11c"; // the victim
@@ -625,6 +627,12 @@ const EXPECTED_FUNCTIONS = {
   // profiles is publicly selectable and neither should need anything its caller doesn't already have.
   "caller_is_guest()": [false, PG_TEMP_LAST, false, true],
   "caller_can_hold_avatars()": [false, PG_TEMP_LAST, false, true],
+  // v2.9.0, Century's two boards. Invoker and public, like the other read-only aggregates: century_runs has
+  // public select, so neither needs rights its caller does not already have. Nothing WRITES that table from a
+  // client at all - the submit-century Edge Function's service role is the only writer - so there is no third
+  // function here to grant.
+  "century_top(p_day text, p_limit integer)": [false, "public", true, true],
+  "century_best(p_limit integer)": [false, "public", true, true],
   "handle_new_user()": [true, PG_TEMP_LAST, true, true],
   "is_moderator()": [true, PG_TEMP_LAST, true, true],
   // Reads the runs log for one mode's score board. Invoker and public, like the other read-only

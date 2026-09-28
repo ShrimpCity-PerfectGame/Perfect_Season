@@ -53,6 +53,12 @@ const SCREENS = [
   ["the draft board", "?as=player", { tile: "Unlimited" }],
   ["Over/Under", "?as=player", { tile: "Over/Under" }],
   ["Build-a-player", "?as=player", { tile: "Build-a-player" }],
+  // Century (v2.9.0), both halves, for the reason the duel has two entries: the menu and the BOARD are different
+  // screens, and the board is where the mode lives - a heading order over four position sections, a roster strip
+  // that has to name its slots rather than colour them, and a board of buttons whose disabled ones have to say
+  // why. It goes on this list from its first release rather than being added after something ships broken.
+  ["Century", "?as=player", { tile: "Century" }],
+  ["the Century board", "?screen=century", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {

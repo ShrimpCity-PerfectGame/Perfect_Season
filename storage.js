@@ -379,3 +379,6 @@ export * from "./storage-shop.js";
 // ---------- 1v1 (v1.19.0) ----------
 // See VERSUS.md.
 export * from "./storage-versus.js";
+// ---------- Century (v2.9.0) ----------
+// The mode's rules are in century-logic.mjs; this is only the two boards and the submission.
+export * from "./storage-century.js";

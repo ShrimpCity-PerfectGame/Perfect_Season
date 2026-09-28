@@ -27,6 +27,9 @@
 //                                                  badge earned but not yet paid (its item says it unlocks next season)
 //   screen=versus[&waiting=1][&done=1][&boom=1][&picks=N]   a duel on the mock: mid-board, from the other side, played
 //                                                  out, or with a powerup announcement firing on load
+//   screen=century[&picks=N]                       Century mid-run: the board a run is actually played on, with N
+//                                                  slots already filled (default 3). The menu is reachable from the
+//                                                  Modes tile instead, the way a player reaches it.
 //   screen=picker[&owned=sideline,night-game][&current=trophy]   the avatar picker on its own, on Choose an avatar,
 //                                                  owning the listed packs (default: sideline)
 import { useState } from "react";
@@ -44,6 +47,8 @@ import { FREE_AVATAR_PRESETS, TEAM_CODES } from "../../profile-rules.mjs";
 import { BOARDS, SLOTS, TEAMS, fits, runLogRow } from "../../game-logic.mjs";
 import { VersusScreen } from "../../versus.jsx";
 import * as V from "../../versus-logic.mjs";
+import { CenturyScreen } from "../../century.jsx";
+import * as C from "../../century-logic.mjs";
 
 const params = new URLSearchParams(location.search);
 const who = params.get("as") || "player";
@@ -574,7 +579,60 @@ function PickerPreview() {
   );
 }
 
+// ---------- screen=century: a Century mid-run, the board the mode is actually played on ----------
+// The menu is one Modes tile away, but the BOARD is two clicks in and is where the mode lives - a position
+// heading order, a roster strip that names its slots and a board of buttons that all have to read correctly. The
+// same reason the duel board and the draft board are on this list rather than just their lobbies.
+function CenturyPreview({ userId, username, picks }) {
+  // The app shell's landmark and h1, exactly as perfect-season.jsx renders them around this screen, so axe judges
+  // the screen rather than the fixture.
+  return (
+    <div className="ps">
+      <style>{APP_CSS}</style>
+      <main id="content">
+        <div className="wrap">
+          <h1 className="vh">Century</h1>
+          <CenturyScreen userId={userId} username={username} isGuest={false}
+            onBack={() => console.log("back")} onClaimCoins={() => {}} onDailySaved={() => {}} />
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// A run part-played, written into the same per-device slot the screen resumes from - which is how a browser gets
+// to the board without clicking through it, and exercises the resume path at the same time.
+async function setUpCentury(howMany) {
+  const { data } = await mock.auth.signUp({ email: "century@harness.test", password: "harness-only", options: { data: { username: "shrimpcity" } } });
+  const seed = "HARNESS1";
+  const plan = C.centuryPlan(seed);
+  const roster = {};
+  const picks = [];
+  const names = new Set();
+  for (let i = 0; i < howMany; i++) {
+    let best = null, bestSlot = null;
+    for (const slot of C.CENTURY_SLOTS) {
+      if (roster[slot]) continue;
+      for (const p of C.CENTURY_BOARDS[plan[i]] || []) {
+        if (!C.centuryFits(p.pos, slot) || names.has(p.name)) continue;
+        if (!best || p.td > best.td) { best = p; bestSlot = slot; }
+      }
+    }
+    if (!best) break;
+    roster[bestSlot] = best;
+    names.add(best.name);
+    picks.push({ slot: bestSlot, name: best.name });
+  }
+  await window.storage.set("ps-century-wip", JSON.stringify({ variant: "unlimited", day: null, seed, picks }));
+  return { uid: data.user.id, username: "shrimpcity" };
+}
+
 (async () => {
+  if (params.get("screen") === "century") {
+    const { uid, username } = await setUpCentury(Number(params.get("picks") || 3));
+    createRoot(document.getElementById("root")).render(<CenturyPreview userId={uid} username={username} />);
+    return;
+  }
   if (params.get("screen") === "versus") {
     const { uid, username, code } = await setUpVersus();
     createRoot(document.getElementById("root")).render(<VersusPreview userId={uid} username={username} code={code} />);

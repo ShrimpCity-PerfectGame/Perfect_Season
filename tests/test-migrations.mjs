@@ -27,6 +27,12 @@ const ORDER = [
   "migration-scoring-formats.sql",
   "migration-runs-log.sql",
   "migration-profiles.sql",
+  // Century goes here and not later: it creates a trigger on century_runs using use_account_username(), which
+  // migration-profiles.sql defines, and BOTH claim_username (profiles) and mod_act (moderation) rewrite this
+  // board's name snapshots - so it has to exist before either of those can be called. Those two bodies are
+  // plpgsql and so are not validated when they are created, which is exactly why this is a runbook order
+  // rather than an error anybody would see: get it wrong and nothing fails until a guest trades up.
+  "migration-century.sql",
   "migration-moderation.sql",
   "migration-wallet.sql",
   "migration-shop.sql",

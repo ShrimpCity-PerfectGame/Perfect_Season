@@ -10,6 +10,58 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.9.0] — 2026-09-28
+
+**Century** — a new mode, with a daily and an Unlimited. Seven slots, hidden stats, and 100 combined
+touchdowns from one real season. `CENTURY.md` is the reference.
+
+**Deploy order: run `migration-century.sql`, then re-run `migration-wallet.sql`, `migration-profiles.sql` and
+`migration-moderation.sql`, then deploy the Edge Functions (`node deploy-function.mjs <env>` — there are three
+now), then the client.** Century's migration has to go before the other three: it creates a trigger using
+`use_account_username` (profiles), while `claim_minigame` (wallet) reads its table and both `mod_act`
+(moderation) and `claim_username` (profiles) rewrite its name snapshots. Those bodies are plpgsql and are not
+validated when created, so the wrong order fails nothing until a guest trades up.
+`tests/test-migrations.mjs` runs the whole list on a bare database and holds the order.
+
+### Added
+
+- **Century.** You get a QB, two RB, two WR, a TE and a Flex. Every spin deals a random team and you fill one
+  slot from it — **with no stats shown** — until all seven are full. One team re-spin. The goal is 100
+  combined passing, rushing and receiving touchdowns from the 2025 regular season, and the end screen shows
+  what you got, whether you reached it, and what the seven teams you were dealt were worth at best.
+  - **Daily**: the same seven teams for everyone that day, one go, its own board. Not for guests, for the
+    reason the season's daily is not: a guest account costs nothing to make.
+  - **Unlimited**: new teams every time, as often as you like, and it counts on the all-time board.
+  - It pays the standard 15 minigame coins a game day, like Over/Under and Build-a-player. It is in no ladder,
+    earns no badges and cannot move a season leaderboard, a best score or a streak.
+- **`data/season-2025.json`**, built by `tools/data/build-season-pool.mjs` from public nflverse data. Century
+  needs every player's actual 2025, which `data/players.json` does not hold — that file keeps a player's BEST
+  season per five-year era, so filtering it to 2025 answers "whose best 2021–25 year happened to be 2025" and
+  returns 129 of 634 players, no Mahomes, and 18 of 31 teams with a quarterback. The new file has 435 players
+  across all 32 teams, every one fielding a QB, RB, WR and TE, and the builder refuses to write one that does
+  not.
+- **`century_runs`, and the first new board that no client can write.** Over/Under and Build-a-player are
+  browser-written because a guess leaves no trace a server could replay; a Century run leaves exactly that —
+  seven (slot, player) pairs and at most one re-spin — so the new `submit-century` Edge Function recomputes
+  the seven teams from the seed, checks every pick against the board it was really dealt from, and adds up the
+  touchdowns from its own copy of the data. Nothing the client says about its score, its teams or its roster is
+  used. The daily's seed is the function's own clock, so that variant cannot be ground for a lucky board.
+- **A code that hashes to a daily's seed is refused**, the protection the main daily already has. The prize is
+  the seven TEAMS, not the row, and `hashStr` is FNV-1a/32 and invertible — `tests/test-century-edge.mjs`
+  finds an ordinary-looking eight-character code that deals a given day's board in about a second, by meeting
+  in the middle, and then asserts it is turned away.
+
+### Notes
+
+- **The balance is measured, not guessed, and the test prints it.** Over 20,000 games played by a bot that
+  always takes the leading scorer for a slot it still needs — which, with the stats hidden, is what perfect
+  knowledge of the season looks like — the median is 80, the ninetieth centile 95, and 100 is reached 5.1% of
+  the time. The absolute ceiling is 133. `tests/test-century-logic.mjs` fails if the goal stops being reachable
+  or stops being hard.
+- **Not built, deliberately:** no share card (it would have to be spoiler-free about the seven teams, which has
+  not been designed), and nothing on the profile (`player_stats` does not count Century runs). Both are in
+  CENTURY.md §9 rather than half-done.
+
 ## [2.8.3] — 2026-09-28
 
 The rest of the sweep's confirmed findings. Client and one SQL function; no Edge Function change.

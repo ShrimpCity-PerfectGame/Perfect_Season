@@ -12,6 +12,7 @@ import {
 } from "./storage.js";
 import gameData from "./data/players.json";
 import versusPool from "./data/versus-pool.json";
+import seasonPool from "./data/season-2025.json";
 import { cssVars, PALETTE, THEME } from "./theme.mjs";
 import {
   POS, WINDOWS, SLOTS, QB_WEIGHT, FLEX_POS, TEAMS, BOARDS, OPPS, PLAYOFF_OPPS, initGameData,
@@ -36,6 +37,8 @@ import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk } from "./co
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
+import { CENTURY_CSS, CenturyScreen } from "./century.jsx";
+import { initCenturyData, CENTURY_GOAL } from "./century-logic.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
@@ -43,6 +46,9 @@ import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, parseSitePath } from "
 initGameData(gameData.players, gameData.opponents);
 // 1v1's defenses and kickers (VERSUS.md 6). Only versus.jsx reads them; single player never does.
 initVersusData(versusPool);
+// Century's one-season touchdown pool (v2.9.0). Only century.jsx and the submit-century Edge Function read it,
+// and it is NOT interchangeable with data/players.json - see the header of tools/data/build-season-pool.mjs.
+initCenturyData(seasonPool);
 
 // Baked in by build.mjs's esbuild `define` (same mechanism as SUPABASE_URL - see storage.js).
 const IS_STAGING = APP_ENV === "staging";
@@ -531,7 +537,7 @@ const CSS = `
 /* Stop the browser pinning the view to the bottom while a season's tiles tick in under it. */
 html:has(.result-hero){overflow-anchor:none}
 /* Scoreboard scope: the whole play screen, plus components that are always stadium-dark. */
-.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.mode.m-versus,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
+.ps.dark,.dark,.reel,.sticky,.result-hero,.champion,.pg,.pre,.cel,.mode.m-unlimited,.mode.m-versus,.mode.m-century,.ce-spin,.ce-hero,.challenge,.pf-card,.cs-dark{${cssVars("dark")};color:var(--ink)}
 .ps.dark{background-color:var(--bg)}
 /* Leaderboard scope: true black. After the dark list so its champion block takes night tokens. */
 .ps.night,.night .champion,.cs-night{${cssVars("night")};color:var(--ink)}
@@ -1276,7 +1282,7 @@ p.gamecoins .earned{display:flex}
 // The whole stylesheet the app renders, for previewing one screen on its own (the UI harness).
 // The screens in their own files bring their own rules, each scoped to its class prefix (pf-, av-, ap-,
 // md-), after the base stylesheet so they can reuse its tokens and classes.
-export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS;
+export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS;
 
 const reducedMotion = () => typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's
@@ -1964,6 +1970,11 @@ function PlayerName({ name, mine, guest }) {
 }
 const HOWTO_KEY = "ps-howto-seen";
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
+// Century's own "today is played" hint, kept the same way Over/Under's is: a per-device key, so the Modes tile
+// can answer without a network read. It is a HINT, not the record - century_runs is, and the Century screen asks
+// it directly (fetchMyCentury) before offering the daily. The two can disagree across devices, exactly as
+// Over/Under's can, and the screen's answer is the one that decides.
+const CENTURY_DONE_KEY = (d) => `ps-century:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
 const findPlayer = (key, id, season) => (BOARDS[key] || []).find((p) => p.id === id && p.season === season);
 
@@ -2269,6 +2280,7 @@ export default function PerfectSeason() {
   const [sou, setSou] = useState(null);
   const [souIntro, setSouIntro] = useState(null); // rules screen pending a confirm - { date, roundIndex, lives, score }, the timer doesn't start until this is accepted
   const [souDone, setSouDone] = useState(null); // today's finished record, if any: { score }
+  const [centuryDone, setCenturyDone] = useState(null); // today's Century, if played on this device: { score, hit }
   const [souCoins, setSouCoins] = useState(null); // { date, credited } - the coins a finished day's claim paid
   const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
@@ -2500,12 +2512,14 @@ export default function PerfectSeason() {
   const readDay = useRef(null);
   readDay.current = async () => {
     const today = todayKey();
-    const [fanDone, stdDone, sou] = await Promise.all([
+    const [fanDone, stdDone, sou, century] = await Promise.all([
       sget(DAILY_KEY(today, "fantasy"), false), sget(DAILY_KEY(today, "standard"), false), sget(SOU_DONE_KEY(today), false),
+      sget(CENTURY_DONE_KEY(today), false),
     ]);
     dayRead.current = today;
     setDailyDone({ fantasy: fanDone, standard: stdDone });
     setSouDone(sou);
+    setCenturyDone(century);
   };
 
   // Checked whenever the player comes back to the app, and on the screens those answers are shown on. A
@@ -2631,6 +2645,7 @@ export default function PerfectSeason() {
     historyScreen.current = s;
     if (s.ps === "profile") { setProfileOf(s.name); setView("profile"); }
     else if (s.view === "versus") { setVersusCode(s.code || null); openTab("versus"); }
+    else if (s.view === "century") openTab("century");
     else if (s.view === "statsou") openSou();
     else if (s.view === "buildplayer") openBuildPicker();
     else openTab(s.view);
@@ -2733,6 +2748,24 @@ export default function PerfectSeason() {
   // new one - so the back() already queued walked straight into the entry it had just stamped. Every duel ends
   // on a screen whose Back is this function. The popstate handler sets the code and the view from whatever
   // entry we land on, so there is nothing to clear on the way out.
+  // Century (v2.9.0). Its own screen owns every bit of its state, including the run in progress, so this is
+  // only the door. A signed-out visitor is let in - the screen shows the boards and says which variant needs an
+  // account - which is why there is no userId gate here.
+  function openCentury() {
+    openTab("century");
+  }
+  function leaveCentury() {
+    openTab("home");
+  }
+  // A daily Century that the server accepted. The key is written for the day the RUN was for, not for today, so a
+  // run handed in either side of UTC midnight marks the day it belonged to - the same mistake the minigame coin
+  // keys were once keyed wrong by (SHOP.md).
+  async function onCenturyDaily({ day, score, hit }) {
+    if (!day) return;
+    await sset(CENTURY_DONE_KEY(day), { score, hit }, false);
+    if (day === todayKey()) setCenturyDone({ score, hit });
+  }
+
   function leaveVersus() {
     const here = window.history.state;
     const onVersusEntry = here?.ps === "view" && here.view === "versus";
@@ -4391,6 +4424,15 @@ export default function PerfectSeason() {
                 <span className="go">{souDone ? "See today's result" : "Play"}</span>
               </button>
 
+              <button className="mode m-century" onClick={openCentury}>
+                <div className="mt">
+                  <span className="icon" aria-hidden="true">💯</span>
+                  <span className="mn">Century</span>{centuryDone && <span className="pill">Done · {centuryDone.score}</span>}
+                </div>
+                <p>Seven slots, a random team each spin and no stats until the end. Get to {CENTURY_GOAL} touchdowns from one real season.</p>
+                <span className="go">{centuryDone ? "See today's result" : "Play"}</span>
+              </button>
+
               <button className="mode m-bap" onClick={openBuildPicker}>
                 <div className="mt"><span className="icon" aria-hidden="true">🧩</span><span className="mn">Build-a-player</span></div>
                 <p>Roll a team, roll their active player, and take one attribute from each until your build is complete - then see if he'd have won a real team the chip.</p>
@@ -4895,6 +4937,21 @@ export default function PerfectSeason() {
               onShare={sendShare} onPlayers={notePlayers} siteUrl={APP_SITE_URL}
             />
             )}
+          </>
+        )}
+
+        {/* ---------------- CENTURY (v2.9.0) ---------------- */}
+        {view === "century" && (
+          <>
+            {/* Names itself for a screen reader, as every screen does; the headings inside are the board's and
+                the result's. */}
+            <h1 className="vh">Century</h1>
+            <CenturyScreen
+              key={userId || "anon"} userId={userId} username={user} isGuest={!!stats?.guest}
+              onBack={leaveCentury}
+              onClaimCoins={(date, onCredited) => claimMinigame("century", date, onCredited)}
+              onDailySaved={onCenturyDaily}
+            />
           </>
         )}
 

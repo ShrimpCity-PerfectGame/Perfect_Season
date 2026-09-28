@@ -14,7 +14,7 @@
 // outside these files, or that CLAUDE.md accepts, are printed at the end with what they're worth, not asserted.
 import { readFileSync } from "node:fs";
 import { assert, runTest, makeMockAuth, setupDom, loadModule, renderComponent } from "./helpers.mjs";
-import { freshDb, addAccount, asUser, asAnon, uuid, sql, PROFILE_MIGRATIONS } from "./pg-fixture.mjs";
+import { freshDb, addAccount, asUser, asAnon, uuid, sql, RENAME_MIGRATIONS } from "./pg-fixture.mjs";
 import * as GL from "../game-logic.mjs";
 import { COIN_RULES, coinsForRun, seasonReward } from "../rewards.mjs";
 import { BADGES, BADGE_BY_ID } from "../badges.mjs";
@@ -87,9 +87,12 @@ function settle(seed, trace, { format = "fantasy", gm = false, kind = "free" } =
 // The database
 // ======================================================================================================================
 
-// v1.12.0's migrations exactly: this file's every-function and every-table checks are about the wallet and the shop, so
-// a later release's migration gets checks of its own rather than an entry here.
-const WALLET_SHOP_MIGRATIONS = [...PROFILE_MIGRATIONS, "migration-wallet.sql", "migration-shop.sql"];
+// v1.12.0's migrations on top of everything a rename needs: this file's every-function and every-table checks are
+// about the wallet and the shop, so a later release's migration gets checks of its own rather than an entry here.
+// RENAME_MIGRATIONS rather than PROFILE_MIGRATIONS because 7a renames somebody, and mod_act rewrites the username
+// snapshot on every board - including century_runs (v2.9.0), which a three-migration database does not have. The
+// BASELINE below gets the same list, so every diff stays exactly "what the wallet and the shop added".
+const WALLET_SHOP_MIGRATIONS = [...RENAME_MIGRATIONS, "migration-wallet.sql", "migration-shop.sql"];
 const db = await freshDb({ migrations: WALLET_SHOP_MIGRATIONS });
 const owner = async (statement, params) => (await db.query(statement, params)).rows;
 // One statement as the service role (SERVICE), a signed-in player (their id) or a signed-out visitor (null):
@@ -153,8 +156,9 @@ const changedNothing = (r) => (r.error ? /permission denied|row-level security|c
 
 // ---------- 1. What the migrations declare ----------
 
-// The same database without v1.12.0, to tell what the wallet and shop migrations added.
-const v111 = await freshDb({ migrations: PROFILE_MIGRATIONS });
+// The same database without v1.12.0, to tell what the wallet and shop migrations added. It is only ever diffed
+// against, never played on, so it carries whatever WALLET_SHOP_MIGRATIONS carries minus those two files.
+const baseline = await freshDb({ migrations: RENAME_MIGRATIONS });
 const FUNCTION_ROWS = `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig, p.prosecdef as definer, p.provolatile as volatility,
     (select substr(c, 13) from unnest(p.proconfig) c where c like 'search_path=%') as search_path,
     has_function_privilege('anon', p.oid, 'execute') as anon, has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
@@ -194,7 +198,7 @@ const ALICE = await account("alice"); // the victim
 
 await runTest("1a. every function the wallet and shop migrations add has a deliberate entry here (definer or invoker, volatility, search_path, who may execute it), and they redefine nothing from before", async () => {
   const rows = await owner(FUNCTION_ROWS);
-  const before = (await v111.query(FUNCTION_ROWS)).rows;
+  const before = (await baseline.query(FUNCTION_ROWS)).rows;
   const now = new Map(rows.map((r) => [r.sig, r]));
   const then = new Map(before.map((r) => [r.sig, r]));
   const added = rows.filter((r) => !then.has(r.sig)).map((r) => r.sig).sort();
@@ -223,7 +227,7 @@ await runTest("1a. every function the wallet and shop migrations add has a delib
   }
 
   const TRIGGERS = "select c.relname || '.' || t.tgname as name, pg_get_triggerdef(t.oid) as def from pg_trigger t join pg_class c on c.oid = t.tgrelid where not t.tgisinternal order by 1";
-  const oldTriggers = new Set((await v111.query(TRIGGERS)).rows.map((t) => t.name));
+  const oldTriggers = new Set((await baseline.query(TRIGGERS)).rows.map((t) => t.name));
   const newTriggers = (await owner(TRIGGERS)).filter((t) => !oldTriggers.has(t.name));
   // Two now: the welcome coins on a new profile, and v2.6.0's, which keeps profiles.supporter in step with
   // the supporters table. Named one by one rather than counted, so a third cannot arrive quietly.
@@ -250,7 +254,7 @@ await runTest("1b. every table, column, sequence and view they add: the coin tab
       (select coalesce(jsonb_agg(m order by m), '[]'::jsonb) from unnest(${MODES}) m where has_table_privilege('authenticated', c.oid, m)) as authenticated
     from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm', 'f') order by 1`;
   const rows = await owner(TABLE_ROWS);
-  const oldNames = new Set((await v111.query(TABLE_ROWS)).rows.map((t) => t.name));
+  const oldNames = new Set((await baseline.query(TABLE_ROWS)).rows.map((t) => t.name));
   const added = rows.filter((t) => !oldNames.has(t.name));
   const CLOSED = { kind: "r", rls: true, policies: [], anon: [], authenticated: [] };
   // supporters is CLOSED like the wallet tables: the row IS the entitlement, so no client may read or write
@@ -264,7 +268,7 @@ await runTest("1b. every table, column, sequence and view they add: the coin tab
   assert(items.rls && same(items.policies, ["SELECT to public"]) && items.anon.includes("SELECT") && items.authenticated.includes("SELECT"), `shop_items: RLS on and a select policy only: ${show(items)}`);
 
   const COLUMNS = "select table_name || '.' || column_name as c from information_schema.columns where table_schema = 'public' order by 1";
-  const oldColumns = new Set((await v111.query(COLUMNS)).rows.map((r) => r.c));
+  const oldColumns = new Set((await baseline.query(COLUMNS)).rows.map((r) => r.c));
   const newColumns = (await owner(COLUMNS)).map((r) => r.c).filter((c) => !oldColumns.has(c) && oldNames.has(c.split(".")[0]));
   // What a player WEARS, plus - since v2.6.0 - whether they support the game, which is public the way the
   // guest chip is and has to be readable before anything decides whether to show an ad. Still nothing about
@@ -308,7 +312,7 @@ await runTest("1b. every table, column, sequence and view they add: the coin tab
   assert(sequences.every((s) => !s.anon && !s.authenticated), `no client role holds a sequence in public, the ledger's included: ${show(sequences)}`);
 });
 
-await v111.close();
+await baseline.close();
 
 // ---------- 2. The coin and shop tables, read and written ----------
 

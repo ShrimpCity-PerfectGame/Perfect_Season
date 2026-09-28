@@ -1,0 +1,260 @@
+# Century — the reference
+
+A mode of its own, shipped in v2.9.0. Seven slots, hidden stats, and a goal of **100** combined passing,
+rushing and receiving touchdowns from **one real season** (2025). Every spin deals a random team; you fill one
+slot from it and that team is spent. One team re-spin. Daily and Unlimited.
+
+`CLAUDE.md` has the release rules and the architecture this sits inside. This file is the contract: what the
+data is, where each rule lives, what the database holds, and what a submission can be refused for.
+
+---
+
+## 1. Why the data is its own file
+
+`data/players.json` holds **one row per player per team per five-year era — his best season in that era**.
+That is right for a draft that spins an era and wrong for a mode that names a single year.
+
+Filtering it to `season === 2025` answers a different question: *whose best 2021–25 season happened to be
+2025*. It returns 129 of 634 players, no Mahomes (his best in that window was 2022), and 18 of 31 teams with a
+quarterback. Every number derived that way is measuring a biased subset. **This is a real mistake that was
+made and shipped into an analysis** before the owner pointed out that there are 32 teams and every one of them
+had a quarterback.
+
+So Century has its own source and its own file:
+
+| | |
+|---|---|
+| Built by | `tools/data/build-season-pool.mjs` (public nflverse `stats_player_week_2025.csv.gz`) |
+| Written to | `data/season-2025.json` — 435 rows, 14 KB, positional rows behind a `columns` list |
+| Read by | `century-logic.mjs`'s `initCenturyData`, and nothing else |
+| Contents | one row per player per team: `team, name, pos, td, games` |
+
+`td` is passing + rushing + receiving touchdowns, **regular season only**. A player traded mid-season keeps a
+row per team, each holding what he scored *for that team* — which is what a board has to offer.
+
+**Parse the CSV with the quote-aware `cells()`.** A player row carries a headshot URL with commas inside its
+quotes. A naive `split(",")` returned three regular-season rows out of 19,000 and read the league as having no
+quarterbacks. `build-versus-pool.mjs` carries the same warning, from the same failure.
+
+**`MIN_GAMES = 6`.** Without a floor a team deals up to 26 names of which 16 never scored, and picking blind
+from that is a coin toss rather than a read on the season. Six games is a third of one, and it costs the pool
+nothing that matters: **not one team-position loses its leading scorer to it**. It leaves 12–16 names a board,
+about a quarter of them without a touchdown — real risk, no haystack.
+
+**The builder refuses to write a file that cannot deal a legal board.** 32 teams, every one present in
+`game-logic.mjs`'s `TEAMS`, every one fielding a QB, RB, WR and TE, no duplicate player-team row, every `td` a
+whole non-negative number. A build that fails any of those exits non-zero rather than shipping a mode that can
+strand a player mid-run.
+
+---
+
+## 2. Where the rules live
+
+**`century-logic.mjs`, and only there.** It is imported by `century.jsx`, by
+`supabase/functions/submit-century/index.ts` and by the tests — the same arrangement `game-logic.mjs` and
+`versus-logic.mjs` have, for the same reason: the browser shows a score the instant the seventh slot is filled
+and the server decides whether it counts, and a rule enforced on one side and not the other will drift.
+
+| | |
+|---|---|
+| `CENTURY_SLOTS` | `QB, RB1, RB2, WR1, WR2, TE, FLEX`. The numbers exist so a roster can be keyed by slot; they are not a depth chart and grade identically. |
+| `centuryFits(pos, slot)` | Flex takes anyone who is not a quarterback; every other slot wants its own position. |
+| `centuryPlan(seed)` | Seven teams, no repeats, from the seed alone — same seeded shuffle as `seededSequence`. |
+| `centuryRespinTeam(seed, step, plan)` | The re-spin's team. Excludes the **whole plan**, not the part already seen. |
+| `centuryTeamsDealt(seed, respunAt)` | The seven teams a game was actually played from. One place, so the screen, the ceiling and the replay agree. |
+| `centuryCeiling(seed, respunAt)` | What those seven teams were worth at best. **Exact**, not greedy. |
+| `replayCentury({ seed, picks })` | The whole legality check, and what the server scores from. |
+| `centuryOutcome(score)` | The stored line. It is stored, so like the season sim's outcome strings it must not change. |
+
+**The re-spin excludes the whole plan** for the reason `rerollCandidate` does: a re-spin onto a team still to
+come would deal that team twice, since nothing removes the original. It also depends on `step`, so the spare is
+not knowable before it is spent.
+
+**The ceiling is exact.** It is an assignment of seven teams to seven slots, and greedy gets it wrong —
+spending the best team's quarterback on the Flex can cost more than it gains. 5,040 permutations of seven, each
+seven lookups, so exactness is affordable. It is the only fair way to read a score: a draw of seven weak teams
+cannot reach 100 however well it is played, and the end screen says so.
+
+**A game is always finishable.** Every team fields all four positions, which the builder refuses to write a
+file without, so any team can fill any empty slot. `centuryCanStrand` says it out loud and
+`tests/test-century-logic.mjs` plays 3,000 seeds through a deliberately bad bot to prove it — 0 stranded.
+
+---
+
+## 3. Why 100
+
+Measured against the real data, over 20,000 games played by a bot that always takes the leading scorer for a
+slot it still needs. With the stats hidden, that bot **is** what perfect knowledge of the season looks like, so
+these are a ceiling on skill, not a floor:
+
+| | |
+|---|---|
+| Median | **80** |
+| p90 / p99 | 95 / 108 |
+| Reached 100 | **5.1%** |
+| Absolute ceiling (best seven teams, assigned perfectly) | 133 |
+| Best ceiling in 20,000 draws | 127 |
+| A spin that can fill nothing | 0.00% |
+
+So 100 is a real target for somebody who knows the season and out of reach for somebody guessing, which is what
+a knowledge game's goal should be. `tests/test-century-logic.mjs` **prints these every run** and fails if the
+goal stops being reachable (>0.5%) or stops being hard (<25%). Changing `MIN_GAMES`, the slots or the Flex rule
+moves all of them.
+
+---
+
+## 4. The database
+
+`supabase/migration-century.sql` — one table and two boards.
+
+**`century_runs` has no client write policy at all.** RLS on, public select, and the `submit-century` Edge
+Function's service role is the only writer, exactly as `profiles`, `daily_runs` and `matches` are. This is
+unlike `sou_runs` and `builds` beside it, and the difference is the point: Over/Under is browser-written
+because a guess leaves no trace a server could replay, while a Century run leaves exactly that — seven
+`(slot, player)` pairs and at most one re-spin — so the score can be derived from scratch server-side. A board
+anybody can POST a number onto is not a board.
+
+- `day` is `'YYYY-MM-DD'` text (matching `sou_runs` and `daily_runs`), NULL for Unlimited. A **partial unique
+  index** on `(day, user_id) where day is not null` is what makes the daily once per account.
+- `username` and `guest` are stamped by `use_account_username`, the trigger `sou_runs` and `builds` carry, so
+  the name comes from the account and a guest's arrives with its chip rather than as a link.
+- `ceiling` is stored, because recomputing it later would need the season pool of the day it was played.
+- The id sequence is revoked from `anon` and `authenticated`, like `wallet_ledger`'s.
+
+**`century_top(p_day, p_limit)`** is one day's board; **`century_best(p_limit)`** is every account's best run,
+daily or Unlimited, one row per account. Both invoker, both stable, both read as GET, both fully tiebroken
+(score, then `created_at`, then `username collate "C"`). `tests/mock-century.mjs` mirrors them and
+`tests/test-century-sql.mjs` holds the two to the same JSON — an order that is not fully tiebroken is an order
+they can disagree about.
+
+**Migration order.** `migration-century.sql` goes **after `migration-profiles.sql`** (it creates a trigger
+using `use_account_username`) and **before `migration-moderation.sql` and `migration-wallet.sql`** (`mod_act`
+rewrites this board's name snapshots, and `claim_minigame` reads this table). Those bodies are plpgsql and so
+are not validated when they are created, which is exactly why this is a runbook order rather than an error
+anybody would see: get it wrong and nothing fails until a guest trades up.
+`tests/test-migrations.mjs` runs the whole list on a bare database and enforces it.
+
+**A rename reaches this board**, in both places a name is ever rewritten: `mod_act` (moderation) and
+`claim_username`'s two arms (profiles). A new board has to be added to each by hand — nothing makes it
+inherit that, which is why `tests/test-century-sql.mjs` drives a real rename and a real guest trade-up.
+
+---
+
+## 5. The Edge Function
+
+`supabase/functions/submit-century/index.ts`. It takes the trace, never the score.
+
+- **The daily's seed is the function's own clock** (`century-<utc today>`), never taken from the client. The
+  client's `day` is only *checked*, so a tab left open past UTC midnight is told rather than recorded against a
+  board it never saw.
+- **An Unlimited seed must look like a challenge code** (`^[A-Z0-9]{4,16}$`), and must not be reserved. A code
+  that *hashes* to a daily's seed deals that daily's seven teams bit for bit — `hashStr` is FNV-1a/32 and
+  invertible, and `tests/test-century-edge.mjs` **finds such a collision in about a second** by meeting in the
+  middle, so the check is on the hash and not on the spelling. Same protection the main daily has.
+- **A guest may not play the daily** (`guest_daily`), for the reason they may not play the season's: a guest
+  account costs nothing to make. They may play Unlimited and they do earn coins.
+- **It never touches `profiles`.** Century keeps its own board, so a run cannot move a season leaderboard, a
+  best score, a streak or a badge. That is also why it is a function of its own rather than an arm of
+  `submit-run`: nothing about the season path changes to add a mode.
+- **It pays no coins.** The client claims them with `claim_minigame('century', day)` once the run saves,
+  exactly as Over/Under and Build-a-player do, so every coin in the game still moves in one place.
+
+### Refusals
+
+Every one of these is mapped in `storage-century.js`'s `CENTURY_REFUSALS` and worded in `century.jsx`'s
+`refusalLine`. **A code that reaches the app unmapped is read as `"network"`** and shown as "check your
+connection" — forever, for a rule rather than a fault. `tests/test-century-screen.mjs` holds the map to the
+function's own source and to `century-logic.mjs`'s, so a new one cannot arrive unmapped.
+
+| Reason | Means |
+|---|---|
+| `duplicate` | today's daily is already recorded for this account (409) |
+| `guest_daily` | a guest asked for the daily (403) |
+| `wrong_day` | a tab left open past UTC midnight |
+| `reserved_code` | a code that deals a daily's own seven teams |
+| `bad_code` | not a code the box would accept |
+| `malformed` | no picks at all |
+| `bad_seed` `bad_picks` `wrong_length` `bad_pick` `two_respins` `bad_slot` `slot_taken` `not_on_board` `wrong_position` `already_drafted` `no_team` | `replayCentury`'s own. A player should never see one — the screen enforces the same rules from the same module. If one appears, the two have drifted. |
+
+`already_drafted` is not theoretical: four players are on two boards in 2025, so the same person really can be
+offered twice.
+
+---
+
+## 6. The screen
+
+`century.jsx`. It draws the rules and holds none of them, with one exception that matters:
+
+**`centuryBlock(player, slot, roster)` is the only place a pick is judged**, and both the board's `disabled`
+state and its click handler call it. CLAUDE.md records what getting this wrong costs: the GM salary cap was
+enforced on one of the draft screen's two doors and not the other, for three releases, so a player could put a
+$42M player into a $19M gap and then be refused by the server under a screen promising it would save.
+`tests/test-century-screen.mjs` walks a real board and asserts that every enabled row has somewhere to go and
+every disabled one has nowhere — if the disabled state came from anything else, one of those counts is wrong.
+
+Other things worth knowing:
+
+- **A run in progress is per device, not per account** (`ps-century-wip`, through `sget`/`sset`/`clearDraft`).
+  It resumes, which is the rule for every daily in the game. Clearing it overwrites with an unusable snapshot
+  before deleting, because a delete that does not land must never bring a finished run back as a resumable one.
+  A daily snapshot from a day that has passed is dropped — its seven teams were yesterday's.
+- **Two request counters, not one.** Account-scoped reads (the daily already played, the boards, the
+  submission) are guarded against a previous account's answer landing. The device-local snapshot read is
+  **not**, and sharing one counter is a bug that was made here: the snapshot read started, the
+  daily-already-played read bumped the counter, and the resume was thrown away as stale — so a half-finished
+  run came back as the menu for anyone signed in. `tests/test-century-screen.mjs` 5 is that test.
+- **The Modes tile's "Done · N" is a per-device hint**, kept the way Over/Under's is. The record is
+  `century_runs`, which the screen asks directly (`fetchMyCentury`) before offering the daily; the two can
+  disagree across devices and the screen's answer decides.
+- The spin panel and the result hero are **stadium-dark wherever they appear**, so both are named in
+  perfect-season.jsx's dark-scope selector list and take `--bg` / `--ink` / `--accent` from there. Nothing in
+  `CENTURY_CSS` hardcodes a colour; the team tints the panel through `--tc-deep`.
+
+---
+
+## 7. Tests
+
+| | |
+|---|---|
+| `tests/test-century-logic.mjs` | every rule, every refusal, 3,000 seeds for stranding, the ceiling against an independent search, and the balance numbers (printed) |
+| `tests/test-century-edge.mjs` | the real `index.ts`, executed: who is asking, the daily's clock, the duplicate, the guest, a found hash collision, and that the score written is the function's whatever the client claims |
+| `tests/test-century-sql.mjs` | the migration in PGlite: nobody writes the table, the daily's unique index, both boards against the mock, a rename, a guest trade-up, and the coin claim |
+| `tests/test-century-screen.mjs` | the buttons: the tile, both variants, seven picks clicked through, the re-spin, resume, the boards, the guest, the two doors, and the refusal map |
+| `tests/test-a11y.mjs` | the menu and the board, both under axe-core |
+| `tests/test-migrations.mjs` | the migration's place in the runbook order |
+
+The UI harness serves it at `?screen=century[&picks=N]` — a run part-played, written into the same per-device
+slot the screen resumes from, so it exercises the resume path on the way in.
+
+---
+
+## 8. Runbook
+
+Deploy order: **`migration-century.sql` → `migration-wallet.sql` (re-run, for the `century` coin arm) →
+`migration-moderation.sql` and `migration-profiles.sql` (re-run, for the rename) → the Edge Functions
+(`node deploy-function.mjs <env>`, which now deploys three) → the client.**
+
+```sql
+-- Take a run back (a farmed result, a bad row)
+delete from century_runs where id = 123;
+
+-- What today's board looks like
+select username, score, hit, ceiling from century_runs where day = to_char(now() at time zone 'utc', 'YYYY-MM-DD') order by score desc;
+
+-- Let somebody play today's daily again (support, not a routine action)
+delete from century_runs where day = '2026-09-28' and user_id = (select id from profiles where username = 'NAME');
+```
+
+Rebuild the pool when a season ends: `node tools/data/build-season-pool.mjs 2025`. It refuses to write a file
+that cannot deal a legal board, so a failed build is a loud one.
+
+---
+
+## 9. Not built
+
+- **No share card.** Every other mode has one; Century's would have to be spoiler-free about the seven teams
+  the way `shareText` is about the players, and that has not been designed.
+- **Nothing on the profile.** `player_stats` does not count Century runs, so a profile shows no trace of the
+  mode. That is `migration-runs-log.sql` plus `tests/mock-profile-stats.mjs` plus the profile screen, changed
+  together, and it was left out rather than half-done.
+- **No badges**, and Century is in no ladder. It pays the standard 15 minigame coins a day and nothing else.
