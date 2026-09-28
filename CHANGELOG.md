@@ -10,6 +10,33 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.10.0] — 2026-09-28
+
+Modes has a shape. Client only — no migration, no Edge Function change.
+
+### Changed
+
+- **Modes is drafts, and a Mini games screen behind one tile.** It had grown to nine tiles and read as a list
+  rather than a shape. The drafts are the game and stay on the front screen under a **Drafts** heading — the
+  daily, Unlimited, Genius, GM, Duel and the challenge-code box. **Over/Under, Build-a-player and Century** move
+  to a Mini games screen of its own, opened from one tile, the way the Shop and Duel already open.
+  - The tile carries an **"N done today"** pill, because the one real cost of moving them off the front screen
+    was losing at a glance whether the day's Over/Under and Century were still to play.
+  - Duel stays with the drafts: it *is* a draft, two people off the same eight boards.
+  - Leaving any of the three now returns to Mini games rather than to Modes, since that is the only place they
+    can be opened from.
+- **Mini games joins the tile colour system** rather than sitting plain cream next to six coloured tiles
+  (`--mode: var(--win)`, the one colour token nothing else had claimed). Tint, never paint, like the rest.
+- `tests/helpers.mjs`'s **`clickMode` learned the route**: a tile that is not on Modes is looked for behind Mini
+  games. Every existing caller kept working, and a test that means "open Over/Under" still says that rather than
+  knowing where it now lives. The four files that clicked tile copy directly were converted to use it, which
+  CLAUDE.md already asked for.
+
+### Added
+
+- `tests/test-a11y.mjs` audits the Mini games screen, and reaches the three modes behind it by the same route a
+  player takes.
+
 ## [2.9.1] — 2026-09-28
 
 Century, made to look like the rest of the game. Client only — no migration, no Edge Function change.

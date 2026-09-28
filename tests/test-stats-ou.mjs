@@ -5,7 +5,8 @@
 // indefinitely), the intro screen gates the timer, running out of lives locks the day and
 // surfaces the leaderboard, and reopening afterward shows the same finished result rather than
 // letting you replay.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, clickMode,
+} from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -14,7 +15,7 @@ const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Got it, let's draft"));
 await flush();
-await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Over/Under").closest("button"));
+await clickMode(container, "Over/Under");
 await flush();
 
 await runTest("the rules screen gates the timer, then guessing until lives run out locks today's game", async () => {
@@ -50,7 +51,7 @@ await runTest("reopening after finishing shows the same result instead of a rule
   await click(findButtonByText(container, "Back to modes"));
   await flush();
   assert(findButtonByText(container, "See today's result"), "expected the home card to reflect today's finished game");
-  await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Over/Under").closest("button"));
+  await clickMode(container, "Over/Under");
   await flush();
   assert(/Your score: \d+/.test(text(container)), "expected the same finished summary on reopen, not the rules screen or a fresh game");
 });

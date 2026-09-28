@@ -66,12 +66,24 @@ async function signUp(email, username) {
   await waitForCrypto();
   await flush();
 }
+// Century lives behind Mini games since v2.10.0, not on Modes. This walks the route a player walks, and hands
+// back the TILE - captured before the click, because afterwards the only thing on screen saying "Century" is
+// the Daily Century tile on the mode's own menu, which is a different tile with different words.
 async function openCentury() {
-  await openNav("Modes");
-  const tile = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes("Century"));
-  assert(tile, "the Modes screen has a Century tile");
+  const tile = await centuryTile();
   await click(tile);
   await flush();
+  return tile;
+}
+// The Century tile as the Mini games screen shows it, without opening the mode.
+async function centuryTile() {
+  await openNav("Modes");
+  const mini = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes("Mini games"));
+  assert(mini, "Modes has a Mini games tile");
+  await click(mini);
+  await flush();
+  const tile = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes("Century"));
+  assert(tile, "the Mini games screen has a Century tile");
   return tile;
 }
 

@@ -3,7 +3,8 @@
 // attribute (graded F-A+ off his real stats) from him, repeat until every attribute is filled,
 // then roll a random real team-season (any year) and watch an animated sim of whether swapping
 // your build into their lineup would have helped them win it all.
-import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth, clickMode,
+} from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -13,7 +14,7 @@ const { container } = await mount();
 await flush();
 await click(findButtonByText(container, "Got it, let's draft"));
 await flush();
-await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Build-a-player").closest("button"));
+await clickMode(container, "Build-a-player");
 await flush();
 
 // The team-then-player roll animation is a deliberately slow, decelerating reveal (~4s: a team
@@ -95,7 +96,7 @@ await runTest("completing a build while logged in logs it sitewide for the Stats
 
   await click(findButtonByText(container, "Modes"));
   await flush();
-  await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Build-a-player").closest("button"));
+  await clickMode(container, "Build-a-player");
   await flush();
 
   const posBtn = [...container.querySelectorAll(".frow button")].find((b) => ["Quarterbacks", "Running backs", "Wide receivers", "Tight ends"].includes(b.textContent));

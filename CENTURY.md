@@ -183,6 +183,10 @@ offered twice.
 
 ## 6. The screen
 
+**Where it is reached from (v2.10.0):** Modes → **Mini games** → Century, not Modes directly. Leaving Century
+returns to Mini games. `tests/helpers.mjs`'s `clickMode` walks that route on its own, so a test still just asks
+for "Century".
+
 `century.jsx`. **It is the draft screen**, deliberately, and that is the single most important thing about it:
 a run uses the app's own `.reel`, `.roster`/`.slot`, `.sec`/`.card` and `.drafts` "Lock in" controls, the menu
 deals the same `.mode` tiles the Modes screen does, and the result lands on `.result-hero` with the record type

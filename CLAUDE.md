@@ -220,6 +220,16 @@ parts that are unlike every other mode:
   picks it could not replay. Take a farmed result back -
   delete the match row (its picks follow) and decrement `pvp_wins` / `pvp_losses` on the two profiles by hand.
 
+**Modes is two groups (v2.10.0).** The front screen is **Drafts** - the daily, Unlimited, Genius, GM, Duel and
+the challenge-code box - and one **Mini games** tile that opens a screen of its own holding **Over/Under,
+Build-a-player and Century**. It had grown to nine tiles and read as a list rather than a shape. Duel stays with
+the drafts because it is one. Three things to know before moving a tile again: the Mini games tile carries an
+"N done today" pill, because the cost of hiding those modes is losing at a glance whether the day's Over/Under
+and Century are still to play; leaving any of the three returns to Mini games, not Modes, since that is now the
+only door to them; and `tests/helpers.mjs`'s **`clickMode` looks behind Mini games** for a tile that is not on
+Modes, which is what kept every existing test working - prefer it over clicking tile copy, as this file already
+asked.
+
 **Century (v2.9.0).** A mode of its own: seven slots (QB, two RB, two WR, TE, Flex), a random team each spin,
 **stats hidden while you pick**, and a goal of 100 combined passing, rushing and receiving touchdowns from one
 real season. Daily and Unlimited. **`CENTURY.md` is the reference** - read it before touching any of it. The

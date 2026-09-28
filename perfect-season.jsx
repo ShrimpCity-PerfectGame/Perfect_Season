@@ -721,10 +721,14 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .mode.m-genius{--mode:var(--genius)}
 .mode.m-gm{--mode:var(--gm)}
 .mode.m-bap{--mode:var(--rb)}
-.mode.m-genius,.mode.m-gm,.mode.m-bap{
+/* Mini games joins the same system rather than staying plain cream, which read as an afterthought next to six
+   coloured tiles. --win is the one colour token nothing else here had claimed: genius and GM hold their own,
+   Build-a-player has --rb, 1v1 violet, Over/Under orange, Century navy and the daily lime. */
+.mode.m-mini{--mode:var(--win)}
+.mode.m-genius,.mode.m-gm,.mode.m-bap,.mode.m-mini{
   background:linear-gradient(135deg,color-mix(in srgb,var(--mode) 14%,var(--surface)),var(--surface));
   border-color:color-mix(in srgb,var(--mode) 45%,var(--ink))}
-.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon{
+.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon,.mode.m-mini .icon{
   background:color-mix(in srgb,var(--mode) 26%,var(--surface));
   border-color:color-mix(in srgb,var(--mode) 55%,var(--ink))}
 .mode .go{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--bg);background:var(--ink);
@@ -2648,6 +2652,7 @@ export default function PerfectSeason() {
     historyScreen.current = s;
     if (s.ps === "profile") { setProfileOf(s.name); setView("profile"); }
     else if (s.view === "versus") { setVersusCode(s.code || null); openTab("versus"); }
+    else if (s.view === "minigames") openTab("minigames");
     else if (s.view === "century") openTab("century");
     else if (s.view === "statsou") openSou();
     else if (s.view === "buildplayer") openBuildPicker();
@@ -2758,7 +2763,13 @@ export default function PerfectSeason() {
     openTab("century");
   }
   function leaveCentury() {
-    openTab("home");
+    openTab("minigames");
+  }
+  // Mini games: a screen of its own, the way the Shop and Duel are. The three side modes are reachable ONLY
+  // from it now, which is why each of them leaves back to it rather than to Modes - there is nowhere else they
+  // could have been opened from.
+  function openMinigames() {
+    openTab("minigames");
   }
   // A daily Century that the server accepted. The key is written for the day the RUN was for, not for today, so a
   // run handed in either side of UTC midnight marks the day it belonged to - the same mistake the minigame coin
@@ -3711,7 +3722,7 @@ export default function PerfectSeason() {
 
   function leaveSou() {
     leaveSouState();
-    setView("home");
+    setView("minigames");
   }
 
   // The day is over: record it locally and show the result straight away, then post the score to
@@ -3777,7 +3788,7 @@ export default function PerfectSeason() {
   function cancelBap() {
     clearTimeout(bapTimer.current);
     setBap(null);
-    setView("home");
+    setView("minigames");
   }
 
   // Team spins first, then the player who plays that position for them - same "reel settles"
@@ -4128,6 +4139,40 @@ export default function PerfectSeason() {
   // CLAUDE.md). It is the single biggest reason the two screens read as the same game rather than two.
   // Century's run AND its result are stadium-dark, for the reason a season's are: the result screen a draft
   // lands on is the play view, so it is dark there too. Only its menu and boards come back to cream.
+  // The three side modes, written once and rendered on the Mini games screen. They used to sit on Modes, which
+  // had grown to nine tiles and read as a list rather than a shape: the drafts are the game, and these are
+  // beside it. Defined here rather than as a component so they keep reaching the state they already read.
+  const miniGameTiles = (
+    <>
+      <button className="mode m-sou" onClick={openSou}>
+        <div className="mt">
+          <span className="icon" aria-hidden="true">📊</span>
+          <span className="mn">Over/Under</span>{souDone && <span className="pill">Done · {souDone.score}</span>}
+        </div>
+        <p>One shared daily set, {SOU_ROUND_SECONDS}s a guess, three lives - how many can you get right today?</p>
+        <span className="go">{souDone ? "See today's result" : "Play"}</span>
+      </button>
+
+      <button className="mode m-century" onClick={openCentury}>
+        <div className="mt">
+          <span className="icon" aria-hidden="true">💯</span>
+          <span className="mn">Century</span>{centuryDone && <span className="pill">Done · {centuryDone.score}</span>}
+        </div>
+        <p>Seven slots, a random team each spin and no stats until the end. Get to {CENTURY_GOAL} touchdowns from one real season.</p>
+        <span className="go">{centuryDone ? "See today's result" : "Play"}</span>
+      </button>
+
+      <button className="mode m-bap" onClick={openBuildPicker}>
+        <div className="mt"><span className="icon" aria-hidden="true">🧩</span><span className="mn">Build-a-player</span></div>
+        <p>Roll a team, roll their active player, and take one attribute from each until your build is complete - then see if he'd have won a real team the chip.</p>
+        <span className="go">Play</span>
+      </button>
+    </>
+  );
+  // What the Mini games tile says without opening it. Only the two with a daily can be "done", so this counts
+  // those - losing that at a glance was the one real cost of moving them off the front screen.
+  const miniDoneToday = [souDone, centuryDone].filter(Boolean).length;
+
   const scope = view === "play" || view === "versus" || (view === "century" && centuryStage !== "menu")
     ? "dark" : view === "board" ? "night" : "light";
 
@@ -4366,6 +4411,9 @@ export default function PerfectSeason() {
               </p>
             </div>
 
+            {/* Two groups, not one list of nine tiles. The drafts are the game; the quick games sit behind one
+                tile of their own so the front screen stays short and says what this place is for. */}
+            <h2 className="h">Drafts</h2>
             <div className="modes">
               {/* The only tile with two CTAs: both formats' dailies are live at once, each its
                   own draft with its own boards, so one button can't express both states. */}
@@ -4421,30 +4469,6 @@ export default function PerfectSeason() {
                 <span className="go">{user && !isGuest ? "Open a lobby" : "Sign in to play"}</span>
               </button>
 
-              <button className="mode m-sou" onClick={openSou}>
-                <div className="mt">
-                  <span className="icon" aria-hidden="true">📊</span>
-                  <span className="mn">Over/Under</span>{souDone && <span className="pill">Done · {souDone.score}</span>}
-                </div>
-                <p>One shared daily set, {SOU_ROUND_SECONDS}s a guess, three lives - how many can you get right today?</p>
-                <span className="go">{souDone ? "See today's result" : "Play"}</span>
-              </button>
-
-              <button className="mode m-century" onClick={openCentury}>
-                <div className="mt">
-                  <span className="icon" aria-hidden="true">💯</span>
-                  <span className="mn">Century</span>{centuryDone && <span className="pill">Done · {centuryDone.score}</span>}
-                </div>
-                <p>Seven slots, a random team each spin and no stats until the end. Get to {CENTURY_GOAL} touchdowns from one real season.</p>
-                <span className="go">{centuryDone ? "See today's result" : "Play"}</span>
-              </button>
-
-              <button className="mode m-bap" onClick={openBuildPicker}>
-                <div className="mt"><span className="icon" aria-hidden="true">🧩</span><span className="mn">Build-a-player</span></div>
-                <p>Roll a team, roll their active player, and take one attribute from each until your build is complete - then see if he'd have won a real team the chip.</p>
-                <span className="go">Play</span>
-              </button>
-
               <div className="mode static">
                 <div className="mt"><span className="icon" aria-hidden="true">🔗</span><span className="mn">Challenge a friend</span></div>
                 <p>Enter a code to draft the exact same boards someone else had.</p>
@@ -4455,6 +4479,19 @@ export default function PerfectSeason() {
                 </div>
                 {codeError && <p className="note" role="status">{codeError}</p>}
               </div>
+            </div>
+
+            <div className="modes">
+              <button className="mode m-mini" onClick={openMinigames}>
+                <div className="mt">
+                  <span className="icon" aria-hidden="true">🎲</span>
+                  <span className="mn">Mini games</span>
+                  {miniDoneToday > 0 && <span className="pill">{miniDoneToday} done today</span>}
+                </div>
+                <p>The quick ones beside the drafts: Over/Under, Build-a-player and Century. They keep boards of
+                  their own and never touch your season stats.</p>
+                <span className="go">Open</span>
+              </button>
             </div>
 
             <div className="hometiles">
@@ -4943,6 +4980,17 @@ export default function PerfectSeason() {
               onShare={sendShare} onPlayers={notePlayers} siteUrl={APP_SITE_URL}
             />
             )}
+          </>
+        )}
+
+        {/* ---------------- MINI GAMES (v2.10.0) ---------------- */}
+        {view === "minigames" && (
+          <>
+            <h1 className="h">Mini games</h1>
+            <p className="note">Quick ones beside the drafts. Nothing here counts towards your season stats or the
+              main leaderboard — Over/Under and Century keep boards of their own, and all three pay coins.</p>
+            <div className="modes">{miniGameTiles}</div>
+            <button className="btn" onClick={() => openTab("home")}>Back</button>
           </>
         )}
 
