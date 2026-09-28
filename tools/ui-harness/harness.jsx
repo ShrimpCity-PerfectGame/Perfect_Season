@@ -610,8 +610,11 @@ function CenturyPreview({ userId, username, finish }) {
       <main id="content">
         <div className="wrap">
           <h1 className="vh">Century</h1>
+          {/* onShare and siteUrl too, or the result screen renders no Share button and the audit never sees
+              one - which is exactly how it was missed the first time. */}
           <CenturyScreen userId={userId} username={username} isGuest={false}
-            onBack={() => console.log("back")} onClaimCoins={() => {}} onDailySaved={() => {}} />
+            onBack={() => console.log("back")} onClaimCoins={() => {}} onDailySaved={() => {}}
+            onShare={async (t) => { console.log("share", t); return "copied"; }} siteUrl="https://gridspin.test" />
         </div>
       </main>
     </div>

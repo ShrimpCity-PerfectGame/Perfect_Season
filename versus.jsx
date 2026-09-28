@@ -158,6 +158,9 @@ export const VERSUS_CSS = `
 /* Who still holds what. Struck through rather than merely dimmed: a spent one has to read without colour. */
 .vs-track{list-style:none;display:flex;gap:8px;margin:6px 0 0;padding:0}
 .vs-tk{font-size:14px;line-height:1;opacity:.95}
+/* 3.55:1, and that is the right bar: the glyph is an aria-hidden ICON, not text - a .vh span beside it says
+   "Re-spin: used" in words - so it answers to the 3:1 non-text rule, not 4.5:1. The line-through carries the
+   meaning too, so nothing here rests on colour alone. Flagged by an audit sweep; left as designed. */
 .vs-tk.spent{opacity:.4;text-decoration:line-through}
 .vs-note{font-size:13px;opacity:.85}
 .vs-err{color:var(--loss);font-weight:700;font-size:13px}

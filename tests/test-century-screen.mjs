@@ -13,7 +13,7 @@
 //     the draft screen's two doors and not the other, for three releases.
 import {
   setupDom, makeStorage, mount, flush, click, text, findButtonByText, clickMode,
-  assert, runTest, waitForCrypto, makeMockAuth, loadModule, type,
+  assert, runTest, waitForCrypto, makeMockAuth, loadModule, loadAppModule, type,
 } from "./helpers.mjs";
 import { readFileSync } from "node:fs";
 import {
@@ -21,6 +21,7 @@ import {
   centuryFits, centuryDailySeed, centuryCeiling,
 } from "../century-logic.mjs";
 import { TEAMS } from "../game-logic.mjs";
+const { parseChallengeLink } = await loadAppModule();
 // Node cannot import .jsx, so the screen module comes through the same bundler helper the other screen tests use.
 const { centuryBlock, CENTURY_SLOT_LABEL } = await loadModule("century.jsx");
 import { CENTURY_REFUSALS } from "../storage-century.js";
@@ -274,33 +275,53 @@ await runTest("6. the daily is once, and the tile says so afterwards", async () 
   const runs = window.__ps_supabase__._century.runs().filter((r) => r.day === today());
   assert(runs.length === 1, `one daily row: ${runs.length}`);
   const score = runs[0].score;
-  // Back out and the daily is closed, on the screen and on the Modes tile.
+  // Back out: the daily is played, and says so - but it is NOT a dead end. It used to be disabled saying
+  // "Played" while the Mini games tile promised "See today's result", so the run just finished was unreachable.
   await click(findButtonByText(ce(), "Boards"));
   await flush();
   const again = [...variantTiles()][0];
-  assert(again.disabled, "the daily is no longer offered");
+  assert(!again.disabled, "the daily tile is still live once played");
   assert(again.textContent.includes(String(score)), `and it says what it scored: ${again.textContent}`);
+  assert(/See how it went/.test(again.textContent), `and offers the result: ${again.textContent}`);
+  // Pressing it shows that run again, from the stored roster - no second run is recorded.
+  await click(again);
+  await flush();
+  assert(ce().dataset.view === "done", `it opens the result: ${ce().dataset.view}`);
+  assert(Number(ce().querySelector(".ce-score").textContent) === score, "with the score it scored");
+  assert(ce().querySelectorAll(".ce-card tbody tr").length === CENTURY_SLOTS.length, "and all seven players");
+  assert(/Today's Century/.test(ce().textContent), "labelled as today's, not as a fresh finish");
+  assert(window.__ps_supabase__._century.runs().filter((r) => r.day === today()).length === 1,
+    "and looking at it records nothing");
+  // And the Mini games tile still carries the pill.
+  await click(findButtonByText(ce(), "Boards"));
+  await flush();
   await click(findButtonByText(ce(), "Back"));
   await flush();
   const tile = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes("Century"));
-  assert(tile.textContent.includes(`Done · ${score}`), `the Modes tile says so too: ${tile.textContent}`);
+  assert(tile.textContent.includes(`Done · ${score}`), `the Mini games tile says so too: ${tile.textContent}`);
 });
 
 await runTest("7. the boards show the day and all time, and mark a player's own row", async () => {
   await openCentury();
+  // BOTH tab panels are in the document (one `hidden`), so every read here is scoped to the open one - the
+  // other is real markup a loose querySelector would happily return instead. That is the shape a tabs widget
+  // has to have, or the closed tab's aria-controls points at nothing.
+  const open = () => ce().querySelector(".ce-panel:not([hidden])");
   const tabs = [...ce().querySelectorAll('[role="tab"]')];
   assert(tabs.length === 2 && tabs[0].getAttribute("aria-selected") === "true", "Today is the open tab");
-  assert(ce().querySelector(".ce-lb"), "the day's board renders");
-  assert(ce().querySelector(".ce-lb tr.me"), "and this player's own row is marked");
-  assert(ce().textContent.includes("centurion"), "by name");
+  assert(ce().querySelectorAll(".ce-panel").length === 2, "both panels exist, so neither tab points at nothing");
+  assert(ce().querySelectorAll(".ce-panel[hidden]").length === 1, "and exactly one of them is hidden");
+  assert(open().querySelector(".ce-lb"), "the day's board renders");
+  assert(open().querySelector(".ce-lb tr.me"), "and this player's own row is marked");
+  assert(open().textContent.includes("centurion"), "by name");
   await click(tabs[1]);
   await flush();
   assert(tabs[1].getAttribute("aria-selected") === "true", "All time opens");
-  const caption = ce().querySelector(".ce-lb caption").textContent;
+  const caption = open().querySelector(".ce-lb caption").textContent;
   assert(/one per player/.test(caption), `it is one row per player: ${caption}`);
   // Every board in the game renders a guest's name with a chip rather than as a link, and this one is no
   // different - that is what stops a throwaway account being clickable.
-  const head = [...ce().querySelectorAll(".ce-lb th")].map((h) => h.textContent);
+  const head = [...open().querySelectorAll(".ce-lb th")].map((h) => h.textContent);
   assert(head.includes("Runs"), `the all-time board counts runs: ${JSON.stringify(head)}`);
 });
 
@@ -312,10 +333,21 @@ await runTest("8. a guest plays Unlimited and is refused the daily, with a reaso
   await flush();
   await openCentury();
   const [daily, free] = [...variantTiles()];
-  assert(daily.disabled, "the daily is closed to a guest");
+  // The daily is closed to a guest, and the tile SAYS so - but it is not a disabled button telling you to do
+  // something it will not let you do. It takes them to the Account tab, which is where the answer is.
+  assert(!daily.disabled, "the daily tile is still a live control");
   assert(/needs an account/.test(daily.textContent), `and says why: ${daily.textContent}`);
-  assert(!free.disabled, "Unlimited is open");
-  await click(free);
+  const beforeGuest = window.__ps_supabase__._century.runs().length;
+  await click(daily);
+  await flush();
+  assert(!ce() || ce().dataset.view !== "play", "a guest tapping the daily never reaches a board");
+  assert(window.__ps_supabase__._century.runs().length === beforeGuest, "and nothing was recorded");
+  assert(/account/i.test(text(container)), "they are taken somewhere that talks about an account");
+
+  await openCentury();
+  const free2 = [...variantTiles()][1];
+  assert(!free2.disabled, "Unlimited is open");
+  await click(free2);
   await flush();
   assert(ce().dataset.view === "play", "and it deals");
   const before = window.__ps_supabase__._century.runs().length;
@@ -330,7 +362,15 @@ await runTest("9. a signed-out visitor reads the boards and is asked to sign in"
   await flush();
   await openCentury();
   const modes = [...variantTiles()];
-  assert(modes.every((b) => b.disabled), "neither variant is playable");
+  // Same rule signed out: live controls that take you to the Account tab rather than dead ones that do not.
+  assert(modes.every((b) => !b.disabled), "both tiles are live controls");
+  assert(modes.every((b) => /Sign in to play/.test(b.textContent)), "and both say what is needed");
+  const beforeOut = window.__ps_supabase__._century.runs().length;
+  await click(modes[1]);
+  await flush();
+  assert(!ce() || ce().dataset.view !== "play", "a signed-out visitor tapping one never reaches a board");
+  assert(window.__ps_supabase__._century.runs().length === beforeOut, "and nothing was recorded");
+  await openCentury();
   assert(/Sign in/.test(ce().textContent), `and it says to sign in: ${ce().textContent.slice(0, 200)}`);
   assert(ce().querySelector(".ce-lb") || /Nobody/.test(ce().textContent), "the boards still render");
 });
@@ -457,6 +497,105 @@ await runTest("12. a second daily is reported as already recorded, not shown as 
   assert(still.length === 1, `with still only one row: ${still.length}`);
   assert(still[0].score === after[0].score, "and the first run's score untouched");
   await dropWip();
+});
+
+await runTest("13. the result shares a card, and the card's link deals the same seven teams", async () => {
+  // The share sheet is not available in jsdom, so sendShare falls through to the clipboard - which is the path
+  // a desktop takes anyway. What is captured here is the TEXT, because that is the whole artefact.
+  const written = [];
+  navigator.clipboard = { writeText: async (t) => { written.push(t); } };
+  await dropWip();
+  await signUp("century4@example.test", "sharer");
+  await openCentury();
+  await click(variantTiles()[1]);
+  await flush();
+  const seed = JSON.parse((await window.storage.get("ps-century-wip")).value).seed;
+  const taken = await playOut();
+  const score = taken.reduce((n, p) => n + p.td, 0);
+
+  const share = findButtonByText(ce(), "Share");
+  assert(share, "the result offers a Share button");
+  await click(share);
+  await flush();
+  assert(written.length === 1, `it shared once: ${written.length}`);
+  const card = written[0];
+  assert(card.includes(`${score}/${CENTURY_GOAL}`), `the card states the score: ${card.split("\n")[0]}`);
+  assert(card.includes(seed), `and carries the seed as its code: ${card}`);
+  // Not one player on the roster may be named - the spoiler rule, checked against the run just played.
+  for (const p of taken) assert(!card.includes(p.name), `${p.name} must not be on the card: ${card}`);
+
+  // And the link is playable: parsed, it deals the same seven teams.
+  const link = card.split("\n").pop();
+  const q = link.slice(link.indexOf("?"));
+  const parsed = parseChallengeLink(`/c/${seed}`, q);
+  assert(parsed?.century && parsed.code === seed, `it parses as a Century link: ${JSON.stringify(parsed)}`);
+  assert(centuryPlan(parsed.code).join(",") === centuryPlan(seed).join(","), "dealing the same seven teams");
+});
+
+await runTest("14. taking a Century link deals its teams, and costs no season draft", async () => {
+  await dropWip();
+  const seed = "SHARED77";
+  // Landing on the link is what the app does at startup, so the card appears on Modes.
+  window.history.replaceState({}, "", `/c/${seed}?mode=century&score=91`);
+  ({ container } = await mount());
+  await flush();
+  const card = container.querySelector(".challenge");
+  assert(card, "a challenge card is offered on Modes");
+  assert(/seven teams/.test(card.textContent), `worded for Century: ${card.textContent.slice(0, 90)}`);
+  assert(/91/.test(card.textContent), "and it says what they got");
+  assert(!/DNF/.test(card.textContent), "with no talk of abandoning a season draft, because none is involved");
+  const take = findButtonByText(card, "Play these teams");
+  assert(take, `the button says what it does: ${card.textContent.slice(0, 120)}`);
+  await click(take);
+  await flush();
+  await flush();
+  assert(ce()?.dataset.view === "play", `it opens Century mid-run: ${ce()?.dataset.view}`);
+  const wip = JSON.parse((await window.storage.get("ps-century-wip")).value);
+  assert(wip.seed === seed, `dealing the link's teams: ${wip.seed}`);
+  assert(wip.variant === "unlimited", "as an Unlimited run, never as the daily");
+  assert(teamCode() === centuryPlan(seed)[0], `and the first board is theirs: ${reelTeam()}`);
+  window.history.replaceState({}, "", "/");
+});
+
+await runTest("15. a link beats a run already in progress, and a slow snapshot read cannot undo it", async () => {
+  // THE BUG THIS FILE MISSED. Test 14 called dropWip() first, so no snapshot existed and the race never ran -
+  // and on staging, taking a link dealt the OLD run instead of the shared one. The resume is an independent
+  // async read: it started before the link was taken and landed after it, restoring a stale snapshot over a run
+  // the player had just been handed. The saved snapshot was right and the screen was wrong, which is what made
+  // it invisible to everything except opening a real link in a real browser.
+  //
+  // So this leaves a snapshot in place ON PURPOSE, and delays the read so it is guaranteed to land late.
+  const stale = { variant: "unlimited", day: null, seed: "STALE999", picks: [] };
+  await window.storage.set("ps-century-wip", JSON.stringify(stale), false);
+  // A get that resolves after the link has been taken, however fast the rest of the mount is.
+  const realGet = window.storage.get;
+  window.storage.get = async (key, shared) => {
+    const value = await realGet.call(window.storage, key, shared);
+    if (key === "ps-century-wip") await new Promise((r) => setTimeout(r, 40));
+    return value;
+  };
+  try {
+    window.history.replaceState({}, "", "/c/SHARED77?mode=century&score=91");
+    ({ container } = await mount());
+    await flush();
+    await click(findButtonByText(container.querySelector(".challenge"), "Play these teams"));
+    await flush();
+    // Let the delayed read land, then look at what is on screen.
+    await new Promise((r) => setTimeout(r, 80));
+    await flush();
+    assert(ce()?.dataset.view === "play", `a run is dealt: ${ce()?.dataset.view}`);
+    const shown = ce().querySelector(".codechip")?.textContent || "";
+    assert(shown.includes("SHARED77"), `the LINK's teams are on screen, not the stale run's: ${shown}`);
+    assert(!shown.includes("STALE999"), "the stale snapshot did not come back");
+    assert(teamCode() === centuryPlan("SHARED77")[0], `and the board is the link's: ${reelTeam()}`);
+    // The saved snapshot agrees with the screen - they disagreed, which is how this hid.
+    const wip = JSON.parse((await realGet.call(window.storage, "ps-century-wip", false)).value);
+    assert(wip.seed === "SHARED77", `and what is saved matches what is shown: ${wip.seed}`);
+  } finally {
+    window.storage.get = realGet;
+    window.history.replaceState({}, "", "/");
+    await dropWip();
+  }
 });
 
 console.log("test-century-screen.mjs done");

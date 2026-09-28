@@ -25,7 +25,7 @@ import {
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
-  POS_NAME, cityRange, statCells, Confetti, BoardWear, reducedMotion,
+  POS_NAME, cityRange, statCells, Confetti, BoardWear, reducedMotion, GRIDSPIN_DAY_ONE, dailyNumber,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -1021,6 +1021,9 @@ p.gamecoins .earned{display:flex}
 .ez{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:rgba(255,255,255,.6);background:#1A4A2E;writing-mode:vertical-rl;transform:rotate(180deg);letter-spacing:.5px;overflow:hidden;white-space:nowrap}
 .ez.r{background:color-mix(in srgb,var(--accent) 26%,#10201A);color:var(--accent);transform:none}
 .yards{position:relative;background:#1f5233;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,transparent 1px 10%),repeating-linear-gradient(90deg,transparent 0 10%,rgba(0,0,0,.08) 10% 20%)}
+/* 2.11:1, and deliberately. This is the "50" painted on the turf inside .field, which is aria-hidden="true" -
+   incidental text in a picture, which WCAG 1.4.3 exempts, and the thing you are meant to watch is the ball.
+   Raised to pass as text it competes with the ball. Flagged by an audit sweep and left alone on purpose. */
 .fifty{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-family:var(--display);font-weight:400;font-size:18px;color:rgba(255,255,255,.28)}
 .ball{position:absolute;top:50%;width:14px;height:9px;border-radius:50%;background:#e9e2d0;transform:translate(-50%,-50%);transition:left .32s cubic-bezier(.2,.7,.3,1);box-shadow:0 0 0 2px rgba(0,0,0,.25);animation:fadein .25s ease-out}
 .ball.air{transition:left .5s cubic-bezier(.3,.1,.3,1)}
@@ -2029,12 +2032,9 @@ function bestOrderFor(history, format) {
 }
 
 // ---------- Sharing ----------
-// Daily 1 is the day Gridspin launched, and the number counts up a day at a time, like Wordle's.
-export const GRIDSPIN_DAY_ONE = "2026-09-14";
-export function dailyNumber(date) {
-  const utc = (key) => { const [y, m, d] = key.split("-").map(Number); return Date.UTC(y, m - 1, d); };
-  return Math.round((utc(date) - utc(GRIDSPIN_DAY_ONE)) / 86400000) + 1;
-}
+// GRIDSPIN_DAY_ONE and dailyNumber live in ui-common.jsx now, so century.jsx can number its own daily without
+// importing this file back. Re-exported here because that is where everything has always looked for them.
+export { GRIDSPIN_DAY_ONE, dailyNumber };
 
 // An Unlimited season's link: its boards (the code), the variant and scoring they were drafted
 // under, and the sharer's record to beat. The record is only ever a friendly headline on the friend's
@@ -2052,12 +2052,23 @@ export function parseChallengeLink(pathname, search) {
   const q = new URLSearchParams(search || "");
   const beat = /^(\d{1,2})-(\d{1,2})$/.exec(q.get("beat") || "");
   const games = beat ? Number(beat[1]) + Number(beat[2]) : 0;
+  // mode=century is a different game entirely: the code is Century's seed, and `score` is what they got,
+  // shown only as a headline the way `beat` is. Never the daily - its seed would hand over the day's teams.
+  const century = q.get("mode") === "century";
+  // Digits and nothing else. Number("") is 0, which is finite and in range, so a link with an empty score
+  // claimed "They got 0" - a headline nobody wrote.
+  const rawScore = q.get("score") || "";
+  const claimed = /^\d{1,3}$/.test(rawScore) ? Number(rawScore) : NaN;
   return {
     code: m[1].toUpperCase(),
+    century,
+    // A Century run cannot score below zero and cannot plausibly pass the 133 ceiling; anything else was
+    // typed in by hand and is simply not shown.
+    score: century && Number.isFinite(claimed) && claimed <= 200 ? claimed : null,
     // A real season is 17 games plus up to 4 playoff games; anything else was typed in by hand.
     beat: games >= 17 && games <= 21 ? { w: Number(beat[1]), l: Number(beat[2]) } : null,
-    gm: q.get("mode") === "gm",
-    genius: q.get("mode") === "genius",
+    gm: !century && q.get("mode") === "gm",
+    genius: !century && q.get("mode") === "genius",
     format: q.get("scoring") === "championship" ? "standard" : "fantasy",
   };
 }
@@ -2288,6 +2299,8 @@ export default function PerfectSeason() {
   // Which stage the Century screen is on, reported up by CenturyScreen. It decides the ROOT scope, the same
   // way `view === "play"` does for a draft: a run in progress is stadium-dark, its menu and boards are not.
   const [centuryStage, setCenturyStage] = useState("menu");
+  // A Century link waiting to be dealt: { seed, score }. Cleared by the screen as it takes it.
+  const [centuryChallenge, setCenturyChallenge] = useState(null);
   const [souCoins, setSouCoins] = useState(null); // { date, credited } - the coins a finished day's claim paid
   const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
@@ -3984,6 +3997,13 @@ export default function PerfectSeason() {
     // Not before the session loads: abandoning a draft while signed out would skip its DNF.
     if (!c || !authReady) return;
     setChallenge(null);
+    // A Century link deals Century's seven teams, not a season's six boards. Nothing of the season draft is
+    // touched - no DNF, no format change - because none of it is involved.
+    if (c.century) {
+      setCenturyChallenge({ seed: c.code, score: c.score });
+      openTab("century");
+      return;
+    }
     await abandonCurrent();
     clearDraft(DRAFT_KEY);
     // The link's scoring becomes the selected format, as opening a daily does, so Modes shows what you're
@@ -4348,21 +4368,34 @@ export default function PerfectSeason() {
           <>
             {challenge && (
               <section className="challenge" aria-labelledby="challenge-title">
-                <span className="k">A friend's boards · code {challenge.code}</span>
+                <span className="k">
+                  {challenge.century ? "A friend's seven teams" : "A friend's boards"} · code {challenge.code}
+                </span>
                 <h2 id="challenge-title" className="big">
-                  {challenge.beat
-                    ? <>They went <em>{challenge.beat.w}–{challenge.beat.l}</em>.<br />Can you beat it?</>
-                    : <>Can you beat<br />their boards?</>}
+                  {challenge.century
+                    ? (challenge.score != null
+                      ? <>They got <em>{challenge.score}</em>.<br />Can you beat it?</>
+                      : <>Can you beat<br />their Century?</>)
+                    : challenge.beat
+                      ? <>They went <em>{challenge.beat.w}–{challenge.beat.l}</em>.<br />Can you beat it?</>
+                      : <>Can you beat<br />their boards?</>}
                 </h2>
                 <p>
-                  {[challenge.gm && "GM mode", challenge.genius && "Genius mode", `${FORMAT_LABEL[challenge.format]} scoring`].filter(Boolean).join(" · ")}.{" "}
-                  The same code, so the boards come up in the order they did for them - re-spins aside. Your season is your own.
+                  {challenge.century
+                    ? <>Century · {CENTURY_GOAL} touchdowns. The same code, so the same seven teams come up in the order they did for them, with the stats hidden as always.</>
+                    : <>
+                      {[challenge.gm && "GM mode", challenge.genius && "Genius mode", `${FORMAT_LABEL[challenge.format]} scoring`].filter(Boolean).join(" · ")}.{" "}
+                      The same code, so the boards come up in the order they did for them - re-spins aside. Your season is your own.
+                    </>}
                 </p>
-                {freeInProgress && (
+                {/* Century touches no season draft at all, so there is nothing of yours to lose by taking one. */}
+                {!challenge.century && freeInProgress && (
                   <p className="warn">You have an Unlimited draft in progress. Drafting these boards {user ? "counts it as a DNF" : "replaces it"}.</p>
                 )}
                 <div className="frow">
-                  <button className="btn solid" disabled={!authReady} onClick={acceptChallenge}>Draft these boards</button>
+                  <button className="btn solid" disabled={!authReady} onClick={acceptChallenge}>
+                    {challenge.century ? "Play these teams" : "Draft these boards"}
+                  </button>
                   <button className="btn" onClick={() => setChallenge(null)}>Not now</button>
                 </div>
               </section>
@@ -5005,6 +5038,14 @@ export default function PerfectSeason() {
               onBack={leaveCentury}
               onClaimCoins={(date, onCredited) => claimMinigame("century", date, onCredited)}
               onDailySaved={onCenturyDaily} onStage={setCenturyStage}
+              onShare={sendShare} siteUrl={APP_SITE_URL}
+              challenge={centuryChallenge} onChallengeTaken={() => setCenturyChallenge(null)}
+              onNeedsAccount={(why) => {
+                setNotice(why === "guest"
+                  ? "The daily needs an account - a guest can be made again and again, so the day's seven teams would be as many goes as you liked. Keep your seasons and it opens up."
+                  : "Century keeps a board, so a run needs an account to go on it. Sign in and it's one tap away.");
+                openTab("profile");
+              }}
             />
           </>
         )}

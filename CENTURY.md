@@ -224,11 +224,22 @@ Other things worth knowing:
   It resumes, which is the rule for every daily in the game. Clearing it overwrites with an unusable snapshot
   before deleting, because a delete that does not land must never bring a finished run back as a resumable one.
   A daily snapshot from a day that has passed is dropped — its seven teams were yesterday's.
+- **A started run beats a resume that is still in flight** (v2.11.1). The snapshot read is async and starting a
+  run is not, so a read begun before a link was taken landed after it and restored the old run over the shared
+  one - with the saved snapshot correct and only the screen wrong, which is why storage-checking tests missed
+  it. A `started` ref carried across the await settles it, the way `pendingClears` does for the draft.
 - **Two request counters, not one.** Account-scoped reads (the daily already played, the boards, the
   submission) are guarded against a previous account's answer landing. The device-local snapshot read is
   **not**, and sharing one counter is a bug that was made here: the snapshot read started, the
   daily-already-played read bumped the counter, and the resume was thrown away as stale — so a half-finished
   run came back as the menu for anyone signed in. `tests/test-century-screen.mjs` 5 is that test.
+- **A played daily is still openable** (v2.10.1). The tile reopens that run from the roster `fetchMyCentury`
+  already returns, and looking at it records nothing. It used to be disabled while the Mini games tile promised
+  "See today's result", which is the kind of gap only a click finds.
+- **No disabled control says "Sign in to play"** (v2.10.1). Signed out, or a guest on the daily, the tile stays
+  live and calls `onNeedsAccount`, which the app answers with a notice and the Account tab.
+- **Both board tab panels are rendered**, the closed one `hidden` (v2.10.1). Rendering only the open one left
+  the closed tab's `aria-controls` pointing at nothing; `tests/test-a11y.mjs` now refuses that on any screen.
 - **The Modes tile's "Done · N" is a per-device hint**, kept the way Over/Under's is. The record is
   `century_runs`, which the screen asks directly (`fetchMyCentury`) before offering the daily; the two can
   disagree across devices and the screen's answer decides.
@@ -278,10 +289,26 @@ that cannot deal a legal board, so a failed build is a loud one.
 
 ---
 
-## 9. Not built
+## 9. Sharing
 
-- **No share card.** Every other mode has one; Century's would have to be spoiler-free about the seven teams
-  the way `shareText` is about the players, and that has not been designed.
+`centuryShareText` and `centuryChallengeLink` in `century.jsx`, tested in `tests/test-share.mjs`.
+
+The card names **no player and no team**. That rule is stricter here than for a season: the daily's seven teams
+are the same for everyone that day, so a hint at one spoils it for every reader. Everything on the card comes
+from the score, which the card states in words anyway — the ten squares (one per tenth of the goal) add nothing
+a reader could not already see, which is what makes them safe. The test holds this against the real pool: not
+one of the 435 players and not one of the 32 teams may appear.
+
+An **Unlimited** card carries a playable link, because Century's seed *is* a code:
+`/c/<seed>?mode=century&score=N`, on the `/c/:code` route `vercel.json` already serves. `parseChallengeLink`
+returns `century: true` and the Modes card offers "Play these teams"; taking it costs no season draft, since
+none is involved. `score` is a headline only, the way a season link's `beat` is, and is dropped unless it is
+plain digits within range.
+
+The **daily never gets a link**. Its seed is `century-<date>` and a link holding that hands over the day's seven
+teams — the whole reason `centuryReservedSeed` exists. A test asserts the seed appears nowhere in its card.
+
+## 10. Not built
 - **Nothing on the profile.** `player_stats` does not count Century runs, so a profile shows no trace of the
   mode. That is `migration-runs-log.sql` plus `tests/mock-profile-stats.mjs` plus the profile screen, changed
   together, and it was left out rather than half-done.
