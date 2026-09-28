@@ -557,4 +557,45 @@ await runTest("14. taking a Century link deals its teams, and costs no season dr
   window.history.replaceState({}, "", "/");
 });
 
+await runTest("15. a link beats a run already in progress, and a slow snapshot read cannot undo it", async () => {
+  // THE BUG THIS FILE MISSED. Test 14 called dropWip() first, so no snapshot existed and the race never ran -
+  // and on staging, taking a link dealt the OLD run instead of the shared one. The resume is an independent
+  // async read: it started before the link was taken and landed after it, restoring a stale snapshot over a run
+  // the player had just been handed. The saved snapshot was right and the screen was wrong, which is what made
+  // it invisible to everything except opening a real link in a real browser.
+  //
+  // So this leaves a snapshot in place ON PURPOSE, and delays the read so it is guaranteed to land late.
+  const stale = { variant: "unlimited", day: null, seed: "STALE999", picks: [] };
+  await window.storage.set("ps-century-wip", JSON.stringify(stale), false);
+  // A get that resolves after the link has been taken, however fast the rest of the mount is.
+  const realGet = window.storage.get;
+  window.storage.get = async (key, shared) => {
+    const value = await realGet.call(window.storage, key, shared);
+    if (key === "ps-century-wip") await new Promise((r) => setTimeout(r, 40));
+    return value;
+  };
+  try {
+    window.history.replaceState({}, "", "/c/SHARED77?mode=century&score=91");
+    ({ container } = await mount());
+    await flush();
+    await click(findButtonByText(container.querySelector(".challenge"), "Play these teams"));
+    await flush();
+    // Let the delayed read land, then look at what is on screen.
+    await new Promise((r) => setTimeout(r, 80));
+    await flush();
+    assert(ce()?.dataset.view === "play", `a run is dealt: ${ce()?.dataset.view}`);
+    const shown = ce().querySelector(".codechip")?.textContent || "";
+    assert(shown.includes("SHARED77"), `the LINK's teams are on screen, not the stale run's: ${shown}`);
+    assert(!shown.includes("STALE999"), "the stale snapshot did not come back");
+    assert(teamCode() === centuryPlan("SHARED77")[0], `and the board is the link's: ${reelTeam()}`);
+    // The saved snapshot agrees with the screen - they disagreed, which is how this hid.
+    const wip = JSON.parse((await realGet.call(window.storage, "ps-century-wip", false)).value);
+    assert(wip.seed === "SHARED77", `and what is saved matches what is shown: ${wip.seed}`);
+  } finally {
+    window.storage.get = realGet;
+    window.history.replaceState({}, "", "/");
+    await dropWip();
+  }
+});
+
 console.log("test-century-screen.mjs done");

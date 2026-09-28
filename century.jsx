@@ -123,6 +123,11 @@ export function CenturyScreen({
   // less motion, and for the tests, which set that media query to match (tests/helpers.mjs).
   const [spinFace, setSpinFace] = useState(null);
   const spinTimer = useRef(null);
+  // Set the moment a run is deliberately started, and read by the resume below across its await. The resume is
+  // an independent async read, so it can start before that and land after it - and it then restored a stale
+  // snapshot OVER a run the player had just been dealt. This is the pendingClears pattern CLAUDE.md names for
+  // exactly this class: the race is between two calls that share no promise chain, so only a ref can settle it.
+  const started = useRef(false);
   const [board, setBoard] = useState({ day: [], best: [], loaded: false });
   const [dailyDone, setDailyDone] = useState(null);
   const [tab, setTab] = useState("day");
@@ -154,7 +159,9 @@ export function CenturyScreen({
     let alive = true;
     (async () => {
       const saved = await sget(CENTURY_WIP, false);
-      if (!alive) return;
+      // A run was started while this read was in flight - a shared link being taken, or the player pressing a
+      // variant. Whatever it found is older than that, and must not replace it.
+      if (!alive || started.current) return;
       // A daily snapshot from a day that has passed is not resumable: its seven teams were yesterday's.
       const usable = saved && typeof saved.seed === "string" && Array.isArray(saved.picks)
         && saved.picks.length < CENTURY_SLOTS.length
@@ -256,6 +263,7 @@ export function CenturyScreen({
 
   // ---------- Starting and playing ----------
   function start(variant, seed) {
+    started.current = true;
     setError("");
     setResult(null);
     setCoins(0);

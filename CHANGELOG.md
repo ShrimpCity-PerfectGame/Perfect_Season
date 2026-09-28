@@ -10,6 +10,26 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.11.1] — 2026-09-28
+
+One bug, found by opening a shared link on staging rather than by running the tests.
+
+### Fixed
+
+- **Taking a Century link dealt the run you already had, not the one you were sent.** The screen reads its
+  saved snapshot asynchronously on mount; taking a link starts a run synchronously. So the read began before
+  the link was taken and landed after it, restoring a stale snapshot over the seven teams the player had just
+  been handed. The tell was that the SAVED snapshot was right and the SCREEN was wrong — which is why nothing
+  caught it: a test that checks storage sees the correct answer.
+
+  This is the race CLAUDE.md names under "Assume storage operations can fail": two independent async calls that
+  share no promise chain, where only a ref carried across the gap can settle it, the way `pendingClears` does
+  for the draft. The resume now stands down if a run has been started while it was in flight.
+
+  `tests/test-century-screen.mjs` 15 reproduces it — a stale snapshot left in place **on purpose** and a
+  deliberately slow read, so the resume is guaranteed to land late. The test that missed it (14) called
+  `dropWip()` first, so no snapshot existed and the race never ran.
+
 ## [2.11.0] — 2026-09-28
 
 Century can be shared, and the seven teams you were dealt can be handed to somebody else. Plus the polish pass

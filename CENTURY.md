@@ -224,6 +224,10 @@ Other things worth knowing:
   It resumes, which is the rule for every daily in the game. Clearing it overwrites with an unusable snapshot
   before deleting, because a delete that does not land must never bring a finished run back as a resumable one.
   A daily snapshot from a day that has passed is dropped — its seven teams were yesterday's.
+- **A started run beats a resume that is still in flight** (v2.11.1). The snapshot read is async and starting a
+  run is not, so a read begun before a link was taken landed after it and restored the old run over the shared
+  one - with the saved snapshot correct and only the screen wrong, which is why storage-checking tests missed
+  it. A `started` ref carried across the await settles it, the way `pendingClears` does for the draft.
 - **Two request counters, not one.** Account-scoped reads (the daily already played, the boards, the
   submission) are guarded against a previous account's answer landing. The device-local snapshot read is
   **not**, and sharing one counter is a bug that was made here: the snapshot read started, the
