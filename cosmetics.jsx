@@ -106,7 +106,7 @@ export const COLORS = {
   nameFlameDeep: "#A63C00",
   nameFlameRedDeep: "#96110F",
   nameFlameBrown: "#7A2A00",
-  nameFlameBlush: "#FF6B6B",
+  nameFlameBlush: "#FF7373", // lifted from #FF6B6B, which was 4.30:1 on the champion block's lime glow
   nameFrostDeep: "#0E5B78",
   nameFrostInk: "#25489E",
   nameFrostIce: "#A8ECFF",
@@ -137,13 +137,15 @@ const LAYER = {
   nightDots: 0.06,
   foilLines: 0.5, // the glint's fine diagonal lines on the foil
   dynastyWreath: 0.1, // the gold laurel watermark
-  // Cosmos (v2.8.0). ONE star layer, deliberately: two would overlap on some pixels and the brightest thing
-  // behind a letter would be a value nothing declared. At 6% a star is as bright as Night's dots, and the
-  // haze at 70% keeps every night text token clear of AA on all four surfaces a letter can land on - the void,
-  // a star, the haze, and a star inside the haze. Raising either fails tests/test-cosmetics.mjs, which is how
-  // these two numbers were chosen rather than picked.
-  cosmosStars: 0.06,
-  cosmosHaze: 0.7,
+  // Cosmos. Two numbers, both found by search rather than chosen: the binding constraint is a STAR INSIDE
+  // THE NEBULA, which is the brightest thing a letter can land on, and it is what stops the card being
+  // brighter still. Behind text you can have a vivid nebula or visible stars, not both - so the nebula takes
+  // it (0.32 of the aurora violet, against 0.7 of a much darker violet before, which read as a purple
+  // outline) and the stars behind text drop to a texture. The stars anyone actually SEES are in the trim,
+  // where the card's padding keeps text out and they can be as bright as they like - the same place Turf
+  // puts its hash marks and Ticket its barcode.
+  cosmosStars: 0.02,
+  cosmosNebula: 0.32,
 };
 
 // The brightest fill the dark scope's text reads on (every text token at 4.6:1, a little over AA so rounding
@@ -184,11 +186,15 @@ export function cardPaint(theme, team = null) {
     case "card-gold-foil": return { scope, behindText: [COLORS.foil, COLORS.foilGlint, COLORS.foilShade, mixHex(COLORS.foilGlint, COLORS.foilShade, LAYER.foilLines)] };
     case "card-dynasty": return { scope, behindText: [COLORS.dynasty, mixHex(COLORS.gold, COLORS.dynasty, LAYER.dynastyWreath)] };
     case "card-cosmos": {
-      // Four surfaces, because the haze covers part of the card and a star can fall anywhere: the void, a star
-      // on it, the haze, and a star inside the haze - which is the brightest thing a letter can sit on.
-      const wash = mixHex(COLORS.cosmosHaze, COLORS.cosmosVoid, LAYER.cosmosHaze);
-      return { scope, behindText: [COLORS.cosmosVoid, mixHex(t.ink, COLORS.cosmosVoid, LAYER.cosmosStars),
-        wash, mixHex(t.ink, wash, LAYER.cosmosStars)] };
+      // Four surfaces, because the nebula covers part of the card and a star can fall anywhere: the void, a
+      // star on it, the nebula, and a star inside the nebula - the brightest thing a letter can sit on, and
+      // the one that decides how bright the whole card is allowed to be.
+      // The starLINE along the top and bottom edges is not here on purpose: it lives in the trim, inside the
+      // card's padding, where no letter reaches - the same reason Turf's hash marks and Ticket's barcode are
+      // not declared either.
+      const wash = mixHex(COLORS.plateAurora, COLORS.cosmosVoid, LAYER.cosmosNebula);
+      return { scope, behindText: [COLORS.cosmosVoid, mixHex(COLORS.nameNebulaLilac, COLORS.cosmosVoid, LAYER.cosmosStars),
+        wash, mixHex(COLORS.nameNebulaLilac, wash, LAYER.cosmosStars)] };
     }
     default: {
       // Navy, today's card: --bg, the dots, and the lime --glow in the top-left corner.
@@ -437,15 +443,33 @@ export const COSMETICS_CSS = `
 .cs-card-dynasty{background:${WREATH} right calc(12px*var(--cs-s)) bottom calc(10px*var(--cs-s))/calc(132px*var(--cs-s)) no-repeat,${C.dynasty};
   box-shadow:calc(4px*var(--cs-s)) calc(4px*var(--cs-s)) 0 ${C.gold},inset 0 0 0 calc(4px*var(--cs-s)) ${C.dynasty},inset 0 0 0 calc(6px*var(--cs-s)) ${C.gold},
     inset 0 0 0 calc(8px*var(--cs-s)) ${C.dynasty},inset 0 0 0 calc(9px*var(--cs-s)) ${C.goldDeep}}
-/* Cosmos (supporter): deep space with a violet nebula in one corner and a single field of stars. One star
-   layer, because two would overlap and put a brighter value behind a letter than cardPaint declares - see
-   LAYER.cosmosStars. Nothing here animates: a card is behind a name and a bio, and a moving background under
-   text is the one place in this app where motion would cost legibility rather than add anything. */
+/* Cosmos (supporter): deep space, a violet nebula, and a line of stars along the top and bottom edges.
+   The card is built in two halves, and which half a thing belongs to is decided by one question: can a letter
+   land on it?
+     behind text - the void, the nebula and a faint star texture, every one of them measured (cardPaint);
+     the trim   - the starlines and the rings, in the outer band the card's padding keeps text out of, exactly
+                  where Turf puts its mowing stripes' chalk and Dynasty its wreath. Nothing here is measured
+                  because nothing here is ever behind a letter, and that is what lets it be bright.
+   The first version put everything behind text and so had to be dark enough to read through: it came out a
+   purple outline. Nothing animates - a card sits under a name and a bio, and a moving background is the one
+   place in this app where motion would cost legibility rather than add anything. */
 .cs-card-cosmos{background:
-  radial-gradient(${rgba(C.cream, LAYER.cosmosStars)} .9px,transparent 1.3px) 0 0/19px 19px,
-  radial-gradient(125% 95% at 14% 0%,${rgba(C.cosmosHaze, LAYER.cosmosHaze)} 0%,transparent 64%),
+  /* the starlines, top and bottom, inside the trim */
+  repeating-linear-gradient(90deg,${C.cream} 0 1.6px,transparent 1.6px 23px) calc(9px*var(--cs-s)) calc(5px*var(--cs-s))/100% 1.6px no-repeat,
+  repeating-linear-gradient(90deg,${rgba(C.nameNebulaLilac, 0.85)} 0 1.4px,transparent 1.4px 17px) calc(16px*var(--cs-s)) calc(9px*var(--cs-s))/100% 1.4px no-repeat,
+  repeating-linear-gradient(90deg,${C.cream} 0 1.6px,transparent 1.6px 29px) calc(13px*var(--cs-s)) calc(100% - 6px*var(--cs-s))/100% 1.6px no-repeat,
+  /* the faint star texture behind text, and the nebula itself */
+  radial-gradient(${rgba(C.nameNebulaLilac, LAYER.cosmosStars)} 1px,transparent 1.4px) 0 0/17px 17px,
+  radial-gradient(135% 105% at 16% 4%,${rgba(C.plateAurora, LAYER.cosmosNebula)} 0%,${rgba(C.plateAurora, LAYER.cosmosNebula * 0.55)} 34%,transparent 66%),
   ${C.cosmosVoid};
-  box-shadow:calc(4px*var(--cs-s)) calc(4px*var(--cs-s)) 0 ${C.ink},inset 0 0 0 calc(2px*var(--cs-s)) ${rgba(C.plateAurora, 0.5)}}
+  /* Four rings, the way Dynasty wears four of gold: this is the whole of what makes a card look paid for, and
+     it costs nothing to contrast because a border is never behind a letter. */
+  box-shadow:calc(4px*var(--cs-s)) calc(4px*var(--cs-s)) 0 ${C.ink},
+    inset 0 0 0 calc(2px*var(--cs-s)) ${C.orbitEdge},
+    inset 0 0 0 calc(4px*var(--cs-s)) ${C.nameNebulaLilac},
+    inset 0 0 0 calc(6px*var(--cs-s)) ${C.plateAurora},
+    inset 0 0 0 calc(9px*var(--cs-s)) ${C.cosmosVoid},
+    inset 0 0 0 calc(10px*var(--cs-s)) ${rgba(C.nameNebulaLilac, 0.45)}}
 
 /* A title under a name: small, letter-spaced, with a slanted double-stripe marker. */
 .cs-title{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;font-weight:800;line-height:1.2;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-ink)}
@@ -497,6 +521,14 @@ export const COSMETICS_CSS = `
   background:var(--cs-nameplate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   color:var(--cs-nameplate-ink);line-height:1.08;
   box-shadow:inset 0 0 0 1.5px var(--cs-nameplate-trim),0 0 0 2px ${rgba(C.ink, 0.35)}}
+/* Wearing a plate AND a name colour: the plate sits inside the colour, as a frame around it. The letters stay
+   the plate's own ink - they have to, see NamePlate - but the frame is never behind a letter, so it can carry
+   the whole look, gradient and drift and all, rather than the one flat stop an outline could take.
+   The plate's own outer ring is dropped here: this IS that ring now, and two would read as a mistake. */
+.cs-plate-ring{display:block;width:fit-content;max-width:100%;padding:2.5px;border-radius:11px;
+  background:var(--cs-name-fill,var(--cs-name-1))}
+.cs-plate-ring>.cs-nameplate{box-shadow:inset 0 0 0 1.5px var(--cs-nameplate-trim)}
+.cs-plate-ring.cs-lively{background-size:220% 100%;animation:cs-name-drift 7s ease-in-out infinite}
 .cs-nameplate-preview{display:inline-flex;align-items:center;justify-content:center;width:64px;height:26px;
   border-radius:6px;font-family:var(--display);font-size:13px;letter-spacing:.02em}
 /* The animated ones drift their gradient. Background-position only - nothing moves, nothing reflows, and the
@@ -624,6 +656,7 @@ export const COSMETICS_CSS = `
   /* A drifting name holds still and keeps its colours, for the same reason a plate does: there is something
      to read underneath, and it is somebody's name. */
   .cs-name-grad.cs-lively{animation:none}
+  .cs-plate-ring.cs-lively{animation:none}
   /* Orbit stops with its body wherever it is - a ring with a bright arc in it, which is still the frame. */
   .cs-frame-orbit::before{animation:none}
 }
@@ -745,13 +778,42 @@ export function NameInk({ look = null, scope = "light", children }) {
   );
 }
 
-export function NamePlate({ plate = null, children, className = "" }) {
+// The name on the player card: its plate if it wears one, otherwise its colour.
+//
+// Both, in one component, because only one of them can win and the rule is worth stating once. A PLATE WINS.
+// A plate is a fill and its own ink held together - that pairing is what makes it readable on any card - so a
+// name colour painted over one is a colour chosen for the card's scope sitting on a background that is not the
+// card. Measured: of the 975 name-colour-on-plate pairs, 596 fall below AA. On the card itself there is no
+// such problem at all - 1,073 pairs across every theme and all 32 team colours, none below AA - because a look
+// carries one palette per scope and the card publishes which scope it is (CARD_THEME_SCOPE).
+// That last part is why this is possible now and was not when nameplates were built: name colours did not have
+// per-scope palettes then, and "no colour clears AA on all three card scopes" was true of a single colour.
+export function NamePlate({ plate = null, look: nameLook = null, scope = "dark", children, className = "" }) {
   const look = NAMEPLATES[known(plate, "nameplate")];
-  if (!look) return children ?? null;
-  return (
-    <span className={`cs-nameplate ${look.lively ? "cs-lively" : ""} ${className}`.trim()} data-plate={plate}
+  if (!look) return <NameInk look={nameLook} scope={scope}>{children}</NameInk>;
+  // Wearing both: the plate keeps the letters, the name colour takes the plate's outer ring.
+  // Not the letters, and the numbers are why. A plate is a fill and its own ink held together, and a name
+  // colour is three palettes chosen for the app's three surfaces - so painting one onto a plate means asking
+  // a colour picked for cream, navy or black to work on a plate's own fill. Measured every way round: even
+  // letting each pair choose whichever of its three palettes suited that plate best, only 50 of the 99
+  // combinations clear AA. The 49 that cannot are every mid-tone fill - blue, ember, inferno, emerald,
+  // aurora - which is the one background neither a deep nor a bright palette can sit on.
+  // The ring is never behind a letter, so it carries the colour at no cost to reading the name, and both
+  // things you paid for are on the card at once.
+  const ink = namePaint(known(nameLook, "namecolor"), scope);
+  const banner = (
+    <span className={`cs-nameplate ${look.lively ? "cs-lively" : ""} ${ink ? "" : className}`.trim()} data-plate={plate}
           style={{ "--cs-nameplate": plateFill(look), "--cs-nameplate-ink": look.ink, "--cs-nameplate-trim": look.trim }}>
       {children}
+    </span>
+  );
+  if (!ink) return banner;
+  const fill = nameFill(ink.inks);
+  const ringClass = ["cs-plate-ring", fill && ink.lively ? "cs-lively" : "", className].filter(Boolean).join(" ");
+  return (
+    <span className={ringClass} data-name-look={nameLook}
+          style={{ "--cs-name-1": ink.inks[0], ...(fill ? { "--cs-name-fill": fill } : {}) }}>
+      {banner}
     </span>
   );
 }

@@ -13,7 +13,7 @@ const { act } = await import("react-dom/test-utils");
 const React = (await import("react")).default;
 const h = React.createElement;
 const cosmetics = await loadModule("cosmetics.jsx");
-const { FramedAvatar, CardTheme, TitleLine, Coin, Coins, ItemPreview, COSMETICS_CSS, CARD_THEME_SCOPE, COLORS, cardPaint, platePaint, NAMEPLATES, namePaint, nameFill, NAME_LOOKS, NAME_SCOPES, NameInk, teamCardColors, frameReach } = cosmetics;
+const { FramedAvatar, CardTheme, TitleLine, Coin, Coins, ItemPreview, COSMETICS_CSS, CARD_THEME_SCOPE, COLORS, cardPaint, platePaint, NAMEPLATES, namePaint, nameFill, NAME_LOOKS, NAME_SCOPES, NameInk, teamCardColors, frameReach , NamePlate, cardLook } = cosmetics;
 const { Avatar, AVATAR_PRESETS } = await loadModule("avatars.jsx");
 
 const FRAMES = SHOP_ITEMS.filter((i) => i.kind === "frame").map((i) => i.id);
@@ -336,6 +336,13 @@ await runTest("every nameplate's own text colour is AA-readable on its own fill"
 // `.lb tr.me td` washes your own row with 30% lime and a name still has to be readable in it. The night scope's
 // extra is the shop's preview chip, a shade deeper than the Leaderboard itself.
 // ADD TO THIS LIST when a board gains a painted background: a colour is only as checked as this list is honest.
+// A token like rgba(184,245,0,.16) flattened onto what it is painted over.
+const glowOver = (glow, under) => {
+  const m = String(glow).match(/rgba?\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
+  if (!m) return under;
+  const hex = `#${m.slice(1, 4).map((v) => Number(v).toString(16).padStart(2, "0")).join("")}`;
+  return mixed(hex, under, Number(m[4]));
+};
 const mixed = (a, b, p) => "#" + [0, 1, 2].map((i) => {
   const v = (h) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
   return Math.round(v(a) * p + v(b) * (1 - p)).toString(16).padStart(2, "0");
@@ -344,7 +351,10 @@ const NAME_SURFACES = {
   light: [THEME.light.bg, THEME.light.surface, THEME.light.surface2,
     mixed(THEME.light.accent, THEME.light.bg, 0.3), mixed(THEME.light.accent, THEME.light.surface, 0.3)],
   dark: [THEME.dark.bg, THEME.dark.surface, THEME.dark.surface2],
-  night: [THEME.night.bg, THEME.night.surface, THEME.night.surface2, COLORS.teamFloor],
+  // ...and the lime glow the Leaderboard's champion block paints into its top-left corner, which .champion .by
+  // renders a NameLink straight onto. It is a token over a token, so nothing above catches it.
+  night: [THEME.night.bg, THEME.night.surface, THEME.night.surface2, COLORS.teamFloor,
+    glowOver(THEME.night.glow, THEME.night.surface)],
 };
 
 await runTest("every name colour is AA-readable on every board surface, in all three scopes", async () => {
@@ -414,6 +424,61 @@ await runTest("NameInk paints the name and nothing else: a flat look is a colour
     assert(bare.container.textContent === "shrimpcity", `${look}: the name is shown anyway`);
     await act(async () => bare.reactRoot.unmount());
   }
+});
+
+await runTest("a name colour is readable on every card it can be worn on, and a nameplate wins over it", async () => {
+  // The card's scope picks the palette, exactly as a board's does - which is why this is possible at all. It
+  // was not when nameplates were built: a look was one colour then, and no single colour clears AA on cream,
+  // navy and true black. Every theme, and all 32 team colours for Team colors.
+  const looks = SHOP_ITEMS.filter((i) => i.kind === "namecolor").map((i) => i.id);
+  const cards = SHOP_ITEMS.filter((i) => i.kind === "card").map((i) => i.id);
+  const below = [];
+  let pairs = 0;
+  for (const look of looks) {
+    for (const card of cards) {
+      for (const team of card === "card-team" ? TEAM_CODES : [null]) {
+        const scope = CARD_THEME_SCOPE[cardLook(card, team)];
+        const paint = cardPaint(card, team);
+        for (const ink of NAME_LOOKS[look][scope]) {
+          for (const bg of paint.behindText) {
+            pairs++;
+            const r = contrast(ink, bg);
+            if (r < 4.5) below.push(`${look} on ${card}${team ? `/${team}` : ""}: ${ink} on ${bg} is ${r.toFixed(2)}:1`);
+          }
+        }
+      }
+    }
+  }
+  assert(pairs > 500, `the sweep is the whole matrix, got ${pairs} pairs`);
+  assert(below.length === 0, `name colours below AA on a card: ${below.slice(0, 4).join(" | ")}`);
+
+  // Wearing both: the plate keeps the letters and the name colour takes the plate's outer RING, so both are
+  // on the card and neither costs the other anything. The letters cannot carry it - even letting each pair
+  // pick whichever of its three palettes suits that plate best, only 50 of 99 combinations clear AA, and the
+  // 49 that fail are every mid-tone fill.
+  const plated = await renderComponent(() => h(NamePlate, { plate: "plate-gold", look: "name-vapor", scope: "night" }, "shrimpcity"));
+  const banner = plated.container.querySelector(".cs-nameplate");
+  assert(banner, "the plate is what renders");
+  assert(!plated.container.querySelector(".cs-name"), "the letters stay the plate's own ink");
+  const ring = plated.container.querySelector(".cs-plate-ring");
+  assert(ring && ring.dataset.nameLook === "name-vapor", "the plate sits inside the name colour");
+  assert(ring.style.getPropertyValue("--cs-name-fill") === nameFill(NAME_LOOKS["name-vapor"].night),
+    `carrying the whole gradient, not one stop: ${ring.style.getPropertyValue("--cs-name-fill")}`);
+  assert(ring.classList.contains("cs-lively"), "and drifting, because this look drifts");
+  assert(ring.contains(banner), "with the plate inside it");
+  await act(async () => plated.reactRoot.unmount());
+  // A plate with no name colour keeps the neutral ring it always had.
+  const plain = await renderComponent(() => h(NamePlate, { plate: "plate-gold", scope: "night" }, "shrimpcity"));
+  assert(!plain.container.querySelector(".cs-plate-ring"), "a plate with no colour is untouched");
+  assert(plain.container.querySelector(".cs-nameplate"), "and is still a plate");
+  await act(async () => plain.reactRoot.unmount());
+
+  // With no plate, the colour is what shows.
+  const bare = await renderComponent(() => h(NamePlate, { plate: null, look: "name-vapor", scope: "night" }, "shrimpcity"));
+  const ink = bare.container.querySelector(".cs-name");
+  assert(ink && ink.dataset.nameLook === "name-vapor", "with no plate the name wears its colour");
+  assert(ink.style.getPropertyValue("--cs-name-1") === NAME_LOOKS["name-vapor"].night[0], "in the card's own scope");
+  await act(async () => bare.reactRoot.unmount());
 });
 
 console.log("test-cosmetics.mjs done");

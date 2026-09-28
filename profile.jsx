@@ -23,7 +23,7 @@
 // your record." and a "Go to the draft" button; an owner given onOpenShop has a "Shop" button.
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar } from "./avatars.jsx";
-import { FramedAvatar, CardTheme, TitleLine, NamePlate, Coin, Coins } from "./cosmetics.jsx";
+import { FramedAvatar, CardTheme, TitleLine, NamePlate, Coin, Coins, CARD_THEME_SCOPE, cardLook } from "./cosmetics.jsx";
 import { AvatarPicker } from "./avatar-picker.jsx";
 import { ReportSheet } from "./moderation.jsx";
 import { BADGE_BY_ID, badgeProgress, topBadges } from "./badges.mjs";
@@ -369,7 +369,8 @@ function PlayerCard({ profile, details, progress, isOwner, signedIn, moderator, 
         <FramedAvatar frame={details.frame} team={team} username={profile.username} photoUrl={details.avatarUrl}
           preset={details.avatarPreset} size={84} decorative />
         <div className="pf-id">
-          <h1 className="pf-name"><NamePlate plate={details.nameplate}>{profile.username}</NamePlate></h1>
+          <h1 className="pf-name"><NamePlate plate={details.nameplate} look={details.namecolor}
+            scope={CARD_THEME_SCOPE[cardLook(details.cardTheme, team)]}>{profile.username}</NamePlate></h1>
           <TitleLine title={details.title} className="pf-title" />
           {team && (
             <p className="pf-team"><span className="pf-swatch" style={teamVars(team)} role="img" aria-label="Favorite team" />{teamName(team)}</p>

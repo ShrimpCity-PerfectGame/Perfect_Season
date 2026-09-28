@@ -203,8 +203,11 @@ function ProfilePreview({ userId, owner }) {
   const fixtures = { veteran: veteranProfile, rookie: rookieProfile, photo: photoProfile };
   const [profile, setProfile] = useState(() => {
     const p = (fixtures[params.get("fixture")] || veteranProfile)();
-    // What the card wears (SHOP.md 7.3): frame=, card= and title= take shop item ids, e.g. card=card-ticket.
-    const worn = Object.fromEntries([["frame", "frame"], ["cardTheme", "card"], ["title", "title"]]
+    // What the card wears (SHOP.md 7.3): frame=, card=, title=, plate= and namecolor= take shop item ids,
+    // e.g. card=card-cosmos&namecolor=name-vapor. A name colour only shows with no plate on - a plate brings
+    // its own background and wins - so plate= and namecolor= together is how you check that rule.
+    const worn = Object.fromEntries([["frame", "frame"], ["cardTheme", "card"], ["title", "title"],
+      ["nameplate", "plate"], ["namecolor", "namecolor"]]
       .map(([key, param]) => [key, params.get(param)]).filter(([, id]) => id));
     // team=SF (or team=none) swaps the fixture's favorite team, e.g. to see a long team name beside a long username.
     if (params.has("team")) worn.favoriteTeam = TEAMS[params.get("team")] ? params.get("team") : null;
@@ -417,7 +420,19 @@ function ShopPreview({ userId, username }) {
 
 async function setUpShop() {
   const username = params.get("name") || "shrimpcity";
-  const { data } = await mock.auth.signUp({ email: `${username}@harness.test`, password: "harness-only", options: { data: { username } } });
+  const { data, error } = await mock.auth.signUp({ email: `${username}@harness.test`, password: "harness-only", options: { data: { username } } });
+  // A blank page with a TypeError was the old answer to a name the seed already holds, or one the username
+  // rule refuses (over 16 characters, a space, a hyphen) - and name= exists precisely so those can be tried.
+  // The signup rules are the real ones here, so it says which one refused rather than failing to render.
+  if (!data?.user?.id) {
+    // The mock's own words, not a guess at them - a duplicate name comes back as a unique-constraint error and
+    // a bad one as Auth's generic "Database error saving new user", and guessing which got it wrong.
+    const why = error?.message || "the mock refused the signup";
+    document.getElementById("root").innerHTML =
+      `<p style="font:16px system-ui;padding:24px">Harness: could not open the shop as <b>${username}</b> - ${why}.<br>`
+      + `Pick a name the seed does not already hold, 3-16 of A-Z, a-z, 0-9 and _ .</p>`;
+    return;
+  }
   const uid = data.user.id;
   // A veteran's career, so badges are earned: Undefeated is paid (its frame and title are owned), and Dynasty is
   // earned but not paid yet, so its card theme says it unlocks after the next finished season.

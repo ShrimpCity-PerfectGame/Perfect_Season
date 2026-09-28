@@ -196,7 +196,8 @@ export const VERSUS_CSS = `
   /* Wraps rather than ellipsising, the same as your own strip: "Trevor La..." is not a player you can pick out
      of a roster, and knowing who they hold is the entire job of this block. */
   .vs-them .slot .v{font-size:12px;margin-top:0;line-height:1.15}
-  .vs-them .slot .k{font-size:11px}
+  /* The same 12px floor the line above sets for your own side. These two were the last things under it. */
+.vs-them .slot .k{font-size:12px}
   .vs-them .slot[data-filled="1"]{border-style:solid}
   .vs-them .vs-track{margin-top:4px}
   .vs-powers .btn{padding:7px 9px}
@@ -210,7 +211,7 @@ export const VERSUS_CSS = `
 @media (pointer:coarse){
   .vs-rosters .vs-grab{min-height:44px;position:relative;z-index:1}
   .vs-them .vs-grab{min-height:44px}
-  .vs-them .vs-grab .sub{display:block;font-size:11px}
+  .vs-them .vs-grab .sub{display:block;font-size:12px}
 }
 `;
 

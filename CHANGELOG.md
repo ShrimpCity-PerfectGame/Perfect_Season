@@ -10,6 +10,51 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.8.2] — 2026-09-27
+
+Client only. No migration, no Edge Function change.
+
+### Added
+
+- **A name colour now shows on the player card**, which it did not before. The reason it could not was real and
+  is now out of date: "no colour clears AA on cream, navy and black" was true of a single colour, and a look has
+  carried one palette per scope since 2.7.0 - and the card publishes its scope. Measured across every theme and
+  all 32 team colours: **1,073 colour-on-card pairs, none below AA.**
+- **A nameplate and a name colour work together.** The plate sits inside the colour, as a frame around it, and
+  because a frame is never behind a letter it carries the whole look - the full gradient, drifting if the look
+  drifts. The letters stay the plate's own ink, and that part is not a preference: painting the colour onto the
+  letters fails even when each pair is allowed to pick whichever of its three palettes suits that plate best -
+  **only 50 of 99 combinations clear AA**, and the 49 that fail are every mid-tone fill.
+- `plate=` and `namecolor=` in the UI harness, so any combination of the two can be looked at.
+
+### Changed
+
+- **Cosmos was a purple outline, and the reason was a mistake in how it was built.** Everything was behind text,
+  where everything has to clear AA, so the whole card had to be dark enough to read through. The other themes do
+  not do this: Turf's chalk, Ticket's barcode and Dynasty's wreath all live in the trim, the outer band the
+  card's padding keeps text out of. Rebuilt on that split - a brighter nebula behind text, real starlines in the
+  trim, and a four-ring edge. The binding constraint turned out to be a star landing inside the nebula, which is
+  why the stars behind text are a texture and the visible ones are in the trim.
+
+### Fixed
+
+- **Self-tinted chips ate their own contrast.** A chip tinted with its own colour at 16% put its text below AA:
+  the draft board's quarterback pill measured 3.71:1, Genius 4.30:1. All now 6%, the one value every position
+  and both mode chips clear on every scope.
+- Every label under the 12px floor `tools/ui-harness/audit.mjs` holds the app to - the position pill, the stat
+  labels, the result strip, the duel's opponent strip - raised to it.
+- The Reports queue's name button underlined in `--line2` at **1.39:1**, its only affordance. Now 6.67:1.
+- Three reduced-motion gaps closed per selector rather than by hiding a parent: `.ball.air` (which a media query
+  could never reach, being less specific than the rule meant to stop it), `.confetti i`, and the admin panel's
+  marker.
+- **The shop dropped three slots on every save.** `showDetails` rebuilt what you were wearing from the saved row
+  and named only frame, card and title - so the nameplate, name colour and celebration came back undefined, and
+  the item you had just equipped showed as merely Owned with an Equip button under it.
+- `name-flame`'s blush was 4.30:1 on the Leaderboard champion block's lime glow - a token painted over a token,
+  which no surface list had. The glow is in `NAME_SURFACES` now.
+- The UI harness rendered a blank page and a TypeError for `screen=shop&name=` with a name the seed already
+  holds or the username rule refuses. It says which, in the mock's own words.
+
 ## [2.8.1] — 2026-09-27
 
 **Order: `migration-shop.sql`, then `migration-profiles.sql`, then BOTH Edge Functions, then the client** -

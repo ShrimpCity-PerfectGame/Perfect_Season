@@ -818,8 +818,8 @@ p.gamecoins .earned{display:flex}
    tiles, so the draft you're in reads at a glance. */
 .seedline{flex-wrap:wrap;justify-content:flex-end;row-gap:6px}
 .modechip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:800;line-height:1.2;white-space:nowrap;border-radius:999px;padding:3px 10px;border:1.5px solid var(--line2);color:var(--ink);background:var(--surface)}
-.modechip.genius{color:var(--genius);border-color:color-mix(in srgb,var(--genius) 60%,transparent);background:color-mix(in srgb,var(--genius) 16%,transparent)}
-.modechip.gm{color:var(--gm);border-color:color-mix(in srgb,var(--gm) 60%,transparent);background:color-mix(in srgb,var(--gm) 16%,transparent)}
+.modechip.genius{color:var(--genius);border-color:color-mix(in srgb,var(--genius) 60%,transparent);background:color-mix(in srgb,var(--genius) 6%,transparent)}
+.modechip.gm{color:var(--gm);border-color:color-mix(in srgb,var(--gm) 60%,transparent);background:color-mix(in srgb,var(--gm) 6%,transparent)}
 .reel{position:relative;overflow:hidden;margin-bottom:10px;padding:18px 20px 16px 22px;border-radius:16px;
   background:linear-gradient(102deg,var(--tc-deep,var(--tc1)) 0%,color-mix(in srgb,var(--tc-deep,var(--tc1)) 62%,var(--bg)) 46%,color-mix(in srgb,var(--tc-deep,var(--tc1)) 18%,var(--bg)) 82%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 12px 30px rgba(0,0,0,.35)}
@@ -875,13 +875,17 @@ p.gamecoins .earned{display:flex}
 .nm-row{display:flex;align-items:center;gap:8px}
 .card .nm{font-weight:700;font-size:16px}
 .card .meta{font-size:13px;color:var(--muted);margin-top:2px}
-.pp{font-size:11px;font-weight:800;color:var(--pc);background:color-mix(in srgb,var(--pc) 16%,transparent);border-radius:5px;padding:1px 6px}
+/* 12px and a 6% tint, both for the reasons .chip.on carries: 11px is under the floor tools/ui-harness's
+   audit holds the app to, and a chip tinted with its own colour eats the contrast of the text on it - the
+   quarterback pill measured 3.71:1 on the draft board's card. 6% is the one value every position and both
+   mode chips clear AA at, on every scope. */
+.pp{font-size:12px;font-weight:800;color:var(--pc);background:color-mix(in srgb,var(--pc) 6%,transparent);border-radius:5px;padding:1px 6px}
 .tdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--tc1);box-shadow:0 0 0 1.5px var(--tc2);margin-right:6px;vertical-align:middle}
 .cells{display:flex;flex-wrap:wrap;gap:6px 0}
 .cell{width:62px}
 .cell .n{font-weight:700;font-size:16px;line-height:1.1}
 .cell:first-child .n{color:var(--pc)}
-.cell .l{font-size:11px;color:var(--muted)}
+.cell .l{font-size:12px;color:var(--muted)}
 .drafts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 
 /* ===== LED numerals: the wrapper glows, the inner text is cut into bulbs ===== */
@@ -917,7 +921,7 @@ p.gamecoins .earned{display:flex}
 .strip .n{font-family:var(--display);font-weight:400;font-size:28px;line-height:1.05}
 .strip .n.up{color:var(--win)}
 .strip .n.down{color:var(--loss)}
-.strip .l{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.strip .l{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
 .strip .s{font-size:12px;color:var(--muted)}
 .moments{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:14px}
 .mo{font-size:13px;font-weight:700;color:var(--ink);border-radius:999px;padding:4px 11px;box-shadow:inset 0 0 0 1px var(--line2)}
@@ -1150,11 +1154,10 @@ p.gamecoins .earned{display:flex}
 .pickerbar{position:sticky;top:var(--sa-top,0px);z-index:5;background:var(--bg);padding-block:8px;margin-bottom:6px;box-shadow:0 1px 0 var(--line)}
 @media (max-width:720px) and (orientation:portrait){
   .cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;gap:8px 6px}.cell{width:auto}
-  .cell .l,.pp{font-size:12px}
 }
 @media (max-width:640px){
   .rc.rank{grid-template-columns:24px minmax(0,1fr) auto}.rc.rank .alt{grid-column:auto}
-  .cell .l,.pp,.slot .sub{font-size:12px}
+  .slot .sub{font-size:12px}
   .ps select.inp{flex:1 1 130px}
 }
 @media (max-width:480px){
@@ -1258,7 +1261,14 @@ p.gamecoins .earned{display:flex}
   .cel.perfect .big{animation:none;background:none;color:var(--accent)}
   .sou-timer.danger{animation:none}
   .g,.flash,.ball{animation:none}
-  .ball,.trail,.sticky{transition:none}
+  /* .ball.air is (0,2,0) and .ball is (0,1,0); a media query adds no specificity, so the line below never
+     reached it. Nothing shows it today - PlayoffGame is handed instant={reducedMotion()} and starts at the
+     end - but the CSS has to hold on its own, not on a JS gate somewhere else staying put. */
+  .ball,.trail,.sticky,.ball.air{transition:none}
+  /* Per selector, not by hiding the parent: the parent being display:none is what makes this invisible
+     today, and that is the pattern the cosmetics test forbids for exactly this reason. */
+  .confetti i{animation:none}
+  .adminpanel>summary::after{transition:none}
   .btn,.mode,.fmtbtn,.card,.tab{transition:none}
   .btn:hover:not(:disabled),.btn:active:not(:disabled),.mode:hover:not(.static),.mode:active:not(.static),.fmtbtn:hover,.card:hover:not(.off){transform:none}
 }
