@@ -233,7 +233,8 @@ const PICTURE_ERROR = {
   network: "That didn't save. Check your connection and try again.",
 };
 const EMPTY_DETAILS = {
-  bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null, title: null, showcase: [], updatedAt: null,
+  bio: "", avatarPath: null, avatarUrl: null, avatarPreset: null, favoriteTeam: null, frame: null, cardTheme: null,
+  title: null, nameplate: null, namecolor: null, celebration: null, showcase: [], updatedAt: null,
 };
 const EMPTY_EXTRA = mapPlayerStats(null);
 

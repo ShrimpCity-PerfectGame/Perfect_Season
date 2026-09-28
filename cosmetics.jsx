@@ -940,7 +940,12 @@ export function ItemPreview({ id, team = null, username = "", photoUrl = null, p
     );
   }
   if (item.kind === "nameplate") {
+    // Guarded like NamePlate and NameInk are, and unlike this used to be. shop.jsx's drawable() admits an item
+    // on catalog membership alone, so a future release that adds a plate to shop-catalog.mjs and seeds the row
+    // but forgets its NAMEPLATES entry - the exact split the catalog file warns about - would throw here on
+    // render. There is no error boundary anywhere in the app, so that is the whole shop screen, for everyone.
     const look = NAMEPLATES[id];
+    if (!look) return null;
     return (
       <span className="cs-preview" aria-hidden="true" data-preview={id}>
         <span className={`cs-nameplate cs-nameplate-preview ${look.lively ? "cs-lively" : ""}`.trim()} data-plate={id}

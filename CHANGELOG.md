@@ -10,6 +10,46 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.8.3] — 2026-09-27
+
+The rest of the sweep's confirmed findings. Client and one SQL function; no Edge Function change.
+**Re-run `migration-runs-log.sql`** before the client - it clamps `site_stats`' limit and changes nothing else.
+
+### Fixed
+
+- **A failed read told you your account had saved nothing.** `fetchProfileDetails` answered `null` both for
+  "this read failed" and "there is no details row", so one dropped request - a 500, a 502, a 429, the errors
+  postgrest-js does not retry - left the header with no frame and no picture for the whole session, and the win
+  celebration the player bought, or earned with the undefeated badge, silently did not play when they went
+  20-0. Nothing on screen said a read had failed and only a reload fixed it. It throws now, the caller gives it
+  one more go, and failing that keeps what is on screen rather than claiming they wear nothing. The same
+  distinction `fetchProfile` was given in v2.0.0, for the same reason.
+- **Over/Under announced something that had not happened.** A dropped insert and a real duplicate were both
+  `false`, and the screen turned that into "Today's Over/Under was already recorded on another device" - to a
+  player on their only device, with no row anywhere. Because the coins are claimed only on a save, the day's 15
+  went unclaimed, and the device's own done-flag was written regardless, so there was no second try.
+  `upsertSouRun` answers "saved", "already" or "failed" now; `23505` is the only error that means recorded.
+- **The Stats screen printed "0 / Created players" when only that one query failed.** `fetchBuildCount`
+  returned `0` for a failed read, against the rule `fetchSiteTotals` states two functions above it: "a failed
+  request must not show up as '0 drafts'". It returns null and the tile shows a dash.
+- **Four duel powerup refusals were not on the buttons**, against the promise the file's own header makes and
+  `VersusHowTo` repeats to the player: `already_dipped`, `no_room`, `respin_too_late` and `one_at_a_time`. The
+  commonest is ordinary play - your opponent doubles up on a board, and your own Double dip stays lit and
+  answers "somebody has already doubled up on this board". Same shape as the GM cap being enforced on one of
+  the two doors into `draft()`.
+- **The steal's target buttons enforced no rule at all.** Every filled slot on the opponent's strip was
+  tappable, so the refusal arrived after the tap: "that doesn't fit a slot you have open" for a player who
+  could never have worked, and "a player can only change hands once" for the first thing a robbed player tries.
+  The strip now asks `stealableSlots`, which is what `decideMove` asks.
+- **`site_stats` was the one RPC with an unclamped limit**, while granted to `anon` over the public REST API -
+  nine subqueries using `p_limit` raw, where `null` means no limit at all in SQL. Clamped to 50, like
+  `ladder_best`, `versus_top` and `board_looks` already are. The mock is clamped identically: a JS default
+  fires only on `undefined`, so `p_limit: null` used to mean zero rows there and everything in SQL.
+- `ItemPreview` indexed `NAMEPLATES` without a guard, unlike `NamePlate` and `NameInk` beside it. A plate added
+  to the catalog and seeded but missing its drawing - the exact split the catalog file warns about - would have
+  thrown on render, and with no error boundary anywhere that is the whole shop screen for everyone.
+- `profile.jsx`'s `EMPTY_DETAILS` was missing the three newest fields, the same omission the shop had.
+
 ## [2.8.2] — 2026-09-27
 
 Client only. No migration, no Edge Function change.

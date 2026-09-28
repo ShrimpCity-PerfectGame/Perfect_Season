@@ -70,16 +70,18 @@ export async function fetchPlayerProfile(username) {
   }
 }
 
-// The signed-in player's own details, for the header picture. null if they can't be loaded.
+// The signed-in player's own details: what the header picture, the frame and the win celebration are read
+// from. THROWS when the read fails, and answers an empty details object when the account simply has no row -
+// the same distinction fetchProfile had to be given, for the same reason. Collapsing both into null meant one
+// dropped request (a 500, a 502, a 429 - the errors postgrest-js does not retry) left `myDetails` null for the
+// whole session: no frame, no picture, no name colour, and - the one that costs money - the win celebration
+// they bought or earned with the undefeated badge silently not playing when they went 20-0. Nothing on screen
+// said a read had failed, and only a reload fixed it.
 export async function fetchProfileDetails(userId) {
   if (!userId) return null;
-  try {
-    const { data, error } = await getClient().from("profile_details").select("*").eq("user_id", userId);
-    if (error) return null;
-    return mapDetails(Array.isArray(data) ? data[0] || null : data);
-  } catch (e) {
-    return null;
-  }
+  const { data, error } = await getClient().from("profile_details").select("*").eq("user_id", userId);
+  if (error) throw error;
+  return mapDetails(Array.isArray(data) ? data[0] || null : data);
 }
 
 // A guest may not put a bio or a picture on the site (PROFILES.md 3.1). Unmapped it fell through to

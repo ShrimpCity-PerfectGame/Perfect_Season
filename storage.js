@@ -268,9 +268,16 @@ export async function fetchMySouRun(date, userId) {
   if (error || !data) return null;
   return { score: data.score };
 }
+// "saved" | "already" | "failed". Three answers, not two, because the caller says something factual about the
+// world: told `false`, it announced "already recorded on another device" - and a dropped request says nothing
+// of the sort. A player on their only device was told their score was safe somewhere else when no row existed
+// anywhere, and because the coins are claimed only on a save, the day's 15 went unclaimed and the device's own
+// done-flag was written regardless, so there was no second try. 23505 is the unique violation, and the only
+// error that means the day really is already recorded.
 export async function upsertSouRun(date, userId, row) {
   const { error } = await getClient().from("sou_runs").insert({ date, user_id: userId, username: row.username, score: row.score });
-  return !error;
+  if (!error) return "saved";
+  return error.code === "23505" ? "already" : "failed";
 }
 
 // Build-a-player is stat-free for the player's own account (see playBapSim's own comment in
@@ -306,8 +313,11 @@ export async function fetchTopBuilds(limit = 10) {
     .filter((b) => Number.isFinite(b.overall) && BUILD_POSITIONS.includes(b.pos));
 }
 export async function fetchBuildCount() {
+  // null when it cannot be loaded, never 0 - the rule fetchSiteTotals states above and this one did not keep.
+  // The Stats screen takes its error flag from fetchSiteStats alone, so when only this query failed the screen
+  // rendered "0 / Created players" beside boards that had loaded perfectly: a wrong number, stated plainly.
   const { count, error } = await getClient().from("builds").select("*", { count: "exact", head: true });
-  return error || count == null ? 0 : count;
+  return error || count == null ? null : count;
 }
 
 // Every Stats-screen board, computed in the database by site_stats() (supabase/migration-runs-log.sql)

@@ -567,7 +567,11 @@ export function makeMockAuth() {
       perfect: rows.reduce((t, r) => t + (r.perfect || 0), 0),
     };
   }
-  function siteStats({ p_limit: limit = 10 } = {}) {
+  function siteStats({ p_limit } = {}) {
+    // Clamped exactly as the SQL clamps it. A JS default fires only on `undefined`, so `p_limit: null` used to
+    // mean slice(0, null) - zero rows - while SQL's `limit null` means no limit at all: the two disagreed on
+    // the one value a hand-rolled call is most likely to send.
+    const limit = Math.max(1, Math.min(p_limit ?? 10, 50));
     const all = [...profiles.values()];
     const played = all.filter((p) => (p.runs || 0) + (p.dnf || 0) > 0);
     const logged = [...runs.values()].filter((r) => !r.dnf);

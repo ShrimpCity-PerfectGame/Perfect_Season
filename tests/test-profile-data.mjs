@@ -855,7 +855,7 @@ await runTest("fetchPlayerProfile: ok for an exact or unambiguous name, missing 
   restore();
 });
 
-await runTest("fetchProfileDetails: the saved details, empty details for none saved, null when it can't load", async () => {
+await runTest("fetchProfileDetails: the saved details, empty details for none saved, and THROWS when it can't load", async () => {
   auth._profileDetails.set(ME, { user_id: ME, bio: "Hi", avatar_path: `${ME}/1757800000000.webp`, avatar_preset: null, favorite_team: "KC", updated_at: "2026-09-14T10:00:00.000Z" });
   const d = await P.fetchProfileDetails(ME);
   assert(same(d, { ...EMPTY_DETAILS, bio: "Hi", avatarPath: `${ME}/1757800000000.webp`, avatarUrl: `https://storage.mock/avatars/${ME}/1757800000000.webp`, favoriteTeam: "KC", updatedAt: "2026-09-14T10:00:00.000Z" }), `mapped details, got ${JSON.stringify(d)}`);
@@ -864,9 +864,18 @@ await runTest("fetchProfileDetails: the saved details, empty details for none sa
   const client = Object.create(auth);
   client.from = () => ({ select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: "boom" } }) }) });
   window.__ps_supabase__ = client;
-  assert((await P.fetchProfileDetails(ME)) === null, "a failed read is null");
+  // A failed read is not "this account has saved nothing" - the same distinction fetchProfile was given, and
+  // for a bigger reason here: null meant the header lost its frame and picture for the session, and the win
+  // celebration the player owns did not play when they went 20-0. Nothing on screen said a read had failed.
+  await P.fetchProfileDetails(ME).then(
+    (d) => assert(false, `a failed read throws rather than answering ${JSON.stringify(d)}`),
+    (e) => assert(e && e.message === "boom", `and passes the error up, got ${JSON.stringify(e)}`),
+  );
   client.from = () => { throw new Error("offline"); };
-  assert((await P.fetchProfileDetails(ME)) === null, "a thrown error is null");
+  await P.fetchProfileDetails(ME).then(
+    () => assert(false, "a thrown error is not swallowed into an answer either"),
+    (e) => assert(e && e.message === "offline", `it comes up as itself, got ${e && e.message}`),
+  );
   restore();
   auth._profileDetails.delete(ME);
   assert(P.avatarUrl(null) === null && P.avatarUrl("") === null && P.avatarUrl(`${ME}/1.webp`) === `https://storage.mock/avatars/${ME}/1.webp`, "avatarUrl");

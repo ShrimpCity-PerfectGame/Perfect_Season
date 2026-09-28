@@ -2260,7 +2260,7 @@ export default function PerfectSeason() {
   const [boardLooks, setBoardLooks] = useState(() => ({ supporters: new Set(), looks: new Map() }));
   const [lbMode, setLbMode] = useState("all");
   const [best, setBest] = useState({ loading: false, rows: [], mode: "all", format: "fantasy" });
-  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: 0, topBuilds: [] });
+  const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: null, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
   const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
   const siteActivity = useRef(null); // { unsubscribe, broadcastDraftFinished } from subscribeSiteActivity - finish() reaches it to announce a completed draft
@@ -2894,7 +2894,7 @@ export default function PerfectSeason() {
       const [data, buildCount, topBuilds] = await Promise.all([fetchSiteStats(10), fetchBuildCount(), fetchTopBuilds(10)]);
       setSiteStats({ loading: false, loaded: true, data, error: !data, buildCount, topBuilds });
     } catch (e) {
-      setSiteStats({ loading: false, loaded: true, data: null, error: true, buildCount: 0, topBuilds: [] });
+      setSiteStats({ loading: false, loaded: true, data: null, error: true, buildCount: null, topBuilds: [] });
     }
   }
 
@@ -3077,7 +3077,15 @@ export default function PerfectSeason() {
   function loadAccountExtras(uid) {
     const account = ++accountReq.current;
     const details = ++detailsReq.current;
-    fetchProfileDetails(uid).then((d) => { if (account === accountReq.current && details === detailsReq.current) setMyDetails(d); });
+    // One retry, then leave what is on screen alone. A failed read is not "this account has saved nothing":
+    // answering it with null cost the player their frame, their picture, their name colour and - the one that
+    // costs money - the win celebration they own, silently, for the rest of the session. The same second go
+    // adoptSession gives a dropped profile read, for the same reason.
+    const readDetails = () => fetchProfileDetails(uid).catch(() => new Promise((r) => setTimeout(r, 600)).then(() => fetchProfileDetails(uid)));
+    readDetails().then(
+      (d) => { if (account === accountReq.current && details === detailsReq.current) setMyDetails(d); },
+      () => { /* twice is enough: keep whatever is showing rather than claim they wear nothing */ },
+    );
     isModerator().then((m) => { if (account === accountReq.current) setIsMod(m); });
   }
   function clearAccountExtras() {
@@ -3685,8 +3693,11 @@ export default function PerfectSeason() {
       // there first - so the score on the board is the one that counts and this run is not it. Either
       // way the day is done; what must not happen is the silence it used to answer with.
       const saved = await upsertSouRun(date, userId, { username: user, score });
-      if (saved) claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
-      else setNotice("Today's Over/Under was already recorded on another device, so this one didn't count.");
+      if (saved === "saved") claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
+      else if (saved === "already") setNotice("Today's Over/Under was already recorded on another device, so this one didn't count.");
+      // A dropped request is not that, and saying so was a lie about the world: no row existed anywhere, and
+      // because the coins are claimed only on a save, the day's 15 went unclaimed with no way back to them.
+      else setNotice("That score didn't reach the board. Your round still counted - check the board in a moment.");
     }
     loadSouBoard(date);
   }
@@ -5090,7 +5101,7 @@ export default function PerfectSeason() {
                   <div className="tile"><div className="n">{(liveDrafts ?? site.totals.runs).toLocaleString()}</div><div className="l">Drafts</div></div>
                   <div className="tile"><div className="n">{site.totals.perfect}</div><div className="l">Perfect seasons</div></div>
                   <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
-                  <div className="tile"><div className="n">{siteStats.buildCount}</div><div className="l">Created players</div></div>
+                  <div className="tile"><div className="n">{siteStats.buildCount == null ? "–" : siteStats.buildCount}</div><div className="l">Created players</div></div>
                 </div>
                 {siteStats.error && <p className="note">Stats couldn't be loaded. Try Refresh.</p>}
                 <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>
