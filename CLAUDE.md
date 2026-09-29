@@ -140,7 +140,7 @@ that function is allowed to change an existing name. **`claim_username` is the g
 clearing `guest` is what opens all of the above, so it refuses unless a credential is actually attached to the
 `auth.users` row - otherwise an anonymous session calls the RPC itself and gets a full account for one sign-in
 and one POST, over and over. The check is permissive on purpose (email, a pending email change, phone, or no
-longer anonymous): with email confirmation ON, which staging has, the address can sit in `email_change` while
+longer anonymous): with email confirmation ON (staging had it on when this was written and has it OFF as of 2026-09-28 - the drift this section warns about, checked by signing up), the address can sit in `email_change` while
 `is_anonymous` stays true, so gating on that flag alone would refuse the real trade-up. Everything played, earned and counted stays. The known cost
 is leaderboard pressure: one person can make guests freely, so **turn on a CAPTCHA for anonymous sign-ins** in
 each Supabase project before this is busy, and remember anonymous users count toward Supabase's monthly actives.
@@ -257,10 +257,16 @@ parts that are unlike everything else:
 - **The daily's seed is the function's clock**, and a code that HASHES to one is refused, the protection the main
   daily has. `tests/test-century-edge.mjs` finds such a collision in about a second by meeting in the middle, and
   then asserts it is turned away.
-- **`migration-century.sql` goes after profiles and before moderation and wallet.** It creates a trigger using
-  `use_account_username`; `claim_minigame` reads its table and both `mod_act` and `claim_username` rewrite its
-  name snapshots. All of those bodies are plpgsql, so the wrong order fails nothing until a guest trades up -
-  which is the worst shape a runbook can be in, and why `tests/test-migrations.mjs` holds the order.
+- **`migration-century.sql` runs FIRST, before runs-log** (v2.12.0). `player_stats` reads `century_runs` and is
+  `language sql`, whose body is validated the moment it is created - so runs-log fails outright without the
+  table. Century's trigger therefore lives in `migration-profiles.sql`, beside the ones on `sou_runs` and
+  `builds`, which is what lets this file depend on nothing. Everything ELSE that reads the table
+  (`claim_minigame`, `claim_username`, `mod_act`) is plpgsql and is NOT validated at creation, so those
+  orderings fail nothing until somebody calls them - the worst shape a runbook can be in, and why
+  `tests/test-migrations.mjs` runs the whole list on a bare database.
+- **The Century badge is the DAILY's hundred** (v2.12.0), gold and paying, and `submit-century` awards it itself
+  because a Century-only player may never finish a season for submit-run to pay it from. `badges.mjs` copies the
+  threshold rather than importing it, because that file is pure by rule.
 - **The screens ARE the draft's** (v2.9.1): the same `.reel`, `.roster`/`.slot`, `.sec`/`.card` and Lock in
   controls, the same `.mode` tiles on its menu, the same `.result-hero` at the end - with the stat cells left off,
   which is precisely what Genius mode does to that markup. The root takes the dark scope while a run is in
@@ -269,8 +275,88 @@ parts that are unlike everything else:
 - **A rule belongs in one function both doors ask.** `centuryBlock` is what the board's `disabled` state, the
   Lock in button AND the roster tile call, because the GM cap's history is that a screen can look right and
   enforce nothing.
-- **Not built:** no share card, nothing on the profile (`player_stats` does not count Century runs), no badges.
-  CENTURY.md 9 says so rather than leaving them half-done.
+- **Not built:** nothing on the profile SCREEN (`player_stats` carries a Century block since v2.12.0, but no
+  screen prints it). The share card landed in v2.11.0 and the badge in v2.12.0; CENTURY.md 9 is the current list.
+
+**Guess the Player (v2.13.0, reshaped in v2.14.0).** A daily game of a different shape: one real player a day
+and **five guesses**, each drawing a row that compares **team, division, position, draft class and jersey
+number** with the answer. Green is exact, grey is no, and yellow means something different in every column.
+Daily and Practice, behind Mini games. **`GUESS.md` is the reference** - read it before touching any of it. The
+parts unlike everything else:
+
+- **The pool is who has been playing, plus the greats.** Quarterbacks, backs, receivers and tight ends with 100+
+  snaps SINCE THE START OF THE 2025 SEASON - two seasons added together - and the 25 best retired players at
+  those positions by career value ranked *within* position. 481 players as this was written. There is no defence
+  and no offensive line: a lineman has no statistics a fan carries around, and nothing the game shows is about
+  him rather than about his team.
+- **The window is two seasons for a reason.** One season made the pool three weeks of football in September
+  (168 men) and left out anybody hurt early - Puka Nacua had 727 snaps in 2025, 43 in 2026, and was not in the
+  game - and it went wrong within a week of any build. `GUESS_POOL_INFO` carries the window, the snap bar and
+  the legend count from the file into the app, so the screen states the rule from the DATA: that sentence has
+  been wrong twice already from being written out by hand.
+- **It has been three different pools, and the history is the argument.** v2.13.0 kept every drafted player with
+  a five-season career (4,637) - wrong at both ends, because 723 men lasted five seasons without ever playing
+  (Rodney Adams took TEN snaps in six) while the draft classes stopped at 2022, so no Jayden Daniels or Brock
+  Bowers could be the answer. Then a Guessability Score over six weighted terms took a share of each position
+  group (773) - better, and still asking about the hundredth-best corner of the century. Now: the men on the
+  field. Each version is in GUESS.md 1 with what it cost.
+- **IT AGES.** Two seasons wide, so it does not go stale in a week - but a rookie arriving mid-season is not in
+  it until `node tools/data/build-guess-pool.mjs` is re-run (`GP_SEASON` pins a season). Rebuild when a season
+  ends. The client and `submit-guess` must ship together every time, since both carry a copy of the pool.
+- **Two columns are not simply lying around.** The jersey number is blank in the player index for thousands of
+  people, so the builder falls back to the season ROSTERS and keeps the number each man appeared under most -
+  reading it off the index and judging it there is how Ezekiel Elliott, a fourth overall pick with two rushing
+  titles, was in no version of the game. nflverse also writes 0 for "unknown" and 0 was not legal before 2023,
+  so a #0 on an older career is a missing value. An undrafted player has no draft team or class either: he gets
+  the team he came into the league with (the earliest roster that has him) and his first season as his class.
+- **`guess-logic.mjs` owns every rule**, imported by the screen, the Edge Function and the tests, and **solved is
+  decided by identity** - the last guess being the answer - never by counting green cells. `compareGuess` is the
+  only place "close" is defined, and it differs per column: the same conference, the same side of the ball, a
+  draft class within two, a number within five, with an arrow on the two numeric ones.
+- **The daily walks a fixed cycle, one turn each**, so nobody comes round until everybody has been asked - 481
+  days, about sixteen months. The weighted version (the best-known quarter three times a cycle)
+  was RIGHT for 731 players and wrong for 193: it brings a man back inside four months, and a daily that repeats
+  inside a season is worse than one that asks a hard question. `GUESS_BANDS` still names the bands because
+  `guessDifficulty` prints them on the end screen - **after** the game, never before.
+- **Five guesses and a small pool move together.** Eight guesses at a pool this size falls to elimination most
+  days. Measured: a blind bot wins 1.05% of games now against 0.20% at eight guesses and 4,637 players, and
+  `tests/test-guess-logic.mjs` prints that number rather than burying it.
+- **`guess_runs` is the second board no client can write** (RLS on, public select, no write policy), and
+  `submit-guess` is the only writer. It takes **the guesses, not the result**: the answer follows from the date,
+  so it recomputes it and derives solved/tries itself, and the answer goes back in the response **only once the
+  row is written**. It never touches `profiles` and pays no coins - `claim_minigame('guess', day)` does that.
+  The table's `tries` bound is a named constraint that the migration drops and re-adds, because
+  `create table if not exists` leaves an existing table's checks alone - and it fails on a row from the old
+  eight-guess rules, which is correct.
+- **`migration-guess.sql` goes after century and before runs-log**, then profiles, moderation and wallet. Three
+  files name its table and all of them are plpgsql, so the wrong order fails nothing until a guest trades up.
+- **Colour is never the only signal.** Every cell carries a visually-hidden sentence ("Team KC: exact", "Class
+  2014: close, higher") and the printed form is `aria-hidden`. Both coloured states take a **dark** ink: `--win`
+  is the game's light green and white on it is 1.8:1, which the `tests/test-a11y.mjs` entry for the grid caught
+  on its first run. The state classes are prefixed `gp-c-`: unprefixed, `hit` collided with the draft card's own
+  `.hit` and a winning row drew its five cells stacked in one column.
+- **The end screen's numbers are the client's own when a save is refused**, and nothing ever replaces them - so
+  the instant result is computed by `replayGuessGame`, the same function the server replays with, rather than by
+  a comparison written in the screen. A stale tab losing a daily and being told "Got it" is what that guards.
+- **The menu lists everybody in the game**, names only, because the pool had a boundary nobody could see:
+  "everyone playing this season" is a category a fan can reason about and "plus some of the greats" is not, so
+  the only way to learn whether Jerry Rice was in it was to type his name. Names ONLY - a list carrying teams,
+  classes and numbers would be the answer key, since you could filter it by the colours already on your grid.
+- **The share card is squares, and they are safe for a reason worth knowing**: a reader does not know what was
+  GUESSED, so a green in the team column is a fact about a name they do not have. The card carries no player, no
+  guesses and no DIFFICULTY - that last one is a real hint, since everyone reading a daily's card is playing that
+  same day. A practice card links `/c/CODE?mode=guess`, the season's own challenge route with a mode of its own,
+  so no new address was needed; a daily's carries no code, because everybody has that day's player already and a
+  link would be a second go. The test checks every line is one of the four it may be, not just that known
+  spoilers are absent.
+- **The badge is Bullseye** (v2.15.0): name the daily player in two guesses, silver, and it PAYS because a
+  guess run is verified. `submit-guess` awards it itself for the reason `submit-century` does - somebody who
+  plays only this may never finish a season for submit-run to pay it from. Daily only: practice is unlimited.
+  A new badge is three files - the badges.mjs entry, a re-run of migration-wallet.sql for `badge_rewards`, and
+  a number in `player_stats` for the rule to read, since badges are computed from stats. That last one is why
+  `migration-guess.sql` must run BEFORE `migration-runs-log.sql`: `player_stats` is `language sql` and its body
+  is validated at creation, so a missing `guess_runs` fails the migration outright.
+- **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
 Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`
@@ -465,6 +551,13 @@ node tests/test-century-logic.mjs      # every rule and refusal, 3,000 seeds for
 node tests/test-century-edge.mjs       # the real submit-century, executed: the daily's clock, the duplicate, a found hash collision, and that the score is the server's
 node tests/test-century-sql.mjs        # the migration in PGlite: nobody writes the table, the daily's unique index, both boards == the mock, a rename, the coin claim
 node tests/test-century-screen.mjs     # the buttons: the tile, both variants, seven picks clicked, the re-spin, resume, the guest, and the refusal map
+
+# Guess the Player (v2.13.0). See GUESS.md. guess-logic.mjs holds the rules, so the first of these needs no
+# database and no browser - and it PRINTS the two numbers the game's fairness rests on.
+node tests/test-guess-logic.mjs        # every rule and refusal, that five greens identify exactly one player in the whole pool, and a blind bot's 0.20%
+node tests/test-guess-edge.mjs         # the real submit-guess, executed: who is asking, the daily's clock, the duplicate, and that the result is the server's
+node tests/test-guess-sql.mjs          # the migration in PGlite: nobody writes the table, the daily's unique index, both boards == the mock, a rename, the coin claim
+node tests/test-guess-screen.mjs       # the buttons: the tile, both variants, guesses typed, the colours IN WORDS, resume, the boards, the guest, the refusal map
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -956,6 +1049,16 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+  v2.13.0's (Guess the Player): run **`migration-century.sql`**, then **`migration-guess.sql`** (new), then
+  **`migration-runs-log.sql`**, **`migration-profiles.sql`**, **`migration-moderation.sql`** and
+  **`migration-wallet.sql`**, then **deploy the Edge Functions**, then the client. Guess has to come before
+  profiles (the `use_account_username` trigger on its table and both of `claim_username`'s blocks), moderation
+  (`mod_act`'s rename) and wallet (`claim_minigame`'s `guess` arm) - all plpgsql, so the wrong order fails
+  nothing until a guest trades up. It carries v2.12.0's reordering with it (century first, see the Century
+  section) and v2.12.0's own list, since neither has reached production yet: profiles/runs-log also bring the
+  Century badge's `player_stats` block. `submit-guess` is a NEW function, so `node deploy-function.mjs <env>`
+  has to run - it deploys all four (submit-run, match-pick, submit-century, submit-guess). A client ahead of the migration shows a Guess the Player tile whose every
+  game fails to save, so do not leave this part done.
   v1.11.0's migrations go in this order: re-run `migration-runs-log.sql` (adds `player_stats`), then
   `migration-profiles.sql`, then `migration-moderation.sql`. All three only add objects, so the live
   site keeps working between them. v1.12.0's: `migration-wallet.sql`, then `migration-shop.sql`, then
@@ -1048,7 +1151,9 @@ suite and still broke the live Leaderboard for every existing account.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging
-  with a generic "couldn't be created". If something works in one environment and not the other and
+  with a generic "couldn't be created". (Staging's is off again as of 2026-09-28 - a signup there
+  comes back with a session - so the setting has now moved in both directions and is worth
+  checking rather than assuming.) If something works in one environment and not the other and
   the schema matches, compare the project config
   (`GET /v1/projects/<ref>/config/auth` via the Management API) before digging into app code.
 - **Version + changelog**: bump `version` in `package.json` (minor for features, patch for fixes),

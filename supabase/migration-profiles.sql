@@ -443,6 +443,7 @@ begin
     update public.sou_runs set username = p_username, guest = false where user_id = v_uid;
     update public.builds set username = p_username, guest = false where user_id = v_uid;
     update public.century_runs set username = p_username, guest = false where user_id = v_uid;
+    update public.guess_runs set username = p_username, guest = false where user_id = v_uid;
   else
     -- A guest keeping what it has played: the same account, under its own name from now on. The name
     -- snapshots on the boards follow it, exactly as a moderator's rename moves them (mod_act).
@@ -473,6 +474,7 @@ begin
     update public.sou_runs set username = p_username, guest = false where user_id = v_uid;
     update public.builds set username = p_username, guest = false where user_id = v_uid;
     update public.century_runs set username = p_username, guest = false where user_id = v_uid;
+    update public.guess_runs set username = p_username, guest = false where user_id = v_uid;
   end if;
   return 'ok';
 exception when unique_violation then
@@ -597,6 +599,17 @@ create trigger sou_runs_account_username before insert or update on public.sou_r
   for each row execute function public.use_account_username();
 drop trigger if exists builds_account_username on public.builds;
 create trigger builds_account_username before insert or update on public.builds
+  for each row execute function public.use_account_username();
+-- Century's board (v2.9.0). The table is migration-century.sql's, which runs before this file; the trigger is
+-- here because this is where use_account_username is defined, and putting it there would have made that file
+-- depend on this one - which it cannot, since it has to run before runs-log.
+drop trigger if exists century_runs_account_username on public.century_runs;
+create trigger century_runs_account_username before insert or update on public.century_runs
+  for each row execute function public.use_account_username();
+-- Guess the Player's board (v2.13.0), same arrangement: the table is migration-guess.sql's and runs before this
+-- file, the trigger is here because this is where use_account_username is defined.
+drop trigger if exists guess_runs_account_username on public.guess_runs;
+create trigger guess_runs_account_username before insert or update on public.guess_runs
   for each row execute function public.use_account_username();
 drop trigger if exists builds_check_new on public.builds;
 create trigger builds_check_new before insert on public.builds

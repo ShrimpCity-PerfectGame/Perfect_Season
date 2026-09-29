@@ -14,7 +14,7 @@
 --   Add a moderator:     insert into moderators (user_id) select id from profiles where username = 'NAME';
 --   Remove a moderator:  delete from moderators where user_id = (select id from profiles where username = 'NAME');
 --   A moderator rename is the one writer of profiles.username besides signup: it changes the username
---   column only, plus the username snapshots in runs, daily_runs, sou_runs, builds and century_runs.
+--   column only, plus the username snapshots in runs, daily_runs, sou_runs, builds, century_runs and guess_runs.
 
 create table if not exists public.moderators (
   user_id   uuid primary key references public.profiles(id) on delete cascade,
@@ -235,6 +235,7 @@ begin
     -- functions that rewrite a name snapshot should not differ about what a name snapshot is.
     update sou_runs set username = p_new_name, guest = false where user_id = p_user_id;
     update century_runs set username = p_new_name, guest = false where user_id = p_user_id;
+    update guess_runs set username = p_new_name, guest = false where user_id = p_user_id;
     update builds set username = p_new_name, guest = false where user_id = p_user_id;
     v_reason := 'username';
   elsif p_action = 'dismiss' then

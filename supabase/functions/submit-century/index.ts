@@ -15,8 +15,14 @@
 //   - touch `profiles`. Century keeps its own board, so a run here cannot move a season leaderboard, a best
 //     score, a streak or a badge. That is also why this is a function of its own rather than an arm of
 //     submit-run: nothing about the season path changes to add a mode.
-//   - pay coins. The client claims them with claim_minigame('century', day) once this answers ok, exactly as
-//     Over/Under and Build-a-player do, so every coin in the game still moves in one place (SHOP.md).
+//   - pay the RUN's coins. The client claims those with claim_minigame('century', day) once this answers ok,
+//     exactly as Over/Under and Build-a-player do, so every coin in the game still moves in one place (SHOP.md).
+//
+// It does award ONE badge, and only from a daily that reached the goal. That is deliberate: submit-run pays
+// every other badge from player_stats, and it would pay this one too - but only on the player's next finished
+// SEASON, which somebody who plays Century and nothing else may never have. This function witnessed the run, so
+// it records it. award_badges is idempotent per (user, badge) and badge_rewards decides the amount, so nothing
+// here can pay twice or pay the wrong number.
 //
 // The daily's seed comes from THIS function's clock and is never taken from the client - the same rule
 // submit-run's daily has, and the reason the daily is the one variant that cannot be ground for a lucky board.
@@ -25,6 +31,7 @@ import {
   initCenturyData, replayCentury, centuryCeiling, centuryOutcome, centuryDailySeed, centuryReservedSeed,
   CENTURY_SLOTS, CENTURY_GOAL,
 } from "../../../century-logic.mjs";
+import { BADGE_BY_ID } from "../../../badges.mjs";
 import seasonPool from "../../../data/season-2025.json" with { type: "json" };
 
 initCenturyData(seasonPool);
@@ -154,8 +161,27 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     return json({ error: "failed to save" }, 500);
   }
 
+  // The badge, and only for a daily that got there. Unlimited is unlimited, so a hundred ground out over an
+  // evening of retries is not the achievement the daily's single go is (badges.mjs says the same in words).
+  // A failure here never fails the run: the run is recorded, and submit-run will award the badge from
+  // player_stats the next time a season finishes.
+  let badge = null;
+  if (day && replay.hit) {
+    try {
+      const { data, error } = await service.rpc("award_badges", {
+        p_user: user.id,
+        p_badges: [{ id: "century", coins: BADGE_BY_ID.century?.coins ?? 0 }],
+      });
+      if (error) console.error("submit-century award_badges:", error);
+      else if (Array.isArray(data?.awarded) && data.awarded.length) badge = { awarded: data.awarded, credited: data.credited, balance: data.balance };
+    } catch (e) {
+      console.error("submit-century award_badges:", e);
+    }
+  }
+
   return json({
     ok: true,
+    badge,
     day,
     seed,
     score: replay.score,

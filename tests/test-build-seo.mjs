@@ -22,6 +22,7 @@ function build(env) {
   const read = (f) => (existsSync(path.join(root, "public", f)) ? readFileSync(path.join(root, "public", f), "utf8") : null);
   return {
     html: read("page.html"), robots: read("robots.txt"), sitemap: read("sitemap.xml"), js: read("page.js"),
+    pool: read(path.join("data", "guess-pool.json")),
     pages: Object.fromEntries(SITE_PAGES.map((p) => [p.id, read(p.file)])),
   };
 }
@@ -56,7 +57,23 @@ check("the share link people see stays gridspin.app", prod.js.includes('"https:/
 // bundle past it - the bundle was already ~988 KB. If this needs raising again, ask first whether the thing
 // being added belongs in the page every visitor loads: the honest fix for that file is to load it when the 1v1
 // screen opens rather than at startup, which needs the service worker to learn about a second chunk.
-check("the bundle is minified", prod.js.length < 1_200_000, `${prod.js.length} bytes`);
+//
+// Raised to 1,300,000 in v2.14.0, at 1,201,138 bytes. The question was asked and answered: what pushed it over
+// was Guess the Player's SCREEN - the share card, the roster list - which is code for a mode every visitor can
+// open, not data for one of them. The data half of that feature is already fetched rather than bundled
+// (guess-pool.mjs), which is what this ceiling asked for last time and got.
+//
+// THE NEXT RECLAIM IS NAMED AND UNCHANGED: data/versus-pool.json, 67 KB of defenses and kickers that only the
+// duel screen reads, still shipped to everybody at startup. Doing to it what was done to the guess pool would
+// give back more than this release took. Do that before raising this number again.
+check("the bundle is minified", prod.js.length < 1_300_000, `${prod.js.length} bytes`);
+// Guess the Player's pool is the one data file the bundle does NOT carry (guess-pool.mjs), because page.js sits
+// a few KB under the ceiling above. Its SIZE moves with the football season - the pool is the men currently
+// taking snaps, so it grows every week and starts again each September - hence a floor rather than a range.
+// Two halves, and both matter: the bundle must not have it back, and the site must actually serve it, because
+// there is no longer a copy to fall back on.
+check("the guess pool is served from the site root", (prod.pool || "").length > 5_000, `${(prod.pool || "").length} bytes`);
+check("and is not in the bundle as well", !prod.js.includes("includesUndrafted"), "the pool's own metadata key is in page.js");
 check("the tab title leads with the name", /<title>Gridspin – /.test(prod.html));
 // The same page answers challenge links (/c/CODE), where relative asset paths would break.
 check("the app and icons load from root-relative paths", prod.html.includes('<script src="/page.js">') && prod.html.includes('href="/icon.svg"') && prod.html.includes('href="/site.webmanifest"') && !/(src|href)="(?!\/|https?:)[^"]+\.(js|svg|png|webmanifest)"/.test(prod.html), prod.html.match(/(src|href)="[^"]+"/g));

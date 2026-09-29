@@ -64,6 +64,12 @@ const SCREENS = [
   // And the result, which is the payoff and the one Century screen with big lime type on a dark hero. Nothing
   // else opens it without playing seven picks by hand, so the harness locks the last slot in on load.
   ["the Century result", "?screen=century&finish=1", null],
+  // Guess the Player (v2.13.0), all three halves, and the GRID is the reason: it is the one screen in the game
+  // whose whole signal is colour, so it is also the one where a missing word costs the most. The menu, the grid
+  // part-played with all three states on screen, and the end screen that names the player.
+  ["Guess the Player", "?as=player", { tile: "Guess the Player" }],
+  ["the Guess the Player grid", "?screen=guess", null],
+  ["the Guess the Player result", "?screen=guess&finish=1", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {
@@ -114,6 +120,68 @@ for (const [name, query, tab] of SCREENS) {
     assert(violations.length === 0, `expected none, got:\n    ${violations.join("\n    ")}`);
   });
 }
+
+// The other thing axe can't judge: whether a row of cells is still a ROW. Guess the Player's grid draws its five
+// cells in five columns, and a class collision turned a winning row - five cells in the same state at once - into
+// a stack in one column: `.hit` is the draft card's clickable area (`all:unset;display:block`) and the cell's
+// state class was called the same thing. Nothing could catch it - jsdom has no layout, and axe measures the
+// colours, which were right. So the check is geometric, in a real browser, on the one row where every cell
+// changes at once.
+await runTest("the guess grid draws a row across, even when every cell is green", async () => {
+  await page.goto(`${HARNESS}?screen=guess&finish=1`, { waitUntil: "load" });
+  await sleep(2600);
+  const rows = await page.evaluate(() => [...document.querySelectorAll(".gp-grid tbody tr")].map((tr) => ({
+    cells: tr.children.length,
+    displays: [...tr.children].map((c) => getComputedStyle(c).display),
+    lefts: [...tr.children].map((c) => Math.round(c.getBoundingClientRect().left)),
+    states: [...tr.children].map((c) => c.className),
+  })));
+  assert(rows.length > 1, `the end screen shows the guesses: ${rows.length}`);
+  const won = rows[rows.length - 1];
+  // The winning row is the one that matters and it is identified by SHAPE, not by a class name: five cells in
+  // one state. Pinning the name would make a rename fail this test for the wrong reason - and renaming is what
+  // fixed the bug it guards.
+  assert(new Set(won.states.slice(1)).size === 1 && won.states.length === 6,
+    `the last row has every cell in one state: ${JSON.stringify(won.states)}`);
+  for (const row of rows) {
+    assert(row.displays.every((d) => d === "table-cell"), `every cell is a table cell: ${JSON.stringify(row.displays)}`);
+    assert(new Set(row.lefts).size === row.cells, `and sits in a column of its own: ${JSON.stringify(row.lefts)}`);
+  }
+  // Every column lines up down the grid, which is what makes the grid readable at all.
+  const first = rows[0].lefts;
+  for (const row of rows) assert(row.lefts.every((x, i) => Math.abs(x - first[i]) <= 1), `columns line up: ${JSON.stringify(row.lefts)}`);
+});
+
+// The player's name is the one thing on a row you have to READ, and a fixed table layout with no widths gave it
+// a sixth of a phone: every row said "Tyler C...", "Davant...", "Penei ...". Checked at the widths phones
+// actually are, in a real browser, because nothing else can see a clipped box.
+await runTest("a player's name is readable on a phone, not cut off", async () => {
+  for (const width of [320, 375, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.goto(`${HARNESS}?screen=guess&guesses=5`, { waitUntil: "load" });
+    await sleep(2400);
+    const out = await page.evaluate(() => ({
+      overflows: document.documentElement.scrollWidth > window.innerWidth,
+      names: [...document.querySelectorAll(".gp-grid .gp-name")].map((el) => ({
+        text: el.textContent,
+        // A clipped box is wider inside than out. An ellipsis would hide the half of the name that identifies
+        // him - "Davant..." could be Davante Adams or Davante Davis - so a long name wraps instead.
+        clipped: el.scrollWidth > el.clientWidth + 1,
+      })),
+      cells: [...document.querySelectorAll(".gp-grid .gp-cell")].map((td) => ({
+        text: td.textContent.trim().slice(0, 8),
+        clipped: td.scrollWidth > td.clientWidth + 1,
+      })),
+    }));
+    assert(out.names.length > 0, `the grid has rows at ${width}px`);
+    const cut = out.names.filter((n) => n.clipped);
+    assert(cut.length === 0, `no name is cut off at ${width}px: ${cut.map((n) => n.text).join(", ")}`);
+    const cutCells = out.cells.filter((c) => c.clipped);
+    assert(cutCells.length === 0, `no cell is cut off at ${width}px: ${cutCells.map((c) => c.text).join(", ")}`);
+    assert(!out.overflows, `and the page does not scroll sideways at ${width}px`);
+  }
+  await page.setViewport({ width: 390, height: 844 });
+});
 
 // The one axe can't judge: a roster chip is coloured by slot, and the slot has to be readable without the colour.
 await runTest("a roster chip says which slot it filled, not only in colour", async () => {

@@ -39,6 +39,8 @@ import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
 import { CENTURY_CSS, CenturyScreen } from "./century.jsx";
 import { initCenturyData, CENTURY_GOAL } from "./century-logic.mjs";
+import { GUESS_CSS, GuessScreen } from "./guess.jsx";
+import { GUESS_TRIES } from "./guess-logic.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
@@ -192,6 +194,11 @@ const todayKey = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+// The UTC day. Century's daily is server-clocked - submit-century derives `century-<utc today>` from its own
+// clock, and century_runs.day is that date - so anything the CLIENT says about which Century day it is has to
+// be in UTC too. todayKey above is LOCAL, which is right for everything that counts a player's own days
+// (Over/Under, the minigame coin claim) and wrong for this.
+const utcDayKey = () => new Date().toISOString().slice(0, 10);
 const prettyDate = (key) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "long", day: "numeric" });
@@ -725,10 +732,12 @@ button.pill{font-family:inherit;transition:border-color .12s}
    coloured tiles. --win is the one colour token nothing else here had claimed: genius and GM hold their own,
    Build-a-player has --rb, 1v1 violet, Over/Under orange, Century navy and the daily lime. */
 .mode.m-mini{--mode:var(--win)}
-.mode.m-genius,.mode.m-gm,.mode.m-bap,.mode.m-mini{
+/* Guess the Player takes --qb, the last colour in the palette nothing else had claimed. */
+.mode.m-guess{--mode:var(--qb)}
+.mode.m-genius,.mode.m-gm,.mode.m-bap,.mode.m-mini,.mode.m-guess{
   background:linear-gradient(135deg,color-mix(in srgb,var(--mode) 14%,var(--surface)),var(--surface));
   border-color:color-mix(in srgb,var(--mode) 45%,var(--ink))}
-.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon,.mode.m-mini .icon{
+.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon,.mode.m-mini .icon,.mode.m-guess .icon{
   background:color-mix(in srgb,var(--mode) 26%,var(--surface));
   border-color:color-mix(in srgb,var(--mode) 55%,var(--ink))}
 .mode .go{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--bg);background:var(--ink);
@@ -1289,7 +1298,7 @@ p.gamecoins .earned{display:flex}
 // The whole stylesheet the app renders, for previewing one screen on its own (the UI harness).
 // The screens in their own files bring their own rules, each scoped to its class prefix (pf-, av-, ap-,
 // md-), after the base stylesheet so they can reuse its tokens and classes.
-export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS;
+export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS + GUESS_CSS;
 
 // reducedMotion now lives in ui-common.jsx - century.jsx starts its reel from the same check.
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's
@@ -1982,6 +1991,8 @@ const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
 // it directly (fetchMyCentury) before offering the daily. The two can disagree across devices, exactly as
 // Over/Under's can, and the screen's answer is the one that decides.
 const CENTURY_DONE_KEY = (d) => `ps-century:${d}`;
+// Same shape, same UTC day, for the same reason (see utcDayKey below).
+const GUESS_DONE_KEY = (d) => `ps-guess:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
 const findPlayer = (key, id, season) => (BOARDS[key] || []).find((p) => p.id === id && p.season === season);
 
@@ -2055,6 +2066,9 @@ export function parseChallengeLink(pathname, search) {
   // mode=century is a different game entirely: the code is Century's seed, and `score` is what they got,
   // shown only as a headline the way `beat` is. Never the daily - its seed would hand over the day's teams.
   const century = q.get("mode") === "century";
+  // mode=guess is Guess the Player: the code is a practice seed, so the same player comes up. Never the daily,
+  // which has no code at all - everybody already has that day's man and a link could only be a second go.
+  const guess = q.get("mode") === "guess";
   // Digits and nothing else. Number("") is 0, which is finite and in range, so a link with an empty score
   // claimed "They got 0" - a headline nobody wrote.
   const rawScore = q.get("score") || "";
@@ -2062,13 +2076,14 @@ export function parseChallengeLink(pathname, search) {
   return {
     code: m[1].toUpperCase(),
     century,
+    guess,
     // A Century run cannot score below zero and cannot plausibly pass the 133 ceiling; anything else was
     // typed in by hand and is simply not shown.
     score: century && Number.isFinite(claimed) && claimed <= 200 ? claimed : null,
     // A real season is 17 games plus up to 4 playoff games; anything else was typed in by hand.
     beat: games >= 17 && games <= 21 ? { w: Number(beat[1]), l: Number(beat[2]) } : null,
-    gm: !century && q.get("mode") === "gm",
-    genius: !century && q.get("mode") === "genius",
+    gm: !century && !guess && q.get("mode") === "gm",
+    genius: !century && !guess && q.get("mode") === "genius",
     format: q.get("scoring") === "championship" ? "standard" : "fantasy",
   };
 }
@@ -2299,8 +2314,11 @@ export default function PerfectSeason() {
   // Which stage the Century screen is on, reported up by CenturyScreen. It decides the ROOT scope, the same
   // way `view === "play"` does for a draft: a run in progress is stadium-dark, its menu and boards are not.
   const [centuryStage, setCenturyStage] = useState("menu");
+  const [guessDone, setGuessDone] = useState(null);   // today's game, if played on this device
+  const [guessStage, setGuessStage] = useState("menu");
   // A Century link waiting to be dealt: { seed, score }. Cleared by the screen as it takes it.
   const [centuryChallenge, setCenturyChallenge] = useState(null);
+  const [guessChallenge, setGuessChallenge] = useState(null);
   const [souCoins, setSouCoins] = useState(null); // { date, credited } - the coins a finished day's claim paid
   const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
@@ -2532,20 +2550,26 @@ export default function PerfectSeason() {
   const readDay = useRef(null);
   readDay.current = async () => {
     const today = todayKey();
-    const [fanDone, stdDone, sou, century] = await Promise.all([
+    const [fanDone, stdDone, sou, century, guessed] = await Promise.all([
       sget(DAILY_KEY(today, "fantasy"), false), sget(DAILY_KEY(today, "standard"), false), sget(SOU_DONE_KEY(today), false),
-      sget(CENTURY_DONE_KEY(today), false),
+      // By the UTC day, because that is the day the run itself is filed under. Keyed by todayKey it was
+      // WRITTEN under one date and READ under another for every player west of UTC in their evening, so the
+      // "Done" pill simply never appeared for them.
+      sget(CENTURY_DONE_KEY(utcDayKey()), false),
+      sget(GUESS_DONE_KEY(utcDayKey()), false),
     ]);
-    dayRead.current = today;
+    // Both days, so a re-read is triggered by whichever rolls over first - they are up to a day apart.
+    dayRead.current = `${today}|${utcDayKey()}`;
     setDailyDone({ fantasy: fanDone, standard: stdDone });
     setSouDone(sou);
     setCenturyDone(century);
+    setGuessDone(guessed);
   };
 
   // Checked whenever the player comes back to the app, and on the screens those answers are shown on. A
   // sleeping tab fires no timers, so the moment that matters is the one where somebody looks at it again.
   useEffect(() => {
-    const check = () => { if (dayRead.current && dayRead.current !== todayKey()) readDay.current(); };
+    const check = () => { if (dayRead.current && dayRead.current !== `${todayKey()}|${utcDayKey()}`) readDay.current(); };
     check();
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", check);
     if (typeof window !== "undefined") window.addEventListener("focus", check);
@@ -2667,6 +2691,7 @@ export default function PerfectSeason() {
     else if (s.view === "versus") { setVersusCode(s.code || null); openTab("versus"); }
     else if (s.view === "minigames") openTab("minigames");
     else if (s.view === "century") openTab("century");
+    else if (s.view === "guess") openTab("guess");
     else if (s.view === "statsou") openSou();
     else if (s.view === "buildplayer") openBuildPicker();
     else openTab(s.view);
@@ -2784,13 +2809,23 @@ export default function PerfectSeason() {
   function openMinigames() {
     openTab("minigames");
   }
+  function leaveGuess() {
+    openTab("minigames");
+  }
+  // A daily game the server accepted. Keyed by the day the RUN was for and in UTC, which is the day the board
+  // files it under - see the note on utcDayKey.
+  async function onGuessDaily({ day, solved, tries }) {
+    if (!day) return;
+    await sset(GUESS_DONE_KEY(day), { solved, tries }, false);
+    if (day === utcDayKey()) setGuessDone({ solved, tries });
+  }
   // A daily Century that the server accepted. The key is written for the day the RUN was for, not for today, so a
   // run handed in either side of UTC midnight marks the day it belonged to - the same mistake the minigame coin
   // keys were once keyed wrong by (SHOP.md).
   async function onCenturyDaily({ day, score, hit }) {
     if (!day) return;
     await sset(CENTURY_DONE_KEY(day), { score, hit }, false);
-    if (day === todayKey()) setCenturyDone({ score, hit });
+    if (day === utcDayKey()) setCenturyDone({ score, hit });
   }
 
   function leaveVersus() {
@@ -4004,6 +4039,12 @@ export default function PerfectSeason() {
       openTab("century");
       return;
     }
+    // Same again for Guess the Player: a code, a player, and nothing of the season draft involved.
+    if (c.guess) {
+      setGuessChallenge({ seed: c.code });
+      openTab("guess");
+      return;
+    }
     await abandonCurrent();
     clearDraft(DRAFT_KEY);
     // The link's scoring becomes the selected format, as opening a daily does, so Modes shows what you're
@@ -4182,6 +4223,16 @@ export default function PerfectSeason() {
         <span className="go">{centuryDone ? "See today's result" : "Play"}</span>
       </button>
 
+      <button className="mode m-guess" onClick={() => openTab("guess")}>
+        <div className="mt">
+          <span className="icon" aria-hidden="true">🔎</span>
+          <span className="mn">Guess the Player</span>
+          {guessDone && <span className="pill">{guessDone.solved ? `Got it in ${guessDone.tries}` : "Missed"}</span>}
+        </div>
+        <p>One player a day and {GUESS_TRIES} guesses. Team, division, position, draft class and number each say how close you were.</p>
+        <span className="go">{guessDone ? "See how it went" : "Play"}</span>
+      </button>
+
       <button className="mode m-bap" onClick={openBuildPicker}>
         <div className="mt"><span className="icon" aria-hidden="true">🧩</span><span className="mn">Build-a-player</span></div>
         <p>Roll a team, roll their active player, and take one attribute from each until your build is complete - then see if he'd have won a real team the chip.</p>
@@ -4194,6 +4245,7 @@ export default function PerfectSeason() {
   const miniDoneToday = [souDone, centuryDone].filter(Boolean).length;
 
   const scope = view === "play" || view === "versus" || (view === "century" && centuryStage !== "menu")
+    || (view === "guess" && guessStage !== "menu")
     ? "dark" : view === "board" ? "night" : "light";
 
   // The colour a browser paints around the page: the address bar on a phone, and the status bar when the site
@@ -4369,10 +4421,12 @@ export default function PerfectSeason() {
             {challenge && (
               <section className="challenge" aria-labelledby="challenge-title">
                 <span className="k">
-                  {challenge.century ? "A friend's seven teams" : "A friend's boards"} · code {challenge.code}
+                  {challenge.century ? "A friend's seven teams" : challenge.guess ? "A friend's player" : "A friend's boards"} · code {challenge.code}
                 </span>
                 <h2 id="challenge-title" className="big">
-                  {challenge.century
+                  {challenge.guess
+                    ? <>Can you name<br />their player?</>
+                    : challenge.century
                     ? (challenge.score != null
                       ? <>They got <em>{challenge.score}</em>.<br />Can you beat it?</>
                       : <>Can you beat<br />their Century?</>)
@@ -4381,7 +4435,9 @@ export default function PerfectSeason() {
                       : <>Can you beat<br />their boards?</>}
                 </h2>
                 <p>
-                  {challenge.century
+                  {challenge.guess
+                    ? <>Guess the Player · {GUESS_TRIES} guesses. The same code, so the same player - team, division, position, draft class and number, and how close each guess was.</>
+                    : challenge.century
                     ? <>Century · {CENTURY_GOAL} touchdowns. The same code, so the same seven teams come up in the order they did for them, with the stats hidden as always.</>
                     : <>
                       {[challenge.gm && "GM mode", challenge.genius && "Genius mode", `${FORMAT_LABEL[challenge.format]} scoring`].filter(Boolean).join(" · ")}.{" "}
@@ -4389,12 +4445,12 @@ export default function PerfectSeason() {
                     </>}
                 </p>
                 {/* Century touches no season draft at all, so there is nothing of yours to lose by taking one. */}
-                {!challenge.century && freeInProgress && (
+                {!challenge.century && !challenge.guess && freeInProgress && (
                   <p className="warn">You have an Unlimited draft in progress. Drafting these boards {user ? "counts it as a DNF" : "replaces it"}.</p>
                 )}
                 <div className="frow">
                   <button className="btn solid" disabled={!authReady} onClick={acceptChallenge}>
-                    {challenge.century ? "Play these teams" : "Draft these boards"}
+                    {challenge.century ? "Play these teams" : challenge.guess ? "Guess this player" : "Draft these boards"}
                   </button>
                   <button className="btn" onClick={() => setChallenge(null)}>Not now</button>
                 </div>
@@ -4521,8 +4577,8 @@ export default function PerfectSeason() {
                   <span className="mn">Mini games</span>
                   {miniDoneToday > 0 && <span className="pill">{miniDoneToday} done today</span>}
                 </div>
-                <p>The quick ones beside the drafts: Over/Under, Build-a-player and Century. They keep boards of
-                  their own and never touch your season stats.</p>
+                <p>The quick ones beside the drafts: Guess the Player, Over/Under, Build-a-player and Century. They
+                  keep boards of their own and never touch your season stats.</p>
                 <span className="go">Open</span>
               </button>
             </div>
@@ -5024,6 +5080,26 @@ export default function PerfectSeason() {
               main leaderboard — Over/Under and Century keep boards of their own, and all three pay coins.</p>
             <div className="modes">{miniGameTiles}</div>
             <button className="btn" onClick={() => openTab("home")}>Back</button>
+          </>
+        )}
+
+        {/* ---------------- GUESS THE PLAYER (v2.13.0) ---------------- */}
+        {view === "guess" && (
+          <>
+            <h1 className="vh">Guess the Player</h1>
+            <GuessScreen
+              key={userId || "anon"} userId={userId} username={user} isGuest={!!stats?.guest}
+              onBack={leaveGuess} onStage={setGuessStage}
+              onClaimCoins={(date, onCredited) => claimMinigame("guess", date, onCredited)}
+              onDailySaved={onGuessDaily}
+              onShare={sendShare} siteUrl={APP_SITE_URL}
+              challenge={guessChallenge} onChallengeTaken={() => setGuessChallenge(null)}
+              onNeedsAccount={(why) => {
+                setNotice(why === "guest"
+                  ? "The daily needs an account - a guest can be made again and again, so the day's player would be as many goes as you liked. Keep your seasons and it opens up."
+                  : "Guess the Player keeps a board, so a game needs an account to go on it. Sign in and it's one tap away.");
+                openTab("profile");
+              }} />
           </>
         )}
 

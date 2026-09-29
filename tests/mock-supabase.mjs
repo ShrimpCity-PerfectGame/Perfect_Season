@@ -9,6 +9,7 @@ import { makeWallet } from "./mock-wallet.mjs";
 import { makeShop } from "./mock-shop.mjs";
 import { makeVersus } from "./mock-versus.mjs";
 import { makeCentury } from "./mock-century.mjs";
+import { makeGuess } from "./mock-guess.mjs";
 import { seasonReward, badgeRewards, coinsSummary } from "../rewards.mjs";
 import { badgeProgress } from "../badges.mjs";
 import { mapPlayerStats } from "../profile-rules.mjs";
@@ -111,7 +112,12 @@ export function makeMockAuth() {
   // no client write policy at all - the Edge Function's service role is the only writer - so it joins extraTables,
   // which is what makes a direct write answer the way row-level security would.
   const century = makeCentury(state);
-  const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables, ...century.tables };
+  // player_stats reads it, the way it reads sou_runs and builds.
+  state.centuryRuns = century.table;
+  // Guess the Player (v2.13.0), the same way: one table nobody writes from a client, two boards, one function.
+  const guess = makeGuess(state);
+  state.guessRuns = guess.table;
+  const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables, ...century.tables, ...guess.tables };
   // These have no client write policy at all - the app changes them only through database functions -
   // so a direct write gets the error RLS would give.
   const rlsDenied = () => Promise.resolve({ error: { code: "42501", message: "new row violates row-level security policy" } });
@@ -656,7 +662,7 @@ export function makeMockAuth() {
 
   const rpcs = {
     site_totals: siteTotals, site_stats: siteStats, ladder_best: ladderBest,
-    ...century.rpcs,
+    ...century.rpcs, ...guess.rpcs,
     player_stats: ({ p_user_id } = {}) => playerStats(state, p_user_id),
     ...profileData.rpcs, ...moderation.rpcs, ...wallet.rpcs, ...shop.rpcs, ...versus.rpcs,
   };
@@ -669,6 +675,7 @@ export function makeMockAuth() {
         if (name === "submit-run") return invokeSubmitRun(opts?.body);
         if (name === "match-pick") return versus.invokeMatchPick(opts?.body, { now: opts?.now });
         if (name === "submit-century") return century.submitCentury(opts?.body);
+        if (name === "submit-guess") return guess.submitGuessRun(opts?.body);
         return Promise.resolve({ error: { message: "unknown function" } });
       },
     },
@@ -705,6 +712,7 @@ export function makeMockAuth() {
     // test-only: a promise submit-run awaits between reading a profile and writing it back, used once.
     _pauseBeforeProfileWrite: (fn) => { beforeProfileWrite = fn; },
     _century: century, // test-only: Century's runs, and the two boards over them
+    _guess: guess,     // test-only: Guess the Player's runs and boards
     _versus: versus, // test-only: 1v1's matches, and the state of one as versus-logic sees it
     _googleSignIn: googleSignIn, // test-only: the session Google's return leaves behind, with no browser
     _profiles: profiles,

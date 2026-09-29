@@ -336,6 +336,28 @@ returns jsonb language sql stable security invoker set search_path = public as $
          where d.date::date <= (now() at time zone 'utc')::date - 2)
     ),
     'over_under', (select jsonb_build_object('played', count(*), 'best', max(score)) from sou_runs where user_id = p_user_id),
+    -- Century (v2.12.0). `daily_best` is what the badge reads, and it is separate from `best` on purpose:
+    -- Unlimited is unlimited, so a hundred ground out over an evening of retries is not the same thing as one
+    -- reached on the day's single go. The badge is for the daily, and only this number can tell them apart.
+    'century', (select jsonb_build_object(
+      'played', count(*),
+      'best', max(score),
+      'daily_best', max(score) filter (where day is not null),
+      'centuries', count(*) filter (where hit)
+    ) from century_runs where user_id = p_user_id),
+    -- Guess the Player (v2.15.0). `daily_best` is the FEWEST guesses a solved daily took, and it is the badge's
+    -- number: practice is unlimited, so only the daily's single go can mean anything. min() over no rows is
+    -- NULL, which is what "has never solved one" has to look like - a 0 would read as solving it in none.
+    --
+    -- This is why migration-guess.sql runs BEFORE this file: player_stats is `language sql`, so its body is
+    -- validated the moment it is created and a missing guess_runs fails the whole migration outright.
+    'guess', (select jsonb_build_object(
+      'played', count(*),
+      'solved', count(*) filter (where solved),
+      'dailies', count(*) filter (where day is not null),
+      'daily_solved', count(*) filter (where solved and day is not null),
+      'daily_best', min(tries) filter (where solved and day is not null)
+    ) from guess_runs where user_id = p_user_id),
     'builds', jsonb_build_object(
       'count', (select count(*) from builds where user_id = p_user_id),
       -- Only a finite overall can be a best: builds was browser-written before 1.11.0's check, and numeric

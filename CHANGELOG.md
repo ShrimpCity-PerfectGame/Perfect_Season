@@ -10,6 +10,233 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.15.0] — 2026-09-29
+
+A badge for Guess the Player.
+
+**Deploy order: re-run `migration-guess.sql`, then `migration-runs-log.sql`, then `migration-wallet.sql`, then
+the Edge Functions, then the client.** Guess before runs-log is not optional now: `player_stats` gained a
+`guess` block, and it is `language sql`, so its body is validated the moment it is created and a missing
+`guess_runs` fails the migration outright.
+
+### Added
+
+- **Bullseye** 🎯, silver, 300 coins — **name the daily player in two guesses**. The first guess is blind, so
+  this is one informative opening plus a deduction that lands: rare without being pure luck.
+  - **The daily only.** Practice is unlimited, so two guesses there is something anybody has by tea time.
+  - **`submit-guess` awards it itself**, the way `submit-century` does — submit-run pays every other badge from
+    `player_stats`, but only on the player's next finished *season*, which somebody who plays this and nothing
+    else may never have. A failed award never fails the game.
+  - It **pays**, unlike Stat Nerd and Mad Scientist, because a guess run is verified: the function recomputes
+    the answer from the date and the result from the guesses.
+- **`player_stats` gains a `guess` block** — played, solved, dailies, daily_solved and `daily_best` (the fewest
+  guesses a solved daily took). `min()` over no rows is NULL, so an account that has never solved one has no
+  best rather than a zero, which would have read as "solved it in none" and handed the badge to everybody.
+
+### Fixed
+
+- **`tests/test-player-stats-sql.mjs` was comparing two empty blocks.** Its fixture seeds Over/Under runs and
+  builds but never seeded Century or Guess runs, so the mock and the SQL agreed about nothing for those two.
+  It now seeds guess games — dailies and practice both — and refuses to run if the fixture is too thin to
+  compare. Verified by breaking the mock's rule and watching the comparison fail.
+
+
+## [2.14.0] — 2026-09-28
+
+Guess the Player asks about the season you are watching. The pool goes from 4,637 players to **193** — everyone
+playing a skill position right now, plus the 25 greats — and the game from eight guesses to **five**.
+
+**Deploy order: re-run `migration-guess.sql`, then the Edge Functions, then the client.** The migration drops
+and re-adds the `tries` bound (8 → 5) and **fails on a row recorded under the old rules**; delete those first if
+a database has any (`delete from public.guess_runs where tries > 5;` — only staging ever did). `submit-guess`
+bundles `data/guess-pool.json` and `guess-logic.mjs`, and both changed. `GUESS.md` 1 is the reference.
+
+### Changed
+
+- **The pool is the men on the field.** Quarterbacks, running backs, receivers and tight ends with **100+ snaps
+  since the start of the 2025 season** — two seasons added together, 456 of them — plus the **25** best retired
+  players at those positions, ranked *within* position so quarterbacks cannot take every place: Brady, Rice,
+  Peyton Manning, Barry Sanders, Emmitt Smith, Moss, Gronkowski, Tony Gonzalez. 481 in all.
+  - **The window is two seasons, not one.** Counting only the season being played made the pool three weeks of
+    football in September (168 men) and left out anyone hurt early — Puka Nacua had 727 snaps in 2025 and 43 in
+    2026, and was missing — and it went wrong within a week of any build. The cost is at the other end: Ezekiel
+    Elliott last played in 2024, so he is out.
+  - **What it costs, and it is not small:** no defence, no offensive line, and of the retired only the very top.
+    It is a quiz about this season rather than about all of football, chosen deliberately to make it winnable.
+  - **It ages.** Two seasons wide, so it does not go stale in a week; rebuild when a season ends, and during one
+    if you want the newest players in. The client and the Edge Function both carry a copy, so they ship
+    together — every time.
+  - This is the pool's third shape. v2.13.0 kept every drafted player with a five-season career (4,637), which
+    asked about men who never played while refusing to ask about anyone who arrived after 2022. A Guessability
+    Score over six weighted terms then took a share of each position group (773) — better, and still asking
+    about the hundredth-best corner of the century. CHANGELOG entries for both remain below; GUESS.md 1 has the
+    full reasoning and what each version cost.
+- **Five guesses, not eight.** Eight at a field of 193 falls to elimination most days. The two knobs move
+  together, and the honest measure is printed by the tests: a bot guessing blind now wins **1.05%** of games,
+  against 0.20% at eight guesses and 4,637 players.
+- **The daily's weighting is gone**, deliberately. Every player takes one turn, so nobody comes round until
+  everybody has been asked — 481 days, about sixteen months. Giving the best-known quarter three turns was right
+  for 731 players (a 1,353-day cycle still left 451 days between a man's turns) and wrong for a pool this size,
+  where it brings him back inside four months.
+
+### Added
+
+- **The menu lists every player in the game** — names only, grouped by position, closed by default. The pool had
+  a boundary nobody could see: "everyone playing this season" is a category you can reason about, "and 25 of the
+  greats" is not, so the only way to find out whether Jerry Rice was in it was to type his name and see. Names
+  only is deliberate: a list with teams, classes and numbers would be the answer key rather than a list, because
+  you could filter it by the colours already on your grid.
+- **A share card**, Wordle-shaped: a row of five squares per guess, `3/5` or `X/5`, and a link. The Share button
+  is on the end screen and uses the same share sheet the season and Century do.
+  - The squares are safe to show for a reason the earlier "not built" note had wrong: a reader does not know
+    what was **guessed**, so a green in the team column is a fact about a name they do not have.
+  - The card carries no player, no guesses, and **no difficulty** — that last one is a genuine hint, because
+    everyone reading a daily's card is playing that same day.
+  - A practice card links `/c/CODE?mode=guess`, the season's existing challenge route with a mode of its own, so
+    it needed no new address; taking it opens the game on that player. A daily's card carries no code at all.
+- **The end screen says how hard the day was** — "Difficulty 29/100", plus whether it was one most people get, a
+  fair test or a deep cut. Shown only once the game is over; before that it would narrow the answer.
+- Undrafted players are in on their own terms: the team they came into the league with (from the rosters) and
+  their first season as their class. No hand-written list — every man in this pool is one the rosters have.
+
+### Notes
+
+- **The bundle ceiling went from 1.2 MB to 1.3 MB** (it sits at 1,201,138). That guard exists to catch a build
+  that forgot to minify — about 1.9 MB — and to force a question when it is hit: does the new thing belong in
+  the page every visitor loads? Here it does: what crossed the line is Guess the Player's *screen* (the share
+  card, the roster list), which is code for a mode anyone can open, while that feature's data is already fetched
+  rather than bundled. The next reclaim is named and unchanged: `data/versus-pool.json`, 67 KB of defenses and
+  kickers that only the duel screen reads, still shipped to everybody at startup.
+
+### Fixed
+
+- **Ezekiel Elliott was not in the game at all**, and neither were thousands of others. The player index leaves
+  `jersey_number` blank for a great many people, and the eligibility line threw the row away *before* anything
+  could look the number up. The builder now falls back to the season rosters and keeps the number each man
+  appeared under most.
+- **Every player's name was cut off on a phone** — "Tyler C...", "Davant...", "Penei ...". The grid is a fixed
+  table layout with no column widths, so all six columns took a sixth of the screen and the name, the one thing
+  on the row you have to read, got 55 pixels. The five state columns now take 13.6% each and the name takes what
+  is left; a long one wraps to a second line rather than being cut, because an ellipsis hides the half that
+  identifies him. The division reads "NFC N" rather than "N-North" for the same reason — it was wrapping the
+  cells onto two lines — while a screen reader still hears "NFC North". Checked at 320, 375 and 390 pixels in a
+  real browser, which is now a test.
+- **88 players wore a jersey number they never wore.** nflverse writes `0` for a number it does not have, and 0
+  only became a legal NFL number in 2023 — so Aqib Talib was in the game as `#0` rather than 21, Blair Walsh as
+  `#0` rather than 3. A `#0` on a career that ended before 2023 is now read as the missing value it is.
+- **A winning row drew its five cells stacked in one column.** The cell's state class was called `hit`, which is
+  also the draft card's clickable area (`all:unset; display:block`), so a row where every cell turns green at
+  once stopped being a row. The states are now prefixed `gp-c-`. Nothing could have caught it — jsdom has no
+  layout and axe measures colour, which was right — so it took opening the game on staging; the check that
+  guards it now is geometric, in a real browser, on that one row.
+- **The grid's green cells were white text on the game's light green**, about 1.8:1. Both coloured states now
+  take the same dark ink. Found by the new accessibility entry on its first run, before the game shipped.
+
+## [2.13.0] — 2026-09-28
+
+**Guess the Player** — a daily Wordle-shaped game. One real player a day, eight guesses, and five columns that
+say how close each guess was.
+
+**Deploy order: `migration-century.sql`, then `migration-guess.sql` (new), then `migration-runs-log.sql`,
+`migration-profiles.sql`, `migration-moderation.sql` and `migration-wallet.sql`, then the Edge Functions, then
+the client.** Guess goes before three files that name its table and all of their bodies are plpgsql, so the
+wrong order fails nothing until a guest trades up. `tests/test-migrations.mjs` holds the order.
+
+`GUESS.md` is the reference for all of it.
+
+### Added
+
+- **Guess the Player**, behind the Mini games tile. Guess a player; every guess draws a row comparing **team,
+  division, position, draft class and jersey number** with the answer. Green is exact, grey is no, and yellow
+  means something different in each column — the same conference, the same side of the ball, a draft class
+  within two years, a number within five. Draft class and number also carry an **arrow**, because knowing the
+  answer is later than 2015 is worth far more than knowing it is not 2015.
+  - **Daily** (one game, the same player for everyone, an account needed) and **Practice** (a code, as often as
+    you like, off the daily board).
+  - The name is not one of the five columns — it is the guess.
+- **`data/guess-pool.json`** (4,637 players, 195 KB), built by `tools/data/build-guess-pool.mjs` from nflverse's
+  player index. It is a **third** data file because this game asks about the whole roster, not the four
+  positions a fantasy score uses: DB 885 · OL 829 · DL 748 · LB 650 · WR 495 · RB 402 · TE 295 · QB 232 ·
+  SPEC 101. Careers of five seasons or more, 1999 on, drafted players only — which costs Warren Moon, Antonio
+  Gates, James Harrison, London Fletcher and Jon Kitna, and is the price of having a draft-class column at all.
+- **`guess_runs`** and two boards (`guess_top`, `guess_best`) in `supabase/migration-guess.sql`. RLS on, public
+  select, **no client write policy at all** — the second board in the game nobody can write, for the reason
+  `century_runs` is the first: a game here leaves a list of player ids, which a server can replay.
+- **`submit-guess`**, the only writer. It takes the guesses, not the result: the answer follows from the date, so
+  it recomputes it, checks every guess against the pool and derives whether the game was solved and in how many
+  itself. The daily's date is the function's own clock. The answer goes back **only once the row is written**.
+- **The pool is fetched when the game opens, not shipped in the bundle** (`guess-pool.mjs`, served from
+  `/data/guess-pool.json`). 195 KB — 61 KB compressed, a sixth of the bundle — for one mini-game is exactly what
+  `tests/test-build-seo.mjs`'s ceiling is there to catch, and that comment names lazy loading as the honest fix
+  rather than a higher ceiling. The service worker treats the file like the bundle, network first, because a
+  stale pool is a different daily answer from the one `submit-guess` checks against. The screen has a loading
+  state and a real retry; with no pool there is no game to show.
+- **Three accessibility entries** for it in `tests/test-a11y.mjs` — the menu, the grid part-played and the end
+  screen — and a `?screen=guess[&guesses=N][&finish=1]` preview in the UI harness to reach them.
+
+### Fixed
+
+- **The grid's green cells were white text on the game's light green, about 1.8:1.** Both coloured states now
+  take the same dark ink. Found by the new accessibility entry on its first run, before the game shipped.
+- **A winning row drew its five cells stacked in one column.** The cell's state class was called `hit`, which is
+  also the draft card's clickable area (`all:unset; display:block`), so a row where every cell turns green at
+  once stopped being a row. The states are now prefixed `gp-c-`. Nothing could have caught it — jsdom has no
+  layout and axe measures colour, which was right — so it took opening the game on staging; the check that
+  guards it now is geometric, in a real browser, on that one row.
+
+### Notes
+
+- **The 17 hand-picked clashes.** Two different players can share all five compared columns — same team, draft
+  class, position and number — and a game whose answer is one of those can go all green without being solved.
+  The builder keeps one of each pair **by hand, with a reason**, and fails the build on a clash it has not been
+  told about. The rule that was there first (keep the longer career) got three backwards, Maxx Crosby among
+  them: equal eight-season careers fell through to alphabetical.
+- **Not built**: no share card (the colours alone would give away the division and the side of the ball), nothing
+  on the profile, no badge, no streak. GUESS.md 9 says so rather than leaving them half-done.
+- Accepted gap, the same one every seeded mode has: the answer is derivable from the date and the pool, both of
+  which ship in the bundle. What is closed is the in-app rehearsal, and the board is honest either way.
+
+## [2.12.0] — 2026-09-28
+
+A badge for Century, and the migration reordering it forced. **Shipped together with 2.13.0** — it was finished
+and green but had not reached staging when Guess the Player landed, so the two travel as one deploy and the
+migration list below is carried by 2.13.0's.
+
+**Deploy order: run `migration-century.sql` FIRST, then `migration-runs-log.sql`, `migration-profiles.sql`,
+`migration-moderation.sql` and `migration-wallet.sql`, then the Edge Functions, then the client.** Century moves
+to the FRONT of the runbook — see below.
+
+### Added
+
+- **Century** 💯, gold, 1,000 coins — **reach 100 in the daily Century**. The daily, not any Century: Unlimited
+  is unlimited, and at roughly one run in twenty played perfectly a hundred is an evening of retries there,
+  while the daily gives one go at one set of seven teams. That is what makes it worth gold, and
+  `tests/test-badges.mjs` asserts a big Unlimited run does **not** earn it.
+  - Unlike the other two minigame badges (Stat Nerd, Mad Scientist, which pay nothing because those games are
+    browser-written), this one **pays** — a Century run is verified, so there is no version of it a browser can
+    simply assert.
+  - **`submit-century` awards it itself**, rather than leaving it to submit-run's next finished season. Somebody
+    who plays Century and nothing else may never finish one. The function witnessed the run, so it records it;
+    `award_badges` is idempotent per (user, badge) and `badge_rewards` decides the amount, so it can neither pay
+    twice nor pay the wrong number. A failed award never fails the run.
+- `player_stats()` gains a **`century`** block — `played`, `best`, `daily_best`, `centuries`. `daily_best` is
+  separate on purpose: it is the only number that can tell the daily's hundred from a ground-out one.
+
+### Changed
+
+- **`migration-century.sql` now runs FIRST, before `migration-runs-log.sql`.** `player_stats` reads
+  `century_runs` and is `language sql`, whose body is validated the moment it is created — so runs-log fails
+  outright without the table. Century's own trigger moves to `migration-profiles.sql`, beside the identical ones
+  on `sou_runs` and `builds`, which is what lets it depend on nothing and come first.
+
+  Worth keeping: everything else that reads `century_runs` (`claim_minigame`, `claim_username`, `mod_act`) is
+  plpgsql and so is **not** validated at creation — those orderings fail nothing until somebody calls them.
+  `language sql` is the one that fails loudly, and it is the reason this moved at all.
+  `tests/test-migrations.mjs` runs the whole list on a bare database and holds the order.
+- `badges.mjs` keeps its own `CENTURY_BADGE_SCORE` rather than importing `CENTURY_GOAL`: that file is pure by
+  rule, so it loads on its own anywhere, and `tests/test-badges.mjs` already enforces that. A test holds the two
+  numbers equal instead — the same arrangement the SQL copies of `rewards.mjs` live under.
+
 ## [2.11.1] — 2026-09-28
 
 One bug, found by opening a shared link on staging rather than by running the tests.

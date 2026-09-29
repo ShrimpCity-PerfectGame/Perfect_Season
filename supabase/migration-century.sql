@@ -1,10 +1,18 @@
 -- Century (v2.9.0) - the table a finished Century run lands in, and the two boards that read it.
 --
 -- Run this in the SQL editor of each environment, staging first. Only adds objects, so the site keeps working
--- while it runs. ORDER: this file goes BEFORE migration-wallet.sql, because claim_minigame there gains a
--- 'century' arm that reads century_runs - a plpgsql body is not validated when it is created, so the wrong order
--- creates a function that only fails when somebody claims their coins, which is the worst shape for a runbook.
--- Then deploy the Edge Functions (submit-century is new), then the client.
+-- while it runs.
+--
+-- ORDER: **this file goes FIRST**, before migration-runs-log.sql. player_stats there reads century_runs, and a
+-- `language sql` body is validated the moment it is created - so the table must already exist or that file
+-- fails outright. Everything that reads this table later is plpgsql and so is not validated at creation
+-- (claim_minigame's 'century' arm in wallet, the name rewrites in profiles and moderation), which means the
+-- wrong order there fails nothing until somebody claims coins or a guest trades up: the worst shape a runbook
+-- can be in, and why tests/test-migrations.mjs runs the whole list on a bare database.
+--
+-- This file depends on nothing itself: the trigger that stamps username and guest lives in
+-- migration-profiles.sql with the identical ones on sou_runs and builds. Then deploy the Edge Functions
+-- (submit-century is new), then the client.
 --
 -- What the mode is: seven slots, hidden stats, a goal of 100 combined touchdowns from one real season. The rules
 -- all live in century-logic.mjs, which the browser and the submit-century Edge Function share.
@@ -70,10 +78,11 @@ drop policy if exists "users update their own century run" on public.century_run
 -- tests/test-economy-security.mjs 1b is what caught this one; it holds the rule for the whole public schema.
 revoke all on sequence public.century_runs_id_seq from anon, authenticated;
 
--- The name and guest flag come from the account, never from the row that was written.
-drop trigger if exists century_runs_account_username on public.century_runs;
-create trigger century_runs_account_username before insert or update on public.century_runs
-  for each row execute function public.use_account_username();
+-- The name and guest flag come from the account, never from the row that was written - but that TRIGGER is
+-- attached in migration-profiles.sql, beside the identical ones on sou_runs and builds, because that is where
+-- use_account_username is defined. This file therefore depends on nothing and RUNS FIRST (see the header):
+-- player_stats in migration-runs-log.sql reads century_runs, and a `language sql` body is validated when it is
+-- created, so the table has to exist before that file does.
 
 -- A rename has to reach this board too, or a renamed account keeps its old name here while every other board
 -- shows the new one. mod_act and claim_username both do this by hand for each table; this file cannot edit them,

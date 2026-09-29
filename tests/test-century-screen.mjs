@@ -598,4 +598,31 @@ await runTest("15. a link beats a run already in progress, and a slow snapshot r
   }
 });
 
+await runTest("16. the played-today hint survives a reload, keyed by the day the run is filed under", async () => {
+  // The OTHER half of the UTC bug. The in-memory pill is set when the run saves; this is the one that has to
+  // come back from storage on a fresh load - and it was WRITTEN under the run's UTC day and READ under the
+  // browser's LOCAL day. Those differ for hours every day for anyone west of UTC, so the pill simply never
+  // returned for them. This is the assertion that catches the read side, which the save-side test cannot.
+  await dropWip();
+  await signUp("century5@example.test", "reloader");
+  await openCentury();
+  await click(variantTiles()[0]);
+  await flush();
+  const taken = await playOut();
+  const score = taken.reduce((n, p) => n + p.td, 0);
+
+  // A fresh load: nothing of the component's state survives, only what is in storage.
+  ({ container } = await mount());
+  await flush();
+  await openNav("Modes");
+  const mini = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes("Mini games"));
+  assert(mini, "Modes still offers Mini games");
+  assert(/done today/.test(mini.textContent), `and counts today's played games: ${mini.textContent}`);
+  await click(mini);
+  await flush();
+  const tile = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes("Century"));
+  assert(tile.textContent.includes(`Done · ${score}`),
+    `the Century tile remembers across a reload: ${tile.textContent}`);
+});
+
 console.log("test-century-screen.mjs done");
