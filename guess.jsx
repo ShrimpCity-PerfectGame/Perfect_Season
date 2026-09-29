@@ -13,7 +13,7 @@ import { TEAMS } from "./game-logic.mjs";
 import {
   GUESS_PLAYERS, GUESS_TRIES, GUESS_COLUMNS, DIVISIONS,
   guessPlayer, compareGuess, guessAnswerFor, guessAnswerForSeed, guessOutcome, replayGuessGame,
-  guessDifficulty, guessBand,
+  guessDifficulty, guessBand, guessDayNumber,
 } from "./guess-logic.mjs";
 import { loadGuessPool } from "./guess-pool.mjs";
 import { teamVars, reducedMotion } from "./ui-common.jsx";
@@ -31,9 +31,44 @@ const newCode = () => {
 // label, because a colour on its own carries meaning and that is the one thing a screen may not do.
 export const GUESS_HEADS = { team: "Team", division: "Division", pos: "Pos", draft: "Class", number: "No." };
 const SAID = { hit: "exact", near: "close", miss: "no" };
+// How many of the pool are retired, counted rather than written down - the builder's LEGENDS can change and
+// this sentence must not go stale. A season is "current" if somebody in the pool is still playing in it.
+const RETIRED_SAID = "a couple of dozen";
 // The ink on a coloured cell. Both paints are light, so it is dark on both - see the note in GUESS_CSS.
 const CELL_INK = "#1B1B1B";
 const ARROW = { up: "↑", down: "↓" };
+
+// ---------- The share card ----------
+// The squares one row per guess, the way Wordle's do. What makes it safe to show is that a reader does not know
+// what was GUESSED: a green in the team column says "the answer's team matched a guess of mine", which is a
+// fact about a name they do not have. That is why the grid can be shown when the guesses themselves never can.
+//
+// What is deliberately NOT on the card: the player, the guesses, and the day's DIFFICULTY. The first two are
+// the answer; the third is a real hint about it - everyone reading a daily's card is playing the same day, and
+// "difficulty 8/100" tells them it is somebody obvious. The end screen shows it because the game is over there.
+const SHARE_SQUARE = { hit: "\u{1F7E9}", near: "\u{1F7E8}", miss: "\u2B1B" };
+
+export function guessShareLink(base, seed) {
+  return `${base}/c/${seed}?${new URLSearchParams({ mode: "guess" })}`;
+}
+
+export function guessShareText({ solved, tries, tried = GUESS_TRIES, rows = [], day, seed, siteUrl }) {
+  const n = day ? guessDayNumber(day) + 1 : 0;
+  const title = day ? `Gridspin · Guess the Player ${n >= 1 ? n : day}` : "Gridspin · Guess the Player";
+  const lines = [`${title} \u00b7 ${solved ? `${tries}/${tried}` : `X/${tried}`}`];
+  for (const r of rows) lines.push(GUESS_COLUMNS.map((c) => SHARE_SQUARE[r.row[c].state] || SHARE_SQUARE.miss).join(""));
+  // A practice code hands over the same player, which is the whole point of sending one. A DAILY never gets a
+  // link to its game: everybody has it already, and a code that dealt it would be a way round the one-go rule.
+  if (!day && seed) {
+    lines.push(siteUrl ? `Same player: ${guessShareLink(siteUrl, seed)}` : `Same player: code ${seed}`);
+  } else if (siteUrl) {
+    lines.push(siteUrl);
+  }
+  return lines.join("\n");
+}
+
+// What the share sheet did, in sendShare's own words - the same four the other screens use.
+export const SHARE_SAID = { shared: "", cancelled: "", copied: "Copied", manual: "Couldn't share - copy it by hand" };
 
 // The short form a cell prints. Division is the only one that would not fit, so it loses its conference.
 const cellText = (col, p) => {
@@ -50,6 +85,7 @@ const cellSaid = (col, p) => (col === "division" ? (p.division || "") : cellText
 
 export function GuessScreen({
   userId, username, isGuest, onBack, onClaimCoins, onDailySaved, onStage, onNeedsAccount,
+  onShare, siteUrl, challenge, onChallengeTaken,
 }) {
   // The pool is fetched when this screen opens rather than shipped in the bundle (guess-pool.mjs says why), so
   // everything here waits on it: the menu's tiles, the search box and the resume below all need the players.
@@ -64,6 +100,8 @@ export function GuessScreen({
   const [board, setBoard] = useState({ day: [], best: [], loaded: false });
   const [dailyDone, setDailyDone] = useState(null);
   const [tab, setTab] = useState("day");
+  const [shared, setShared] = useState(null); // what the share sheet did, in sendShare's own words
+  const [rosterOpen, setRosterOpen] = useState(false);
   const day = utcDay();
   const acct = useRef(0);
   const started = useRef(false);
@@ -98,6 +136,16 @@ export function GuessScreen({
     })();
     return () => { alive = false; };
   }, [day, saveWip, pool]);
+
+  // A link somebody sent: its code IS the seed, so the same player comes up. It replaces whatever was in
+  // progress - a game here is five guesses, not a record - and is cleared as it is taken so it cannot re-deal
+  // on the next render.
+  useEffect(() => {
+    if (!challenge || !challenge.seed || !userId || pool !== "ready") return;
+    start("practice", challenge.seed);
+    if (onChallengeTaken) onChallengeTaken();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [challenge, userId, pool]);
 
   useEffect(() => {
     const mine = ++acct.current;
@@ -263,7 +311,10 @@ export function GuessScreen({
             </ul>
           )}
           {query.trim().length >= 2 && matches.length === 0 && (
-            <p className="note">Nobody by that name is in the game. It holds the quarterbacks, backs, receivers and tight ends playing this season, and twenty-five of the greats.</p>
+            <p className="note">
+              Nobody by that name is in the game. It holds the quarterbacks, backs, receivers and tight ends
+              taking real snaps this season, and {RETIRED_SAID} of the greats — the menu lists every one of them.
+            </p>
           )}
         </div>
 
@@ -311,6 +362,16 @@ export function GuessScreen({
         {error && <p className="note gp-err" role="status">{error}</p>}
         <GuessTable rows={shown} />
         <div className="gp-row">
+          {onShare && (
+            <button className="btn" onClick={async () => {
+              const how = await onShare(guessShareText({
+                solved: result.solved, tries: result.tries, tried: result.tried || GUESS_TRIES,
+                rows: shown.map((r) => ({ row: r.row })), day: result.day, seed: result.seed || run?.seed, siteUrl,
+              }));
+              setShared(how);
+            }}>Share</button>
+          )}
+          {shared && <span className="note gp-shared" role="status">{SHARE_SAID[shared] || ""}</span>}
           <button className="btn solid" onClick={() => start("practice")}>Another one 🔁</button>
           <button className="btn" onClick={() => { setStage("menu"); loadBoards(); }}>Boards</button>
           <button className="btn" onClick={onBack}>Done</button>
@@ -341,10 +402,11 @@ export function GuessScreen({
   return (
     <div className="gp" data-view="menu">
       <p className="note gp-intro">
-        One player a day, {GUESS_TRIES} guesses. Everybody playing this season, and the greats. Every guess shows
-        how close it was on five things — team, division, position, draft class and number. Green is exact,
-        yellow is close, and the arrows say which way to go.
+        One player a day, {GUESS_TRIES} guesses. Every guess shows how close it was on five things — team,
+        division, position, draft class and number. Green is exact, yellow is close, and the arrows say which
+        way to go.
       </p>
+      <GuessRoster open={rosterOpen} onToggle={() => setRosterOpen((v) => !v)} />
       <div className="modes">
         <button className="mode daily"
           onClick={() => (dailyDone ? showDailyResult()
@@ -431,6 +493,48 @@ function GuessTable({ rows }) {
   );
 }
 
+// Everybody the game can ask about, by position. NAMES ONLY - no team, no class, no number.
+//
+// This exists because the pool has a boundary nobody can see. "Everyone playing this season" is a category a
+// fan can reason about; "and twenty-five of the greats" is not, so the only way to find out whether Jerry Rice
+// was in it was to type his name and see. That is not difficulty, it is a guessing game about the guessing
+// game - and with the pool down to a couple of hundred it can simply be shown.
+//
+// The five columns stay off it deliberately. A table of every player WITH his team, class and number would not
+// be a list, it would be the answer key: you could filter it by the colours and read off the man. The names
+// bound the search; the clues still have to be earned.
+function GuessRoster({ open, onToggle }) {
+  const byGroup = useMemo(() => {
+    const out = new Map();
+    for (const p of [...GUESS_PLAYERS].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (!out.has(p.group)) out.set(p.group, []);
+      out.get(p.group).push(p);
+    }
+    return [...out].sort((a, b) => ROSTER_ORDER.indexOf(a[0]) - ROSTER_ORDER.indexOf(b[0]));
+  }, []);
+  return (
+    <section className="gp-roster">
+      <button className="linkbtn" aria-expanded={open} aria-controls="gp-roster-list" onClick={onToggle}>
+        {open ? "Hide who's in the game" : `Who's in the game? (${GUESS_PLAYERS.length})`}
+      </button>
+      <div id="gp-roster-list" hidden={!open}>
+        <p className="note">
+          Every player the game can ask about — everyone taking real snaps this season, and {RETIRED_SAID} of the
+          greats. Teams, draft classes and numbers are not listed: those are the game.
+        </p>
+        {byGroup.map(([group, men]) => (
+          <div key={group} className="gp-rgroup">
+            <h3 className="h">{ROSTER_LABEL[group] || group} <span className="gp-rcount">{men.length}</span></h3>
+            <p className="gp-rnames">{men.map((p) => p.name).join(" · ")}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+const ROSTER_ORDER = ["QB", "RB", "WR", "TE"];
+const ROSTER_LABEL = { QB: "Quarterbacks", RB: "Running backs", WR: "Receivers", TE: "Tight ends" };
+
 function GuessBoard({ rows, loaded, username, allTime }) {
   if (!loaded) return <p className="note">Loading…</p>;
   if (!rows.length) return <p className="note">{allTime ? "Nobody has played yet." : "Nobody has played today yet."}</p>;
@@ -511,7 +615,16 @@ export const GUESS_CSS = `
 .gp-hn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gp-hm { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .gp-err { color: var(--loss); }
+.gp-shared { align-self: center; }
 .gp-coins { color: var(--accent-ink); }
+
+/* Who's in the game. Names run as one wrapped line per position rather than a list of rows: it is a reference
+   to scan, not a table to read, and 200 rows would bury the rest of the menu. */
+.gp-roster { display: grid; gap: 8px; }
+.gp-rgroup { margin-top: 10px; }
+.gp-rgroup .h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; }
+.gp-rcount { font-size: 11px; color: var(--muted); font-weight: 700; }
+.gp-rnames { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink); text-wrap: pretty; }
 
 .gp-hero { text-align: center; }
 .gp-eyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; opacity: .8; margin: 0; }

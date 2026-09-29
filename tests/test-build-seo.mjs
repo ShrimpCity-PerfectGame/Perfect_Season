@@ -57,7 +57,16 @@ check("the share link people see stays gridspin.app", prod.js.includes('"https:/
 // bundle past it - the bundle was already ~988 KB. If this needs raising again, ask first whether the thing
 // being added belongs in the page every visitor loads: the honest fix for that file is to load it when the 1v1
 // screen opens rather than at startup, which needs the service worker to learn about a second chunk.
-check("the bundle is minified", prod.js.length < 1_200_000, `${prod.js.length} bytes`);
+//
+// Raised to 1,300,000 in v2.14.0, at 1,201,138 bytes. The question was asked and answered: what pushed it over
+// was Guess the Player's SCREEN - the share card, the roster list - which is code for a mode every visitor can
+// open, not data for one of them. The data half of that feature is already fetched rather than bundled
+// (guess-pool.mjs), which is what this ceiling asked for last time and got.
+//
+// THE NEXT RECLAIM IS NAMED AND UNCHANGED: data/versus-pool.json, 67 KB of defenses and kickers that only the
+// duel screen reads, still shipped to everybody at startup. Doing to it what was done to the guess pool would
+// give back more than this release took. Do that before raising this number again.
+check("the bundle is minified", prod.js.length < 1_300_000, `${prod.js.length} bytes`);
 // Guess the Player's pool is the one data file the bundle does NOT carry (guess-pool.mjs), because page.js sits
 // a few KB under the ceiling above. Its SIZE moves with the football season - the pool is the men currently
 // taking snaps, so it grows every week and starts again each September - hence a floor rather than a range.

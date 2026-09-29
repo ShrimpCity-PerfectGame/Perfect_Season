@@ -264,6 +264,55 @@ and `.mode`. It is reached from **Mini games**, not Modes (v2.10.0).
 
 ---
 
+## 6a. Who's in the game
+
+The menu carries a **list of every player the game can ask about**, closed by default, names only, grouped by
+position with a count each.
+
+It exists because the pool had a boundary nobody could see. "Everyone playing this season" is a category a fan
+can reason about; "and twenty-five of the greats" is not — so the only way to find out whether Jerry Rice was in
+it was to type his name and see. That is not difficulty, it is a guessing game *about* the guessing game, and
+with the pool down to a couple of hundred it can simply be shown.
+
+**Names only, and that is the whole design.** A list with teams, draft classes and numbers on it would not be a
+list, it would be the answer key: you could filter it by the colours already on your grid and read the man off.
+The names bound the search; the five clues still have to be earned. `tests/test-guess-screen.mjs` 12b checks
+both halves — every player appears, and the day's answer's team, class and number do not.
+
+## 6b. Sharing
+
+A Wordle-style card, one row of five squares per guess (green exact, yellow close, black no), the result as
+`3/5` or `X/5`, and a link. The Share button sits on the end screen and hands the text to `sendShare`, the same
+helper the season and Century use — the phone's share sheet where there is one, the clipboard where there isn't.
+
+```
+Gridspin · Guess the Player 16 · 3/5
+⬛⬛🟨⬛⬛
+⬛⬛🟩⬛⬛
+🟩🟩🟩🟩🟩
+https://gridspin.app
+```
+
+**Why the squares are safe when the guesses never are.** A reader does not know what was *guessed*, so a green
+in the team column says only "the answer's team matched a guess of mine" — a fact about a name they do not have.
+That is the whole argument, and it is why this could be built after GUESS.md said it could not: the earlier note
+assumed the colours gave away the division and the side of the ball, which they only would if the guesses were
+on the card too.
+
+**What is deliberately not on it:** the player, the guesses, and the day's **difficulty**. The first two are the
+answer. The third is a real hint — everyone reading a daily's card is playing that same day, and "difficulty
+8/100" tells them it is somebody obvious. The end screen shows it because the game is over there.
+
+`tests/test-guess-screen.mjs` 13 checks the spoiler rule by name against the game just played, and then checks
+that **every line on the card is one of the four it is allowed to be** — looking for known spoilers only catches
+the ones somebody thought of, and a stray line is how one would actually arrive.
+
+**The link.** A practice card carries `/c/CODE?mode=guess`, which is the season's challenge route with a mode of
+its own (`parseChallengeLink`), so no new address and no `vercel.json` change were needed. Taking it opens the
+game on that seed, the way a Century link opens its seven teams, and costs no draft. **A daily's card carries no
+code at all**: everybody already has that day's player, and a link that dealt it would be a way round the
+one-go rule.
+
 ## 7. Tests
 
 | File | What only it can hold |
@@ -321,9 +370,6 @@ fifty-third best quarterback of the century".
 
 ## 9. Not built
 
-- **No share card.** Wordle's grid of coloured squares is the obvious one and it is a real piece of work to do
-  without spoiling the answer — the colours alone give away the division and the side of the ball. Left out
-  rather than done badly.
 - **Nothing on the profile.** `player_stats` does not count guess games, and no badge is awarded. Century's
   badge took a release of its own; this can have the same.
 - **No streak.** The all-time board counts dailies solved and the average, which is the honest measure; a streak

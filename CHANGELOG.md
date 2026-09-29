@@ -45,10 +45,32 @@ bundles `data/guess-pool.json` and `guess-logic.mjs`, and both changed. `GUESS.m
 
 ### Added
 
+- **The menu lists every player in the game** — names only, grouped by position, closed by default. The pool had
+  a boundary nobody could see: "everyone playing this season" is a category you can reason about, "and 25 of the
+  greats" is not, so the only way to find out whether Jerry Rice was in it was to type his name and see. Names
+  only is deliberate: a list with teams, classes and numbers would be the answer key rather than a list, because
+  you could filter it by the colours already on your grid.
+- **A share card**, Wordle-shaped: a row of five squares per guess, `3/5` or `X/5`, and a link. The Share button
+  is on the end screen and uses the same share sheet the season and Century do.
+  - The squares are safe to show for a reason the earlier "not built" note had wrong: a reader does not know
+    what was **guessed**, so a green in the team column is a fact about a name they do not have.
+  - The card carries no player, no guesses, and **no difficulty** — that last one is a genuine hint, because
+    everyone reading a daily's card is playing that same day.
+  - A practice card links `/c/CODE?mode=guess`, the season's existing challenge route with a mode of its own, so
+    it needed no new address; taking it opens the game on that player. A daily's card carries no code at all.
 - **The end screen says how hard the day was** — "Difficulty 29/100", plus whether it was one most people get, a
   fair test or a deep cut. Shown only once the game is over; before that it would narrow the answer.
 - Undrafted players are in on their own terms: the team they came into the league with (from the rosters) and
   their first season as their class. No hand-written list — every man in this pool is one the rosters have.
+
+### Notes
+
+- **The bundle ceiling went from 1.2 MB to 1.3 MB** (it sits at 1,201,138). That guard exists to catch a build
+  that forgot to minify — about 1.9 MB — and to force a question when it is hit: does the new thing belong in
+  the page every visitor loads? Here it does: what crossed the line is Guess the Player's *screen* (the share
+  card, the roster list), which is code for a mode anyone can open, while that feature's data is already fetched
+  rather than bundled. The next reclaim is named and unchanged: `data/versus-pool.json`, 67 KB of defenses and
+  kickers that only the duel screen reads, still shipped to everybody at startup.
 
 ### Fixed
 

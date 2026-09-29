@@ -334,7 +334,18 @@ parts unlike everything else:
 - **The end screen's numbers are the client's own when a save is refused**, and nothing ever replaces them - so
   the instant result is computed by `replayGuessGame`, the same function the server replays with, rather than by
   a comparison written in the screen. A stale tab losing a daily and being told "Got it" is what that guards.
-- **Not built:** no share card, nothing on the profile, no badge, no streak. GUESS.md 9 says so.
+- **The menu lists everybody in the game**, names only, because the pool had a boundary nobody could see:
+  "everyone playing this season" is a category a fan can reason about and "plus some of the greats" is not, so
+  the only way to learn whether Jerry Rice was in it was to type his name. Names ONLY - a list carrying teams,
+  classes and numbers would be the answer key, since you could filter it by the colours already on your grid.
+- **The share card is squares, and they are safe for a reason worth knowing**: a reader does not know what was
+  GUESSED, so a green in the team column is a fact about a name they do not have. The card carries no player, no
+  guesses and no DIFFICULTY - that last one is a real hint, since everyone reading a daily's card is playing that
+  same day. A practice card links `/c/CODE?mode=guess`, the season's own challenge route with a mode of its own,
+  so no new address was needed; a daily's carries no code, because everybody has that day's player already and a
+  link would be a second go. The test checks every line is one of the four it may be, not just that known
+  spoilers are absent.
+- **Not built:** nothing on the profile, no badge, no streak. GUESS.md 9 says so.
 
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
 Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`

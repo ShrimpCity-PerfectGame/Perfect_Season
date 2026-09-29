@@ -11,16 +11,18 @@
 //     line of its own reads as "check your connection" - forever, for a rule rather than a fault.
 import {
   setupDom, makeStorage, mount, flush, click, text, findButtonByText,
-  assert, runTest, waitForCrypto, makeMockAuth, loadModule, type,
+  assert, runTest, waitForCrypto, makeMockAuth, loadModule, loadAppModule, type,
 } from "./helpers.mjs";
 import { readFileSync } from "node:fs";
 import {
   initGuessData, GUESS_PLAYERS, GUESS_TRIES, GUESS_COLUMNS, guessAnswerFor, guessAnswerForSeed, guessPlayer,
+  compareGuess as compareGuessRow,
 } from "../guess-logic.mjs";
 import { GUESS_POOL_URL } from "../guess-pool.mjs";
 import { GUESS_REFUSALS } from "../storage-guess.js";
 // Node cannot import .jsx, so the screen module comes through the same bundler helper the other screen tests use.
-const { GUESS_WIP, GUESS_HEADS } = await loadModule("guess.jsx");
+const { GUESS_WIP, GUESS_HEADS, guessShareText, guessShareLink } = await loadModule("guess.jsx");
+const { parseChallengeLink } = await loadAppModule();
 
 // Deliberately NOT initialised here, unlike every other data file in the tests: the pool is fetched when the
 // game opens (guess-pool.mjs), so test 0 drives the real loader through a stubbed fetch - which is also what
@@ -471,9 +473,139 @@ await runTest("12. the pool the screen offers is the pool the server checks agai
   assert(gp().querySelectorAll(".gp-hit").length === 0, "one letter offers nothing");
   await type(box(), "Zzzzzz");
   assert(gp().querySelectorAll(".gp-hit").length === 0, "and a name nobody has offers nothing");
-  assert(/playing this season/.test(gp().textContent), "with a line saying which players the game holds");
+  assert(/taking real snaps this season/.test(gp().textContent), "with a line saying which players the game holds");
   // Every id the screen can hand in resolves in the same module the function replays with.
   for (const p of GUESS_PLAYERS.slice(0, 50)) assert(guessPlayer(p.id) === p, `${p.id} resolves`);
+});
+
+await runTest("12b. the menu lists everybody in the game, and gives none of the five columns away", async () => {
+  // The pool has a boundary nobody could see: "everyone playing this season" is a category a fan can reason
+  // about, "and some of the greats" is not - so the only way to learn whether Jerry Rice was in it was to type
+  // his name. With a couple of hundred players it can simply be shown.
+  await dropWip();
+  await openGuess();
+  const toggle = findButtonByText(gp(), "Who's in the game");
+  assert(toggle, `the menu offers the list: ${text(gp()).slice(0, 120)}`);
+  assert(toggle.textContent.includes(String(GUESS_PLAYERS.length)), `and says how many: ${toggle.textContent}`);
+  const list = gp().querySelector("#gp-roster-list");
+  assert(list && list.hidden, "closed to begin with, so it does not bury the menu");
+  assert(toggle.getAttribute("aria-expanded") === "false", "and says so");
+  await click(toggle);
+  await flush();
+  assert(!gp().querySelector("#gp-roster-list").hidden, "it opens");
+  assert(findButtonByText(gp(), "Who's in the game") === null || toggle.getAttribute("aria-expanded") === "true",
+    "and the button says it is open");
+
+  // EVERY player, or the list is worse than none - a name missing from it reads as "not in the game".
+  const shown = gp().querySelector("#gp-roster-list").textContent;
+  for (const p of GUESS_PLAYERS) assert(shown.includes(p.name), `${p.name} is on the list`);
+  // Including the retired, which is the half nobody could guess at.
+  for (const name of ["Jerry Rice", "Tom Brady", "Peyton Manning"]) {
+    assert(shown.includes(name), `${name} is on the list`);
+  }
+  // And NOT the five columns. A list with teams, classes and numbers on it would not be a list, it would be
+  // the answer key: you could filter it by the colours and read the man off.
+  const answer = guessAnswerFor(today());
+  assert(!shown.includes(`#${answer.number}`), "no jersey numbers on the list");
+  assert(!new RegExp(`\b${answer.draft}\b`).test(shown), "no draft classes");
+  assert(!new RegExp(`\b${answer.team}\b`).test(shown), `no teams (${answer.team})`);
+});
+
+await runTest("13. the result shares a spoiler-free card, and a practice card's link deals the same player", async () => {
+  // The share sheet is not available in jsdom, so sendShare falls through to the clipboard - which is the path
+  // a desktop takes anyway. What is captured is the TEXT, because that is the whole artefact.
+  const written = [];
+  navigator.clipboard = { writeText: async (t) => { written.push(t); } };
+  await dropWip();
+  await openGuess();
+  await click(variantTiles()[1]);
+  await flush();
+  const code = seedOnScreen();
+  const answer = guessAnswerForSeed(code);
+  const used = new Set();
+  const wrong = someoneElse(answer, used);
+  await guessPlayerByName(wrong);
+  await guessPlayerByName(answer);
+  assert(view() === "done", "a game to share");
+
+  const share = findButtonByText(gp(), "Share");
+  assert(share, "the result offers a Share button");
+  await click(share);
+  await flush();
+  assert(written.length === 1, `it shared once: ${written.length}`);
+  const card = written[0];
+
+  // THE SPOILER RULE. The card may not name the player, and it may not name what he is either - the whole
+  // point of the squares is that they mean nothing without the guesses, which are also not on it.
+  assert(!card.includes(answer.name), `the answer must not be on the card: ${card}`);
+  assert(!card.includes(wrong.name), `nor the guesses: ${card}`);
+  assert(!card.includes(`#${answer.number}`), `nor his number: ${card}`);
+  assert(!/Difficulty/i.test(card), `nor how hard it was - every reader of a daily's card is playing that day: ${card}`);
+
+  // What it DOES say: how many it took, and a row of five squares per guess.
+  assert(/Guess the Player/.test(card), `it says which game it is: ${card.split("\n")[0]}`);
+  assert(card.includes(`2/${GUESS_TRIES}`), `and the result: ${card.split("\n")[0]}`);
+  const squares = card.split("\n").filter((l) => /^[\u{1F7E9}\u{1F7E8}\u2B1B]+$/u.test(l));
+  assert(squares.length === 2, `a row of squares per guess: ${JSON.stringify(squares)}`);
+  assert(squares.every((l) => [...l].length === 5), `five squares to a row: ${JSON.stringify(squares)}`);
+  assert(/^\u{1F7E9}{5}$/u.test(squares[1]), `and the winning row is all green: ${squares[1]}`);
+
+  // And NOTHING ELSE is on it. Checking for known spoilers only catches the ones somebody thought of - this
+  // catches a line nobody thought about, which is how a spoiler would actually arrive.
+  for (const line of card.split("\n")) {
+    const known = /^Gridspin \u00b7 Guess the Player/.test(line)
+      || /^[\u{1F7E9}\u{1F7E8}\u2B1B]+$/u.test(line)
+      || /^Same player: /.test(line)
+      || /^https?:\/\//.test(line);
+    assert(known, `the card carries a line nobody accounted for: ${JSON.stringify(line)}`);
+  }
+
+  // The link is playable: parsed, it is a Guess link carrying the same code, which deals the same player.
+  const link = card.split("\n").pop();
+  const parsed = parseChallengeLink(`/c/${code}`, link.slice(link.indexOf("?")));
+  assert(parsed?.guess && parsed.code === code, `it parses as a Guess link: ${JSON.stringify(parsed)}`);
+  assert(guessAnswerForSeed(parsed.code).id === answer.id, "and deals the same player");
+  assert(!parsed.gm && !parsed.genius && !parsed.century, "and is not mistaken for any other mode's link");
+});
+
+await runTest("14. a daily's card carries no code, because everybody already has that day's player", async () => {
+  const day = today();
+  const answer = guessAnswerFor(day);
+  const rows = [answer].map((p) => ({ row: compareGuessRow(p, answer) }));
+  const card = guessShareText({ solved: true, tries: 1, rows, day, siteUrl: "https://gridspin.test" });
+  assert(!/\/c\//.test(card), `no challenge link on a daily's card: ${card}`);
+  assert(card.includes("https://gridspin.test"), "just the site, which is where a reader goes to play it");
+  // Numbered from launch day, the way the season's share card is.
+  assert(/Guess the Player \d+/.test(card), `the day is numbered: ${card.split("\n")[0]}`);
+  // A practice card carries the code instead - that is the only difference between them.
+  const practice = guessShareText({ solved: false, tries: GUESS_TRIES, rows, seed: "ZZZZ9999", siteUrl: "https://gridspin.test" });
+  assert(practice.includes(guessShareLink("https://gridspin.test", "ZZZZ9999")), `a practice card links its code: ${practice}`);
+  assert(practice.includes(`X/${GUESS_TRIES}`), `and a lost game is X, the way Wordle writes it: ${practice.split("\n")[0]}`);
+});
+
+await runTest("15. taking a link opens the game on that player, and costs no draft", async () => {
+  await dropWip();
+  // Mounting again gives the app a FRESH copy of its modules, so its pool is empty and it fetches - and test 0
+  // left a stub that refuses, to prove the load is memoised. Serve it again before landing on the link.
+  servePool();
+  const code = "LINKED99";
+  const answer = guessAnswerForSeed(code);
+  // The app reads the address on load, so this is the whole journey: land on the link, take the card.
+  window.history.pushState({}, "", `/c/${code}?mode=guess`);
+  let fresh = await mount();
+  container = fresh.container;
+  await flush();
+  const take = findButtonByText(container, "Guess this player");
+  assert(take, `the challenge card offers to play it: ${text(container).slice(0, 200)}`);
+  await click(take);
+  await flush();
+  await flush();
+  assert(view() === "play", `it opens the game: ${view()}`);
+  assert(seedOnScreen() === code, `on the link's own code: ${seedOnScreen()}`);
+  await guessPlayerByName(answer);
+  assert(view() === "done", "and it plays out");
+  assert(gp().textContent.includes(answer.name), "against the player the link carried");
+  window.history.pushState({}, "", "/");
 });
 
 console.log("test-guess-screen.mjs done");

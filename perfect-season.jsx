@@ -2066,6 +2066,9 @@ export function parseChallengeLink(pathname, search) {
   // mode=century is a different game entirely: the code is Century's seed, and `score` is what they got,
   // shown only as a headline the way `beat` is. Never the daily - its seed would hand over the day's teams.
   const century = q.get("mode") === "century";
+  // mode=guess is Guess the Player: the code is a practice seed, so the same player comes up. Never the daily,
+  // which has no code at all - everybody already has that day's man and a link could only be a second go.
+  const guess = q.get("mode") === "guess";
   // Digits and nothing else. Number("") is 0, which is finite and in range, so a link with an empty score
   // claimed "They got 0" - a headline nobody wrote.
   const rawScore = q.get("score") || "";
@@ -2073,13 +2076,14 @@ export function parseChallengeLink(pathname, search) {
   return {
     code: m[1].toUpperCase(),
     century,
+    guess,
     // A Century run cannot score below zero and cannot plausibly pass the 133 ceiling; anything else was
     // typed in by hand and is simply not shown.
     score: century && Number.isFinite(claimed) && claimed <= 200 ? claimed : null,
     // A real season is 17 games plus up to 4 playoff games; anything else was typed in by hand.
     beat: games >= 17 && games <= 21 ? { w: Number(beat[1]), l: Number(beat[2]) } : null,
-    gm: !century && q.get("mode") === "gm",
-    genius: !century && q.get("mode") === "genius",
+    gm: !century && !guess && q.get("mode") === "gm",
+    genius: !century && !guess && q.get("mode") === "genius",
     format: q.get("scoring") === "championship" ? "standard" : "fantasy",
   };
 }
@@ -2314,6 +2318,7 @@ export default function PerfectSeason() {
   const [guessStage, setGuessStage] = useState("menu");
   // A Century link waiting to be dealt: { seed, score }. Cleared by the screen as it takes it.
   const [centuryChallenge, setCenturyChallenge] = useState(null);
+  const [guessChallenge, setGuessChallenge] = useState(null);
   const [souCoins, setSouCoins] = useState(null); // { date, credited } - the coins a finished day's claim paid
   const [souBoard, setSouBoard] = useState({ loading: false, rows: [] });
   // Standalone from the normal draft - see openBuildPicker/pickBapAttr/playBapSim below.
@@ -4034,6 +4039,12 @@ export default function PerfectSeason() {
       openTab("century");
       return;
     }
+    // Same again for Guess the Player: a code, a player, and nothing of the season draft involved.
+    if (c.guess) {
+      setGuessChallenge({ seed: c.code });
+      openTab("guess");
+      return;
+    }
     await abandonCurrent();
     clearDraft(DRAFT_KEY);
     // The link's scoring becomes the selected format, as opening a daily does, so Modes shows what you're
@@ -4410,10 +4421,12 @@ export default function PerfectSeason() {
             {challenge && (
               <section className="challenge" aria-labelledby="challenge-title">
                 <span className="k">
-                  {challenge.century ? "A friend's seven teams" : "A friend's boards"} · code {challenge.code}
+                  {challenge.century ? "A friend's seven teams" : challenge.guess ? "A friend's player" : "A friend's boards"} · code {challenge.code}
                 </span>
                 <h2 id="challenge-title" className="big">
-                  {challenge.century
+                  {challenge.guess
+                    ? <>Can you name<br />their player?</>
+                    : challenge.century
                     ? (challenge.score != null
                       ? <>They got <em>{challenge.score}</em>.<br />Can you beat it?</>
                       : <>Can you beat<br />their Century?</>)
@@ -4422,7 +4435,9 @@ export default function PerfectSeason() {
                       : <>Can you beat<br />their boards?</>}
                 </h2>
                 <p>
-                  {challenge.century
+                  {challenge.guess
+                    ? <>Guess the Player · {GUESS_TRIES} guesses. The same code, so the same player - team, division, position, draft class and number, and how close each guess was.</>
+                    : challenge.century
                     ? <>Century · {CENTURY_GOAL} touchdowns. The same code, so the same seven teams come up in the order they did for them, with the stats hidden as always.</>
                     : <>
                       {[challenge.gm && "GM mode", challenge.genius && "Genius mode", `${FORMAT_LABEL[challenge.format]} scoring`].filter(Boolean).join(" · ")}.{" "}
@@ -4430,12 +4445,12 @@ export default function PerfectSeason() {
                     </>}
                 </p>
                 {/* Century touches no season draft at all, so there is nothing of yours to lose by taking one. */}
-                {!challenge.century && freeInProgress && (
+                {!challenge.century && !challenge.guess && freeInProgress && (
                   <p className="warn">You have an Unlimited draft in progress. Drafting these boards {user ? "counts it as a DNF" : "replaces it"}.</p>
                 )}
                 <div className="frow">
                   <button className="btn solid" disabled={!authReady} onClick={acceptChallenge}>
-                    {challenge.century ? "Play these teams" : "Draft these boards"}
+                    {challenge.century ? "Play these teams" : challenge.guess ? "Guess this player" : "Draft these boards"}
                   </button>
                   <button className="btn" onClick={() => setChallenge(null)}>Not now</button>
                 </div>
@@ -5077,6 +5092,8 @@ export default function PerfectSeason() {
               onBack={leaveGuess} onStage={setGuessStage}
               onClaimCoins={(date, onCredited) => claimMinigame("guess", date, onCredited)}
               onDailySaved={onGuessDaily}
+              onShare={sendShare} siteUrl={APP_SITE_URL}
+              challenge={guessChallenge} onChallengeTaken={() => setGuessChallenge(null)}
               onNeedsAccount={(why) => {
                 setNotice(why === "guest"
                   ? "The daily needs an account - a guest can be made again and again, so the day's player would be as many goes as you liked. Keep your seasons and it opens up."
