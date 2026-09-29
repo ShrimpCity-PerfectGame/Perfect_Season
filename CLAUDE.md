@@ -140,7 +140,7 @@ that function is allowed to change an existing name. **`claim_username` is the g
 clearing `guest` is what opens all of the above, so it refuses unless a credential is actually attached to the
 `auth.users` row - otherwise an anonymous session calls the RPC itself and gets a full account for one sign-in
 and one POST, over and over. The check is permissive on purpose (email, a pending email change, phone, or no
-longer anonymous): with email confirmation ON, which staging has, the address can sit in `email_change` while
+longer anonymous): with email confirmation ON (staging had it on when this was written and has it OFF as of 2026-09-28 - the drift this section warns about, checked by signing up), the address can sit in `email_change` while
 `is_anonymous` stays true, so gating on that flag alone would refuse the real trade-up. Everything played, earned and counted stays. The known cost
 is leaderboard pressure: one person can make guests freely, so **turn on a CAPTCHA for anonymous sign-ins** in
 each Supabase project before this is busy, and remember anonymous users count toward Supabase's monthly actives.
@@ -1117,7 +1117,9 @@ suite and still broke the live Leaderboard for every existing account.
 - **Supabase project settings are NOT in this repo**, so the two environments can drift in ways
   `schema.sql` won't catch. This has already bitten once: staging shipped with email confirmation
   on while production has it off, so signup worked in production and silently failed on staging
-  with a generic "couldn't be created". If something works in one environment and not the other and
+  with a generic "couldn't be created". (Staging's is off again as of 2026-09-28 - a signup there
+  comes back with a session - so the setting has now moved in both directions and is worth
+  checking rather than assuming.) If something works in one environment and not the other and
   the schema matches, compare the project config
   (`GET /v1/projects/<ref>/config/auth` via the Management API) before digging into app code.
 - **Version + changelog**: bump `version` in `package.json` (minor for features, patch for fixes),

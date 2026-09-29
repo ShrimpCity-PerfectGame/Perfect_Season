@@ -392,8 +392,13 @@ function GuessTable({ rows }) {
             <th scope="row" className="gp-who">
               <span className="gp-name">{player.name}</span>
             </th>
+            {/* `gp-c-` is the CELL's own prefix, and it earned both halves of its name. Unprefixed, `hit`
+                collided with the draft card's `.hit` (`all:unset;display:block`) and a winning row - five hits
+                at once - drew its five cells stacked in one column; prefixed as `gp-hit` it collided with the
+                search result buttons below. Nothing failed either time: jsdom has no layout and axe measures
+                colour, so the first took opening the game on staging to see. */}
             {GUESS_COLUMNS.map((c) => (
-              <td key={c} className={`gp-cell ${row[c].state}`} style={c === "team" ? teamVars(player.team) : undefined}>
+              <td key={c} className={`gp-cell gp-c-${row[c].state}`} style={c === "team" ? teamVars(player.team) : undefined}>
                 <span aria-hidden="true">{cellText(c, player)}{row[c].hint ? ARROW[row[c].hint] : ""}</span>
                 <span className="vh">
                   {GUESS_HEADS[c]} {cellText(c, player)}: {SAID[row[c].state]}
@@ -469,9 +474,9 @@ export const GUESS_CSS = `
    1.8:1, which is what tests/test-a11y.mjs's entry for this grid caught on its first run. The ink is a fixed
    colour rather than a token for the reason the cosmetics paints are - it belongs to the paint under it, not to
    the scope, and the grid is drawn on the dark scope wherever it appears. */
-.gp-cell.hit { background: var(--win); color: ${CELL_INK}; border-color: var(--win); }
-.gp-cell.near { background: var(--orange); color: ${CELL_INK}; border-color: var(--orange); }
-.gp-cell.miss { opacity: .75; }
+.gp-cell.gp-c-hit { background: var(--win); color: ${CELL_INK}; border-color: var(--win); }
+.gp-cell.gp-c-near { background: var(--orange); color: ${CELL_INK}; border-color: var(--orange); }
+.gp-cell.gp-c-miss { opacity: .75; }
 
 .gp-search { position: relative; display: grid; gap: 6px; }
 .gp-hits { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }

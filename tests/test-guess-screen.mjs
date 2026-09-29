@@ -96,7 +96,7 @@ async function openGuess() {
 const seedOnScreen = () => gp().querySelector(".codechip code")?.textContent;
 const gridRows = () => [...gp().querySelectorAll(".gp-grid tbody tr")];
 const cellsOf = (tr) => [...tr.querySelectorAll(".gp-cell")];
-const stateOf = (tr, col) => cellsOf(tr)[GUESS_COLUMNS.indexOf(col)].className.replace("gp-cell ", "");
+const stateOf = (tr, col) => cellsOf(tr)[GUESS_COLUMNS.indexOf(col)].className.replace("gp-cell gp-c-", "");
 
 // Types a name and clicks the player out of the list. The list shows position and draft class beside the name
 // because the pool holds two Adrian Petersons - so the click is matched on all three, not on the name.

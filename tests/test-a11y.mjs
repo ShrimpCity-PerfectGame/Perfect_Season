@@ -121,6 +121,37 @@ for (const [name, query, tab] of SCREENS) {
   });
 }
 
+// The other thing axe can't judge: whether a row of cells is still a ROW. Guess the Player's grid draws its five
+// cells in five columns, and a class collision turned a winning row - five cells in the same state at once - into
+// a stack in one column: `.hit` is the draft card's clickable area (`all:unset;display:block`) and the cell's
+// state class was called the same thing. Nothing could catch it - jsdom has no layout, and axe measures the
+// colours, which were right. So the check is geometric, in a real browser, on the one row where every cell
+// changes at once.
+await runTest("the guess grid draws a row across, even when every cell is green", async () => {
+  await page.goto(`${HARNESS}?screen=guess&finish=1`, { waitUntil: "load" });
+  await sleep(2600);
+  const rows = await page.evaluate(() => [...document.querySelectorAll(".gp-grid tbody tr")].map((tr) => ({
+    cells: tr.children.length,
+    displays: [...tr.children].map((c) => getComputedStyle(c).display),
+    lefts: [...tr.children].map((c) => Math.round(c.getBoundingClientRect().left)),
+    states: [...tr.children].map((c) => c.className),
+  })));
+  assert(rows.length > 1, `the end screen shows the guesses: ${rows.length}`);
+  const won = rows[rows.length - 1];
+  // The winning row is the one that matters and it is identified by SHAPE, not by a class name: five cells in
+  // one state. Pinning the name would make a rename fail this test for the wrong reason - and renaming is what
+  // fixed the bug it guards.
+  assert(new Set(won.states.slice(1)).size === 1 && won.states.length === 6,
+    `the last row has every cell in one state: ${JSON.stringify(won.states)}`);
+  for (const row of rows) {
+    assert(row.displays.every((d) => d === "table-cell"), `every cell is a table cell: ${JSON.stringify(row.displays)}`);
+    assert(new Set(row.lefts).size === row.cells, `and sits in a column of its own: ${JSON.stringify(row.lefts)}`);
+  }
+  // Every column lines up down the grid, which is what makes the grid readable at all.
+  const first = rows[0].lefts;
+  for (const row of rows) assert(row.lefts.every((x, i) => Math.abs(x - first[i]) <= 1), `columns line up: ${JSON.stringify(row.lefts)}`);
+});
+
 // The one axe can't judge: a roster chip is coloured by slot, and the slot has to be readable without the colour.
 await runTest("a roster chip says which slot it filled, not only in colour", async () => {
   await page.goto(`${HARNESS}?as=player`, { waitUntil: "load" });

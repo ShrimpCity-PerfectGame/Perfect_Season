@@ -56,6 +56,11 @@ wrong order fails nothing until a guest trades up. `tests/test-migrations.mjs` h
 
 - **The grid's green cells were white text on the game's light green, about 1.8:1.** Both coloured states now
   take the same dark ink. Found by the new accessibility entry on its first run, before the game shipped.
+- **A winning row drew its five cells stacked in one column.** The cell's state class was called `hit`, which is
+  also the draft card's clickable area (`all:unset; display:block`), so a row where every cell turns green at
+  once stopped being a row. The states are now prefixed `gp-c-`. Nothing could have caught it — jsdom has no
+  layout and axe measures colour, which was right — so it took opening the game on staging; the check that
+  guards it now is geometric, in a real browser, on that one row.
 
 ### Notes
 
