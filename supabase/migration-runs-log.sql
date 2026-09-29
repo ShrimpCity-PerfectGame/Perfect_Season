@@ -122,15 +122,34 @@ on conflict (user_id, created_at, dnf) do nothing;
 -- whole tables to the browser. tests/helpers.mjs mirrors both, and tests/test-runs-sql.mjs checks
 -- that the mirror and this SQL return identical results.
 
--- The three sitewide numbers on the home screen, Leaderboard and Stats. Summed from profiles, whose
--- counters have always been complete (the runs log starts partway through the site's history).
+-- The sitewide numbers on the home screen, Leaderboard and Stats. `players`, `runs` and `perfect` are
+-- summed from profiles, whose counters have always been complete (the runs log starts partway through
+-- the site's history).
+--
+-- `plays` (v2.16.0) is what the home screen's pill counts: every draft plus every mini-game round. The
+-- pill said "drafts" and showed `runs`, which left the four mini-games out of the one number a visitor
+-- sees first. It is a DIFFERENT number from `runs`, not a replacement - the Stats screen's "Drafts
+-- played" still means drafts, and the two must not be swapped for each other.
+--
+-- Duels are deliberately NOT in it, and that is a constraint rather than a judgement. This function is
+-- `language sql`, so its body is validated the moment it is created and every table it names has to
+-- exist by then. sou_runs and builds come from schema.sql; century_runs and guess_runs are already this
+-- file's dependencies, which is exactly why century and guess run before it in the runbook. `matches`
+-- is not: migration-versus.sql has to run AFTER migration-profiles.sql (can_play_versus reads
+-- profiles.guest) and this file runs BEFORE it, so naming matches here would make the migration list
+-- unorderable. Counting duels needs its own function in migration-versus.sql, added on the client.
 create or replace function public.site_totals()
 returns jsonb language sql stable security invoker set search_path = public as $$
   select jsonb_build_object(
-    'players', count(*),
-    'runs', coalesce(sum(runs + dnf), 0),
-    'perfect', coalesce(sum(perfect), 0)
-  ) from profiles;
+    'players', (select count(*) from profiles),
+    'runs', (select coalesce(sum(runs + dnf), 0) from profiles),
+    'perfect', (select coalesce(sum(perfect), 0) from profiles),
+    'plays', (select coalesce(sum(runs + dnf), 0) from profiles)
+             + (select count(*) from sou_runs)
+             + (select count(*) from builds)
+             + (select count(*) from century_runs)
+             + (select count(*) from guess_runs)
+  );
 $$;
 
 -- The fields a Stats board shows for an account - career counters only, so a board of ten rows

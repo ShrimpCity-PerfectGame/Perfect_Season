@@ -10,6 +10,33 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.16.0] — 2026-09-29
+
+The home screen counts plays, not drafts.
+
+**Deploy order: re-run `migration-runs-log.sql`, then the client.** No Edge Function change. The
+migration only replaces `site_totals()`, so it is safe on any shape and the site keeps working between
+the two steps - a client ahead of it reads no `plays` and falls back to the drafts count, which is the
+number the pill showed before this release.
+
+- The hero pill said **"N drafts"** and counted `profiles.runs + dnf`, which left all four mini-games
+  out of the one number a visitor sees first. It now says **"N plays"** and counts every draft plus
+  every Over/Under round, build, Century run and Guess the Player game. On production that is 170 → 180.
+- **The Stats screen's Drafts tile still counts drafts**, and that is the point of the split rather than
+  an oversight. `site_totals()` returns both numbers, the app keeps both live, and the Realtime broadcast
+  now carries which kind of thing just finished so a Guess the Player round moves one and not the other.
+  `tests/test-online-counter.mjs` holds the two apart on their own screens.
+- **The broadcast's wire event is still named `draft_finished`.** A deploy leaves tabs on both bundles
+  open and talking to each other; renaming it would split them into two halves that each count only
+  their own kind of tab. A payload with no `kind` is read as a draft, which is the only thing a tab on
+  the old bundle ever sent.
+- **Duels are not in it.** `site_totals()` is `language sql`, so every table it names must exist when it
+  is created, and `migration-versus.sql` has to run after `migration-profiles.sql` while runs-log runs
+  before it. Naming `matches` there would make the migration list unorderable. The reason is written
+  above the function, with what counting duels would take.
+- `tests/test-runs-sql.mjs` seeds the four mini-games with four different row counts, so a sum that
+  counts one table twice and drops another cannot pass, and it asserts the seeding did something —
+  otherwise the check compares the drafts count with itself.
 ## [2.15.0] — 2026-09-29
 
 A badge for Guess the Player.

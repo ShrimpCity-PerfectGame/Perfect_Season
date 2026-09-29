@@ -572,10 +572,15 @@ export function makeMockAuth() {
   const guestOf = (userId) => !!profiles.get(userId)?.guest;
   function siteTotals() {
     const rows = [...profiles.values()];
+    const drafts = rows.reduce((t, r) => t + (r.runs || 0) + (r.dnf || 0), 0);
     return {
       players: rows.length,
-      runs: rows.reduce((t, r) => t + (r.runs || 0) + (r.dnf || 0), 0),
+      runs: drafts,
       perfect: rows.reduce((t, r) => t + (r.perfect || 0), 0),
+      // `plays` counts the mini-games on top of the drafts, in the same order the SQL adds them.
+      // Every one of these is a Map keyed the way its real table is keyed, so .size is the row count.
+      // Duels are out for the migration-ordering reason written above site_totals() in the SQL.
+      plays: drafts + souRuns.size + builds.size + state.centuryRuns.size + state.guessRuns.size,
     };
   }
   function siteStats({ p_limit } = {}) {
