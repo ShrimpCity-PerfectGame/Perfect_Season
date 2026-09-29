@@ -22,6 +22,7 @@ function build(env) {
   const read = (f) => (existsSync(path.join(root, "public", f)) ? readFileSync(path.join(root, "public", f), "utf8") : null);
   return {
     html: read("page.html"), robots: read("robots.txt"), sitemap: read("sitemap.xml"), js: read("page.js"),
+    pool: read(path.join("data", "guess-pool.json")),
     pages: Object.fromEntries(SITE_PAGES.map((p) => [p.id, read(p.file)])),
   };
 }
@@ -57,6 +58,11 @@ check("the share link people see stays gridspin.app", prod.js.includes('"https:/
 // being added belongs in the page every visitor loads: the honest fix for that file is to load it when the 1v1
 // screen opens rather than at startup, which needs the service worker to learn about a second chunk.
 check("the bundle is minified", prod.js.length < 1_200_000, `${prod.js.length} bytes`);
+// Guess the Player's pool is the first data file the bundle does NOT carry - 195 KB for one mini-game, which is
+// what the ceiling above is for (guess-pool.mjs). Two halves, and both matter: the bundle must not have it back,
+// and the site must actually serve it, because there is no longer a copy to fall back on.
+check("the guess pool is served from the site root", (prod.pool || "").length > 100_000, `${(prod.pool || "").length} bytes`);
+check("and is not in the bundle as well", !prod.js.includes("includesUndrafted"), "the pool's own metadata key is in page.js");
 check("the tab title leads with the name", /<title>Gridspin – /.test(prod.html));
 // The same page answers challenge links (/c/CODE), where relative asset paths would break.
 check("the app and icons load from root-relative paths", prod.html.includes('<script src="/page.js">') && prod.html.includes('href="/icon.svg"') && prod.html.includes('href="/site.webmanifest"') && !/(src|href)="(?!\/|https?:)[^"]+\.(js|svg|png|webmanifest)"/.test(prod.html), prod.html.match(/(src|href)="[^"]+"/g));

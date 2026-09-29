@@ -25,14 +25,18 @@ import { freshDb, sql } from "./pg-fixture.mjs";
 const ORDER = [
   "migration-points-ladder.sql",
   "migration-scoring-formats.sql",
+  // Century FIRST, which is not where it started. player_stats in migration-runs-log.sql reads century_runs,
+  // and a `language sql` body is validated the moment it is created - so runs-log fails outright without the
+  // table. Its own trigger lives in migration-profiles.sql precisely so this file depends on nothing and can
+  // come first. Everything else that reads the table (claim_minigame, claim_username, mod_act) is plpgsql and
+  // so is NOT validated at creation, which is why those orderings fail nothing until somebody calls them -
+  // the shape this whole test exists to catch.
+  "migration-century.sql",
+  // Guess the Player sits beside Century and for the same reason: its trigger lives in profiles, so it
+  // depends on nothing. It is before runs-log only to keep the two new boards together.
+  "migration-guess.sql",
   "migration-runs-log.sql",
   "migration-profiles.sql",
-  // Century goes here and not later: it creates a trigger on century_runs using use_account_username(), which
-  // migration-profiles.sql defines, and BOTH claim_username (profiles) and mod_act (moderation) rewrite this
-  // board's name snapshots - so it has to exist before either of those can be called. Those two bodies are
-  // plpgsql and so are not validated when they are created, which is exactly why this is a runbook order
-  // rather than an error anybody would see: get it wrong and nothing fails until a guest trades up.
-  "migration-century.sql",
   "migration-moderation.sql",
   "migration-wallet.sql",
   "migration-shop.sql",

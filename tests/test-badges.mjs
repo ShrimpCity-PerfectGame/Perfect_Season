@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { assert, runTest } from "./helpers.mjs";
 import {
-  BADGES, BADGE_BY_ID, BADGE_TIERS, TIER_COINS, CINDERELLA_MAX_SCORE, SCOUT_MIN_POINTS, DAY_ONE_BEFORE, badgeProgress, topBadges,
+  BADGES, BADGE_BY_ID, BADGE_TIERS, TIER_COINS, CINDERELLA_MAX_SCORE, SCOUT_MIN_POINTS, DAY_ONE_BEFORE, badgeProgress, topBadges, CENTURY_BADGE_SCORE,
 } from "../badges.mjs";
 import { mapPlayerStats, emptyPlayerStats } from "../profile-rules.mjs";
 import { rowToProfile } from "../storage-core.js";
@@ -18,9 +18,9 @@ const fromProfile = (p) => ({ stats: p.stats, extra: p.extra, details: p.details
 const ids = (badges) => badges.map((b) => b.id);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-await runTest("the catalog: 22 badges in the contract's shape, coins by tier", async () => {
-  assert(BADGES.length === 22, `expected 22 badges, got ${BADGES.length}`);
-  assert(new Set(BADGES.map((b) => b.id)).size === 22, "badge ids must be unique");
+await runTest("the catalog: 23 badges in the contract's shape, coins by tier", async () => {
+  assert(BADGES.length === 23, `expected 23 badges, got ${BADGES.length}`);
+  assert(new Set(BADGES.map((b) => b.id)).size === 23, "badge ids must be unique");
   for (const b of BADGES) {
     assert(same(Object.keys(b).sort(), ["coins", "emoji", "how", "id", "name", "tier"]), `${b.id} has keys ${Object.keys(b)}`);
     assert(BADGE_TIERS.includes(b.tier), `${b.id}: unknown tier ${b.tier}`);
@@ -29,14 +29,25 @@ await runTest("the catalog: 22 badges in the contract's shape, coins by tier", a
     const unpaid = b.id === "stat-nerd" || b.id === "mad-scientist"; // browser-saved scores pay nothing
     assert(b.coins === (unpaid ? 0 : TIER_COINS[b.tier]), `${b.id}: coins ${b.coins}`);
   }
-  assert(Object.keys(BADGE_BY_ID).length === 22, "BADGE_BY_ID has exactly the catalog");
+  assert(Object.keys(BADGE_BY_ID).length === 23, "BADGE_BY_ID has exactly the catalog");
+});
+
+await runTest("the Century badge asks for the same hundred the mode does", async () => {
+  // badges.mjs may not import (the rule below), so CENTURY_BADGE_SCORE is a copy of century-logic.mjs's
+  // CENTURY_GOAL. This is what stops the two drifting - the badge promising a number the mode does not use.
+  const { CENTURY_GOAL } = await import("../century-logic.mjs");
+  assert(CENTURY_BADGE_SCORE === CENTURY_GOAL,
+    `badges.mjs says ${CENTURY_BADGE_SCORE}, century-logic.mjs says ${CENTURY_GOAL}`);
+  assert(BADGE_BY_ID.century.how.includes(String(CENTURY_GOAL)), `and the badge says so: ${BADGE_BY_ID.century.how}`);
+  assert(BADGE_BY_ID.century.tier === "gold" && BADGE_BY_ID.century.coins === 1000,
+    `it is gold and pays: ${BADGE_BY_ID.century.tier} ${BADGE_BY_ID.century.coins}`);
 });
 
 await runTest("badges.mjs is pure: no imports, so it loads on its own anywhere", async () => {
   const source = readFileSync(new URL("../badges.mjs", import.meta.url), "utf8");
   assert(!/^\s*import\b|\bimport\s*\(|\brequire\s*\(|^\s*export\s*(\*|\{[^}]*\})\s*from\s/m.test(source), "badges.mjs must not import anything");
   const alone = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-  assert(alone.badgeProgress({}).length === 22, "it should work loaded with nothing around it");
+  assert(alone.badgeProgress({}).length === 23, "it should work loaded with nothing around it");
 });
 
 // [badge, need, input carrying a value]. Each is checked at need - 1, need and need + 1.
@@ -85,6 +96,15 @@ await runTest("yes/no badges: just below, at and above the threshold", async () 
   check("cinderella", upset(C + 0.1, C + 0.1), false, "both formats above");
   check("cinderella", upset(null, null), false, "no titles");
   assert(BADGE_BY_ID.cinderella.how.includes(`${C} or lower`), `cinderella's how text: "${BADGE_BY_ID.cinderella.how}"`);
+
+  // The Century badge reads the DAILY best and nothing else. An Unlimited hundred is a hundred, but it is not
+  // the daily's single go, so it must not earn this - that is the whole shape of the badge.
+  const cent = (dailyBest, best) => ({ extra: { century: { dailyBest, best: best ?? dailyBest } } });
+  check("century", cent(CENTURY_BADGE_SCORE - 1), false, "one touchdown short on the daily");
+  check("century", cent(CENTURY_BADGE_SCORE), true, "exactly the goal");
+  check("century", cent(CENTURY_BADGE_SCORE + 9), true, "past the goal");
+  check("century", cent(0, CENTURY_BADGE_SCORE + 20), false, "a big Unlimited run does not earn it");
+  check("century", { extra: {} }, false, "no Century runs at all");
 
   check("scout", { extra: { bestPoints: SCOUT_MIN_POINTS - 1 } }, false, "one point short");
   check("scout", { extra: { bestPoints: SCOUT_MIN_POINTS } }, true, "exactly");
@@ -144,15 +164,15 @@ await runTest("missing and partial inputs count as nothing done, and never throw
 await runTest("topBadges: gold, special, silver, bronze, then catalog order, up to n", async () => {
   const all = BADGES.map((b) => ({ id: b.id, have: 1, need: 1, earned: true }));
   const ORDER = [
-    "hall-of-famer", "undefeated", "every-single-day", "cinderella", "daily-winner",
+    "hall-of-famer", "undefeated", "every-single-day", "cinderella", "daily-winner", "century",
     "day-one",
     "veteran", "dynasty", "playoff-regular", "big-brain", "front-office", "daily-champion", "old-school", "week-warrior", "scout",
     "first-down", "starter", "ring-bearer", "hot-streak", "loyal-fan", "stat-nerd", "mad-scientist",
   ];
-  assert(same(ids(topBadges(all, 22)), ORDER), `full order: ${ids(topBadges(all, 22))}`);
+  assert(same(ids(topBadges(all, 23)), ORDER), `full order: ${ids(topBadges(all, 23))}`);
   assert(same(ids(topBadges(all)), ORDER.slice(0, 3)), "three by default");
   assert(same(ids(topBadges([...all].reverse(), 7)), ORDER.slice(0, 7)), "the order doesn't depend on the input's order");
-  assert(topBadges(all, 0).length === 0 && topBadges(all, 40).length === 22, "n caps the list");
+  assert(topBadges(all, 0).length === 0 && topBadges(all, 40).length === 23, "n caps the list");
   assert(topBadges(all, 1)[0] === BADGE_BY_ID["hall-of-famer"], "returns the catalog entries themselves");
 
   const some = all.map((p) => ({ ...p, earned: ["starter", "day-one", "scout", "stat-nerd"].includes(p.id) }));

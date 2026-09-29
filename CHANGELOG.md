@@ -10,6 +10,106 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.13.0] — 2026-09-28
+
+**Guess the Player** — a daily Wordle-shaped game. One real player a day, eight guesses, and five columns that
+say how close each guess was.
+
+**Deploy order: `migration-century.sql`, then `migration-guess.sql` (new), then `migration-runs-log.sql`,
+`migration-profiles.sql`, `migration-moderation.sql` and `migration-wallet.sql`, then the Edge Functions, then
+the client.** Guess goes before three files that name its table and all of their bodies are plpgsql, so the
+wrong order fails nothing until a guest trades up. `tests/test-migrations.mjs` holds the order.
+
+`GUESS.md` is the reference for all of it.
+
+### Added
+
+- **Guess the Player**, behind the Mini games tile. Guess a player; every guess draws a row comparing **team,
+  division, position, draft class and jersey number** with the answer. Green is exact, grey is no, and yellow
+  means something different in each column — the same conference, the same side of the ball, a draft class
+  within two years, a number within five. Draft class and number also carry an **arrow**, because knowing the
+  answer is later than 2015 is worth far more than knowing it is not 2015.
+  - **Daily** (one game, the same player for everyone, an account needed) and **Practice** (a code, as often as
+    you like, off the daily board).
+  - The name is not one of the five columns — it is the guess.
+- **`data/guess-pool.json`** (4,637 players, 195 KB), built by `tools/data/build-guess-pool.mjs` from nflverse's
+  player index. It is a **third** data file because this game asks about the whole roster, not the four
+  positions a fantasy score uses: DB 885 · OL 829 · DL 748 · LB 650 · WR 495 · RB 402 · TE 295 · QB 232 ·
+  SPEC 101. Careers of five seasons or more, 1999 on, drafted players only — which costs Warren Moon, Antonio
+  Gates, James Harrison, London Fletcher and Jon Kitna, and is the price of having a draft-class column at all.
+- **`guess_runs`** and two boards (`guess_top`, `guess_best`) in `supabase/migration-guess.sql`. RLS on, public
+  select, **no client write policy at all** — the second board in the game nobody can write, for the reason
+  `century_runs` is the first: a game here leaves a list of player ids, which a server can replay.
+- **`submit-guess`**, the only writer. It takes the guesses, not the result: the answer follows from the date, so
+  it recomputes it, checks every guess against the pool and derives whether the game was solved and in how many
+  itself. The daily's date is the function's own clock. The answer goes back **only once the row is written**.
+- **The pool is fetched when the game opens, not shipped in the bundle** (`guess-pool.mjs`, served from
+  `/data/guess-pool.json`). 195 KB — 61 KB compressed, a sixth of the bundle — for one mini-game is exactly what
+  `tests/test-build-seo.mjs`'s ceiling is there to catch, and that comment names lazy loading as the honest fix
+  rather than a higher ceiling. The service worker treats the file like the bundle, network first, because a
+  stale pool is a different daily answer from the one `submit-guess` checks against. The screen has a loading
+  state and a real retry; with no pool there is no game to show.
+- **Three accessibility entries** for it in `tests/test-a11y.mjs` — the menu, the grid part-played and the end
+  screen — and a `?screen=guess[&guesses=N][&finish=1]` preview in the UI harness to reach them.
+
+### Fixed
+
+- **The grid's green cells were white text on the game's light green, about 1.8:1.** Both coloured states now
+  take the same dark ink. Found by the new accessibility entry on its first run, before the game shipped.
+
+### Notes
+
+- **The 17 hand-picked clashes.** Two different players can share all five compared columns — same team, draft
+  class, position and number — and a game whose answer is one of those can go all green without being solved.
+  The builder keeps one of each pair **by hand, with a reason**, and fails the build on a clash it has not been
+  told about. The rule that was there first (keep the longer career) got three backwards, Maxx Crosby among
+  them: equal eight-season careers fell through to alphabetical.
+- **Not built**: no share card (the colours alone would give away the division and the side of the ball), nothing
+  on the profile, no badge, no streak. GUESS.md 9 says so rather than leaving them half-done.
+- Accepted gap, the same one every seeded mode has: the answer is derivable from the date and the pool, both of
+  which ship in the bundle. What is closed is the in-app rehearsal, and the board is honest either way.
+
+## [2.12.0] — 2026-09-28
+
+A badge for Century, and the migration reordering it forced. **Shipped together with 2.13.0** — it was finished
+and green but had not reached staging when Guess the Player landed, so the two travel as one deploy and the
+migration list below is carried by 2.13.0's.
+
+**Deploy order: run `migration-century.sql` FIRST, then `migration-runs-log.sql`, `migration-profiles.sql`,
+`migration-moderation.sql` and `migration-wallet.sql`, then the Edge Functions, then the client.** Century moves
+to the FRONT of the runbook — see below.
+
+### Added
+
+- **Century** 💯, gold, 1,000 coins — **reach 100 in the daily Century**. The daily, not any Century: Unlimited
+  is unlimited, and at roughly one run in twenty played perfectly a hundred is an evening of retries there,
+  while the daily gives one go at one set of seven teams. That is what makes it worth gold, and
+  `tests/test-badges.mjs` asserts a big Unlimited run does **not** earn it.
+  - Unlike the other two minigame badges (Stat Nerd, Mad Scientist, which pay nothing because those games are
+    browser-written), this one **pays** — a Century run is verified, so there is no version of it a browser can
+    simply assert.
+  - **`submit-century` awards it itself**, rather than leaving it to submit-run's next finished season. Somebody
+    who plays Century and nothing else may never finish one. The function witnessed the run, so it records it;
+    `award_badges` is idempotent per (user, badge) and `badge_rewards` decides the amount, so it can neither pay
+    twice nor pay the wrong number. A failed award never fails the run.
+- `player_stats()` gains a **`century`** block — `played`, `best`, `daily_best`, `centuries`. `daily_best` is
+  separate on purpose: it is the only number that can tell the daily's hundred from a ground-out one.
+
+### Changed
+
+- **`migration-century.sql` now runs FIRST, before `migration-runs-log.sql`.** `player_stats` reads
+  `century_runs` and is `language sql`, whose body is validated the moment it is created — so runs-log fails
+  outright without the table. Century's own trigger moves to `migration-profiles.sql`, beside the identical ones
+  on `sou_runs` and `builds`, which is what lets it depend on nothing and come first.
+
+  Worth keeping: everything else that reads `century_runs` (`claim_minigame`, `claim_username`, `mod_act`) is
+  plpgsql and so is **not** validated at creation — those orderings fail nothing until somebody calls them.
+  `language sql` is the one that fails loudly, and it is the reason this moved at all.
+  `tests/test-migrations.mjs` runs the whole list on a bare database and holds the order.
+- `badges.mjs` keeps its own `CENTURY_BADGE_SCORE` rather than importing `CENTURY_GOAL`: that file is pure by
+  rule, so it loads on its own anywhere, and `tests/test-badges.mjs` already enforces that. A test holds the two
+  numbers equal instead — the same arrangement the SQL copies of `rewards.mjs` live under.
+
 ## [2.11.1] — 2026-09-28
 
 One bug, found by opening a shared link on staging rather than by running the tests.

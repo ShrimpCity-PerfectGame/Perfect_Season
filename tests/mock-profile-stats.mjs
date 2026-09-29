@@ -110,6 +110,9 @@ export function playerStats(state, userId) {
 
   const souRuns = [...state.souRuns.values()].filter((r) => r.user_id === userId);
   const builds = [...state.builds.values()].filter((r) => r.user_id === userId);
+  // century_runs may not exist on a state built before v2.12.0 (an older fixture), so an absent table reads as
+  // no runs rather than throwing - the SQL answers zeros for a player with none either way.
+  const centuryRuns = [...(state.centuryRuns?.values() || [])].filter((r) => r.user_id === userId);
   // Only a finite overall can be a best (the SQL's abs(overall) < 1e12 leaves out NaN and Infinity).
   const bestBuild = builds.filter((b) => Math.abs(num(b.overall)) < 1e12)
     .sort((a, b) => desc(num(a.overall), num(b.overall)) || asc(ms(a.created_at), ms(b.created_at)) || asc(a.id, b.id))[0];
@@ -131,6 +134,12 @@ export function playerStats(state, userId) {
       best_rank: finishes.length ? Math.min(...finishes) : null,
     },
     over_under: { played: souRuns.length, best: max(souRuns.map((r) => num(r.score))) },
+    century: {
+      played: centuryRuns.length,
+      best: max(centuryRuns.map((r) => num(r.score))),
+      daily_best: max(centuryRuns.filter((r) => r.day != null).map((r) => num(r.score))),
+      centuries: centuryRuns.filter((r) => r.hit).length,
+    },
     builds: { count: builds.length, best: bestBuild ? { pos: text(bestBuild.pos), overall: num(bestBuild.overall) } : null },
   };
 }

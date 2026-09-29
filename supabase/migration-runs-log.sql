@@ -336,6 +336,15 @@ returns jsonb language sql stable security invoker set search_path = public as $
          where d.date::date <= (now() at time zone 'utc')::date - 2)
     ),
     'over_under', (select jsonb_build_object('played', count(*), 'best', max(score)) from sou_runs where user_id = p_user_id),
+    -- Century (v2.12.0). `daily_best` is what the badge reads, and it is separate from `best` on purpose:
+    -- Unlimited is unlimited, so a hundred ground out over an evening of retries is not the same thing as one
+    -- reached on the day's single go. The badge is for the daily, and only this number can tell them apart.
+    'century', (select jsonb_build_object(
+      'played', count(*),
+      'best', max(score),
+      'daily_best', max(score) filter (where day is not null),
+      'centuries', count(*) filter (where hit)
+    ) from century_runs where user_id = p_user_id),
     'builds', jsonb_build_object(
       'count', (select count(*) from builds where user_id = p_user_id),
       -- Only a finite overall can be a best: builds was browser-written before 1.11.0's check, and numeric

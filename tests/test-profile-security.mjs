@@ -633,6 +633,10 @@ const EXPECTED_FUNCTIONS = {
   // function here to grant.
   "century_top(p_day text, p_limit integer)": [false, "public", true, true],
   "century_best(p_limit integer)": [false, "public", true, true],
+  // v2.13.0, Guess the Player's two, on the same terms and for the same reasons: guess_runs has public select and
+  // no client may write it at all, so both are invoker and both are public - a signed-out visitor reads the board.
+  "guess_top(p_day text, p_limit integer)": [false, "public", true, true],
+  "guess_best(p_limit integer)": [false, "public", true, true],
   "handle_new_user()": [true, PG_TEMP_LAST, true, true],
   "is_moderator()": [true, PG_TEMP_LAST, true, true],
   // Reads the runs log for one mode's score board. Invoker and public, like the other read-only

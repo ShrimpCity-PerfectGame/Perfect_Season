@@ -267,11 +267,29 @@ picks by hand; `tests/test-a11y.mjs` audits all three.
 
 ---
 
-## 8. Runbook
+## 8. The badge
 
-Deploy order: **`migration-century.sql` → `migration-wallet.sql` (re-run, for the `century` coin arm) →
-`migration-moderation.sql` and `migration-profiles.sql` (re-run, for the rename) → the Edge Functions
-(`node deploy-function.mjs <env>`, which now deploys three) → the client.**
+**Century** 💯, gold, 1,000 coins: reach 100 in the **daily**. Not any Century — Unlimited is unlimited, and a
+hundred there is an evening of retries at roughly one run in twenty, while the daily gives one go at one set of
+seven teams. `player_stats()`'s `century.daily_best` is the only number that tells the two apart, which is why
+it is carried separately from `best`.
+
+It is the first minigame badge that **pays**. Stat Nerd and Mad Scientist pay nothing because Over/Under and
+Build-a-player are browser-written; a Century run is verified, so there is no version of this a browser can
+assert. And `submit-century` awards it itself rather than leaving it to submit-run's next finished season,
+because somebody who plays Century and nothing else may never finish one. A failed award never fails the run.
+
+`badges.mjs` holds its own `CENTURY_BADGE_SCORE` rather than importing `CENTURY_GOAL` — that file is pure by
+rule and `tests/test-badges.mjs` enforces it — and a test holds the two numbers equal.
+
+## 9. Runbook
+
+Deploy order: **`migration-century.sql` FIRST → `migration-runs-log.sql` → `migration-profiles.sql` →
+`migration-moderation.sql` → `migration-wallet.sql` → the Edge Functions (`node deploy-function.mjs <env>`,
+which now deploys three) → the client.**
+
+Century goes first because `player_stats` reads `century_runs` and is `language sql`, whose body is validated
+when it is created. Its own trigger lives in `migration-profiles.sql` so that this file depends on nothing.
 
 ```sql
 -- Take a run back (a farmed result, a bad row)
@@ -289,7 +307,7 @@ that cannot deal a legal board, so a failed build is a loud one.
 
 ---
 
-## 9. Sharing
+## 10. Sharing
 
 `centuryShareText` and `centuryChallengeLink` in `century.jsx`, tested in `tests/test-share.mjs`.
 
@@ -308,8 +326,9 @@ plain digits within range.
 The **daily never gets a link**. Its seed is `century-<date>` and a link holding that hands over the day's seven
 teams — the whole reason `centuryReservedSeed` exists. A test asserts the seed appears nowhere in its card.
 
-## 10. Not built
-- **Nothing on the profile.** `player_stats` does not count Century runs, so a profile shows no trace of the
-  mode. That is `migration-runs-log.sql` plus `tests/mock-profile-stats.mjs` plus the profile screen, changed
-  together, and it was left out rather than half-done.
-- **No badges**, and Century is in no ladder. It pays the standard 15 minigame coins a day and nothing else.
+## 11. Not built
+- **No Century numbers on the profile.** `player_stats` counts the runs now (the badge reads them), but the
+  profile screen shows none of them. Deliberate: a best score has a ceiling, and the repo already learned that
+  lesson when position records were dropped from Stats for maxing out and never changing again. The badge is
+  the right shape for an achievement with a top — a stat is not.
+- **Century is in no ladder** and pays the standard 15 minigame coins a day beyond the badge.

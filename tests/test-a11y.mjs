@@ -64,6 +64,12 @@ const SCREENS = [
   // And the result, which is the payoff and the one Century screen with big lime type on a dark hero. Nothing
   // else opens it without playing seven picks by hand, so the harness locks the last slot in on load.
   ["the Century result", "?screen=century&finish=1", null],
+  // Guess the Player (v2.13.0), all three halves, and the GRID is the reason: it is the one screen in the game
+  // whose whole signal is colour, so it is also the one where a missing word costs the most. The menu, the grid
+  // part-played with all three states on screen, and the end screen that names the player.
+  ["Guess the Player", "?as=player", { tile: "Guess the Player" }],
+  ["the Guess the Player grid", "?screen=guess", null],
+  ["the Guess the Player result", "?screen=guess&finish=1", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {

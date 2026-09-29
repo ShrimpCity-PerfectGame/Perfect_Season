@@ -13,6 +13,12 @@ import { runLogRow } from "../game-logic.mjs";
 
 const sql = (p) => readFileSync(new URL(`../supabase/${p}`, import.meta.url), "utf8");
 const MIGRATION = sql("migration-runs-log.sql");
+// player_stats reads century_runs and is `language sql`, so its body is validated the moment it is created -
+// the table has to exist first. That is why migration-century.sql runs before runs-log in the runbook
+// (tests/test-migrations.mjs holds that order), and this fixture, which predates pg-fixture.mjs and keeps its
+// own database, has to do the same. Its trigger lives in migration-profiles.sql, which this file never runs,
+// so the table arrives here without one - which is fine: nothing in this file writes it.
+const CENTURY = sql("migration-century.sql");
 
 // Supabase provides the auth schema; this is just enough of it for schema.sql's foreign keys,
 // signup trigger and RLS policies to install.
@@ -22,8 +28,17 @@ async function freshDb() {
     create schema auth;
     create table auth.users (id uuid primary key, raw_user_meta_data jsonb);
     create function auth.uid() returns uuid language sql as $$ select null::uuid $$;
+    -- The two client roles a real project has. Only needed since migration-century.sql, which grants its board
+    -- functions to them and revokes its sequence from them, the way every other migration does. Created only
+    -- if absent: roles live in the cluster, not the database, so a second freshDb() in the same process finds
+    -- the first one's still there.
+    do $$ begin
+      if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
+      if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
+    end $$;
   `);
   await db.exec(sql("schema.sql"));
+  await db.exec(CENTURY);
   return db;
 }
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -264,7 +279,7 @@ await runTest("runs is readable by anyone and writable by no client role", async
   const db = await freshDb();
   await db.exec(MIGRATION);
   await db.exec(`
-    create role anon nologin; create role authenticated nologin;
+    -- freshDb creates the two roles now (migration-century.sql grants to them), so this only grants.
     grant usage on schema public to anon, authenticated;
     grant select, insert, update, delete on public.runs to anon, authenticated;
     grant execute on function public.site_stats(integer), public.site_totals() to anon, authenticated;

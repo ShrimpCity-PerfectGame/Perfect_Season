@@ -67,6 +67,7 @@ create table if not exists public.badge_rewards (
 );
 
 insert into public.badge_rewards (badge, coins) values
+  ('century', 1000),
   ('first-down', 100),
   ('starter', 100),
   ('veteran', 300),
@@ -305,7 +306,7 @@ begin
   if v_uid is null or not exists (select 1 from public.profiles where id = v_uid) then
     raise exception 'not_signed_in' using errcode = 'P0001';
   end if;
-  if p_game is null or p_game not in ('over_under', 'build', 'century') then
+  if p_game is null or p_game not in ('over_under', 'build', 'century', 'guess') then
     raise exception 'bad_game' using errcode = 'P0001';
   end if;
   -- to_char, not ::text, which would follow the session's DateStyle.
@@ -327,6 +328,13 @@ begin
                          and (day = p_date or created_at > now() - interval '24 hours'));
   elsif p_game = 'century' then
     v_played := exists (select 1 from public.century_runs where user_id = v_uid and created_at > now() - interval '24 hours');
+  -- Guess the Player (v2.13.0), the same shape as Century's arm above. Reads public.guess_runs, which
+  -- migration-guess.sql creates - run that file FIRST.
+  elsif p_game = 'guess' and p_date is not null then
+    v_played := exists (select 1 from public.guess_runs where user_id = v_uid
+                         and (day = p_date or created_at > now() - interval '24 hours'));
+  elsif p_game = 'guess' then
+    v_played := exists (select 1 from public.guess_runs where user_id = v_uid and created_at > now() - interval '24 hours');
   else
     v_played := exists (select 1 from public.builds where user_id = v_uid and created_at > now() - interval '24 hours');
   end if;

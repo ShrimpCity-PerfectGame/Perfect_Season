@@ -3,7 +3,7 @@
 // injection works identically on Windows/PowerShell, macOS, Linux, and Vercel's build image.
 import * as esbuild from "esbuild";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync } from "node:fs";
 import { SITE_PAGES, sitePageBody, sitePageJsonLd, SITE_PAGE_CSS } from "./site-pages.mjs";
 
 mkdirSync("public", { recursive: true });
@@ -62,6 +62,16 @@ await esbuild.build({
 // Icons, the web manifest and the link preview image (see tools/brand/render.mjs) are served from
 // the site root.
 cpSync("static", "public", { recursive: true });
+
+// Guess the Player's pool, which the game FETCHES rather than carrying in the bundle - 195 KB for one mini-game
+// (guess-pool.mjs says why, and tests/test-build-seo.mjs holds the bundle to a ceiling that says the same). It is
+// asserted rather than copied hopefully: a missing file here is a mode that cannot open, and the bundle no longer
+// contains a copy to fall back on.
+mkdirSync("public/data", { recursive: true });
+if (!existsSync("data/guess-pool.json")) {
+  throw new Error("data/guess-pool.json is missing - run node tools/data/build-guess-pool.mjs");
+}
+cpSync("data/guess-pool.json", "public/data/guess-pool.json");
 
 // The service worker, which is what makes the site installable and what lets a draft carry on with no signal
 // (service-worker.js, sw-rules.mjs; entry.jsx registers it). Its store is named after this exact build - the

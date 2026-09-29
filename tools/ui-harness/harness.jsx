@@ -29,6 +29,8 @@
 //                                                  out, or with a powerup announcement firing on load
 //   screen=century[&picks=N][&finish=1]            Century mid-run: the board a run is actually played on, with N
 //                                                  slots already filled (default 3). The menu is reachable from the
+//   screen=guess[&guesses=N][&finish=1]            Guess the Player mid-game: the grid of coloured rows, N guesses
+//                                                 in - and with finish=1 the end screen, where the answer is named
 //                                                  Modes tile instead, the way a player reaches it.
 //   screen=picker[&owned=sideline,night-game][&current=trophy]   the avatar picker on its own, on Choose an avatar,
 //                                                  owning the listed packs (default: sideline)
@@ -49,6 +51,14 @@ import { VersusScreen } from "../../versus.jsx";
 import * as V from "../../versus-logic.mjs";
 import { CenturyScreen } from "../../century.jsx";
 import * as C from "../../century-logic.mjs";
+import { GuessScreen, GUESS_WIP } from "../../guess.jsx";
+import * as G from "../../guess-logic.mjs";
+import guessPool from "../../data/guess-pool.json";
+// The app FETCHES this file in the browser (guess-pool.mjs); the harness is opened over file:// and has no
+// server to fetch it from, so it is imported and initialised here before anything mounts. Everything downstream
+// - the menu, the grid, tests/test-a11y.mjs's three entries - then sees a pool that is already there, which is
+// the same state a player is in a moment after opening the game.
+G.initGuessData(guessPool);
 
 const params = new URLSearchParams(location.search);
 const who = params.get("as") || "player";
@@ -648,7 +658,85 @@ async function setUpCentury(howMany) {
   return { uid: data.user.id, username: "shrimpcity" };
 }
 
+// ---------- screen=guess: a game part-played, the grid of coloured rows ----------
+// The menu is one Mini games tile away; the GRID is what the game is, and it is the one thing in the app whose
+// whole signal is colour - five narrow cells per row, on a dark scope, at phone width. Auditing the menu would
+// measure none of it.
+function GuessPreview({ userId, username, answer }) {
+  // ?finish=1 types the answer's name and takes it out of the list, so the END screen can be audited too - it
+  // names the player, which is the payoff, and nothing else opens it without playing a game by hand. The name has
+  // to go in through the value setter and an input event, because the box is a controlled React input and
+  // assigning `.value` would leave React holding the old one.
+  useEffect(() => {
+    if (!answer) return undefined;
+    const t = setTimeout(() => {
+      const box = document.getElementById("gp-q");
+      if (!box) return;
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(box, answer.name);
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      setTimeout(() => {
+        // Matched on the position and class too: the pool holds two Adrian Petersons.
+        const hit = [...document.querySelectorAll(".gp-hit")].find((b) =>
+          b.querySelector(".gp-hn").textContent === answer.name
+          && b.querySelector(".gp-hm").textContent === `${answer.pos} · ${answer.draft}`);
+        if (hit) hit.click();
+      }, 80);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [answer]);
+  // The app shell's landmark and h1, and `dark` on the root, exactly as perfect-season.jsx renders them around
+  // this screen while a game is in progress - the same reason Century's preview does.
+  return (
+    <div className="ps dark">
+      <style>{APP_CSS}</style>
+      <main id="content">
+        <div className="wrap">
+          <h1 className="vh">Guess the Player</h1>
+          <GuessScreen userId={userId} username={username} isGuest={false}
+            onBack={() => console.log("back")} onClaimCoins={() => {}} onDailySaved={() => {}}
+            onStage={() => {}} onNeedsAccount={() => {}} />
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// A game part-played, written into the same per-device slot the screen resumes from - which is how a browser
+// reaches the grid without typing names into it, and exercises the resume path on the way.
+// The guesses are chosen to put all three states on screen: one in the right division, one drafted a year out,
+// one with a number within range, and one that misses everything. A grid of nothing but grey would audit the
+// colour that needs the least checking.
+async function setUpGuess(howMany, finish) {
+  const { data } = await mock.auth.signUp({ email: "guess@harness.test", password: "harness-only", options: { data: { username: "shrimpcity" } } });
+  const seed = "HARNESS1";
+  const answer = G.guessAnswerForSeed(seed);
+  const wanted = [
+    (p) => p.team !== answer.team && p.division === answer.division,
+    (p) => Math.abs(p.draft - answer.draft) === 1,
+    (p) => Math.abs(p.number - answer.number) <= 5 && p.side !== answer.side,
+    (p) => p.side === answer.side && p.pos !== answer.pos,
+    () => true,
+  ];
+  const guesses = [];
+  for (const wants of wanted) {
+    if (guesses.length >= howMany) break;
+    const p = G.GUESS_PLAYERS.find((x) => x.id !== answer.id && !guesses.includes(x.id) && wants(x));
+    if (p) guesses.push(p.id);
+  }
+  // With finish=1 the preview clicks one more name, so the game must have a guess still in hand.
+  await window.storage.set(GUESS_WIP,
+    JSON.stringify({ variant: "practice", day: null, seed, guesses: guesses.slice(0, finish ? G.GUESS_TRIES - 1 : howMany) }));
+  return { uid: data.user.id, username: "shrimpcity", answer };
+}
+
 (async () => {
+  if (params.get("screen") === "guess") {
+    const finish = params.get("finish") === "1";
+    const { uid, username, answer } = await setUpGuess(Number(params.get("guesses") || 4), finish);
+    createRoot(document.getElementById("root")).render(
+      <GuessPreview userId={uid} username={username} answer={finish ? answer : null} />);
+    return;
+  }
   if (params.get("screen") === "century") {
     const finish = params.get("finish") === "1";
     const { uid, username } = await setUpCentury(finish ? 6 : Number(params.get("picks") || 3));

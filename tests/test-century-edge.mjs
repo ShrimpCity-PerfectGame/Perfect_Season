@@ -33,7 +33,7 @@ function store() {
     [GUEST, { id: GUEST, username: "Guest_ab12c", guest: true }],
   ]);
   const century = [];
-  return {
+  const store = {
     users: { has: (id) => id === ME || id === GUEST || id === NAMELESS },
     readFails: {}, writeFails: {}, rpcFails: {}, throwOn: {}, beforeWrite: null, rpcCalls: [],
     profiles, century,
@@ -52,8 +52,26 @@ function store() {
       return { row };
     },
     remove() {},
-    rpcs: {},
+    // award_badges as migration-wallet.sql behaves: idempotent per (user, badge), and badge_rewards - not the
+    // caller - decides what is paid. The caller's `coins` is checked for shape and then ignored, so this mirrors
+    // that by ignoring it too.
+    awards: [],
+    rpcs: {
+      award_badges: (args) => {
+        const already = new Set(store.awards.map((a) => `${a.user}|${a.badge}`));
+        const awarded = [];
+        for (const b of args.p_badges) {
+          const key = `${args.p_user}|${b.id}`;
+          if (already.has(key)) continue;
+          already.add(key);
+          store.awards.push({ user: args.p_user, badge: b.id });
+          awarded.push(b.id);
+        }
+        return { awarded, credited: awarded.length * 1000, balance: 1000 * store.awards.length };
+      },
+    },
   };
+  return store;
 }
 
 // A legal game from a seed, played by the perfect-knowledge bot the balance numbers use.
@@ -303,6 +321,85 @@ await runTest("a failed read or write says the save failed and writes nothing", 
   const threw = await invoke({ variant: "unlimited", seed: CODE, picks: play(CODE).picks }, { userId: ME });
   assert(threw.status === 500 && threw.headers.get("Access-Control-Allow-Origin"),
     `a thrown error keeps its CORS headers: ${threw.status}`);
+});
+
+// The clock the function reads is its own `new Date()`, so a test that wants a particular day has to move it.
+// Everything else about the request stays real.
+function atDate(iso) {
+  const Real = Date;
+  const fixed = new Real(`${iso}T12:00:00.000Z`).getTime();
+  class Fixed extends Real {
+    constructor(...args) { if (args.length === 0) super(fixed); else super(...args); }
+    static now() { return fixed; }
+  }
+  globalThis.Date = Fixed;
+  return () => { globalThis.Date = Real; };
+}
+
+// 2026-10-08's daily can be won: played perfectly its seven teams give 104. Found by searching dailies for one
+// whose ceiling clears the goal - most cannot be won at all, which is the point of the mode.
+const WINNABLE_DAY = "2026-10-08";
+
+await runTest("a daily that reaches the goal awards the Century badge, once", async () => {
+  const s = store();
+  globalThis.__edge_store__ = s;
+  const restore = atDate(WINNABLE_DAY);
+  try {
+    const seed = centuryDailySeed(WINNABLE_DAY);
+    const game = play(seed);
+    assert(game.score >= 100, `test setup: this day must be winnable, got ${game.score}`);
+    const res = await invoke({ variant: "daily", day: WINNABLE_DAY, picks: game.picks }, { userId: ME });
+    assert(res.status === 200 && res.body?.hit, `the run reached the goal: ${res.status} ${res.body?.score}`);
+    assert(s.awards.length === 1 && s.awards[0].badge === "century",
+      `and the badge was awarded: ${JSON.stringify(s.awards)}`);
+    assert(res.body.badge?.awarded?.includes("century"), `the answer says so: ${JSON.stringify(res.body.badge)}`);
+    // Playing it again is refused as a duplicate, and awards nothing a second time.
+    const again = await invoke({ variant: "daily", day: WINNABLE_DAY, picks: game.picks }, { userId: ME });
+    assert(again.status === 409, `the second is a duplicate: ${again.status}`);
+    assert(s.awards.length === 1, `and no second award: ${JSON.stringify(s.awards)}`);
+  } finally { restore(); }
+});
+
+await runTest("an Unlimited hundred does not award it, and nor does a daily that falls short", async () => {
+  const s = store();
+  globalThis.__edge_store__ = s;
+  const restore = atDate(WINNABLE_DAY);
+  try {
+    // The SAME seven teams and the same perfect run, handed in as Unlimited. Unlimited is unlimited, so a
+    // hundred there is an evening of retries rather than the daily's single go - which is the whole reason the
+    // badge is the daily's. This is the assertion that keeps it that way.
+    // A code whose seven teams DO give a hundred played perfectly - found by searching, since most do not.
+    // Using one that falls short would prove nothing: the badge would be withheld for the score, not for the
+    // variant, and dropping the `day &&` guard would still pass.
+    const code = "KU29GNU1";
+    const unlimited = play(code);
+    assert(unlimited.score >= 100, `test setup: this code must reach the goal, got ${unlimited.score}`);
+    const res = await invoke({ variant: "unlimited", seed: code, picks: unlimited.picks }, { userId: ME });
+    assert(res.status === 200 && res.body.hit, `an Unlimited hundred saves: ${res.status} ${res.body?.score}`);
+    assert(s.awards.length === 0, `and awards nothing: ${JSON.stringify(s.awards)}`);
+  } finally { restore(); }
+  // And today's daily, which falls short, awards nothing either.
+  const t = store();
+  globalThis.__edge_store__ = t;
+  const short = play(centuryDailySeed(today()));
+  const res = await invoke({ variant: "daily", day: today(), picks: short.picks }, { userId: ME });
+  assert(res.status === 200, `it saves: ${res.status}`);
+  if (!res.body.hit) assert(t.awards.length === 0, `a daily short of the goal awards nothing: ${JSON.stringify(t.awards)}`);
+});
+
+await runTest("a failed award never fails the run", async () => {
+  // The run is the record; the badge is a reward. submit-run treats its runs log the same way.
+  const s = store();
+  globalThis.__edge_store__ = s;
+  s.rpcFails.award_badges = true;
+  const restore = atDate(WINNABLE_DAY);
+  try {
+    const seed = centuryDailySeed(WINNABLE_DAY);
+    const res = await invoke({ variant: "daily", day: WINNABLE_DAY, picks: play(seed).picks }, { userId: ME });
+    assert(res.status === 200 && res.body?.ok, `the run still saves: ${res.status} ${JSON.stringify(res.body?.error)}`);
+    assert(s.century.length === 1, "and is recorded");
+    assert(res.body.badge === null, `with no badge claimed: ${JSON.stringify(res.body.badge)}`);
+  } finally { restore(); }
 });
 
 console.log("test-century-edge.mjs done");

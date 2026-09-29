@@ -38,6 +38,14 @@ export const CINDERELLA_MAX_SCORE = 102;
 export const SCOUT_MIN_POINTS = 220;
 // Joined in Gridspin's first month (it launched 2026-09-14).
 export const DAY_ONE_BEFORE = "2026-10-14T00:00:00.000Z";
+// The Century badge is the DAILY's hundred, not any hundred. Unlimited is unlimited, and at roughly one run in
+// twenty played perfectly, a hundred is an evening of retries there - while the daily gives one go at one set of
+// seven teams, which is what makes this worth gold.
+//
+// A COPY of century-logic.mjs's CENTURY_GOAL, not an import: this file is pure by rule, so it loads on its own
+// anywhere (tests/test-badges.mjs enforces that, and it is why submit-run can bundle it). tests/test-badges.mjs
+// holds the two numbers equal instead - the same arrangement the SQL copies of rewards.mjs live under.
+export const CENTURY_BADGE_SCORE = 100;
 
 // `coins` is paid once, from v1.12.0. Over/Under and Build-a-player scores are saved by the browser
 // rather than checked by the server, so their badges pay nothing.
@@ -64,6 +72,7 @@ export const BADGES = [
   { id: "loyal-fan", name: "Loyal Fan", emoji: "🏈", tier: "bronze", how: "Draft 25 players from your favorite team" },
   { id: "stat-nerd", name: "Stat Nerd", emoji: "📈", tier: "bronze", how: "Score 15 in Over/Under" },
   { id: "mad-scientist", name: "Mad Scientist", emoji: "⚡", tier: "bronze", how: "Create 10 players in Build-a-player" },
+  { id: "century", name: "Century", emoji: "💯", tier: "gold", how: `Reach ${CENTURY_BADGE_SCORE} in the daily Century` },
   { id: "day-one", name: "Day One", emoji: "👑", tier: "special", how: "Join in Gridspin's first month" },
 ].map((b) => ({ ...b, coins: UNPAID.has(b.id) ? 0 : TIER_COINS[b.tier] }));
 export const BADGE_BY_ID = Object.fromEntries(BADGES.map((b) => [b.id, b]));
@@ -114,6 +123,10 @@ export function badgeProgress(input) {
     "loyal-fan": () => count(favCount, 25),
     "stat-nerd": () => flag(value(x.overUnder?.best) >= 15),
     "mad-scientist": () => count(x.builds?.count, 10),
+    // Unlike the other two minigame badges this one PAYS, because a Century run is verified: submit-century
+    // recomputes the seven teams from the seed and adds the touchdowns up itself, so there is no version of
+    // this a browser can simply assert.
+    "century": () => flag(value(x.century?.dailyBest) >= CENTURY_BADGE_SCORE),
     "day-one": () => flag(joinedAt < Date.parse(DAY_ONE_BEFORE)),
   };
   return BADGES.map((b) => ({ id: b.id, ...rules[b.id]() }));

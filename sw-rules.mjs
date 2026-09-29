@@ -56,6 +56,12 @@ export function pageKey(request, origin) {
 // one (CLAUDE.md, "the client and the Edge Function must ship together").
 export const BUNDLE = "/page.js";
 
+// Guess the Player's pool (v2.13.0), fetched by the game rather than carried in the bundle (guess-pool.mjs). Its
+// name never changes either, and it is treated exactly like the bundle for the same reason: the daily's answer is
+// a walk through a permutation of THIS file and submit-guess walks its own copy, so a browser holding last
+// release's pool would play one player and hand in another. Network first, the store only when there is none.
+export const DATA = new Set(["/data/guess-pool.json"]);
+
 // "page" and "bundle" are fetched first and only fall back to what's stored; "asset" and "font" are served
 // from store and refreshed behind the player's back; null means the worker never touches the request.
 export function planFor(request, origin) {
@@ -74,7 +80,7 @@ export function planFor(request, origin) {
   // it is a top-level navigation, so answering it from the store would be answering the wrong question,
   // and offline it is the browser's own error page rather than the shell.
   if (request.mode === "navigate") return isFile(url.pathname) ? null : "page";
-  if (url.pathname === BUNDLE) return "bundle";
+  if (url.pathname === BUNDLE || DATA.has(url.pathname)) return "bundle";
   if (ASSET.test(url.pathname)) return "asset";
   return null;
 }

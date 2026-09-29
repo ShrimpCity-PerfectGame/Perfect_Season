@@ -107,6 +107,9 @@ export const EMPTY_PLAYER_STATS = Object.freeze({
   dailies: { played: 0, best_score: null, best_w: null, best_l: null, best_rank: null },
   over_under: { played: 0, best: null },
   builds: { count: 0, best: null },
+  // The RAW shape player_stats() answers with, so the keys are its keys and the nulls are its nulls: max()
+  // over no rows is NULL in Postgres, not 0.
+  century: { played: 0, best: null, daily_best: null, centuries: 0 },
 });
 export const emptyPlayerStats = () => JSON.parse(JSON.stringify(EMPTY_PLAYER_STATS));
 
@@ -142,6 +145,10 @@ export function mapPlayerStats(json) {
       bestW: num(s.dailies?.best_w), bestL: num(s.dailies?.best_l), bestRank: num(s.dailies?.best_rank),
     },
     overUnder: { played: int(s.over_under?.played), best: num(s.over_under?.best) },
+    century: {
+      played: int(s.century?.played), best: num(s.century?.best),
+      dailyBest: num(s.century?.daily_best), centuries: int(s.century?.centuries),
+    },
     builds: { count: int(s.builds?.count), best: s.builds?.best ? { pos: s.builds.best.pos, overall: Number(s.builds.best.overall) } : null },
   };
 }

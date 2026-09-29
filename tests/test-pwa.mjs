@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setupDom, makeStorage, mount, flush, click, text, assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { planFor, pageKey, BUNDLE, FONT_HOSTS } from "../sw-rules.mjs";
+import { planFor, pageKey, BUNDLE, DATA, FONT_HOSTS } from "../sw-rules.mjs";
 import { SITE_PAGE_PATHS } from "../site-paths.mjs";
 import { SITE_PAGES } from "../site-pages.mjs";
 import { THEME } from "../theme.mjs";
@@ -24,6 +24,12 @@ await runTest("the worker touches this site's own files and nothing else", async
   assert(planFor(req(`${SITE}/c/ABC123?beat=12-5`, { mode: "navigate" }), SITE) === "page", "a challenge link");
   assert(planFor(req(`${SITE}/how-to-play`, { mode: "navigate" }), SITE) === "page", "a page of its own");
   assert(planFor(req(`${SITE}${BUNDLE}`), SITE) === "bundle", "the bundle");
+  // Guess the Player's pool is a data file the game fetches, and it takes the bundle's rule rather than an
+  // asset's: a stale pool is a different daily answer from the one submit-guess checks against, which is the
+  // same class of failure as a stale bundle and not the same as last week's icon.
+  for (const path of DATA) {
+    assert(planFor(req(`${SITE}${path}`), SITE) === "bundle", `${path} is fetched like the bundle, not stored like an icon`);
+  }
   for (const asset of ["/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/icon.svg", "/favicon-32.png", "/apple-touch-icon.png", "/og.png", "/site.webmanifest"]) {
     assert(planFor(req(`${SITE}${asset}`), SITE) === "asset", `${asset} is an asset`);
   }
