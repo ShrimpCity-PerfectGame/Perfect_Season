@@ -159,7 +159,7 @@ await runTest("0. the pool is fetched when the game opens, and a failure says so
   // bundled into build/test-component.mjs, so it holds its own guess-logic.mjs. The screen's pool was loaded
   // above through the stub; these are the answers the tests below compare against.
   initGuessData(JSON.parse(POOL_TEXT));
-  assert(GUESS_PLAYERS.length > 400, `the test's own copy is in too: ${GUESS_PLAYERS.length}`);
+  assert(GUESS_PLAYERS.length > 120, `the test's own copy is in too: ${GUESS_PLAYERS.length}`);
 });
 
 await runTest("1. the Mini games tile opens the game, and the menu says how it is played", async () => {
@@ -471,7 +471,7 @@ await runTest("12. the pool the screen offers is the pool the server checks agai
   assert(gp().querySelectorAll(".gp-hit").length === 0, "one letter offers nothing");
   await type(box(), "Zzzzzz");
   assert(gp().querySelectorAll(".gp-hit").length === 0, "and a name nobody has offers nothing");
-  assert(/the best known at every position/.test(gp().textContent), "with a line saying which players the game holds");
+  assert(/playing this season/.test(gp().textContent), "with a line saying which players the game holds");
   // Every id the screen can hand in resolves in the same module the function replays with.
   for (const p of GUESS_PLAYERS.slice(0, 50)) assert(guessPlayer(p.id) === p, `${p.id} resolves`);
 });

@@ -8,6 +8,9 @@
 import { assert, runTest } from "./helpers.mjs";
 import { freshDb, addAccount, addGuestAccount, attachEmail, asUser, asAnon, uuid, sql } from "./pg-fixture.mjs";
 import { makeGuess } from "./mock-guess.mjs";
+// The number of guesses is a rule, and the table's check constraint enforces it - so these fixtures take it
+// from the rules rather than writing it out, or a change to one silently breaks the other.
+import { GUESS_TRIES } from "../guess-logic.mjs";
 
 const db = await freshDb();
 const ALICE = uuid(1), BOB = uuid(2), CAROL = uuid(3), GUEST = uuid(4), MOD = uuid(5);
@@ -58,7 +61,7 @@ async function addRun({ user, day = null, solved, tries, now = false }) {
   await owner(
     `insert into guess_runs (user_id, username, day, seed, solved, tries, guesses, answer, outcome, created_at)
      values ($1, 'placeholder', $2, null, $3, $4, $5::jsonb, 'Someone|2015|QB', $6, $7)`,
-    [user, day, solved, tries, JSON.stringify(["A|2015|QB"]), solved ? `Got it in ${tries}.` : "Missed. 8 guesses.", at]);
+    [user, day, solved, tries, JSON.stringify(["A|2015|QB"]), solved ? `Got it in ${tries}.` : `Missed. ${GUESS_TRIES} guesses.`, at]);
 }
 const clear = () => owner("delete from guess_runs");
 
@@ -86,14 +89,14 @@ await runTest("tries has to be a real number of guesses", async () => {
     assert(err, `${bad} guesses is refused by the table itself: ${err}`);
   }
   await addRun({ user: ALICE, solved: true, tries: 1 });
-  await addRun({ user: BOB, solved: false, tries: 8 });
+  await addRun({ user: BOB, solved: false, tries: GUESS_TRIES });
   assert((await owner("select count(*)::int as n from guess_runs"))[0].n === 2, "one and eight are both fine");
 });
 
 await runTest("the name and the guest flag come from the account", async () => {
   await clear();
   await addRun({ user: ALICE, solved: true, tries: 2 });
-  await addRun({ user: GUEST, solved: false, tries: 8 });
+  await addRun({ user: GUEST, solved: false, tries: GUESS_TRIES });
   const rows = await owner("select username, guest from guess_runs order by tries");
   assert(rows[0].username === "alice" && rows[0].guest === false, `alice's row: ${JSON.stringify(rows[0])}`);
   const guestName = (await owner("select username from profiles where id = $1", [GUEST]))[0].username;
@@ -106,8 +109,8 @@ await runTest("the daily is once per account, and practice is unlimited", async 
   let dupe = null;
   try { await addRun({ user: ALICE, day: "2026-01-02", solved: true, tries: 2 }); } catch (e) { dupe = String(e?.message || e); }
   assert(dupe && /unique|duplicate/i.test(dupe), `a second daily on the same date is refused: ${dupe}`);
-  await addRun({ user: ALICE, day: "2026-01-03", solved: false, tries: 8 });
-  await addRun({ user: BOB, day: "2026-01-02", solved: true, tries: 6 });
+  await addRun({ user: ALICE, day: "2026-01-03", solved: false, tries: GUESS_TRIES });
+  await addRun({ user: BOB, day: "2026-01-02", solved: true, tries: 5 });
   for (let i = 0; i < 4; i++) await addRun({ user: ALICE, solved: true, tries: 5 });
   const c = (await owner("select count(*)::int as n, count(day)::int as d from guess_runs"))[0];
   assert(c.n === 7 && c.d === 3, `rows: ${JSON.stringify(c)}`);
@@ -124,9 +127,9 @@ await runTest("guess_top and guess_best answer exactly what the mock does", asyn
     { user: ALICE, name: "alice", day: "2026-01-02", solved: true, tries: 4 },
     { user: BOB, name: "Bob", day: "2026-01-02", solved: true, tries: 4 },
     { user: CAROL, name: "carol", day: "2026-01-02", solved: true, tries: 2 },
-    { user: GUEST, name: guestName, day: "2026-01-02", solved: false, tries: 8 },
-    { user: ALICE, name: "alice", day: "2026-01-03", solved: true, tries: 6 },
-    { user: BOB, name: "Bob", day: "2026-01-03", solved: false, tries: 8 },
+    { user: GUEST, name: guestName, day: "2026-01-02", solved: false, tries: GUESS_TRIES },
+    { user: ALICE, name: "alice", day: "2026-01-03", solved: true, tries: 5 },
+    { user: BOB, name: "Bob", day: "2026-01-03", solved: false, tries: GUESS_TRIES },
     { user: CAROL, name: "carol", day: null, solved: true, tries: 1 },
   ];
   let n = 0;
@@ -136,7 +139,7 @@ await runTest("guess_top and guess_best answer exactly what the mock does", asyn
     mock.add({
       id: n, user_id: r.user, username: r.name, guest: r.user === GUEST, day: r.day, seed: null,
       solved: r.solved, tries: r.tries, guesses: ["A|2015|QB"], answer: "Someone|2015|QB",
-      outcome: r.solved ? `Got it in ${r.tries}.` : "Missed. 8 guesses.",
+      outcome: r.solved ? `Got it in ${r.tries}.` : `Missed. ${GUESS_TRIES} guesses.`,
       created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, clock - (rows.length - n))).toISOString(),
     });
   }
@@ -153,7 +156,8 @@ await runTest("guess_top and guess_best answer exactly what the mock does", asyn
   assert(!differs(best, bestMock), `guess_best differs at ${differs(best, bestMock)}`);
   const alice = best.find((r) => r.username === "alice");
   assert(alice.dailies === 2 && alice.solved === 2, `alice played two and solved two: ${JSON.stringify(alice)}`);
-  assert(Number(alice.avgTries) === 5, `averaging five: ${alice.avgTries}`);
+  // Her two solved dailies took four and five, so the board averages them and rounds to two decimals.
+  assert(Number(alice.avgTries) === 4.5, `averaging her two: ${alice.avgTries}`);
   // The practice game must not count towards the all-time board - it is the daily's board.
   const carol = best.find((r) => r.username === "carol");
   assert(carol.dailies === 1 && carol.solved === 1, `carol's practice game is not counted: ${JSON.stringify(carol)}`);
@@ -174,7 +178,7 @@ await runTest("a moderator's rename and a guest's trade-up both reach this board
   assert((await owner("select username from guess_runs"))[0].username === "robert", "and the board follows it");
 
   await clear();
-  await addRun({ user: GUEST, solved: false, tries: 8 });
+  await addRun({ user: GUEST, solved: false, tries: GUESS_TRIES });
   assert((await owner("select guest from guess_runs"))[0].guest === true, "it starts as a guest's row");
   await attachEmail(db, GUEST);
   assert((await call(GUEST, "claim_username", { p_username: "keeper" })).data === "ok", "the trade-up works");

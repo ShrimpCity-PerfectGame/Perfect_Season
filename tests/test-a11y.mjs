@@ -152,6 +152,37 @@ await runTest("the guess grid draws a row across, even when every cell is green"
   for (const row of rows) assert(row.lefts.every((x, i) => Math.abs(x - first[i]) <= 1), `columns line up: ${JSON.stringify(row.lefts)}`);
 });
 
+// The player's name is the one thing on a row you have to READ, and a fixed table layout with no widths gave it
+// a sixth of a phone: every row said "Tyler C...", "Davant...", "Penei ...". Checked at the widths phones
+// actually are, in a real browser, because nothing else can see a clipped box.
+await runTest("a player's name is readable on a phone, not cut off", async () => {
+  for (const width of [320, 375, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.goto(`${HARNESS}?screen=guess&guesses=5`, { waitUntil: "load" });
+    await sleep(2400);
+    const out = await page.evaluate(() => ({
+      overflows: document.documentElement.scrollWidth > window.innerWidth,
+      names: [...document.querySelectorAll(".gp-grid .gp-name")].map((el) => ({
+        text: el.textContent,
+        // A clipped box is wider inside than out. An ellipsis would hide the half of the name that identifies
+        // him - "Davant..." could be Davante Adams or Davante Davis - so a long name wraps instead.
+        clipped: el.scrollWidth > el.clientWidth + 1,
+      })),
+      cells: [...document.querySelectorAll(".gp-grid .gp-cell")].map((td) => ({
+        text: td.textContent.trim().slice(0, 8),
+        clipped: td.scrollWidth > td.clientWidth + 1,
+      })),
+    }));
+    assert(out.names.length > 0, `the grid has rows at ${width}px`);
+    const cut = out.names.filter((n) => n.clipped);
+    assert(cut.length === 0, `no name is cut off at ${width}px: ${cut.map((n) => n.text).join(", ")}`);
+    const cutCells = out.cells.filter((c) => c.clipped);
+    assert(cutCells.length === 0, `no cell is cut off at ${width}px: ${cutCells.map((c) => c.text).join(", ")}`);
+    assert(!out.overflows, `and the page does not scroll sideways at ${width}px`);
+  }
+  await page.setViewport({ width: 390, height: 844 });
+});
+
 // The one axe can't judge: a roster chip is coloured by slot, and the slot has to be readable without the colour.
 await runTest("a roster chip says which slot it filled, not only in colour", async () => {
   await page.goto(`${HARNESS}?as=player`, { waitUntil: "load" });

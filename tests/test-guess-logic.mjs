@@ -28,7 +28,9 @@ const find = (name) => GUESS_PLAYERS.find((p) => p.name === name);
 
 // ---------- 1. The pool ----------
 console.log(`pool: ${info.players} players, ${info.teams} teams, ${info.positions} positions`);
-ok(GUESS_PLAYERS.length > 400, `enough players for a daily that does not come round quickly: ${GUESS_PLAYERS.length}`);
+// The pool is the season being played plus the legends, so its size moves with the season - about 170 in
+// September and half as many again by January. What must hold is that a daily does not come round in a month.
+ok(GUESS_PLAYERS.length > 120, `enough players for a daily that does not come round quickly: ${GUESS_PLAYERS.length}`);
 for (const p of GUESS_PLAYERS) {
   ok(TEAMS[p.team], `${p.name}'s team is one the game knows: ${p.team}`);
   ok(DIVISIONS[p.team], `${p.team} has a division`);
@@ -49,7 +51,10 @@ for (const t of Object.keys(TEAMS)) ok(DIVISIONS[t], `${t} is in a division`);
 const bySide = {};
 for (const p of GUESS_PLAYERS) bySide[p.side] = (bySide[p.side] || 0) + 1;
 console.log(`  sides: ${Object.entries(bySide).map(([k, v]) => `${k} ${v}`).join(" · ")}`);
-ok(bySide.defence > GUESS_PLAYERS.length * 0.3, `the pool is not another offence-only list: ${bySide.defence} defenders`);
+// Offence only, and deliberately (GUESS.md 1): the line and the defence came out in v2.14.0 because a lineman
+// has no statistics a fan carries around. The assertion here used to be the opposite - that the pool was NOT
+// another offence-only list - which is the shape of the game changing rather than a rule being broken.
+eq(bySide.offence, GUESS_PLAYERS.length, `every player is an offensive one: ${JSON.stringify(bySide)}`);
 
 // ---------- 2. Comparing ----------
 const P = (over) => ({ name: "X", team: "KC", division: DIVISIONS.KC, pos: "CB", group: "DB", side: "defence", draft: 2015, number: 24, ...over });
@@ -117,14 +122,13 @@ eq(guessDailySeed("2026-09-28"), "guess-2026-09-28", "the daily's seed names its
   }
   console.log(`  a ${cycle}-day cycle: ${Object.entries(bands).map(([b, n]) => `${b} ${n}`).join(" · ")}`);
   eq(seen.size, GUESS_PLAYERS.length, "every player in the pool gets asked");
-  ok(cycle > GUESS_PLAYERS.length, `the cycle is longer than the pool, because the best known repeat: ${cycle}`);
-  ok(closest > 300, `nobody is asked twice inside a year: closest ${closest} days apart`);
-  // The weighting itself: an easy player comes up oftener than a deep cut, which is the whole point of bands.
-  const easy = GUESS_PLAYERS.filter((p) => guessBand(p) === "easy");
-  const hard = GUESS_PLAYERS.filter((p) => guessBand(p) === "hard");
-  const turnsFor = (list) => list.reduce((n, p) => n + (seen.get(p.id) || 0), 0) / list.length;
-  ok(turnsFor(easy) > turnsFor(hard) * 2, `the best known are asked about oftener: ${turnsFor(easy).toFixed(1)} turns each against ${turnsFor(hard).toFixed(1)}`);
-  eq(GUESS_BANDS.reduce((n, b) => n + b.share, 0), 1, "the bands cover the whole pool");
+  eq(cycle, GUESS_PLAYERS.length, `the cycle is the pool, one turn each: ${cycle}`);
+  eq(closest, Infinity, "and nobody is asked twice before everybody has been asked once");
+  // Each band takes one turn since v2.14.0 - see GUESS_BANDS for why a pool this small cannot afford the
+  // weighting that a pool of 731 could. The bands still name how hard a man is, which the end screen prints.
+  eq(GUESS_BANDS.every((b) => b.turns === 1), true, "every band takes one turn, so nobody comes round early");
+  eq(GUESS_BANDS.reduce((n, b) => n + b.share, 0), 1, "and the bands cover the whole pool");
+  for (const p of GUESS_PLAYERS.slice(0, 40)) ok(guessBand(p), `${p.name} is in a band`);
   // And the day after the cycle is day one's answer again, not a gap.
   const wrapped = guessAnswerFor(new Date(Date.UTC(2026, 8, 14) + cycle * 86400000).toISOString().slice(0, 10));
   eq(wrapped.id, dayOne.id, "the cycle wraps rather than running out");
@@ -149,8 +153,9 @@ eq(guessAnswerForSeed("ABCD1234").id, guessAnswerForSeed("ABCD1234").id, "a code
 {
   const picks = new Set();
   for (let i = 0; i < 300; i++) picks.add(guessAnswerForSeed(`code-${i}`).id);
-  // 300 codes over a pool of a few hundred collide by birthday alone; what matters is that they spread.
-  ok(picks.size > 200, `codes spread over the pool (${picks.size} different in 300)`);
+  // 300 codes over a pool of a couple of hundred collide constantly by birthday alone; what matters is that
+  // they spread over most of it rather than clustering on a few players.
+  ok(picks.size > GUESS_PLAYERS.length * 0.6, `codes spread over the pool (${picks.size} different in 300)`);
 }
 
 // ---------- 4. Replaying a game ----------
@@ -223,41 +228,48 @@ refuse({ guesses: [brady.id] }, "no_answer", "no date and no seed");
 }
 
 // ---------- 5b. Who is in the game ----------
-// The pool is a RANKING now, not a filter (v2.14.0): the best known at each position, two and a half times over
-// for anyone starting in the last three seasons. These are the properties that ranking has to keep, and the
-// first two are the two halves of the complaint that caused it - the daily was asking about men nobody could
-// place while refusing to ask about the players everybody has just watched.
+// The pool is the men playing this season at the positions people watch, plus the twenty-five best retired at
+// those positions (GUESS.md 1). It is a photograph of a season in progress, so these check the SHAPE rather
+// than a list of names - except for the legends, who are the one part that does not move.
 {
-  ok(GUESS_PLAYERS.length > 400 && GUESS_PLAYERS.length < 1200,
-    `the pool is a few hundred well-known players, not thousands: ${GUESS_PLAYERS.length}`);
-  // The recent ones. Every one of these was refused by the five-season rule this replaced.
-  for (const name of ["Jayden Daniels", "Brock Bowers", "C.J. Stroud", "Puka Nacua", "Caleb Williams",
-    "Bijan Robinson", "Ashton Jeanty", "Cam Ward", "Marvin Harrison Jr."]) {
-    ok(find(name), `${name} is in the game`);
-  }
-  // And the ones no ranking may lose, or it is ranking the wrong thing.
-  for (const name of ["Tom Brady", "Peyton Manning", "Ray Lewis", "Randy Moss", "Adrian Peterson", "Aaron Donald",
-    "Troy Aikman", "Eli Manning", "Charles Tillman", "Jordy Nelson", "Travis Kelce"]) {
-    ok(find(name), `${name} is in the game`);
-  }
-  // Every position group is a real possibility, or the position column stops meaning anything - and a share of
-  // each group is exactly how the pool is chosen, so this is the rule rather than a coincidence.
-  for (const g of ["QB", "RB", "WR", "TE", "OL", "DL", "LB", "DB", "SPEC"]) {
+  ok(GUESS_PLAYERS.length > 120 && GUESS_PLAYERS.length < 700,
+    `a couple of hundred players, not thousands: ${GUESS_PLAYERS.length}`);
+
+  // Only the skill positions. The line and the defence came out because a lineman has no statistics a fan
+  // carries around - and if either came back, the position column would mean something different.
+  const groups = [...new Set(GUESS_PLAYERS.map((p) => p.group))].sort();
+  eq(groups.join(","), "QB,RB,TE,WR", `only the skill positions are in the game: ${groups.join(",")}`);
+  for (const g of ["QB", "RB", "WR", "TE"]) {
     const n = GUESS_PLAYERS.filter((p) => p.group === g).length;
     ok(n >= 15, `${g} is a real possibility: ${n}`);
   }
-  // Every team can come up, or the team column is a lie on the days nobody from that team can be the answer.
-  eq(new Set(GUESS_PLAYERS.map((p) => p.team)).size, 32, "all 32 teams can be the answer's");
-  // The recency bias, measured rather than asserted: about half the game is people playing now and the rest is
-  // its history. Both halves are the point.
-  const recent = GUESS_PLAYERS.filter((p) => p.to >= 2024).length;
-  ok(recent > GUESS_PLAYERS.length * 0.35 && recent < GUESS_PLAYERS.length * 0.8,
-    `recent players are a bias, not the whole game: ${recent} of ${GUESS_PLAYERS.length}`);
-  console.log(`  ${recent} of ${GUESS_PLAYERS.length} played in the last three seasons`);
-  // Nobody wears a number the game does not know. nflverse writes 0 for "unknown", and 0 was not a legal number
-  // before 2023 - 88 players in the first pool wore a #0 they never wore, Aqib Talib among them.
-  const fake = GUESS_PLAYERS.filter((p) => p.number === 0 && p.to < 2023);
-  eq(fake.length, 0, `no player carries a jersey number that is really a missing value: ${fake.map((p) => p.name).join(", ")}`);
+  eq(GUESS_PLAYERS.every((p) => p.side === "offence"), true, "and every one of them plays offence");
+
+  // The legends, who are why this is a football quiz rather than a fantasy-football quiz.
+  for (const name of ["Tom Brady", "Jerry Rice", "Peyton Manning", "Barry Sanders", "Randy Moss"]) {
+    ok(find(name), `${name} is in the game`);
+  }
+  const retired = GUESS_PLAYERS.filter((p) => p.to < new Date().getUTCFullYear());
+  ok(retired.length >= 20 && retired.length <= 40, `a couple of dozen retired, no more: ${retired.length}`);
+  // And they are not treated as obscure: a legend is one of the easier answers, not one of the hardest.
+  ok(guessDifficulty(find("Jerry Rice")) < 50, `Jerry Rice is an easy answer: ${guessDifficulty(find("Jerry Rice"))}/100`);
+
+  // The current half. Most of the game is men playing now - that is the whole point of the pool.
+  const active = GUESS_PLAYERS.length - retired.length;
+  ok(active > GUESS_PLAYERS.length * 0.6, `most of the game is players of this season: ${active} of ${GUESS_PLAYERS.length}`);
+  console.log(`  ${active} playing this season, ${retired.length} retired`);
+
+  // Every one of them can be compared on all five columns, which is the only thing the game truly requires.
+  for (const p of GUESS_PLAYERS) {
+    ok(p.team && p.division, `${p.name} has a team and a division: ${p.team}`);
+    ok(p.number > 0 || p.to >= 2023, `${p.name} has a jersey number the game knows: #${p.number}`);
+    ok(p.draft > 1900, `${p.name} has a draft class: ${p.draft}`);
+  }
+  // Undrafted men are in on the same terms - the team they came into the league with, and their first season
+  // as a class - and the end screen has to word it differently, so the flag has to survive the file.
+  const undrafted = GUESS_PLAYERS.filter((p) => p.undrafted);
+  ok(undrafted.length > 0, `undrafted players are in the game: ${undrafted.length}`);
+  for (const p of undrafted) eq(p.draft, p.from, `${p.name}'s class is his first season: ${p.draft} vs ${p.from}`);
 }
 
 // ---------- 6. How hard is it? ----------
@@ -278,7 +290,11 @@ refuse({ guesses: [brady.id] }, "no_answer", "no date and no seed");
     }
   }
   console.log(`  a bot guessing blind solves ${((100 * solved) / N).toFixed(2)}% of games in ${GUESS_TRIES}`);
-  ok(solved / N < 0.02, "blind guessing is not a strategy");
+  // This number moved a long way in v2.14.0 and it is the price of an easier game: 5 guesses at a pool of a
+  // couple of hundred is about one game in thirty won by luck alone, where 8 guesses at 4,637 players was one
+  // in five hundred. It is printed rather than buried because it is the honest measure of how much easier the
+  // game got - and it still has to be a fraction, or the colours are decoration.
+  ok(solved / N < 0.06, `blind guessing is not a strategy: ${((100 * solved) / N).toFixed(2)}%`);
 }
 
 eq(guessOutcome(true, 1), "Got it first guess.", "a first-guess win reads as one");

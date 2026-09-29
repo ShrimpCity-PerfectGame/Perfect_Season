@@ -12,62 +12,67 @@ CLAUDE.md.
 ## [Unreleased]
 ## [2.14.0] — 2026-09-28
 
-Guess the Player asks about people you have heard of. The pool goes from 4,637 players to **731**, chosen by a
-ranking rather than a filter, and the daily leans toward the best known of them.
+Guess the Player asks about the season you are watching. The pool goes from 4,637 players to **193** — everyone
+playing a skill position right now, plus the 25 greats — and the game from eight guesses to **five**.
 
-**Deploy order: no migration. Deploy the Edge Functions, then the client** — `submit-guess` bundles
-`data/guess-pool.json` and `guess-logic.mjs`, and both changed, so a client ahead of the function would play one
-player and hand in another. `GUESS.md` 1 is the reference.
+**Deploy order: re-run `migration-guess.sql`, then the Edge Functions, then the client.** The migration drops
+and re-adds the `tries` bound (8 → 5) and **fails on a row recorded under the old rules**; delete those first if
+a database has any (`delete from public.guess_runs where tries > 5;` — only staging ever did). `submit-guess`
+bundles `data/guess-pool.json` and `guess-logic.mjs`, and both changed. `GUESS.md` 1 is the reference.
 
 ### Changed
 
-- **The pool is a ranking, not a filter.** v2.13.0 kept every drafted player with a five-season career, which was
-  wrong at both ends: 723 men lasted five seasons without ever playing — Rodney Adams took **ten snaps** across
-  six seasons and three teams — while a career takes five years to measure, so the draft classes stopped at 2022
-  and **977 players who played in 2024 or later were shut out**, Jayden Daniels, Brock Bowers, C.J. Stroud, Puka
-  Nacua and Caleb Williams among them.
-  - A **floor** first: 32 career games, or 16 starts, or one season of real playing time, or a Pro Bowl. That
-    removes 2,180 players before anything is scored.
-  - Then a **Guessability Score**, six parts each scaled 0–1: recency (0.30, decaying smoothly), prominence
-    (0.35, as a percentile **within his own position**, so a top-decile guard scores like a top-decile receiver),
-    longevity (0.10), accolades (0.15, the Hall of Fame full marks), starts (0.05) and draft capital (0.05).
-  - Then a **share of each position group** rather than of everybody — a flat tenth of the field gave 34
-    quarterbacks and 141 defensive backs, which is the right shape for a roster and the wrong shape for a quiz.
-  - **Prominence blends into draft capital for a short career**, which is what makes the recency goal work at
-    all: every other term is career-shaped, so a first-year player was a dozen points below any cut *by
-    construction*, and the first pick in the draft could not be in a pool meant to feel current.
-  - What comes out: 731 players, 32 teams, every position group, draft classes 1982–2025, **397 of them from the
-    last three seasons**. The cut line is the test — Jonathan Vilma, Steve Wisniewski, Ahman Green, Donald
-    Driver, with Jay Cutler just outside.
-- **The daily is weighted.** Everybody is still in the cycle, but the best-known quarter take three turns to the
-  deepest cuts' one: 41% easy, 38% medium, 21% hard. Turns are *spread* rather than shuffled together, so nobody
-  comes round twice inside 451 days — three concatenated passes would have been simpler and would have allowed
-  the same player on consecutive days.
-- The search box holds the same 731 players, so what you can type is what can be asked.
+- **The pool is the men on the field.** Quarterbacks, running backs, receivers and tight ends with **100+ snaps
+  in the season being played** — about 170 in September and growing every week — plus the **25** best retired
+  players at those positions, ranked *within* position so quarterbacks cannot take every place: Brady, Rice,
+  Peyton Manning, Barry Sanders, Emmitt Smith, Moss, Gronkowski, Tony Gonzalez.
+  - **What it costs, and it is not small:** no defence, no offensive line, and of the retired only the very top.
+    It is a quiz about this season rather than about all of football, chosen deliberately to make it winnable.
+  - **It goes stale.** Rebuild `data/guess-pool.json` weekly while football is on. The client and the Edge
+    Function both carry a copy, so they ship together — every time.
+  - This is the pool's third shape. v2.13.0 kept every drafted player with a five-season career (4,637), which
+    asked about men who never played while refusing to ask about anyone who arrived after 2022. A Guessability
+    Score over six weighted terms then took a share of each position group (773) — better, and still asking
+    about the hundredth-best corner of the century. CHANGELOG entries for both remain below; GUESS.md 1 has the
+    full reasoning and what each version cost.
+- **Five guesses, not eight.** Eight at a field of 193 falls to elimination most days. The two knobs move
+  together, and the honest measure is printed by the tests: a bot guessing blind now wins **2.75%** of games,
+  against 0.20% at eight guesses and 4,637 players.
+- **The daily's weighting is gone**, deliberately. Every player takes one turn, so nobody comes round until
+  everybody has been asked — 193 days now, longer every week. Giving the best-known quarter three turns was
+  right for 731 players (a 1,353-day cycle still left 451 days between a man's turns) and wrong for 193, where
+  it brings him back inside four months.
 
 ### Added
 
 - **The end screen says how hard the day was** — "Difficulty 29/100", plus whether it was one most people get, a
   fair test or a deep cut. Shown only once the game is over; before that it would narrow the answer.
-- `GP_WHY="Cam Ward"` on the builder prints where a player ranks in his position group and how far he is from the
-  cut, which is how "the score is wrong about him" is told from "he is the 53rd best quarterback of the century".
+- Undrafted players are in on their own terms: the team they came into the league with (from the rosters) and
+  their first season as their class. No hand-written list — every man in this pool is one the rosters have.
 
 ### Fixed
 
+- **Ezekiel Elliott was not in the game at all**, and neither were thousands of others. The player index leaves
+  `jersey_number` blank for a great many people, and the eligibility line threw the row away *before* anything
+  could look the number up. The builder now falls back to the season rosters and keeps the number each man
+  appeared under most.
+- **Every player's name was cut off on a phone** — "Tyler C...", "Davant...", "Penei ...". The grid is a fixed
+  table layout with no column widths, so all six columns took a sixth of the screen and the name, the one thing
+  on the row you have to read, got 55 pixels. The five state columns now take 13.6% each and the name takes what
+  is left; a long one wraps to a second line rather than being cut, because an ellipsis hides the half that
+  identifies him. The division reads "NFC N" rather than "N-North" for the same reason — it was wrapping the
+  cells onto two lines — while a screen reader still hears "NFC North". Checked at 320, 375 and 390 pixels in a
+  real browser, which is now a test.
 - **88 players wore a jersey number they never wore.** nflverse writes `0` for a number it does not have, and 0
   only became a legal NFL number in 2023 — so Aqib Talib was in the game as `#0` rather than 21, Blair Walsh as
-  `#0` rather than 3. The number is one of the five columns, so a player without one is now left out entirely
-  (416 of them, Talib included).
-
-### Notes
-
-- **The Fame Bonus** is the one hand-written thing in the score, for what no column can see. It holds two names:
-  Travis Hunter (a Heisman winner playing both ways) and Cam Ward (first overall, starting from week one, who
-  misses the quarterback cut by a fifth of a point). Both are first-year players whose numbers will speak for
-  themselves next season.
-- **Not built**: per-position statistical formulas for prominence (AV is a cross-position value metric and is
-  what makes this possible at all), and the difficulty score is shown but not yet used to pick a day's *intended*
-  difficulty, order the search box or seed a future match.
+  `#0` rather than 3. A `#0` on a career that ended before 2023 is now read as the missing value it is.
+- **A winning row drew its five cells stacked in one column.** The cell's state class was called `hit`, which is
+  also the draft card's clickable area (`all:unset; display:block`), so a row where every cell turns green at
+  once stopped being a row. The states are now prefixed `gp-c-`. Nothing could have caught it — jsdom has no
+  layout and axe measures colour, which was right — so it took opening the game on staging; the check that
+  guards it now is geometric, in a real browser, on that one row.
+- **The grid's green cells were white text on the game's light green**, about 1.8:1. Both coloured states now
+  take the same dark ink. Found by the new accessibility entry on its first run, before the game shipped.
 
 ## [2.13.0] — 2026-09-28
 

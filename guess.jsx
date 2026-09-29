@@ -1,4 +1,4 @@
-// Guess the Player (v2.13.0): eight guesses at the day's player, five columns that go green, yellow or grey.
+// Guess the Player (v2.13.0): five guesses at the day's player, five columns that go green, yellow or grey.
 //
 // Every rule is in guess-logic.mjs, shared with the submit-guess Edge Function - this file draws it. It styles
 // only its own `gp-` prefix and reuses the app's .btn, .h, .note, .panel and .mode, the way the other screens
@@ -38,11 +38,15 @@ const ARROW = { up: "↑", down: "↓" };
 // The short form a cell prints. Division is the only one that would not fit, so it loses its conference.
 const cellText = (col, p) => {
   if (col === "team") return p.team;
-  if (col === "division") return (p.division || "").replace("AFC ", "A-").replace("NFC ", "N-");
+  // "NFC N", not "N-North": the cell is about 45 pixels wide on a phone and the longer form wrapped onto two
+  // lines, which made the row taller than the name beside it. The conference and one letter say the same thing.
+  if (col === "division") return (p.division || "").replace(/^(AFC|NFC) (.)\w+$/, "$1 $2");
   if (col === "pos") return p.pos;
   if (col === "draft") return String(p.draft);
   return `#${p.number}`;
 };
+// What a screen reader hears, which is not abbreviated: it has the room, and "NFC North" is the thing itself.
+const cellSaid = (col, p) => (col === "division" ? (p.division || "") : cellText(col, p));
 
 export function GuessScreen({
   userId, username, isGuest, onBack, onClaimCoins, onDailySaved, onStage, onNeedsAccount,
@@ -259,7 +263,7 @@ export function GuessScreen({
             </ul>
           )}
           {query.trim().length >= 2 && matches.length === 0 && (
-            <p className="note">Nobody by that name is in the game. It holds about 700 players — the best known at every position, and most of the league right now.</p>
+            <p className="note">Nobody by that name is in the game. It holds the quarterbacks, backs, receivers and tight ends playing this season, and twenty-five of the greats.</p>
           )}
         </div>
 
@@ -269,6 +273,8 @@ export function GuessScreen({
   }
 
   if (stage === "done" && result) {
+    // The answer comes back from the server as plain columns; the pool is where the rest of him lives.
+    const answerPlayer = result.answer ? guessPlayer(result.answer.id) : null;
     const difficulty = result.answer ? guessDifficulty(result.answer) : null;
     const band = result.answer ? guessBand(result.answer) : null;
     const shown = result.shownGuesses
@@ -286,8 +292,8 @@ export function GuessScreen({
           {result.answer && (
             <p className="rating">
               It was <strong>{result.answer.name}</strong> — {result.answer.pos},{" "}
-              {TEAMS[result.answer.team] ? TEAMS[result.answer.team][0] : result.answer.team}, drafted{" "}
-              {result.answer.draft}, #{result.answer.number}
+              {TEAMS[result.answer.team] ? TEAMS[result.answer.team][0] : result.answer.team},{" "}
+              {answerPlayer?.undrafted ? "undrafted in" : "drafted"} {result.answer.draft}, #{result.answer.number}
               {result.answer.from ? ` (${result.answer.from}–${result.answer.to})` : ""}.
             </p>
           )}
@@ -335,8 +341,9 @@ export function GuessScreen({
   return (
     <div className="gp" data-view="menu">
       <p className="note gp-intro">
-        One player a day, eight guesses. Every guess shows how close it was on five things — team, division,
-        position, draft class and number. Green is exact, yellow is close, and the arrows say which way to go.
+        One player a day, {GUESS_TRIES} guesses. Everybody playing this season, and the greats. Every guess shows
+        how close it was on five things — team, division, position, draft class and number. Green is exact,
+        yellow is close, and the arrows say which way to go.
       </p>
       <div className="modes">
         <button className="mode daily"
@@ -353,7 +360,7 @@ export function GuessScreen({
             {isGuest ? "The daily needs an account - a guest can be made again and again, and the day's player is one go for everyone."
               : !userId ? "The same player for everyone today, one go. Sign in to play it."
               : dailyDone ? dailyDone.outcome
-              : "The same player for everyone today. One go, eight guesses."}
+              : `The same player for everyone today. One go, ${GUESS_TRIES} guesses.`}
           </p>
           <span className="go">{dailyDone ? "See how it went" : isGuest || !userId ? "Sign in to play" : "Let's go"}</span>
         </button>
@@ -412,7 +419,7 @@ function GuessTable({ rows }) {
               <td key={c} className={`gp-cell gp-c-${row[c].state}`} style={c === "team" ? teamVars(player.team) : undefined}>
                 <span aria-hidden="true">{cellText(c, player)}{row[c].hint ? ARROW[row[c].hint] : ""}</span>
                 <span className="vh">
-                  {GUESS_HEADS[c]} {cellText(c, player)}: {SAID[row[c].state]}
+                  {GUESS_HEADS[c]} {cellSaid(c, player)}: {SAID[row[c].state]}
                   {row[c].hint ? `, ${row[c].hint === "up" ? "higher" : "lower"}` : ""}
                 </span>
               </td>
@@ -474,9 +481,16 @@ export const GUESS_CSS = `
 .gp-grid th[scope="col"] { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
   font-weight: 700; padding: 0 2px 2px; text-align: center; }
 .gp-grid th[scope="col"]:first-child { text-align: left; }
-.gp-grid col, .gp-grid th:first-child { width: auto; }
-.gp-who { text-align: left; font-weight: 600; padding: 0 4px 0 0; min-width: 0; }
-.gp-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+/* The NAME COLUMN takes what the five cells do not, and that is the whole of this. A fixed table layout with
+   no widths gives six equal columns, so the name got a sixth of a phone - about 55px - and every row read
+   "Tyler C...", "Davant...", "Penei ...". The player is the one thing on the row you actually have to read.
+   Five cells at 13.6% leaves 32% for the name: 120px at 375px wide, which is most names on one line. */
+.gp-grid th:first-child { width: 32%; }
+.gp-grid th:not(:first-child) { width: 13.6%; }
+.gp-who { text-align: left; font-weight: 600; padding: 0 6px 0 0; min-width: 0; vertical-align: middle; }
+/* A long one WRAPS rather than being cut off. An ellipsis hides the half of the name that identifies him -
+   "Davant..." could be Davante Adams or Davante Davis - where a second line costs a few pixels of height. */
+.gp-name { display: block; font-size: 13px; line-height: 1.15; overflow-wrap: anywhere; }
 .gp-cell { text-align: center; border-radius: 7px; padding: 8px 2px; font-weight: 700; font-variant-numeric: tabular-nums;
   background: var(--surface2); color: var(--ink); border: 1px solid var(--line); }
 /* Green, yellow, grey - and never ONLY those: every cell carries a visually-hidden sentence saying exact,
@@ -517,8 +531,20 @@ export const GUESS_CSS = `
 .gp-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
 @media (max-width: 520px) {
-  .gp-grid { font-size: 12px; border-spacing: 2px; }
-  .gp-cell { padding: 7px 1px; }
+  /* Every pixel the cells give back goes to the name. The cells hold at most "N-North" and "2018 down-arrow",
+     which fit at 11px; the name is the thing being read, so it keeps 12. */
+  .gp-grid { font-size: 11px; border-spacing: 2px; }
+  .gp-grid th[scope="col"] { font-size: 9px; letter-spacing: .04em; }
+  .gp-cell { padding: 7px 0; }
   .gp-name { font-size: 12px; }
+  .gp-grid th:first-child { width: 31%; }
+  .gp-grid th:not(:first-child) { width: 13.8%; }
+}
+
+/* The smallest phone this game supports (CLAUDE.md's 320px). A cell is 38 pixels there, and "2021" with an
+   arrow after it does not fit at 11px - it was the class column, every time, on exactly one screen size. */
+@media (max-width: 360px) {
+  .gp-grid { font-size: 10px; }
+  .gp-name { font-size: 11px; }
 }
 `;

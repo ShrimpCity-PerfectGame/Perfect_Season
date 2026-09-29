@@ -22,8 +22,9 @@ create table if not exists public.guess_runs (
   day         text,
   seed        text check (seed is null or char_length(seed) between 1 and 80),
   solved      boolean not null,
-  -- How many guesses were made. A solved game is 1-8; a lost one is always the full 8.
-  tries       integer not null check (tries between 1 and 8),
+  -- How many guesses were made. A solved game is 1 to GUESS_TRIES; a lost one is always the full number.
+  -- The bound is re-stated below, because this line does nothing on a table that already exists.
+  tries       integer not null check (tries between 1 and 5),
   -- The ids guessed, in order, and the answer's id. Kept so the board can show a game back and so a run is
   -- auditable after the fact - the whole game is about forty bytes.
   guesses     jsonb not null,
@@ -31,6 +32,19 @@ create table if not exists public.guess_runs (
   outcome     text not null check (char_length(outcome) between 1 and 80),
   created_at  timestamptz not null default now()
 );
+
+-- The number of guesses the game allows (guess-logic.mjs's GUESS_TRIES) came down from 8 to 5 in v2.14.0, and
+-- `create table if not exists` leaves an existing table's constraints exactly as they were - so the bound has to
+-- be dropped and re-added by name, the way migration-shop.sql re-states its `kind` check. Named explicitly
+-- rather than relying on the name Postgres generated, so this is re-runnable on any shape of the table.
+--
+-- IT FAILS IF A ROW BREAKS THE NEW BOUND, which is correct: a run recorded under the old rules is a game that
+-- could not happen under the new ones. On a database with such rows - only staging ever had any - delete them
+-- first, and know that you are deleting somebody's game:
+--     delete from public.guess_runs where tries > 5;
+alter table public.guess_runs drop constraint if exists guess_runs_tries_check;
+alter table public.guess_runs drop constraint if exists guess_runs_tries_bound;
+alter table public.guess_runs add constraint guess_runs_tries_bound check (tries between 1 and 5);
 
 -- One daily per account per date. Partial, so practice games (day is null) are unlimited - a plain unique
 -- constraint would treat every null as distinct anyway, but saying it as a partial index states the rule.

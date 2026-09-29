@@ -3,7 +3,7 @@
 // row the instant a guess is made and the server decides whether the run counts, and a rule enforced on one
 // side and not the other will drift. Nothing here touches React, Supabase or the DOM.
 //
-// The game. A player is picked for the day and you have eight guesses. Every guess is a real player, and the row
+// The game. A player is picked for the day and you have five guesses. Every guess is a real player, and the row
 // it draws compares five things against the answer: TEAM, DIVISION, POSITION, DRAFT CLASS and JERSEY NUMBER.
 // The name is not one of the five - it is the guess itself.
 //
@@ -13,7 +13,10 @@
 // answer is LATER than 2015 is worth far more than knowing it is not 2015.
 import { hashStr, mulberry32, TEAMS } from "./game-logic.mjs";
 
-export const GUESS_TRIES = 8;
+// Five, not the eight it shipped with. The pool went from 4,637 players to the couple of hundred taking snaps
+// this season plus the twenty-five nobody has forgotten, and eight guesses at a field that small is not a game -
+// most days it would be solved by elimination. The two knobs move together: a smaller field wants fewer tries.
+export const GUESS_TRIES = 5;
 // The five columns a guess is judged on, in the order the row draws them.
 export const GUESS_COLUMNS = ["team", "division", "pos", "draft", "number"];
 // A draft class this many years either side is close; a number this far either side is close. Both were picked
@@ -70,6 +73,9 @@ export function initGuessData(pool) {
       // what the end screen calls the day's difficulty. A file built before v2.14.0 has no such column, and 0
       // for everybody is a flat pool - which is what it was.
       score: at.score === undefined ? 0 : row[at.score],
+      // He was never drafted; the team is the one he came into the league with and the class is his first
+      // season. The end screen has to word it differently, and nothing else changes.
+      undrafted: at.und !== undefined && row[at.und] === 1,
     };
     p.division = DIVISIONS[p.team] || null;
     p.side = GUESS_SIDES[p.group] || null;
@@ -120,9 +126,9 @@ export const isGuessSolved = (row) => !!row && GUESS_COLUMNS.every((c) => row[c]
 // The daily walks a fixed cycle rather than picking at random: a random pick repeats somebody within a year
 // about as often as not, and the one thing a daily must never do is ask the same question twice in a fortnight.
 //
-// The cycle is WEIGHTED (v2.14.0). Every player is in it, but the best-known are in it three times and the
-// deepest cuts once, so a typical day is somebody most people can name and the hard ones stay occasional. It
-// runs about 1,300 days - three and a half years - and nobody comes round twice inside about a year.
+// Every player takes one turn (see GUESS_BANDS), so the cycle is the pool and nobody comes round again until
+// everybody has been asked - about six months at the size the pool is now, and longer every week of the season
+// as more men pass the snap bar.
 export const GUESS_DAY_ONE = "2026-09-14";
 const SHUFFLE_SEED = "gridspin-guess-order";
 
@@ -134,9 +140,16 @@ export function guessDayNumber(date) {
 // How often each band comes round. The best-known third of the pool is asked three times a cycle, the middle
 // twice, the rest once - so most days are a player you know and the deep cuts stay occasional rather than
 // disappearing. The alternative, one turn each, makes every day equally likely to be the 700th-best guard.
+// The bands name how hard a player is thought to be, and `turns` is how often he comes round.
+//
+// Every band takes ONE turn now, which is to say the daily is a plain permutation again. Weighting was worth it
+// over 731 players: three turns for the best-known quarter gave a 1,353-day cycle and still left 451 days
+// between one man's turns. Over a couple of hundred it is not - the same weighting brings a player back inside
+// four months, and a daily that repeats a question inside a season is worse than one that asks a hard question.
+// The pool is already only current players and legends, which is what the weighting was for.
 export const GUESS_BANDS = [
-  { name: "easy", share: 0.25, turns: 3 },
-  { name: "medium", share: 0.35, turns: 2 },
+  { name: "easy", share: 0.25, turns: 1 },
+  { name: "medium", share: 0.35, turns: 1 },
   { name: "hard", share: 0.40, turns: 1 },
 ];
 
