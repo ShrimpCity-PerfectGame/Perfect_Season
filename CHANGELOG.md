@@ -10,6 +10,48 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.16.0] — 2026-09-29
+
+The home screen counts plays, not drafts, and the Stats screen counts players drafted.
+
+**Deploy order: re-run `migration-runs-log.sql`, then the client.** No Edge Function change. The
+migration only replaces `site_totals()`, so it is safe on any shape and the site keeps working between
+the two steps - a client ahead of it reads no `plays` and falls back to the drafts count, which is the
+number the pill showed before this release.
+
+- The hero pill said **"N drafts"** and counted `profiles.runs + dnf`, which left all four mini-games
+  out of the one number a visitor sees first. It now says **"N plays"** and counts every draft plus
+  every Over/Under round, build, Century run and Guess the Player game. On production that is 170 → 180.
+- **The Stats screen's Drafts tile still counts drafts**, and that is the point of the split rather than
+  an oversight. `site_totals()` returns both numbers, the app keeps both live, and the Realtime broadcast
+  now carries which kind of thing just finished so a Guess the Player round moves one and not the other.
+  `tests/test-online-counter.mjs` holds the two apart on their own screens.
+- **The broadcast's wire event is still named `draft_finished`.** A deploy leaves tabs on both bundles
+  open and talking to each other; renaming it would split them into two halves that each count only
+  their own kind of tab. A payload with no `kind` is read as a draft, which is the only thing a tab on
+  the old bundle ever sent.
+- **Duels are in it**, counted once somebody joined the lobby - the same rule a draft follows, where a
+  season counts from the moment its first board is dealt. So an abandoned duel counts and an open lobby
+  nobody joined does not. Production: 11.
+- **`site_totals()` is plpgsql now, and had to become it.** A `language sql` body is validated the moment
+  it is created, and `matches` does not exist then - `migration-versus.sql` runs after
+  `migration-profiles.sql` while runs-log runs before it. plpgsql plans each statement the first time it
+  RUNS, so the duel counts are read through `EXECUTE` behind a `to_regclass` guard: the same shape, for
+  the same reason, as `set_avatar`'s supporters lookup. On a database that has never had the versus
+  migration the guard leaves the duel counts at zero instead of failing.
+- **A Players drafted tile on the Stats screen**, from the same function: six a season out of the runs
+  log plus every duel pick. Production: 966 from seasons, 1,142 with duel picks. A season DNF has no
+  roster and contributes nothing.
+- `fetchSiteStats` whitelists the totals field by field, so a new one has to be added there as well -
+  which is exactly how `drafted` first reached the Stats screen as `undefined` and drew no tile. The new
+  test caught it; the mapping now carries both new fields and the tile leaves itself out on null rather
+  than claiming a confident 0.
+- `tests/test-runs-sql.mjs` seeds the four mini-games with four different row counts, so a sum that
+  counts one table twice and drops another cannot pass, and it asserts the seeding did something —
+  otherwise the check compares the drafts count with itself. That fixture has no `matches` table, which
+  makes it the place that proves the guard holds; `tests/test-migrations.mjs` covers the other half,
+  running the real list in the real order and then counting a duel out of a table created five files
+  after the function that reads it.
 ## [2.15.0] — 2026-09-29
 
 A badge for Guess the Player.

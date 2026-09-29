@@ -572,10 +572,22 @@ export function makeMockAuth() {
   const guestOf = (userId) => !!profiles.get(userId)?.guest;
   function siteTotals() {
     const rows = [...profiles.values()];
+    const drafts = rows.reduce((t, r) => t + (r.runs || 0) + (r.dnf || 0), 0);
+    // Every store here is a Map keyed the way its real table is keyed, so .size is the row count.
+    const mini = souRuns.size + builds.size + state.centuryRuns.size + state.guessRuns.size;
+    // A duel counts once somebody joined it, exactly as the SQL has it - an open lobby nobody joined
+    // never dealt a board, so it is not a play, the same way an undealt draft is not one.
+    const duels = [...versus.tables.matches.values()].filter((m) => m.guest_id != null).length;
+    // Players drafted: six a season from the runs log (a DNF has no roster, hence the Array.isArray),
+    // plus every duel pick. Mirrors the SQL's sum(jsonb_array_length(roster)) + count(match_picks).
+    const drafted = [...runs.values()].reduce((t, r) => t + (Array.isArray(r.roster) ? r.roster.length : 0), 0)
+      + versus.tables.match_picks.size;
     return {
       players: rows.length,
-      runs: rows.reduce((t, r) => t + (r.runs || 0) + (r.dnf || 0), 0),
+      runs: drafts,
       perfect: rows.reduce((t, r) => t + (r.perfect || 0), 0),
+      plays: drafts + mini + duels,
+      drafted,
     };
   }
   function siteStats({ p_limit } = {}) {

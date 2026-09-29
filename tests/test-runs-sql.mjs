@@ -219,6 +219,36 @@ await runTest("site_stats and site_totals match the mock exactly, past 300 accou
   }
   clock += 10000;
 
+  // The four mini-games, which site_totals' `plays` counts on top of the drafts. Seeded with four
+  // DIFFERENT counts on purpose: a sum that counts one table twice and drops another is still right
+  // when every table holds the same number of rows, and that is the bug most worth catching here.
+  // `runs`, `players` and `perfect` must not move at all - none of these touches profiles.
+  const MINI = { sou: 4, builds: 3, century: 2, guess: 5 };
+  for (let i = 0; i < MINI.sou; i++) {
+    const id = uuid(i + 1), username = `player${String(i + 1).padStart(3, "0")}`, date = `2026-09-0${i + 1}`;
+    await db.query("insert into sou_runs (date, user_id, username, score) values ($1, $2, $3, $4)", [date, id, username, 10 + i]);
+    mock._souRuns.set(`${date}:${id}`, { date, user_id: id, username, score: 10 + i });
+  }
+  for (let i = 0; i < MINI.builds; i++) {
+    const id = uuid(i + 1), username = `player${String(i + 1).padStart(3, "0")}`, bid = uuid(900 + i);
+    await db.query("insert into builds (id, user_id, username, pos, overall, filled) values ($1, $2, $3, $4, $5, $6)",
+      [bid, id, username, "WR", 80 + i, JSON.stringify({ speed: 90 })]);
+    mock._builds.set(bid, { id: bid, user_id: id, username, pos: "WR", overall: 80 + i, filled: { speed: 90 } });
+  }
+  for (let i = 0; i < MINI.century; i++) {
+    const id = uuid(i + 1), username = `player${String(i + 1).padStart(3, "0")}`;
+    await db.query("insert into century_runs (user_id, username, day, seed, score, hit, ceiling, roster, outcome) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [id, username, `2026-09-0${i + 1}`, `century-${i}`, 90 + i, false, 130, JSON.stringify([]), "Short of 100."]);
+    mock._century.add({ id: 7000 + i, user_id: id, username, day: `2026-09-0${i + 1}`, seed: `century-${i}`, score: 90 + i, hit: false, ceiling: 130, roster: [], outcome: "Short of 100." });
+  }
+  for (let i = 0; i < MINI.guess; i++) {
+    const id = uuid(i + 1), username = `player${String(i + 1).padStart(3, "0")}`;
+    await db.query("insert into guess_runs (user_id, username, day, seed, solved, tries, guesses, answer, outcome) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [id, username, `2026-09-0${i + 1}`, null, true, (i % 5) + 1, JSON.stringify(["a"]), "Patrick Mahomes", "Got it."]);
+    mock._guess.add({ id: 8000 + i, user_id: id, username, day: `2026-09-0${i + 1}`, seed: null, solved: true, tries: (i % 5) + 1, guesses: ["a"], answer: "Patrick Mahomes", outcome: "Got it." });
+  }
+  const MINI_TOTAL = MINI.sou + MINI.builds + MINI.century + MINI.guess;
+
   const sqlStats = (await db.query("select site_stats(10) as s")).rows[0].s;
   const mockStats = (await mock.rpc("site_stats", { p_limit: 10 })).data;
   const diff = firstDiff(canon(sqlStats), canon(mockStats));
@@ -227,6 +257,34 @@ await runTest("site_stats and site_totals match the mock exactly, past 300 accou
   const sqlTotals = (await db.query("select site_totals() as t")).rows[0].t;
   const mockTotals = (await mock.rpc("site_totals")).data;
   assert(JSON.stringify(canon(sqlTotals)) === JSON.stringify(canon(mockTotals)), `site_totals: SQL ${JSON.stringify(sqlTotals)} vs mock ${JSON.stringify(mockTotals)}`);
+
+  // `plays` is the drafts plus every mini-game row, and `runs` is untouched by them. The two are shown
+  // side by side - the hero pill counts plays, the Stats screen's Drafts tile counts runs - so the
+  // failure worth guarding is one quietly becoming the other. Dropping any table from the SQL sum, or
+  // counting one twice, makes this red; so does adding profiles' counters to it a second time.
+  assert(sqlTotals.plays === sqlTotals.runs + MINI_TOTAL,
+    `plays: expected ${sqlTotals.runs} drafts + ${MINI_TOTAL} mini-game rows = ${sqlTotals.runs + MINI_TOTAL}, got ${sqlTotals.plays}`);
+  // And the seeding above has to have DONE something, or the line before it passes by comparing the
+  // drafts count with itself - the shape of a test that cannot fail (see test-player-stats-sql.mjs).
+  assert(MINI_TOTAL > 0 && sqlTotals.plays > sqlTotals.runs,
+    `the mini-game seeding did nothing: plays ${sqlTotals.plays} vs runs ${sqlTotals.runs}`);
+
+  // This fixture never runs migration-versus.sql, so there is no `matches` table - which makes it the
+  // place that proves site_totals SURVIVES that rather than failing. It is plpgsql precisely so the
+  // duel reads are planned when they run, behind a to_regclass guard; getting an answer at all is the
+  // assertion. tests/test-migrations.mjs covers the other half, where the table does exist.
+  assert((await db.query("select to_regclass('public.matches') as t")).rows[0].t === null,
+    "this fixture is supposed to have no matches table - that is what makes the next line meaningful");
+  assert(sqlTotals.plays === sqlTotals.runs + MINI_TOTAL,
+    "with no matches table the duel counts must fall to zero rather than throwing");
+
+  // Players drafted: six a season from the log, and nothing from a DNF, which has no roster at all.
+  const drafted = Number((await db.query("select coalesce(sum(jsonb_array_length(roster)), 0) as d from runs where roster is not null")).rows[0].d);
+  assert(sqlTotals.drafted === drafted, `drafted: expected ${drafted} from the seeded rosters, got ${sqlTotals.drafted}`);
+  // It has to be counting PLAYERS, not rows - six a season, so it cannot come out at or below the
+  // number of drafts. Summing the wrong thing (count(*), or profiles.runs again) lands under this.
+  assert(sqlTotals.drafted > sqlTotals.runs,
+    `drafted ${sqlTotals.drafted} should be several times the ${sqlTotals.runs} drafts, not row-shaped`);
 
   // And the numbers really cover everything, not a sample.
   assert(sqlTotals.players === N, `expected all ${N} accounts counted, got ${sqlTotals.players}`);
@@ -288,6 +346,12 @@ await runTest("runs is readable by anyone and writable by no client role", async
     grant select, insert, update, delete on public.runs to anon, authenticated;
     grant execute on function public.site_stats(integer), public.site_totals() to anon, authenticated;
     grant select on public.profiles to anon, authenticated;
+    -- site_totals is security invoker and counts the mini-games into "plays" (v2.16.0), so the caller
+    -- needs to be able to read all four. Both client roles hold SELECT on every one of them in the real
+    -- projects - checked against production before this was written, because a security-invoker function
+    -- that a signed-out visitor cannot execute would take the home screen's pill away from exactly the
+    -- people it is there for. This fixture grants by hand, so it has to be told.
+    grant select on public.sou_runs, public.builds, public.century_runs, public.guess_runs to anon, authenticated;
   `);
   await db.query("insert into auth.users values ($1, $2)", [uuid(1), { username: "alice" }]);
   await addRun(db, runLogRow(uuid(1), "alice", { w: 10, l: 7, score: 70, date: Date.UTC(2026, 8, 2), roster: [] }));

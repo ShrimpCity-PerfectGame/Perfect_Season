@@ -18,6 +18,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { assert, runTest } from "./helpers.mjs";
 import { freshDb, sql } from "./pg-fixture.mjs";
 
+const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
 // EVERY migration, in an order that works on a database that has only schema.sql - which is what a new
 // Supabase project is, and the shape a broken order hides from. A given release re-runs a subset of this
 // (v2.0.0's is in CLAUDE.md and 2.0-STATUS.md §7, and is this list minus the two that predate scoring
@@ -71,6 +73,23 @@ await runTest("the runbook's order works on a database that has never seen any o
     for (const needed of ["player_stats", "player_profile", "site_stats", "shop_state", "record_pick", "mod_act", "caller_can_hold_avatars"]) {
       assert(fns.includes(needed), `${needed} exists after the runbook's order`);
     }
+
+    // site_totals counts duels, and `matches` is created five files AFTER the one that defines it - which is
+    // the whole reason it is plpgsql reading them through EXECUTE behind a to_regclass guard. This is the only
+    // fixture that runs the real list in the real order, so it is the only place the deferred plan is exercised
+    // end to end: created with no matches table in sight, and counting rows out of it by the time it is called.
+    await db.query("insert into auth.users values ($1, $2), ($3, $4)",
+      [uuid(1), { username: "host" }, uuid(2), { username: "guest" }]);
+    const started = await db.query(
+      `insert into matches (code, host_id, guest_id, status) values ('AAAAAA', $1, $2, 'done') returning id`, [uuid(1), uuid(2)]);
+    // An open lobby nobody joined: dealt nothing, so it is not a play and must not be counted.
+    await db.query(`insert into matches (code, host_id, status) values ('BBBBBB', $1, 'open')`, [uuid(1)]);
+    await db.query(`insert into match_picks (match_id, pick_no, user_id, board_idx, kind, player_id, season, slot)
+                    values ($1, 1, $2, 0, 'player', 42, 2007, 'QB')`, [started.rows[0].id, uuid(1)]);
+    const t = (await db.query("select site_totals() as t")).rows[0].t;
+    assert(t.plays === 1, `one joined duel and one open lobby should be 1 play, got ${t.plays}`);
+    assert(t.drafted === 1, `one duel pick should be 1 player drafted, got ${t.drafted}`);
+
     await db.close();
   } catch (e) {
     await db.close();

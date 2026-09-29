@@ -91,7 +91,7 @@ const cellSaid = (col, p) => (col === "division" ? (p.division || "") : cellText
 
 export function GuessScreen({
   userId, username, isGuest, onBack, onClaimCoins, onDailySaved, onStage, onNeedsAccount,
-  onShare, siteUrl, challenge, onChallengeTaken,
+  onShare, siteUrl, challenge, onChallengeTaken, onPlayed,
 }) {
   // The pool is fetched when this screen opens rather than shipped in the bundle (guess-pool.mjs says why), so
   // everything here waits on it: the menu's tiles, the search box and the resume below all need the players.
@@ -257,6 +257,9 @@ export function GuessScreen({
         setDailyDone({ solved: sent.solved, tries: sent.tries, outcome: sent.outcome, guesses: finished.guesses, answer: sent.answer?.id });
         if (onDailySaved) onDailySaved({ day: sent.day, solved: sent.solved, tries: sent.tries });
       }
+      // The row is in guess_runs/century_runs now, and site_totals counts those into `plays` -
+      // so the home screen's pill may tick. Only on ok: a refused save wrote no row.
+      if (onPlayed) onPlayed();
       if (onClaimCoins) onClaimCoins(finished.day || day, (credited) => setCoins(credited));
       loadBoards();
     } else {

@@ -2303,8 +2303,13 @@ export default function PerfectSeason() {
   const [best, setBest] = useState({ loading: false, rows: [], mode: "all", format: "fantasy" });
   const [siteStats, setSiteStats] = useState({ loading: false, loaded: false, data: null, error: false, buildCount: null, topBuilds: [] });
   const [online, setOnline] = useState(null); // concurrent-players count, null until the Realtime channel first syncs
-  const [liveDrafts, setLiveDrafts] = useState(null); // total drafts, live-ticked via broadcast on top of the initial fetchSiteTotals() count
-  const siteActivity = useRef(null); // { unsubscribe, broadcastDraftFinished } from subscribeSiteActivity - finish() reaches it to announce a completed draft
+  // Two sitewide counters, both live-ticked via broadcast on top of the initial fetchSiteTotals().
+  // They are NOT interchangeable: `plays` is every draft plus every mini-game round and is what the
+  // hero pill shows; `drafts` is drafts alone and is what the Stats screen's Drafts tile shows. One
+  // broadcast carries which kind it was, so a Guess the Player round moves the first and not the second.
+  const [livePlays, setLivePlays] = useState(null);
+  const [liveDrafts, setLiveDrafts] = useState(null);
+  const siteActivity = useRef(null); // { unsubscribe, broadcastPlayFinished } from subscribeSiteActivity - finish() and the mini-games reach it to announce one
   // Over/Under's daily game state while playing:
   // { date, roundIndex, lives, score, round, guess, correct, deadline, timeLeft }
   const [sou, setSou] = useState(null);
@@ -2534,7 +2539,10 @@ export default function PerfectSeason() {
     })();
     siteActivity.current = subscribeSiteActivity({
       onOnlineCount: setOnline,
-      onDraftFinished: () => setLiveDrafts((n) => (n == null ? n : n + 1)),
+      onPlayFinished: (kind) => {
+        setLivePlays((n) => (n == null ? n : n + 1));
+        if (kind === "draft") setLiveDrafts((n) => (n == null ? n : n + 1));
+      },
     });
     return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); siteActivity.current?.unsubscribe(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2972,11 +2980,14 @@ export default function PerfectSeason() {
       }
       // totals is null when it couldn't be loaded - keep whatever was showing rather than zeros.
       setLb((x) => ({ loading: false, top, totals: totals || x.totals, myRank, error: false, format: boardFormat }));
-      // Never lower the live count. These totals can predate drafts whose broadcasts have already
+      // Never lower either live count. These totals can predate plays whose broadcasts have already
       // bumped the count past them - including, on a guest's result, the draft that just finished.
-      if (totals) setLiveDrafts((n) => (n == null ? totals.runs : Math.max(n, totals.runs)));
+      if (totals) {
+        setLivePlays((n) => (n == null ? totals.plays : Math.max(n, totals.plays)));
+        setLiveDrafts((n) => (n == null ? totals.runs : Math.max(n, totals.runs)));
+      }
     } catch (e) {
-      setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0 }, myRank: -1, error: true, format: boardFormat });
+      setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0, plays: 0 }, myRank: -1, error: true, format: boardFormat });
     }
   }
 
@@ -3463,7 +3474,7 @@ export default function PerfectSeason() {
     if (forcedScenario) sim.rank = null;
     setNotice("");
     if (!forcedScenario) {
-      siteActivity.current?.broadcastDraftFinished();
+      siteActivity.current?.broadcastPlayFinished("draft");
       if (mode.kind === "daily") {
         const rec = { date: mode.date, format: fmt, w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, roster: runRoster };
         setDailyDone((d) => ({ ...d, [fmt]: rec }));
@@ -3788,7 +3799,12 @@ export default function PerfectSeason() {
       // there first - so the score on the board is the one that counts and this run is not it. Either
       // way the day is done; what must not happen is the silence it used to answer with.
       const saved = await upsertSouRun(date, userId, { username: user, score });
-      if (saved === "saved") claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
+      // `plays` counts rows in sou_runs, so the tick follows the row - not the round. "already" wrote
+      // nothing here (another device holds the day) and a dropped request wrote nothing either.
+      if (saved === "saved") {
+        siteActivity.current?.broadcastPlayFinished("minigame");
+        claimMinigame("over_under", date, (credited) => setSouCoins({ date, credited }));
+      }
       else if (saved === "already") setNotice("Today's Over/Under was already recorded on another device, so this one didn't count.");
       // A dropped request is not that, and saying so was a lie about the world: no row existed anywhere, and
       // because the coins are claimed only on a save, the day's 15 went unclaimed with no way back to them.
@@ -3913,6 +3929,7 @@ export default function PerfectSeason() {
       if (user && userId) {
         (async () => {
           await logBuild(userId, { username: user, pos: bap.pos, overall: bapOverallScore(filled), filled });
+          siteActivity.current?.broadcastPlayFinished("minigame");
           await claimMinigame("build", todayKey(), (credited) => setBap((b) => (b && b.filled === filled ? { ...b, coins: credited } : b)));
         })().catch(() => {});
       }
@@ -4475,8 +4492,8 @@ export default function PerfectSeason() {
                 <button className="btn solid xl" onClick={playUnlimited}>Start my season 🏈</button>
               </div>
               <div className="herostats">
-                {liveDrafts != null && (
-                  <button className="pill" onClick={() => { setView("stats"); if (!siteStats.loaded) loadSiteStats(); }}>🔥 {liveDrafts.toLocaleString()} drafts</button>
+                {livePlays != null && (
+                  <button className="pill" onClick={() => { setView("stats"); if (!siteStats.loaded) loadSiteStats(); }}>🔥 {livePlays.toLocaleString()} plays</button>
                 )}
                 {online != null && <span className="pill">🟢 {online} online now</span>}
                 {installOffer && <button className="pill install" onClick={install}>Install Gridspin</button>}
@@ -5094,6 +5111,7 @@ export default function PerfectSeason() {
               onDailySaved={onGuessDaily}
               onShare={sendShare} siteUrl={APP_SITE_URL}
               challenge={guessChallenge} onChallengeTaken={() => setGuessChallenge(null)}
+              onPlayed={() => siteActivity.current?.broadcastPlayFinished("minigame")}
               onNeedsAccount={(why) => {
                 setNotice(why === "guest"
                   ? "The daily needs an account - a guest can be made again and again, so the day's player would be as many goes as you liked. Keep your seasons and it opens up."
@@ -5116,6 +5134,7 @@ export default function PerfectSeason() {
               onDailySaved={onCenturyDaily} onStage={setCenturyStage}
               onShare={sendShare} siteUrl={APP_SITE_URL}
               challenge={centuryChallenge} onChallengeTaken={() => setCenturyChallenge(null)}
+              onPlayed={() => siteActivity.current?.broadcastPlayFinished("minigame")}
               onNeedsAccount={(why) => {
                 setNotice(why === "guest"
                   ? "The daily needs an account - a guest can be made again and again, so the day's seven teams would be as many goes as you liked. Keep your seasons and it opens up."
@@ -5329,6 +5348,11 @@ export default function PerfectSeason() {
                 <div className="tiles">
                   <div className="tile"><div className="n">{site.totals.players}</div><div className="l">Accounts</div></div>
                   <div className="tile"><div className="n">{(liveDrafts ?? site.totals.runs).toLocaleString()}</div><div className="l">Drafts</div></div>
+                  {/* Six a season plus every duel pick, counted in the database (site_totals). Left out
+                      entirely when the migration hasn't run, rather than shown as a confident 0. */}
+                  {site.totals.drafted != null && (
+                    <div className="tile"><div className="n">{site.totals.drafted.toLocaleString()}</div><div className="l">Players drafted</div></div>
+                  )}
                   <div className="tile"><div className="n">{site.totals.perfect}</div><div className="l">Perfect seasons</div></div>
                   <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
                   <div className="tile"><div className="n">{siteStats.buildCount == null ? "–" : siteStats.buildCount}</div><div className="l">Created players</div></div>

@@ -236,7 +236,16 @@ export async function fetchBoardLooks({ names = null, limit = 500 } = {}) {
 export async function fetchSiteTotals() {
   const { data, error } = await getClient().rpc("site_totals", {}, READ);
   if (error || !data) return null;
-  return { runs: Number(data.runs) || 0, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0 };
+  // `plays` falls back to `runs` rather than to 0: a client that is ahead of the migration would
+  // otherwise show a pill counting nothing at all, and drafts alone is the honest older answer.
+  const runs = Number(data.runs) || 0;
+  // `drafted` is null rather than 0 when the database has not got it yet: the Stats tile leaves itself
+  // out on null, and "0 players drafted" beside 170 drafts would be a claim about the world, not a gap.
+  return {
+    runs, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0,
+    plays: Number(data.plays) || runs,
+    drafted: data.drafted == null ? null : Number(data.drafted) || 0,
+  };
 }
 export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
   // Tiebroken on username, for the reason fetchLeaderboardTop is.
@@ -334,7 +343,15 @@ export async function fetchSiteStats(limit = 10) {
     byFormat[f] = { bestLineups: profilesOf(v.best_lineups), bestGm: v.best_gm || [], biggestUpsets: v.biggest_upsets || [] };
   }
   return {
-    totals: { runs: Number(data.totals?.runs) || 0, perfect: Number(data.totals?.perfect) || 0, players: Number(data.totals?.players) || 0 },
+    // Whitelisted field by field, so a new one in site_totals() has to be added HERE too - which is how
+    // `drafted` reached the Stats screen as undefined the first time. Null, not 0, when the database
+    // hasn't got it: the tile leaves itself out rather than claiming nobody has drafted anyone.
+    totals: {
+      runs: Number(data.totals?.runs) || 0, perfect: Number(data.totals?.perfect) || 0,
+      players: Number(data.totals?.players) || 0,
+      plays: Number(data.totals?.plays) || Number(data.totals?.runs) || 0,
+      drafted: data.totals?.drafted == null ? null : Number(data.totals.drafted) || 0,
+    },
     byFormat: { fantasy: byFormat.fantasy || EMPTY_FORMAT, standard: byFormat.standard || EMPTY_FORMAT },
     mostDrafted: data.most_drafted || [],
     mostWins: profilesOf(data.most_wins),
@@ -349,22 +366,29 @@ export async function fetchSiteStats(limit = 10) {
 // One channel, two live concerns: a concurrent-players count via Supabase Realtime Presence
 // (every open tab - no auth needed, guests count too - joins and "tracks" itself; every tab gets
 // a "sync" event with the full presence set whenever anyone joins/leaves), and a live
-// total-drafts tick via Realtime broadcast (every tab that finishes a draft tells every other
-// open tab to bump its count by one - optimistic, not re-fetched, since this is a fun live
-// number, not a ledger). Unlike every other export here, this is a long-lived subscription, not
+// total-plays tick via Realtime broadcast (every tab that finishes a draft or a mini-game tells
+// every other open tab to bump its count by one - optimistic, not re-fetched, since this is a fun
+// live number, not a ledger). Unlike every other export here, this is a long-lived subscription, not
 // a one-shot request, so it returns an unsubscribe function (call it on unmount) alongside a
-// broadcaster for the "a draft just finished" side.
-export function subscribeSiteActivity({ onOnlineCount, onDraftFinished }) {
+// broadcaster for the "something just finished" side.
+export function subscribeSiteActivity({ onOnlineCount, onPlayFinished }) {
   const client = getClient();
   // self: true - Supabase doesn't echo a broadcast back to its sender by default, and the tab that
-  // just finished a draft should count it too (see loadLeaderboard's setLiveDrafts for the other half).
+  // just finished a draft should count it too (see loadLeaderboard's setLivePlays for the other half).
   const channel = client.channel("site-activity", { config: { broadcast: { self: true } } });
   channel.on("presence", { event: "sync" }, () => onOnlineCount(Object.keys(channel.presenceState()).length));
-  channel.on("broadcast", { event: "draft_finished" }, onDraftFinished);
+  // The WIRE name stays "draft_finished" though the number it feeds is now plays (v2.16.0). A deploy
+  // leaves tabs on both bundles talking to each other for as long as they stay open, and renaming the
+  // event would split them into two silent halves, each counting only its own kind of tab. `kind` is a
+  // payload field for the same reason it is not a new event: an old tab sends none, and no kind means
+  // "draft", which is the only thing an old tab ever broadcast.
+  channel.on("broadcast", { event: "draft_finished" }, (msg) => onPlayFinished(msg?.payload?.kind === "minigame" ? "minigame" : "draft"));
   channel.subscribe(async (status) => { if (status === "SUBSCRIBED") await channel.track({}); });
   return {
     unsubscribe: () => client.removeChannel(channel),
-    broadcastDraftFinished: () => channel.send({ type: "broadcast", event: "draft_finished", payload: {} }),
+    // kind: "draft" bumps both the plays pill and the Stats screen's Drafts tile; "minigame" bumps
+    // only plays, because a Guess the Player round is not a draft and that tile still says Drafts.
+    broadcastPlayFinished: (kind = "draft") => channel.send({ type: "broadcast", event: "draft_finished", payload: { kind } }),
   };
 }
 

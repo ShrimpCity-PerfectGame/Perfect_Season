@@ -107,7 +107,7 @@ export function centuryBlock(player, slot, roster) {
 // ---------- The screen ----------
 export function CenturyScreen({
   userId, username, isGuest, onBack, onClaimCoins, onDailySaved, onStage, onNeedsAccount,
-  onShare, siteUrl, challenge, onChallengeTaken,
+  onShare, siteUrl, challenge, onChallengeTaken, onPlayed,
 }) {
   // stage: "menu" a variant to choose | "play" seven slots to fill | "done" the result
   const [stage, setStage] = useState("menu");
@@ -347,6 +347,9 @@ export function CenturyScreen({
         // midnight passes belongs to the day whose teams it was played from.
         if (onDailySaved) onDailySaved({ day: answer.day, score: answer.score, hit: answer.hit });
       }
+      // The row is in guess_runs/century_runs now, and site_totals counts those into `plays` -
+      // so the home screen's pill may tick. Only on ok: a refused save wrote no row.
+      if (onPlayed) onPlayed();
       if (onClaimCoins) onClaimCoins(finished.day || day, (credited) => setCoins(credited));
       loadBoards();
     } else {
