@@ -13,15 +13,21 @@ pool is, where each rule lives, what the database holds, and what a submission c
 
 ## 1. Who is in the game
 
-**The men playing right now, at the positions people watch, plus the twenty-five nobody has forgotten.**
+**The men playing now, at the positions people watch, plus the twenty-five nobody has forgotten.**
 
-- **Active:** quarterbacks, running backs, receivers and tight ends with **100+ snaps in the season being
-  played**. About 170 in September, growing every week as snaps accumulate.
+- **Playing:** quarterbacks, running backs, receivers and tight ends with **100+ snaps since the start of the
+  2025 season** — two seasons added together (`MIN_SNAPS`, `SINCE_SEASON`). 456 of them.
 - **Legends:** the **25** best retired players at those same positions, by career value ranked *within* each
   position so quarterbacks cannot take all the places. Brady, Rice, Peyton Manning, Barry Sanders, Emmitt Smith,
   Moss, Gronkowski, Tony Gonzalez.
 
-193 players as this was written. Every one of them is both typable as a guess and askable as the answer.
+481 players as this was written. Every one of them is both typable as a guess and askable as the answer.
+
+**The window is two seasons and not one**, which matters more than it sounds. Counting only the season being
+played made the pool three weeks of football in September — 168 men — and left out anyone hurt early: **Puka
+Nacua** had 727 snaps in 2025 and 43 in 2026, and was not in the game. It also meant the pool was wrong within a
+week of any build. Two seasons is steady from the first Sunday of a season to the last, and still only men a fan
+has watched recently. The cost is at the other end: Ezekiel Elliott last played in 2024, so he is out.
 
 ### Why it is this, after twice being something else
 
@@ -31,15 +37,17 @@ The shape has changed three times, and the reasoning is worth keeping because ea
 | --- | --- | --- |
 | v2.13.0 | every drafted player with a 5-season career — **4,637** | Wrong at both ends. 723 men lasted five seasons without ever playing (Rodney Adams took **ten snaps** in six); and a career takes five years to measure, so the draft classes stopped at 2022 and no Jayden Daniels or Brock Bowers could ever be the answer. Most days were closer to Rodney Adams than to Peyton Manning. |
 | then | a Guessability Score — recency, prominence within position, longevity, accolades, starts, draft capital — taking a share of each position group, **773** | Much better, and still asking about the hundredth-best corner of the century. |
-| now | the men on the field, and the greats — **193** | A fan can place the players he is watching this season far more readily than anyone else, whatever a career-value model says. The point of a daily is that most people can get it. |
+| now | the men on the field, and the greats — **481** | A fan can place the players he has been watching far more readily than anyone else, whatever a career-value model says. The point of a daily is that most people can get it. |
 
 **What it costs, and it is not small:** there is no defence in this game and no offensive line, and of the
 retired only the very top. It is a quiz about the season being played rather than about all of football. That
 was chosen deliberately, to make it winnable.
 
-**It goes stale.** The active half is a photograph of a season in progress. **Rebuild it weekly while football
-is being played**, and again when a season ends; `built` and `throughWeek` in the file say when the photograph
-was taken. A pool built in week 3 has ~170 players and one built in January has half as many again.
+**It ages.** The playing half is two seasons wide, so it does not go stale in a week the way a one-season window
+did — but a rookie who arrives mid-season is not in it until it is rebuilt. **Rebuild when a season ends**, and
+during one if you want the newest players in; `built`, `sinceSeason` and `throughWeek` in the file say what it
+holds. `GUESS_POOL_INFO` carries all of that into the app, so the screen states the rule from the data rather
+than from prose that has already been wrong twice.
 
 ### The columns a player needs
 
@@ -131,8 +139,8 @@ wrong team, and that is worth knowing.
 
 The daily **walks a fixed cycle**, one turn each. A random pick repeats somebody inside a year about as often as
 not, and the one thing a daily must never do is ask the same question twice in a fortnight; walking a
-permutation gives every player exactly one turn before anybody comes round again — **193 days** at the size the
-pool is now, and longer every week of the season.
+permutation gives every player exactly one turn before anybody comes round again — **481 days**, about sixteen
+months, at the size the pool is now.
 
 - `GUESS_DAY_ONE = "2026-09-14"`, the same launch day the share cards number from.
 - The shuffle is `mulberry32(hashStr("gridspin-guess-order"))` and a plain Fisher–Yates loop. **Never a random
@@ -152,9 +160,9 @@ the weighting was for.
 (the hardest in the pool), and `guessBand` is his band. The end screen prints both once the game is over — never
 before, where it would narrow the answer.
 
-**Five guesses, not eight** (`GUESS_TRIES`). The two knobs move together: eight guesses at a field of 193 is not
-a game, because most days it falls to elimination. Measured, a bot guessing blind now solves **2.75%** of games,
-against 0.20% at eight guesses and 4,637 players — the honest measure of how much easier this is.
+**Five guesses, not eight** (`GUESS_TRIES`). The two knobs move together: eight guesses at a field this size is
+not a game, because most days it falls to elimination. Measured, a bot guessing blind now solves **1.05%** of
+games, against 0.20% at eight guesses and 4,637 players — the honest measure of how much easier this is.
 
 ## 4. The database
 
@@ -269,8 +277,8 @@ and `.mode`. It is reached from **Mini games**, not Modes (v2.10.0).
 The menu carries a **list of every player the game can ask about**, closed by default, names only, grouped by
 position with a count each.
 
-It exists because the pool had a boundary nobody could see. "Everyone playing this season" is a category a fan
-can reason about; "and twenty-five of the greats" is not — so the only way to find out whether Jerry Rice was in
+It exists because the pool had a boundary nobody could see. "Everyone who has played since last season" is a
+category a fan can reason about; "and twenty-five of the greats" is not — so the only way to find out whether Jerry Rice was in
 it was to type his name and see. That is not difficulty, it is a guessing game *about* the guessing game, and
 with the pool down to a couple of hundred it can simply be shown.
 

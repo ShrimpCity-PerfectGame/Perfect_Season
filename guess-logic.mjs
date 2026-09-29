@@ -43,6 +43,10 @@ export const conferenceOf = (team) => (DIVISIONS[team] || "").split(" ")[0];
 // what they did and doubled-and-a-half for anyone starting now. Everyone here can be typed as a guess AND asked
 // as the answer - the two are the same set, because a game that asks about somebody you cannot name is unfair
 // and a game that refuses a name you can is broken. tools/data/build-guess-pool.mjs holds the ranking.
+// What the pool IS, straight from the file that was built: which seasons it covers, the snap bar, how many of
+// it are retired. The screen says the rule out loud and the tests check it, and neither should be writing the
+// numbers down a second time - the window has already moved twice.
+export let GUESS_POOL_INFO = {};
 export let GUESS_PLAYERS = [];        // every player, in the file's order
 export let GUESS_BY_ID = {};          // id -> player
 export let GUESS_SIDES = {};          // position group -> which side of the ball
@@ -59,6 +63,14 @@ export function initGuessData(pool) {
   const at = {};
   for (let i = 0; i < pool.columns.length; i++) at[pool.columns[i]] = i;
   GUESS_SIDES = pool.sides || {};
+  GUESS_POOL_INFO = {
+    season: pool.season ?? null,
+    sinceSeason: pool.sinceSeason ?? pool.season ?? null,
+    throughWeek: pool.throughWeek ?? null,
+    minSnaps: pool.minSnaps ?? null,
+    legends: pool.legends ?? 0,
+    built: pool.built ?? null,
+  };
   GUESS_PLAYERS = pool.players.map((row) => {
     const p = {
       name: row[at.name],

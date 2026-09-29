@@ -6,10 +6,11 @@
 // ---------------------------------------------------------------------------------------------------------
 // WHO IS IN THE GAME (v2.14.0): THE MEN PLAYING RIGHT NOW, PLUS A FEW WHO WILL NEVER BE FORGOTTEN.
 //
-//   * quarterbacks, running backs, receivers and tight ends with MIN_SNAPS snaps in the season being played
+//   * quarterbacks, running backs, receivers and tight ends with MIN_SNAPS snaps SINCE THE START OF LAST
+//     SEASON - two seasons of football, added together
 //   * and the LEGENDS - the best retired players at those same positions, by career value
 //
-// About 170 of the first in September, growing every week as snaps accumulate, and 25 of the second.
+// About 440 of the first and 25 of the second.
 //
 // This is the third shape this pool has had, and the reasoning is worth keeping because each one failed
 // differently:
@@ -29,8 +30,9 @@
 // retired only the very top. It is a quiz about the season being played rather than about all of football, and
 // that was chosen deliberately to make it winnable.
 //
-// IT GOES STALE. The active half is a photograph of a season in progress: rebuild it weekly while football is
-// being played, and again when a season ends. `built` and `throughWeek` in the file say when it was taken.
+// IT AGES. The playing half is two seasons wide, so it does not go stale in a week the way a one-season window
+// did - but a rookie who arrives mid-season is not in it until it is rebuilt. Rebuild when a season ends, and
+// during one if you want the newest players in. `built`, `sinceSeason` and `throughWeek` say what it holds.
 // ---------------------------------------------------------------------------------------------------------
 //
 // Where it comes from, the same public nflverse project as the rest:
@@ -51,10 +53,17 @@ const DRAFT = "https://github.com/nflverse/nflverse-data/releases/download/draft
 const SNAPS = (y) => `https://github.com/nflverse/nflverse-data/releases/download/snap_counts/snap_counts_${y}.csv`;
 const ROSTER = (y) => `https://github.com/nflverse/nflverse-data/releases/download/rosters/roster_${y}.csv`;
 
-// Snaps in the season being played. A hundred is about a game and a half of starting, which is low enough to
-// take every starter and the backs and receivers in a rotation, and high enough to leave out a man who has been
-// on the field twice.
+// Snaps since the start of SINCE_SEASON, added across both years. A hundred is about a game and a half of
+// starting: low enough to take every starter and the backs and receivers in a rotation, high enough to leave
+// out a man who has been on the field twice.
+//
+// The window is two seasons and not one, which matters more than it sounds. Counting only the season being
+// played meant the pool was three weeks of football in September - 168 men - and that a player who got hurt in
+// week one was not in the game at all: Puka Nacua had 727 snaps in 2025 and 43 in 2026, and was missing. It
+// also meant the pool had to be rebuilt weekly or it was simply wrong. Two seasons is 441 players, steady from
+// the first Sunday of a season to the last, and still only men a fan has watched recently.
 const MIN_SNAPS = 100;
+const SINCE_SEASON = 2025;
 // The positions people watch. The line and the defence were in the pool until this release and are much of the
 // reason it was hard: a lineman has no statistics a fan carries around, and nothing the game shows is about him
 // rather than about his team.
@@ -121,22 +130,28 @@ const GROUP = { QB: "QB", RB: "RB", FB: "RB", WR: "WR", TE: "TE", HB: "RB" };
 const SIDE = { QB: "offence", RB: "offence", WR: "offence", TE: "offence" };
 
 // ---------- Who is playing ----------
-console.log(`fetching the ${SEASON} season's snap counts...`);
-let snapRows;
-try { snapRows = await csv(SNAPS(SEASON), `snaps-${SEASON}.csv`); }
-catch (e) {
-  console.error(`\nREFUSING TO WRITE - no snap counts for ${SEASON}. If the season has not started, build the`);
-  console.error(`previous one with GP_SEASON=${SEASON - 1}.`);
+console.log(`fetching snap counts, ${SINCE_SEASON} to ${SEASON}...`);
+const playing = new Map();   // pfr id -> snaps since SINCE_SEASON, both years added
+let week = 0;
+let seasonsRead = 0;
+for (let year = SINCE_SEASON; year <= SEASON; year++) {
+  let rows;
+  try { rows = await csv(SNAPS(year), `snaps-${year}.csv`); }
+  catch (e) { console.log(`  ${year}: not published yet`); continue; }
+  seasonsRead++;
+  for (const r of rows) {
+    if (r.game_type !== "REG" || !r.pfr_player_id) continue;
+    if (year === SEASON) week = Math.max(week, num(r.week));
+    playing.set(r.pfr_player_id, (playing.get(r.pfr_player_id) || 0) + num(r.offense_snaps) + num(r.defense_snaps));
+  }
+  process.stdout.write(`${year} `);
+}
+if (!seasonsRead) {
+  console.error(`\nREFUSING TO WRITE - no snap counts for ${SINCE_SEASON}-${SEASON} at all.`);
   process.exit(1);
 }
-const playing = new Map();   // pfr id -> snaps this season
-let week = 0;
-for (const r of snapRows) {
-  if (r.game_type !== "REG" || !r.pfr_player_id) continue;
-  week = Math.max(week, num(r.week));
-  playing.set(r.pfr_player_id, (playing.get(r.pfr_player_id) || 0) + num(r.offense_snaps) + num(r.defense_snaps));
-}
-console.log(`  through week ${week}: ${playing.size} players have taken a snap`);
+console.log(`\n  ${playing.size} players have taken a snap since ${SINCE_SEASON}`
+  + (week ? `, and the ${SEASON} season is through week ${week}` : ""));
 
 console.log("fetching the rosters...");
 // Jersey numbers, which the player index leaves blank for hundreds of people - and the team an undrafted man
@@ -225,12 +240,13 @@ for (const p of all) {
 // ---------- The two halves ----------
 const active = candidates.filter((p) => p.snaps >= MIN_SNAPS);
 for (const p of active) p.active = true;
-console.log(`  ${active.length} men playing a skill position with ${MIN_SNAPS}+ snaps this season`);
+console.log(`  ${active.length} men at a skill position with ${MIN_SNAPS}+ snaps since ${SINCE_SEASON}`);
 
 // The legends: retired, and the best of the retired by what their careers were worth. Ranked WITHIN a position,
 // because a quarterback's career value runs half again as high as a receiver's and a straight list of the top
-// 25 would be almost all quarterbacks. Retired means he has not taken a snap this season.
-const retired = candidates.filter((p) => !p.active && p.to < SEASON);
+// 25 would be almost all quarterbacks. Retired means he is not in the window above - he has not played, or not
+// enough of it, since SINCE_SEASON.
+const retired = candidates.filter((p) => !p.active && p.to < SINCE_SEASON);
 const career = (p) => p.av + 10 * p.probowls + 25 * p.allpro + 60 * (p.hof ? 1 : 0);
 const standing = new Map();
 for (const g of GROUPS_IN) {
@@ -262,7 +278,9 @@ const guessability = (p) => 0.45 * (p.legend ? 0.9 : p.snaps / mostSnaps)
 // A row where team, position, draft class and number all match must BE the answer, or a player could go all
 // green and not have won. Among a couple of hundred men it is unlikely - but it is checked, and a clash nobody
 // has decided fails the build rather than being tie-broken quietly.
-const KEEP = {};
+const KEEP = {
+  "NYJ|RB|2022|20": ["Breece Hall", "the Jets' starting back and a second-round pick; Knight is depth behind him"],
+};
 const byShape = new Map();
 for (const p of pool) {
   const k = `${p.team}|${p.pos}|${p.draft}|${p.number}`;
@@ -282,7 +300,7 @@ if (undecided.length) {
   console.error(`\nREFUSING TO WRITE - ${undecided.length} clash(es) nobody has decided:`);
   for (const [shape, group] of undecided) {
     console.error(`  ${shape}`);
-    for (const p of group) console.error(`      ${p.name} (${p.from}-${p.to}, ${p.snaps} snaps this season)`);
+    for (const p of group) console.error(`      ${p.name} (${p.from}-${p.to}, ${p.snaps} snaps since ${SINCE_SEASON})`);
   }
   console.error("\nAdd each to KEEP in this file, naming the player to keep and why.");
   process.exit(1);
@@ -331,6 +349,7 @@ const out = {
   season: SEASON,
   throughWeek: week,
   minSnaps: MIN_SNAPS,
+  sinceSeason: SINCE_SEASON,
   legends: legends.length,
   groupsIncluded: GROUPS_IN,
   teams: TEAM_LIST,
@@ -360,5 +379,6 @@ console.log(`  ${Object.entries(byGroup).sort((a, b) => b[1] - a[1]).map(([k, v]
 console.log(`  skipped: ${skipped.number} with no jersey number, ${skipped.team} with no team the game knows`);
 console.log(`  easiest: ${order.slice(-5).reverse().map((p) => p.name).join(", ")}`);
 console.log(`  hardest: ${order.slice(0, 5).map((p) => p.name).join(", ")}`);
-console.log(`  the daily comes round in ${pool.length} days (${(pool.length / 30.4).toFixed(1)} months) - `
-  + `REBUILD WEEKLY while the season is on, the active half grows with it`);
+console.log(`  the daily comes round in ${pool.length} days (${(pool.length / 30.4).toFixed(1)} months)`);
+console.log(`  rebuild when a season ends, and during one if you want the newest players in - the two-season`
+  + ` window means it does not go stale in a week`);

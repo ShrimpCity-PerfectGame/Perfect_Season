@@ -9,7 +9,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { initGameData, TEAMS } from "../game-logic.mjs";
 import {
-  initGuessData, GUESS_PLAYERS, GUESS_BY_ID, GUESS_BANDS, guessBand, guessDifficulty, guessCycleLength, GUESS_TRIES, GUESS_COLUMNS, DIVISIONS, DRAFT_NEAR, NUMBER_NEAR,
+  initGuessData, GUESS_PLAYERS, GUESS_BY_ID, GUESS_BANDS, guessBand, guessDifficulty, guessCycleLength,
+  GUESS_POOL_INFO, GUESS_TRIES, GUESS_COLUMNS, DIVISIONS, DRAFT_NEAR, NUMBER_NEAR,
   conferenceOf, guessId, guessPlayer, compareGuess, isGuessSolved, guessAnswerFor, guessAnswerForSeed,
   guessDayNumber, guessDailySeed, replayGuessGame, guessOutcome, GUESS_DAY_ONE,
 } from "../guess-logic.mjs";
@@ -153,9 +154,9 @@ eq(guessAnswerForSeed("ABCD1234").id, guessAnswerForSeed("ABCD1234").id, "a code
 {
   const picks = new Set();
   for (let i = 0; i < 300; i++) picks.add(guessAnswerForSeed(`code-${i}`).id);
-  // 300 codes over a pool of a couple of hundred collide constantly by birthday alone; what matters is that
-  // they spread over most of it rather than clustering on a few players.
-  ok(picks.size > GUESS_PLAYERS.length * 0.6, `codes spread over the pool (${picks.size} different in 300)`);
+  // 300 codes collide constantly by birthday alone - drawing 300 times from a few hundred players is expected
+  // to hit only about 200 of them - so what is checked is that they SPREAD rather than cluster on a few.
+  ok(picks.size > 150, `codes spread over the pool (${picks.size} different in 300)`);
 }
 
 // ---------- 4. Replaying a game ----------
@@ -249,15 +250,19 @@ refuse({ guesses: [brady.id] }, "no_answer", "no date and no seed");
   for (const name of ["Tom Brady", "Jerry Rice", "Peyton Manning", "Barry Sanders", "Randy Moss"]) {
     ok(find(name), `${name} is in the game`);
   }
-  const retired = GUESS_PLAYERS.filter((p) => p.to < new Date().getUTCFullYear());
+  // Retired means "outside the playing window", not "did not play THIS year" - a man who played all of last
+  // season and is hurt this one is still one of the players people have watched.
+  const since = GUESS_POOL_INFO.sinceSeason;
+  ok(since > 2000, `the pool says which seasons it covers: ${since}`);
+  const retired = GUESS_PLAYERS.filter((p) => p.to < since);
   ok(retired.length >= 20 && retired.length <= 40, `a couple of dozen retired, no more: ${retired.length}`);
   // And they are not treated as obscure: a legend is one of the easier answers, not one of the hardest.
   ok(guessDifficulty(find("Jerry Rice")) < 50, `Jerry Rice is an easy answer: ${guessDifficulty(find("Jerry Rice"))}/100`);
 
   // The current half. Most of the game is men playing now - that is the whole point of the pool.
   const active = GUESS_PLAYERS.length - retired.length;
-  ok(active > GUESS_PLAYERS.length * 0.6, `most of the game is players of this season: ${active} of ${GUESS_PLAYERS.length}`);
-  console.log(`  ${active} playing this season, ${retired.length} retired`);
+  ok(active > GUESS_PLAYERS.length * 0.8, `most of the game is current players: ${active} of ${GUESS_PLAYERS.length}`);
+  console.log(`  ${active} have played since ${since}, ${retired.length} retired`);
 
   // Every one of them can be compared on all five columns, which is the only thing the game truly requires.
   for (const p of GUESS_PLAYERS) {

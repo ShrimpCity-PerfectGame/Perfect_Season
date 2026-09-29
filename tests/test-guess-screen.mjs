@@ -473,7 +473,10 @@ await runTest("12. the pool the screen offers is the pool the server checks agai
   assert(gp().querySelectorAll(".gp-hit").length === 0, "one letter offers nothing");
   await type(box(), "Zzzzzz");
   assert(gp().querySelectorAll(".gp-hit").length === 0, "and a name nobody has offers nothing");
-  assert(/taking real snaps this season/.test(gp().textContent), "with a line saying which players the game holds");
+  // The line states the rule the pool was built by, and it comes FROM the pool - so this checks the shape of
+  // the sentence rather than a season, which has already moved twice.
+  assert(/snaps or more since the \d{4} season/.test(gp().textContent),
+    `with a line saying which players the game holds: ${gp().textContent.slice(0, 200)}`);
   // Every id the screen can hand in resolves in the same module the function replays with.
   for (const p of GUESS_PLAYERS.slice(0, 50)) assert(guessPlayer(p.id) === p, `${p.id} resolves`);
 });

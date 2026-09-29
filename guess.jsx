@@ -13,7 +13,7 @@ import { TEAMS } from "./game-logic.mjs";
 import {
   GUESS_PLAYERS, GUESS_TRIES, GUESS_COLUMNS, DIVISIONS,
   guessPlayer, compareGuess, guessAnswerFor, guessAnswerForSeed, guessOutcome, replayGuessGame,
-  guessDifficulty, guessBand, guessDayNumber,
+  guessDifficulty, guessBand, guessDayNumber, GUESS_POOL_INFO,
 } from "./guess-logic.mjs";
 import { loadGuessPool } from "./guess-pool.mjs";
 import { teamVars, reducedMotion } from "./ui-common.jsx";
@@ -31,9 +31,15 @@ const newCode = () => {
 // label, because a colour on its own carries meaning and that is the one thing a screen may not do.
 export const GUESS_HEADS = { team: "Team", division: "Division", pos: "Pos", draft: "Class", number: "No." };
 const SAID = { hit: "exact", near: "close", miss: "no" };
-// How many of the pool are retired, counted rather than written down - the builder's LEGENDS can change and
-// this sentence must not go stale. A season is "current" if somebody in the pool is still playing in it.
-const RETIRED_SAID = "a couple of dozen";
+// The rule the pool was built by, in a sentence, taken from the file rather than written out here - the window
+// has moved twice already and a hard-coded "this season" was wrong within the hour.
+const poolRule = () => {
+  const { sinceSeason, minSnaps, legends } = GUESS_POOL_INFO;
+  const playing = sinceSeason && minSnaps
+    ? `everyone with ${minSnaps} snaps or more since the ${sinceSeason} season kicked off`
+    : "everyone playing now";
+  return legends ? `${playing}, and ${legends} of the greats` : playing;
+};
 // The ink on a coloured cell. Both paints are light, so it is dark on both - see the note in GUESS_CSS.
 const CELL_INK = "#1B1B1B";
 const ARROW = { up: "↑", down: "↓" };
@@ -312,8 +318,8 @@ export function GuessScreen({
           )}
           {query.trim().length >= 2 && matches.length === 0 && (
             <p className="note">
-              Nobody by that name is in the game. It holds the quarterbacks, backs, receivers and tight ends
-              taking real snaps this season, and {RETIRED_SAID} of the greats — the menu lists every one of them.
+              Nobody by that name is in the game. It holds quarterbacks, backs, receivers and tight ends —{" "}
+              {poolRule()} — and the menu lists every one of them.
             </p>
           )}
         </div>
@@ -519,8 +525,8 @@ function GuessRoster({ open, onToggle }) {
       </button>
       <div id="gp-roster-list" hidden={!open}>
         <p className="note">
-          Every player the game can ask about — everyone taking real snaps this season, and {RETIRED_SAID} of the
-          greats. Teams, draft classes and numbers are not listed: those are the game.
+          Every player the game can ask about — {poolRule()}. Teams, draft classes and numbers are not listed:
+          those are the game.
         </p>
         {byGroup.map(([group, men]) => (
           <div key={group} className="gp-rgroup">

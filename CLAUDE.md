@@ -284,21 +284,25 @@ number** with the answer. Green is exact, grey is no, and yellow means something
 Daily and Practice, behind Mini games. **`GUESS.md` is the reference** - read it before touching any of it. The
 parts unlike everything else:
 
-- **The pool is the season being played, plus the greats.** Quarterbacks, backs, receivers and tight ends with
-  100+ snaps in the current season (about 170 in September, growing weekly), and the 25 best retired players at
-  those positions by career value ranked *within* position. 193 players as this was written. There is no defence
+- **The pool is who has been playing, plus the greats.** Quarterbacks, backs, receivers and tight ends with 100+
+  snaps SINCE THE START OF THE 2025 SEASON - two seasons added together - and the 25 best retired players at
+  those positions by career value ranked *within* position. 481 players as this was written. There is no defence
   and no offensive line: a lineman has no statistics a fan carries around, and nothing the game shows is about
   him rather than about his team.
+- **The window is two seasons for a reason.** One season made the pool three weeks of football in September
+  (168 men) and left out anybody hurt early - Puka Nacua had 727 snaps in 2025, 43 in 2026, and was not in the
+  game - and it went wrong within a week of any build. `GUESS_POOL_INFO` carries the window, the snap bar and
+  the legend count from the file into the app, so the screen states the rule from the DATA: that sentence has
+  been wrong twice already from being written out by hand.
 - **It has been three different pools, and the history is the argument.** v2.13.0 kept every drafted player with
   a five-season career (4,637) - wrong at both ends, because 723 men lasted five seasons without ever playing
   (Rodney Adams took TEN snaps in six) while the draft classes stopped at 2022, so no Jayden Daniels or Brock
   Bowers could be the answer. Then a Guessability Score over six weighted terms took a share of each position
   group (773) - better, and still asking about the hundredth-best corner of the century. Now: the men on the
   field. Each version is in GUESS.md 1 with what it cost.
-- **IT GOES STALE.** The active half is a photograph of a season in progress, so `data/guess-pool.json` wants
-  **rebuilding weekly while football is on** (`node tools/data/build-guess-pool.mjs`, `GP_SEASON` to pin a
-  season). `built` and `throughWeek` in the file say when the photograph was taken. This also means the client
-  and `submit-guess` must ship together every time, since both carry a copy of the pool.
+- **IT AGES.** Two seasons wide, so it does not go stale in a week - but a rookie arriving mid-season is not in
+  it until `node tools/data/build-guess-pool.mjs` is re-run (`GP_SEASON` pins a season). Rebuild when a season
+  ends. The client and `submit-guess` must ship together every time, since both carry a copy of the pool.
 - **Two columns are not simply lying around.** The jersey number is blank in the player index for thousands of
   people, so the builder falls back to the season ROSTERS and keeps the number each man appeared under most -
   reading it off the index and judging it there is how Ezekiel Elliott, a fourth overall pick with two rushing
@@ -309,13 +313,13 @@ parts unlike everything else:
   decided by identity** - the last guess being the answer - never by counting green cells. `compareGuess` is the
   only place "close" is defined, and it differs per column: the same conference, the same side of the ball, a
   draft class within two, a number within five, with an arrow on the two numeric ones.
-- **The daily walks a fixed cycle, one turn each**, so nobody comes round until everybody has been asked - 193
-  days now, longer every week of the season. The weighted version (the best-known quarter three times a cycle)
+- **The daily walks a fixed cycle, one turn each**, so nobody comes round until everybody has been asked - 481
+  days, about sixteen months. The weighted version (the best-known quarter three times a cycle)
   was RIGHT for 731 players and wrong for 193: it brings a man back inside four months, and a daily that repeats
   inside a season is worse than one that asks a hard question. `GUESS_BANDS` still names the bands because
   `guessDifficulty` prints them on the end screen - **after** the game, never before.
-- **Five guesses and a small pool move together.** Eight guesses at 193 players falls to elimination most days.
-  Measured: a blind bot wins 2.75% of games now against 0.20% at eight guesses and 4,637 players, and
+- **Five guesses and a small pool move together.** Eight guesses at a pool this size falls to elimination most
+  days. Measured: a blind bot wins 1.05% of games now against 0.20% at eight guesses and 4,637 players, and
   `tests/test-guess-logic.mjs` prints that number rather than burying it.
 - **`guess_runs` is the second board no client can write** (RLS on, public select, no write policy), and
   `submit-guess` is the only writer. It takes **the guesses, not the result**: the answer follows from the date,

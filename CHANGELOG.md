@@ -23,25 +23,30 @@ bundles `data/guess-pool.json` and `guess-logic.mjs`, and both changed. `GUESS.m
 ### Changed
 
 - **The pool is the men on the field.** Quarterbacks, running backs, receivers and tight ends with **100+ snaps
-  in the season being played** — about 170 in September and growing every week — plus the **25** best retired
+  since the start of the 2025 season** — two seasons added together, 456 of them — plus the **25** best retired
   players at those positions, ranked *within* position so quarterbacks cannot take every place: Brady, Rice,
-  Peyton Manning, Barry Sanders, Emmitt Smith, Moss, Gronkowski, Tony Gonzalez.
+  Peyton Manning, Barry Sanders, Emmitt Smith, Moss, Gronkowski, Tony Gonzalez. 481 in all.
+  - **The window is two seasons, not one.** Counting only the season being played made the pool three weeks of
+    football in September (168 men) and left out anyone hurt early — Puka Nacua had 727 snaps in 2025 and 43 in
+    2026, and was missing — and it went wrong within a week of any build. The cost is at the other end: Ezekiel
+    Elliott last played in 2024, so he is out.
   - **What it costs, and it is not small:** no defence, no offensive line, and of the retired only the very top.
     It is a quiz about this season rather than about all of football, chosen deliberately to make it winnable.
-  - **It goes stale.** Rebuild `data/guess-pool.json` weekly while football is on. The client and the Edge
-    Function both carry a copy, so they ship together — every time.
+  - **It ages.** Two seasons wide, so it does not go stale in a week; rebuild when a season ends, and during one
+    if you want the newest players in. The client and the Edge Function both carry a copy, so they ship
+    together — every time.
   - This is the pool's third shape. v2.13.0 kept every drafted player with a five-season career (4,637), which
     asked about men who never played while refusing to ask about anyone who arrived after 2022. A Guessability
     Score over six weighted terms then took a share of each position group (773) — better, and still asking
     about the hundredth-best corner of the century. CHANGELOG entries for both remain below; GUESS.md 1 has the
     full reasoning and what each version cost.
 - **Five guesses, not eight.** Eight at a field of 193 falls to elimination most days. The two knobs move
-  together, and the honest measure is printed by the tests: a bot guessing blind now wins **2.75%** of games,
+  together, and the honest measure is printed by the tests: a bot guessing blind now wins **1.05%** of games,
   against 0.20% at eight guesses and 4,637 players.
 - **The daily's weighting is gone**, deliberately. Every player takes one turn, so nobody comes round until
-  everybody has been asked — 193 days now, longer every week. Giving the best-known quarter three turns was
-  right for 731 players (a 1,353-day cycle still left 451 days between a man's turns) and wrong for 193, where
-  it brings him back inside four months.
+  everybody has been asked — 481 days, about sixteen months. Giving the best-known quarter three turns was right
+  for 731 players (a 1,353-day cycle still left 451 days between a man's turns) and wrong for a pool this size,
+  where it brings him back inside four months.
 
 ### Added
 
