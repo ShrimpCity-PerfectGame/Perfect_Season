@@ -14,6 +14,7 @@ const REPORT_REFUSALS = {
   // make, so six throwaways would put 24 open reports on somebody. Unmapped, this fell through to
   // "network" and told them their connection had failed - forever, for a rule rather than a fault.
   guest_not_allowed: "guest",
+  guest_target: "guest_target",
 };
 const MOD_REFUSALS = {
   not_moderator: "not_moderator", taken: "taken", blocked: "blocked", invalid: "invalid",

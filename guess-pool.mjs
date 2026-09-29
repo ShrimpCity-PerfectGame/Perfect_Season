@@ -41,7 +41,3 @@ export function loadGuessPool(fetchImpl) {
   return pending;
 }
 
-// Tests only: forget a load in flight.
-export function resetGuessPool() {
-  pending = null;
-}

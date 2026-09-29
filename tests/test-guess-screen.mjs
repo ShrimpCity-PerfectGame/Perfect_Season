@@ -641,4 +641,24 @@ await runTest("16. a daily whose save is refused is still spent - the answer is 
   assert(/See how it went/.test(daily.textContent), `and offers the result instead: ${daily.textContent}`);
 });
 
+await runTest("17. a badge the run earns is named on the end screen, not just paid", async () => {
+  // submit-guess has always returned `badge` so the screen could say so, and the screen never read it: a first
+  // Bullseye paid 300 coins under a line that said "+15 coins". The badge is the bigger thing of the two.
+  await dropWip();
+  // Test 16 spent this account's daily on this device, so clear the local record it left. It is keyed by
+  // account, so the prefix is what finds it without this test needing to know the id.
+  for (const k of (await window.storage.list("ps-guess-done", false)).keys) await window.storage.delete(k, false);
+  window.__ps_supabase__._guess.clear();
+  await openGuess();
+  await click(variantTiles()[0]);                       // the daily
+  await flush();
+  const answer = guessAnswerFor(today());
+  await guessPlayerByName(answer);                      // solved first guess - inside GUESS_BADGE_TRIES
+  await flush();
+  assert(view() === "done", "the game ends");
+  const said = gp().textContent;
+  assert(/Bullseye/.test(said), `the end screen names the badge: ${said.slice(-260)}`);
+  assert(/unlocked/.test(said), "and says it was unlocked");
+});
+
 console.log("test-guess-screen.mjs done");

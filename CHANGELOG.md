@@ -82,6 +82,39 @@ between the steps.
 - `SCORING.md` described win probability as a sigmoid; it is clamped linear with `SPREAD = 20`.
 - `GUESS.md` still said guess games were not counted and no badge was awarded, both false since v2.15.0.
 
+**Money and refusals that were invisible**
+
+- **A badge earned in Century or Guess the Player is now named on the end screen.** Both functions have always
+  returned `badge` so the screen could say so, and neither screen read it - a first Century paid 1,000 coins and
+  a first Bullseye 300 under a line that said "+15 coins". The mocks did not model the award either, so there
+  was nothing to test against; `tests/mock-guess.mjs` now mirrors `submit-guess`'s rule and the end screen's
+  badge line is covered.
+- **Three refusals read as "check your connection".** `submit-guess` and `submit-century` returned 401, a
+  missing profile and a malformed body with no `reason` field, so `rpcReason` fell through to `"network"` - the
+  exact failure that map exists to prevent, and `malformed` was already in both refusal lists with no way to
+  arrive. All three now carry a reason and words: being signed out mid-game says so.
+- **Reporting a guest told the wrong person to fix it.** `report_player` raised `guest_not_allowed` for two
+  different rules - the reporter is a guest, and the TARGET is one - so a full account reporting a guest read
+  "Keep your seasons first - reports come from a full account." The target rule has its own code now.
+- **A name colour or nameplate could not be taken off once equipped.** Neither kind has a free item and both
+  default to nothing, so there was no route back to a plain name; "Take off" was offered for titles alone.
+  `equip_item` has always accepted null for every slot - only the screen refused to send it.
+- The wallet ledger showed a Century or Guess claim as a bare "Minigame".
+
+**Housekeeping**
+
+- Removed three CSS rules nothing renders (`.vs-lines`, `.vs-ln`, `.vs-clock`) and `resetGuessPool`, an export
+  whose comment said "tests only" and which no test has ever imported.
+- `VERSUS.md` ticked "a profile shows the pair as a line of its own" - `pvp_wins`/`pvp_losses` are read by no
+  screen and by neither `player_profile` nor `player_stats`. Written down as not built.
+- Nine test files were named nowhere in CLAUDE.md, though `run-all.mjs` globs the directory and has always run
+  them. All listed now.
+- **v2.12.0, v2.13.0 and v2.14.0 had changelog entries and no git tags**, while this file's own header promises
+  every release is tagged. Tagged after the fact; 2.12.0 never had a commit of its own, so its tag points at the
+  2.13.0 commit its content landed in, and the tag message says so.
+- Stale counts corrected in `VERSUS.md` (859 defenses, not 861; the tile reads Duel, not 1v1; one-kicker boards
+  are real), `SHOP.md` (24 avatar presets), and `guess-logic.mjs`'s comments about the pool it no longer has.
+
 **Copy**
 
 - The Mini games tile's "N done today" pill never counted Guess the Player, so solving it alone showed no pill.

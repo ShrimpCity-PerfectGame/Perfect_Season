@@ -7,6 +7,7 @@
 //
 // The BOARD half is not thin, and tests/test-guess-sql.mjs holds it to the real SQL row for row.
 import { replayGuessGame, guessOutcome, GUESS_TRIES } from "../guess-logic.mjs";
+import { GUESS_BADGE_TRIES, BADGE_BY_ID } from "../badges.mjs";
 
 const CODE = /^[A-Z0-9]{4,16}$/;
 
@@ -72,10 +73,21 @@ export function makeGuess(state, { today = () => new Date().toISOString().slice(
       guesses: replay.rows.map((r) => r.id), answer: replay.answer.id, outcome,
       created_at: new Date(Date.now() + nextId).toISOString(),
     });
+    // Bullseye, exactly as supabase/functions/submit-guess/index.ts awards it: the DAILY only, solved in
+    // GUESS_BADGE_TRIES or fewer, and idempotent per account the way award_badges is. The mock never modelled
+    // this, so the end screen's badge line had no jsdom coverage at all.
+    let badge = null;
+    if (day && replay.solved && replay.tries <= GUESS_BADGE_TRIES) {
+      const already = state.badgeAwards?.has?.(`${uid}|bullseye`);
+      if (!state.badgeAwards) state.badgeAwards = new Set();
+      state.badgeAwards.add(`${uid}|bullseye`);
+      const coins = BADGE_BY_ID.bullseye?.coins ?? 0;
+      badge = { awarded: ["bullseye"], credited: already ? 0 : coins, balance: null };
+    }
     const a = replay.answer;
     return {
       data: {
-        ok: true, day, seed, solved: replay.solved, tries: replay.tries, tried: GUESS_TRIES, outcome,
+        ok: true, badge, day, seed, solved: replay.solved, tries: replay.tries, tried: GUESS_TRIES, outcome,
         answer: { id: a.id, name: a.name, team: a.team, pos: a.pos, draft: a.draft, number: a.number, from: a.from, to: a.to },
         rows: replay.rows,
       },

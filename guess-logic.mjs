@@ -39,7 +39,7 @@ export const DIVISIONS = {
 };
 export const conferenceOf = (team) => (DIVISIONS[team] || "").split(" ")[0];
 
-// One list, and it is short on purpose (v2.14.0): about 700 players, the best known at each position, ranked by
+// One list, and it is short on purpose (v2.14.0): 481 players, the best known at each position, ranked by
 // what they did and doubled-and-a-half for anyone starting now. Everyone here can be typed as a guess AND asked
 // as the answer - the two are the same set, because a game that asks about somebody you cannot name is unfair
 // and a game that refuses a name you can is broken. tools/data/build-guess-pool.mjs holds the ranking.
@@ -139,7 +139,7 @@ export const isGuessSolved = (row) => !!row && GUESS_COLUMNS.every((c) => row[c]
 // about as often as not, and the one thing a daily must never do is ask the same question twice in a fortnight.
 //
 // Every player takes one turn (see GUESS_BANDS), so the cycle is the pool and nobody comes round again until
-// everybody has been asked - about six months at the size the pool is now, and longer every week of the season
+// everybody has been asked - about sixteen months at the size the pool is now, and longer every week of the season
 // as more men pass the snap bar.
 export const GUESS_DAY_ONE = "2026-09-14";
 const SHUFFLE_SEED = "gridspin-guess-order";

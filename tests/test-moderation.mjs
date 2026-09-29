@@ -395,7 +395,9 @@ await runTest("a guest can neither report nor be reported", async () => {
   assert(asGuest.error === "guest_not_allowed", `a guest reporting: ${describe(asGuest)}`);
 
   const atGuest = await report(db, ID.dave, guestName, "username", "about a guest");
-  assert(atGuest.error === "guest_not_allowed", `reporting a guest: ${describe(atGuest)}`);
+  // Its own code since v2.17.0: the reporter being a guest and the TARGET being one are different rules, and
+  // sharing guest_not_allowed told a full account reporting a guest to "keep your seasons first".
+  assert(atGuest.error === "guest_target", `reporting a guest: ${describe(atGuest)}`);
 
   // ...and a report between two real accounts still goes through, so these are rules and not a blanket refusal.
   assert(!(await report(db, ID.dave, "carol", "bio", "a real one")).error, "a real report still works");
@@ -411,7 +413,7 @@ await runTest("every code report_player and mod_act raise has a reason in storag
   const raised = async (fn) => [...new Set([...(await db.query("select prosrc from pg_proc where proname = $1", [fn])).rows[0].prosrc
     .matchAll(/raise exception '([a-z_0-9]+)'/g)].map((m) => m[1]))].sort();
   const WANT = {
-    report_player: ["bad_reason", "duplicate", "guest_not_allowed", "limit", "no_such_player", "not_signed_in", "note_too_long", "self"],
+    report_player: ["bad_reason", "duplicate", "guest_not_allowed", "guest_target", "limit", "no_such_player", "not_signed_in", "note_too_long", "self"],
     mod_act: ["bad_action", "blocked", "guest_not_allowed", "invalid", "no_such_player", "not_moderator", "taken"],
   };
   for (const [fn, want] of Object.entries(WANT)) {

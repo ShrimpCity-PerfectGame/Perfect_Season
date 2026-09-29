@@ -187,7 +187,7 @@ a re-run changes nothing.
 primary key (user_id, item_id))`. RLS on, no policies, privileges revoked from anon and authenticated. Only bought
 items get rows: free items belong to everyone, and a badge item belongs to whoever has its badge in `badge_awards`.
 
-**`avatar_presets`** gains the pack avatars, four a pack (`pack` = the pack name, `free` false): 12 at launch, 20 since
+**`avatar_presets`** gains the pack avatars, four a pack (`pack` = the pack name, `free` false): 12 at launch, 24 since
 v1.13.0.
 
 **`profile_details`** gains `frame`, `card_theme` and `title` (text → `shop_items(id)`, null = the default: the Ink

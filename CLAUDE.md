@@ -574,6 +574,16 @@ node tests/test-economy-security.mjs   # attacks on coins and purchases a modifi
 node tests/test-cosmetics.mjs          # every frame, card theme and title renders; text contrast on every theme and team
 node tests/test-shop-screen.mjs        # ShopScreen on its own: buying, equipping, locked items, showcase, the wallet
 node tests/test-shop-flow.mjs          # the whole app: a season's coins, the shop from the result, a frame in the header
+# Named nowhere else in this file until v2.17.0, though run-all.mjs globs the directory and has always run them.
+node tests/test-build-a-player.mjs      # Build-a-player: rolling a position, a team, the attributes, and the sim at the end
+node tests/test-daily-submit.mjs        # the daily's submission path end to end, including the once-a-day lock
+node tests/test-dnf.mjs                 # what counts as an abandoned draft, and which ladder it is charged to
+node tests/test-leaderboard-format.mjs  # the two scoring formats keep separate boards and never rank against each other
+node tests/test-online-counter.mjs      # the live plays pill and the online count: presence, the broadcast, and the two counters kept apart
+node tests/test-points.mjs              # ladder points: par, the penalty, and where each mode's points land
+node tests/test-stats-ou.mjs            # Over/Under's board and its day
+node tests/test-stats.mjs               # the Stats screen's boards and the Sitewide tiles
+node tests/test-submit-run-integration.mjs # a whole season through the mock submit-run, profile write included
 node tests/run-all.mjs [filter...]     # every test file above in turn (not the difficulty benchmark)
 
 # Rebuild the game data from source (only when adding a season or changing grading)

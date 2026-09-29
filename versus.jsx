@@ -101,8 +101,6 @@ export const VERSUS_CSS = `
 .vs-final{display:grid;gap:6px;justify-items:center;text-align:center;padding:18px 0;position:relative;overflow:hidden}
 .vs-score{font-family:var(--display);font-size:56px;line-height:1;font-variant-numeric:tabular-nums}
 .vs-beat{margin:0;font-weight:800;letter-spacing:.04em;font-size:14px;opacity:.85}
-.vs-lines{display:grid;gap:3px;font-size:13px;margin-top:8px;max-width:420px}
-.vs-lines .vs-ln{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding:4px 0}
 /* The powerups, under the reel: an icon, the name, and how many are left. The icon carries the row on a phone,
    where the label shortens - so it has to be a glyph that reads small, not a picture. */
 .vs-pu{display:inline-flex;align-items:center;gap:7px}
@@ -181,7 +179,6 @@ export const VERSUS_CSS = `
 @media (max-width:640px){
   .versus{gap:10px}
   .vs-score{font-size:42px}
-  .vs-clock{font-size:22px}
   .vs-reelclock{font-size:24px;padding:2px 7px}
   .vs-rosters{gap:6px}
   .vs-rosters .roster{gap:4px}
@@ -308,7 +305,7 @@ const GROUPS = [
 
 // 1v1's own rules, which are not the game's rules. Someone arriving on an invite has very likely never seen
 // this mode, and the single-player How to play answers none of the questions they actually have - whose turn,
-// what the clock does, what the five buttons are. Its own dialog, with its own seen-flag, so it appears once.
+// what the clock does, what the four buttons are. Its own dialog, with its own seen-flag, so it appears once.
 export function VersusHowTo({ onClose }) {
   const btn = useRef(null);
   const dialog = useRef(null);
