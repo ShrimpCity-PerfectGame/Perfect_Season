@@ -198,6 +198,10 @@ refuse({ date: bradyDay }, "bad_guesses", "no guesses at all");
 refuse({ date: bradyDay, guesses: [] }, "no_guesses", "an empty game");
 refuse({ date: bradyDay, guesses: new Array(GUESS_TRIES + 1).fill(0).map((_, i) => GUESS_PLAYERS[i].id) }, "too_many", `${GUESS_TRIES + 1} guesses`);
 refuse({ date: bradyDay, guesses: [mahomes.id, mahomes.id] }, "repeat_guess", "the same player twice");
+// A game that was not solved has to have spent every guess. migration-guess.sql states this as the column's
+// meaning and nothing enforced it: one wrong guess handed in stored solved=false with tries=1, which guess_top
+// sorts ABOVE everyone who honestly used all five, while the row's own outcome string said "Missed. 5 guesses."
+refuse({ date: bradyDay, guesses: [GUESS_PLAYERS.find((p) => p.id !== brady.id).id] }, "short_loss", "a loss that stopped early");
 refuse({ date: bradyDay, guesses: ["Nobody At All|2015|QB"] }, "unknown_player", "a player who does not exist");
 refuse({ date: bradyDay, guesses: [7] }, "bad_guess", "a guess that is not an id");
 refuse({ date: bradyDay, guesses: [brady.id, mahomes.id] }, "guessed_past_the_end", "guessing on after solving it");

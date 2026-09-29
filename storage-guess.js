@@ -22,7 +22,7 @@ export const GUESS_REFUSALS = [
   "malformed",     // no guesses at all
   // replayGuessGame's own reasons. A player should never see one: the screen enforces the same rules from the
   // same module. If one appears, the two have drifted.
-  "no_answer", "bad_guesses", "no_guesses", "too_many", "bad_guess", "repeat_guess", "unknown_player",
+  "no_answer", "bad_guesses", "no_guesses", "too_many", "bad_guess", "repeat_guess", "unknown_player", "short_loss",
   "guessed_past_the_end",
 ];
 

@@ -20,6 +20,15 @@ import { teamVars, reducedMotion } from "./ui-common.jsx";
 import { submitGuess, fetchGuessTop, fetchGuessBest, fetchMyGuess, sget, sset, clearDraft } from "./storage.js";
 
 export const GUESS_WIP = "ps-guess-wip";
+// A daily that has been PLAYED, kept on this device whether or not the save reached the server. The season
+// draft has always done this (perfect-season.jsx's DAILY_KEY) and this screen did not: `dailyDone` came only
+// from fetchMyGuess, so a refused save left the tile saying "Let's go" with the answer on the screen behind
+// it - play, pull the network before the last guess, read the answer, come back and solve it in one. The row
+// the server never wrote is exactly the row that cannot stop the replay, so the device has to remember.
+// Keyed by ACCOUNT as well as day. Device-scoped, it leaked: play the daily, sign out, and the next
+// account on the same device - a guest included, who may not play the daily at all - read the day as already
+// spent. The server's row is per-account, so this has to be too.
+export const GUESS_DONE = (userId, day) => `ps-guess-done:${userId || "anon"}:${day}`;
 const utcDay = () => new Date().toISOString().slice(0, 10);
 const newCode = () => {
   let out = "";
@@ -156,7 +165,12 @@ export function GuessScreen({
   useEffect(() => {
     const mine = ++acct.current;
     if (!userId) { setDailyDone(null); return; }
-    fetchMyGuess(day).then((r) => { if (mine === acct.current) setDailyDone(r); });
+    // The server first, then this device. Either one means the day is spent: a run the server never
+    // recorded is still a run this player has seen the answer to.
+    fetchMyGuess(day).then(
+      async (r) => { if (mine === acct.current) setDailyDone(r || (await sget(GUESS_DONE(userId, day), false)) || null); },
+      async () => { const local = await sget(GUESS_DONE(userId, day), false); if (mine === acct.current) setDailyDone(local || null); },
+    );
   }, [userId, day]);
 
   const loadBoards = useCallback(() => {
@@ -245,6 +259,15 @@ export function GuessScreen({
     });
     setStage("done");
     saveWip(null);
+    // Written BEFORE the submission and never conditioned on it. The numbers are the client's own replay,
+    // which is what the end screen is already showing; the server's answer replaces them below when it lands.
+    if (finished.variant === "daily" && finished.day) {
+      const rec = { day: finished.day, solved: !!local.ok && local.solved, tries: local.ok ? local.tries : finished.guesses.length,
+                    outcome: guessOutcome(!!local.ok && local.solved, local.ok ? local.tries : finished.guesses.length),
+                    guesses: finished.guesses, answer: answer?.id, local: true };
+      await sset(GUESS_DONE(userId, finished.day), rec, false);
+      setDailyDone(rec);
+    }
     const mine = acct.current;
     const sent = await submitGuess({
       variant: finished.variant, seed: finished.seed, day: finished.day, guesses: finished.guesses,

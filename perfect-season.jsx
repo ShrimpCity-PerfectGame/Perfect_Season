@@ -38,7 +38,7 @@ import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
 import { CENTURY_CSS, CenturyScreen } from "./century.jsx";
-import { initCenturyData, CENTURY_GOAL } from "./century-logic.mjs";
+import { initCenturyData, CENTURY_GOAL, centuryReservedSeed } from "./century-logic.mjs";
 import { GUESS_CSS, GuessScreen } from "./guess.jsx";
 import { GUESS_TRIES } from "./guess-logic.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
@@ -2938,7 +2938,12 @@ export default function PerfectSeason() {
 
   // Keep the draft in progress on this device so a reload doesn't lose it
   useEffect(() => {
-    if (!draftReady || result || !spin || !mode) return;
+    // `spinTarget.current || spin` is what the snapshot below uses, so the guard has to accept the same
+    // thing. Reading `spin` alone meant the first draft of every page load saved NOTHING for the ~910ms the
+    // reel spins (`spin` deliberately lags it so the reveal is not spoiled), and a tap on Daily inside that
+    // window dropped a dealt draft with no DNF - the free redo 1.8.1 closed. The tests force
+    // prefers-reduced-motion, so the spinning path is unreachable from every one of them.
+    if (!draftReady || result || !mode || !(spinTarget.current || spin)) return;
     // Not while a clear of this slot is still in flight. pendingClears has guarded the READERS since the
     // "5 of 6 picked" bug; the writer had no such guard, so finishing a season and tapping Run it back
     // inside the clear's flight wrote the NEW draft's snapshot and then had the old clear delete it - a
@@ -3179,9 +3184,18 @@ export default function PerfectSeason() {
   // answers are dropped if the account has changed by the time they arrive; a picture saved meanwhile
   // (onDetailsSaved) also outranks a slower read of the old one.
   const accountReq = useRef(0);
+  const accountUid = useRef(null);
   const detailsReq = useRef(0);
   function loadAccountExtras(uid) {
-    const account = ++accountReq.current;
+    // The generation counts ACCOUNT CHANGES, not calls. adoptSession runs on every tab refocus (auth-js
+    // re-emits SIGNED_IN then, as this file notes twice), and bumping here on every one of those made three
+    // readers throw away answers for the account that is still signed in: submitAndSync dropped the
+    // post-season stats refresh and the new coin balance - leaving the header on the old career totals and
+    // loadLeaderboard reading a stale statsRef, which is the "#40 with a best score of 104.2" bug again -
+    // loadWallet dropped the balance, and claimMinigame never fired onCredited, so "+15 coins" never showed
+    // though the coins were paid. Switching apps while a season saves is ordinary, not exotic.
+    if (accountUid.current !== uid) { accountUid.current = uid; accountReq.current++; }
+    const account = accountReq.current;
     const details = ++detailsReq.current;
     // One retry, then leave what is on screen alone. A failed read is not "this account has saved nothing":
     // answering it with null cost the player their frame, their picture, their name colour and - the one that
@@ -3195,6 +3209,7 @@ export default function PerfectSeason() {
     isModerator().then((m) => { if (account === accountReq.current) setIsMod(m); });
   }
   function clearAccountExtras() {
+    accountUid.current = null;
     accountReq.current++;
     // souCoins too: Over/Under's finished day belongs to the device, but the coins it paid were that account's.
     setMyDetails(null); setIsMod(false); setOpenReports(null); setWallet(null); setSouCoins(null);
@@ -3477,7 +3492,12 @@ export default function PerfectSeason() {
       siteActivity.current?.broadcastPlayFinished("draft");
       if (mode.kind === "daily") {
         const rec = { date: mode.date, format: fmt, w: sim.w, l: sim.l, score, outcome: sim.outcome, champ: sim.champ, roster: runRoster };
-        setDailyDone((d) => ({ ...d, [fmt]: rec }));
+        // Only when the draft's own day is still today. `dailyDone` is keyed by FORMAT with no date in it, so a
+        // season dealt at 23:50 and finished at 00:05 used to stamp the new day as done: the tile went to "See
+        // how it went", tapping it dealt the new day's board under yesterday's recap, and today's daily became
+        // unreachable until a reload. The storage write below is keyed by mode.date and was always right.
+        // onGuessDaily and onCenturyDaily, written later, both carry this guard - this is the one that missed it.
+        if (mode.date === todayKey()) setDailyDone((d) => ({ ...d, [fmt]: rec }));
         sset(DAILY_KEY(mode.date, fmt), rec, false);
       }
       // The client never persists its own computed score/outcome/capUsed directly - submit-run (a
@@ -3789,7 +3809,10 @@ export default function PerfectSeason() {
   async function finishSouDay(date, score) {
     await sset(SOU_DONE_KEY(date), { score }, false);
     setSouBoard({ loading: true, rows: [] });
-    setSouDone({ score });
+    // Same guard as the daily draft's: `souDone` carries no date, so a round that starts before local
+    // midnight and ends after it used to mark the NEW day done, and openSou then short-circuited straight
+    // to the board for the rest of the session. The storage write above is keyed by the round's own date.
+    if (date === todayKey()) setSouDone({ score });
     await sdel(SOU_PROGRESS(date), false);
     // Wait for the leaderboard write to land before re-fetching it, or the read can race ahead of
     // the write and show a board missing the score that was just saved. Today's coins are claimed after
@@ -4051,6 +4074,15 @@ export default function PerfectSeason() {
     setChallenge(null);
     // A Century link deals Century's seven teams, not a season's six boards. Nothing of the season draft is
     // touched - no DNF, no format change - because none of it is involved.
+    // Reserved codes are refused on EVERY door, not just the code box. isReservedCode used to be asked only
+    // by startCode, so a link was the way round it: /c/<code> where the code hashes like a future daily's seed
+    // deals that daily's boards bit for bit, and finish() computes the whole season locally, so the server is
+    // never consulted. A player could rehearse the 29th's daily all month and draft the winning lineup on the
+    // day. Same rule, same function, every entry point - the GM cap's history all over again.
+    if (c.century ? centuryReservedSeed(c.code) : isReservedCode(c.code)) {
+      setNotice("That link is a reserved code - it deals a daily's own boards, so it can't be played.");
+      return;
+    }
     if (c.century) {
       setCenturyChallenge({ seed: c.code, score: c.score });
       openTab("century");
@@ -4080,14 +4112,23 @@ export default function PerfectSeason() {
   // The Top 10 for one mode. "all" needs no request at all - that board is already loaded with the rest of
   // the leaderboard - so this only goes to the database for a real mode, and keeps the rows it has on screen
   // while the next ones arrive, the way loadLadder and loadDailyBoard do.
+  // `best` is the one board on this screen compared against a SEPARATE state (lbMode/lbFormat) rather than
+  // rendered from its own stamp, so a late answer does not go stale-but-consistent - it goes blank. Tap
+  // Unlimited, tap GM before it lands (postgrest retries a dropped GET at 1s/2s/4s, so seconds is ordinary),
+  // and Unlimited's answer overwrites `best` with mode "unlimited" while lbMode is "gm": lbShowing goes
+  // false, loading is already false, and the screen says "No Fantasy seasons in GM mode yet" until the tab
+  // is tapped again. So the newest request wins and older ones are dropped where they land.
+  const bestReq = useRef(0);
   async function loadBest(m, f) {
     const mk = LADDERS.includes(m) ? m : "all";
     const fmt = normFormat(f || boardFormatRef.current);
+    const req = ++bestReq.current;
     if (mk === "all") { setBest({ loading: false, rows: [], mode: "all", format: fmt }); return; }
     setBest((b) => ({ loading: true, rows: b.mode === mk && b.format === fmt ? b.rows : [], mode: mk, format: fmt }));
     try {
-      setBest({ loading: false, rows: await fetchLadderBest(mk, fmt, 10), mode: mk, format: fmt });
-    } catch (e) { setBest({ loading: false, rows: [], mode: mk, format: fmt }); }
+      const rows = await fetchLadderBest(mk, fmt, 10);
+      if (req === bestReq.current) setBest({ loading: false, rows, mode: mk, format: fmt });
+    } catch (e) { if (req === bestReq.current) setBest({ loading: false, rows: [], mode: mk, format: fmt }); }
   }
 
   // Cheap and rarely changing, so it rides along with whichever board screen was opened rather than having
@@ -4257,9 +4298,10 @@ export default function PerfectSeason() {
       </button>
     </>
   );
-  // What the Mini games tile says without opening it. Only the two with a daily can be "done", so this counts
-  // those - losing that at a glance was the one real cost of moving them off the front screen.
-  const miniDoneToday = [souDone, centuryDone].filter(Boolean).length;
+  // What the Mini games tile says without opening it - losing that at a glance was the one real cost of moving
+  // them off the front screen. THREE of the four have a daily since v2.13.0; Guess the Player was added to the
+  // screen and to its own tile's pill but never to this count, so solving it alone showed no pill at all.
+  const miniDoneToday = [souDone, centuryDone, guessDone].filter(Boolean).length;
 
   const scope = view === "play" || view === "versus" || (view === "century" && centuryStage !== "menu")
     || (view === "guess" && guessStage !== "menu")
@@ -5094,7 +5136,8 @@ export default function PerfectSeason() {
           <>
             <h1 className="h">Mini games</h1>
             <p className="note">Quick ones beside the drafts. Nothing here counts towards your season stats or the
-              main leaderboard — Over/Under and Century keep boards of their own, and all three pay coins.</p>
+              main leaderboard — Over/Under, Century and Guess the Player each keep a board of their own, and all
+              four pay coins.</p>
             <div className="modes">{miniGameTiles}</div>
             <button className="btn" onClick={() => openTab("home")}>Back</button>
           </>
@@ -5448,7 +5491,7 @@ export default function PerfectSeason() {
                 <RankRows rows={site.longestStreaks} empty="No daily streaks yet." value={(q) => `${q.dailyBestStreak} day${q.dailyBestStreak === 1 ? "" : "s"}`} />
 
                 <h2 className="h" style={{ marginTop: 22 }}>Best win percentage</h2>
-                <p className="note" style={{ marginTop: 0 }}>Minimum 3 finished drafts.</p>
+                <p className="note" style={{ marginTop: 0 }}>Minimum 3 games played.</p>
                 <RankRows rows={site.bestWinPct} empty="Not enough finished drafts yet." value={(q) => `${Math.round(q.pct * 100)}%`} />
 
                 <h2 className="h" style={{ marginTop: 22 }}>Best {FORMAT_LABEL[boardFormat]} GM-mode score</h2>

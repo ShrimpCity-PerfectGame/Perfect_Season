@@ -127,11 +127,13 @@ daily or Unlimited, one row per account. Both invoker, both stable, both read as
 `tests/test-century-sql.mjs` holds the two to the same JSON — an order that is not fully tiebroken is an order
 they can disagree about.
 
-**Migration order.** `migration-century.sql` goes **after `migration-profiles.sql`** (it creates a trigger
-using `use_account_username`) and **before `migration-moderation.sql` and `migration-wallet.sql`** (`mod_act`
-rewrites this board's name snapshots, and `claim_minigame` reads this table). Those bodies are plpgsql and so
-are not validated when they are created, which is exactly why this is a runbook order rather than an error
-anybody would see: get it wrong and nothing fails until a guest trades up.
+**Migration order.** `migration-century.sql` goes **FIRST**, before `migration-runs-log.sql` - not after
+`migration-profiles.sql`, which is what this paragraph said until v2.17.0 and which fails outright if anybody
+follows it. `player_stats` in runs-log reads `century_runs` and is `language sql`, whose body is validated the
+moment it is created, so runs-log aborts on a database that has not got the table. This file's own trigger
+lives in `migration-profiles.sql` precisely so that this file depends on nothing and can go first. The things
+that come AFTER it and read this table - `mod_act`'s rename, `claim_minigame`'s century arm - are plpgsql and
+are not validated at creation, so those orderings fail nothing until somebody calls them.
 `tests/test-migrations.mjs` runs the whole list on a bare database and enforces it.
 
 **A rename reaches this board**, in both places a name is ever rewritten: `mod_act` (moderation) and
@@ -284,9 +286,12 @@ rule and `tests/test-badges.mjs` enforces it — and a test holds the two number
 
 ## 9. Runbook
 
-Deploy order: **`migration-century.sql` FIRST → `migration-runs-log.sql` → `migration-profiles.sql` →
-`migration-moderation.sql` → `migration-wallet.sql` → the Edge Functions (`node deploy-function.mjs <env>`,
-which now deploys three) → the client.**
+Deploy order: **`migration-century.sql` FIRST → `migration-guess.sql` → `migration-runs-log.sql` →
+`migration-profiles.sql` → `migration-moderation.sql` → `migration-wallet.sql` → the Edge Functions
+(`node deploy-function.mjs <env>`, which deploys all four) → the client.**
+
+`migration-guess.sql` is in this list because `player_stats` reads `guess_runs` too since v2.15.0, for exactly
+the same reason century is here: one `language sql` body, validated at creation, naming both tables.
 
 Century goes first because `player_stats` reads `century_runs` and is `language sql`, whose body is validated
 when it is created. Its own trigger lives in `migration-profiles.sql` so that this file depends on nothing.

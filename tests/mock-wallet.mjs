@@ -108,15 +108,29 @@ export function makeWallet(state) {
     // date, with any row of that game from the last 24 hours as the evidence (migration-wallet.sql).
     claim_minigame({ p_game = null, p_date = null } = {}) {
       const uid = player();
-      if (!["over_under", "build"].includes(p_game)) fail("bad_game");
+      // All FOUR games, as the database has accepted since v2.13.0. This list said over_under and build, so
+      // every jsdom Century or Guess run got `bad_game` - which storage-shop.js maps to "invalid" and the
+      // screen swallows - and the "+15 coins" line in those two screens had no coverage at all while the mock
+      // modelled a refusal the database never makes.
+      if (!["over_under", "build", "century", "guess"].includes(p_game)) fail("bad_game");
       const today = Date.parse(`${utcDate(new Date())}T00:00:00.000Z`);
       const plausible = [-1, 0, 1].map((d) => utcDate(new Date(today + d * DAY_MS)));
       if (p_date != null && !plausible.includes(p_date)) fail("bad_date");
       const day = p_date ?? utcDate(new Date());
       const since = Date.now() - DAY_MS;
-      const played = p_game === "over_under" && p_date != null
-        ? [...state.souRuns.values()].some((r) => r.user_id === uid && r.date === p_date)
-        : [...(p_game === "over_under" ? state.souRuns.values() : state.builds.values())].some((r) => r.user_id === uid && time(r.created_at) > since);
+      // Every arm binds to ONE day when p_date is given, the way the SQL does: Over/Under by its own `date`
+      // column, Century and Guess by `day` for a daily or the run's UTC date for a practice game, and a build
+      // by its UTC date. Unbound, one run satisfied all three permitted dates and paid three times.
+      // Empty when a harness does not carry that table - tests/test-wallet-sql.mjs builds its own state with
+      // only the two it needs, and "no rows" is the right answer there rather than a crash.
+      const rowsFor = { over_under: state.souRuns, build: state.builds, century: state.centuryRuns, guess: state.guessRuns }[p_game] || new Map();
+      const mine = [...rowsFor.values()].filter((r) => r.user_id === uid);
+      const utcOf = (r) => utcDate(new Date(time(r.created_at)));
+      const played = p_date == null
+        ? mine.some((r) => time(r.created_at) > since) // no p_date: the 24-hour window, for all four
+        : p_game === "over_under" ? mine.some((r) => r.date === p_date)
+        : p_game === "build" ? mine.some((r) => utcOf(r) === p_date)
+        : mine.some((r) => r.day === p_date || (r.day == null && utcOf(r) === p_date));
       if (!played) fail("not_played");
       lock(uid);
       const credited = apply(uid, COIN_RULES.minigame, "minigame", `${p_game}:${day}`);

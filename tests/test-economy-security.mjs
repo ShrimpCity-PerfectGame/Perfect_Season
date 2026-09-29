@@ -781,7 +781,11 @@ await runTest("6a. claim_minigame pays without a game played - the browser write
       burst += r.data?.credited || 0;
     }
   }
-  assert(burst === 6 * COIN_RULES.minigame, `at most three days of each game at once (${6 * COIN_RULES.minigame} coins), got ${burst}`);
+  // Three Over/Under rows, one per day, pay three times - that is three days genuinely on the board. The
+  // single build pays ONCE, under the day it was made. Before v2.17.0 every game whose evidence was a bare
+  // 24-hour window paid all three permitted dates from one row, so this number was 90 and a day of honest
+  // play across the four games paid 150 coins where the design intends 60.
+  assert(burst === 4 * COIN_RULES.minigame, `three days of Over/Under plus one build (${4 * COIN_RULES.minigame} coins), got ${burst}`);
 });
 
 await runTest("6b. the service functions' numbers at their edges - bigint and integer extremes, a number past what numeric rounds, 10,000-entry lists - are refused with their code, or pay exactly what they say", async () => {
@@ -1193,6 +1197,17 @@ await runTest("a challenge code that hashes like the daily is refused, whatever 
   assert(/GL\.isReservedCode\(mode\.code\)/.test(index), "and the deployed function asks the shared rule");
   const app = readFileSync(new URL("../perfect-season.jsx", import.meta.url), "utf8");
   assert(/isReservedCode\(code\)/.test(app), "as does the code box, before any boards are dealt");
+
+  // COUNT the doors, don't grep for one spelling of one of them. This assertion matched `isReservedCode(code)`
+  // - the code box - and passed while acceptChallenge dealt a challenge LINK with no check at all, which is
+  // the GM cap's history exactly (test 8c below counts doors for the same reason). A /c/<code> link whose code
+  // hashes like a future daily's seed dealt that daily's boards, and finish() grades the season locally, so a
+  // player could rehearse the 29th all month and draft the winning lineup on the day. Every door that can deal
+  // boards from a client-supplied code has to ask.
+  const guarded = [...app.matchAll(/isReservedCode\(/g)].length;
+  assert(guarded >= 2, `every door that deals a client-supplied code asks isReservedCode - found ${guarded} asks`);
+  assert(/centuryReservedSeed\(c\.code\)|centuryReservedSeed\(challenge\.seed\)/.test(app + readFileSync(new URL("../century.jsx", import.meta.url), "utf8")),
+    "and Century's link door asks its own reserved-seed rule");
 });
 
 // Two rules that ship in files nothing in this suite executes. The mocks mirror the Edge Function and PGlite
@@ -1239,7 +1254,9 @@ await runTest("the rules that only exist in the deployed files are in the deploy
   // are board_looks (v2.7.0), the same pair for the same reason: one ordering decides WHICH rows the limit
   // keeps, the other the order they come back in, and a board that ties differently on two runs shows a
   // different set of stars.
-  const TEXT_ORDERINGS = 27;
+  // 31 since v2.17.0: best_gm and biggest_upsets each gained a username tiebreak, inner and outer, so a tie on
+  // score AND created_at can no longer come back in whatever order the plan happens to yield.
+  const TEXT_ORDERINGS = 31;
   const uncollated = [];
   let clauses = 0;
   for (const [file, text] of Object.entries(files)) {

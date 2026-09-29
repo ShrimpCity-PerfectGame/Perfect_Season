@@ -47,7 +47,7 @@ export const HOWTO_NOTE = "Grades compare each season to the top players at that
 const BOARDS = [
   ["Best team score", "The highest-graded roster ever drafted, in each scoring format. Fantasy is full PPR and Championship is standard scoring, and the two never rank against each other."],
   ["Today's Daily", "Everyone gets the same boards each day. The Daily leaderboard starts fresh every morning, and playing day after day builds a streak."],
-  ["Points ladders", "Every draft scores ladder points against what a par draft would have managed, kept separately for Unlimited, Genius and GM mode."],
+  ["Points ladders", "Every draft scores ladder points against what a par draft would have managed, kept separately for the daily, Unlimited, Genius and GM mode."],
   ["Biggest upsets", "The lowest team score ever to win the championship — the roster that had no business going all the way."],
   ["Career records", "Wins, championships, playoff trips, the longest Daily streak and the best win percentage, on the Stats screen."],
 ];
@@ -75,7 +75,7 @@ const PRIVACY_SECTIONS = [
     "Your email address is never shown to anyone, whether you signed up with it or arrived through Google.",
   ]],
   ["What the game records as you play", [
-    "Every finished season and every abandoned one: the boards you were dealt, the players you drafted, the score, the result and when it happened. The same for the daily, for Over/Under and for Build-a-player.",
+    "Every finished season and every abandoned one: the boards you were dealt, the players you drafted, the score, the result and when it happened. The same for the daily, for Over/Under, Build-a-player, Century and Guess the Player, and for the picks either side of a duel.",
     "The coins a season earns, the badges it unlocks and anything bought in the shop. Coins are a game score - there is no real money anywhere in Gridspin and nothing to buy with real money.",
   ]],
   ["Pictures", [
@@ -88,7 +88,7 @@ const PRIVACY_SECTIONS = [
     "Nothing is sold, rented or handed to anyone else.",
   ]],
   ["What is kept on your device", [
-    "A draft in progress, the scoring format you last chose, whether you have seen the rules, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
+    "A draft in progress, a Century or Guess the Player game in progress, which dailies you have already played, the scoring format you last chose, whether you have seen the rules, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
   ]],
   ["Your choices", [
     `You can change or clear your bio, your picture and your favourite team whenever you like, from your profile. To have your account and everything recorded under it deleted, write to ${PRIVACY_CONTACT} from the address the account uses, and it will be removed.`,

@@ -120,7 +120,7 @@ Not built. When they are:
 
 ## 4. What to build, in order
 
-### Phase 1 — celebrations + the supporter gate ✅ built, unshipped
+### Phase 1 — celebrations + the supporter gate ✅ built and in production
 
 Ships as one update with whatever else is ready. Grant supporter by hand until §3.2 exists:
 
@@ -129,7 +129,7 @@ insert into supporters (user_id, source, note)
 select id, 'grant', 'why' from profiles where username = 'NAME';
 ```
 
-### Phase 2 — names ✅ built, unshipped
+### Phase 2 — names ✅ built and in production
 
 The highest-visibility cosmetic in the game. The rendering turned out to be three places, not two: `NameLink`
 for every board, `DuelName` for the duel screen (colour only — a name there is never a profile link, because

@@ -10,6 +10,85 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.17.0] — 2026-09-29
+
+A bug pass: two ways to cheat the daily, a coin over-payment, three client races, and the tests and
+documents that let them through.
+
+**Deploy order: re-run `migration-wallet.sql`, then `migration-runs-log.sql`, then the client.** No Edge
+Function change. Both files only replace functions, so they are safe on any shape and the site keeps working
+between the steps.
+
+**Two doors the daily could be got at through**
+
+- **A `/c/CODE` link bypassed the reserved-code rule entirely.** `isReservedCode` was asked by the code box and
+  by `submit-run`, but not by `acceptChallenge` - so a link whose code hashes like a future daily's seed dealt
+  that daily's boards bit for bit, and `finish()` grades a season locally, so the server was never consulted. A
+  player could rehearse the 29th's daily all month and draft the winning lineup on the day. Century had the
+  same gap on its own link. Both doors ask now, and `tests/test-economy-security.mjs` COUNTS the doors instead
+  of grepping for one spelling of one of them — which is exactly how the GM cap went unenforced for three
+  releases.
+- **A daily whose save was refused stayed playable, with the answer on the screen.** Guess the Player and
+  Century both name the player (or show the teams) from the client's own replay before the save lands, and
+  marked the day done only if the server answered ok. Pull the network before the last guess, read the answer,
+  come back and solve it in one - Bullseye and the top of the board. The day is now recorded on the device
+  whatever the server did, keyed by account so it cannot leak to the next person to sign in.
+- **A lost Guess daily could be stored as `tries: 1`.** `replayGuessGame` bounded only the upper end, while
+  `guess_top` sorts unsolved rows by `tries` ascending and the row's own outcome string said "Missed. 5
+  guesses.". A game that is not solved must now have spent every guess (`short_loss`).
+
+**Coins**
+
+- **One run of a mini-game paid three times.** `p_date` may be UTC yesterday, today or tomorrow and the ledger
+  key is `<game>:<p_date>`, but the evidence for Century, Guess and Build-a-player was a bare 24-hour window -
+  so a single honest run satisfied all three keys. A day of playing all four games paid **150 coins where the
+  design intends 60**. Every arm now binds to one day: Over/Under by its own date column (it always did),
+  Century and Guess by `day` for a daily or the run's UTC date for a practice game, a build by its UTC date.
+
+**Client races**
+
+- **Finishing a daily after local midnight locked you out of today's.** `dailyDone` carries no date, so a season
+  dealt at 23:50 and finished at 00:05 stamped the new day as done and the tile showed yesterday's recap over
+  today's live board. Over/Under had the same shape. The two handlers written later already carried the guard.
+- **The first draft of every page load was not saved while its reel spun.** The snapshot reads
+  `spinTarget.current`; the guard above it read `spin`, which is null for the ~910ms the reel takes - so a tap
+  on Daily inside that window dropped a dealt draft with no DNF, the free redo 1.8.1 closed. The tests force
+  `prefers-reduced-motion`, so the spinning path is unreachable from all of them.
+- **A tab refocus threw away an in-flight season's own follow-up.** `accountReq` counted loads rather than
+  account changes, and `adoptSession` runs on every refocus - so switching apps while a season saved dropped
+  the stats refresh, the new coin balance and the "+15 coins" line. It counts account changes now.
+- **A slow ladder answer could leave the Leaderboard reading "No seasons in this mode yet"** until the tab was
+  tapped again. The newest request wins.
+
+**Tests and mocks that could not fail**
+
+- `tests/mock-wallet.mjs` accepted only two of the four games the database accepts, so every jsdom Century or
+  Guess coin claim hit `bad_game` and the "+15 coins" line in both screens had no coverage at all.
+- Both rename mocks rewrote four tables where the SQL rewrites six, so a traded-up guest's Century and Guess
+  boards would have asserted the pre-v1.17.0 guest-chip bug as correct.
+- `best_gm` and `biggest_upsets` had no final username tiebreak, and the mock's `best_gm` comparator returned 1
+  on a tie - an invalid comparator, so a tied pair came back in whatever order the engine chose.
+- `join_match`'s opening clock is a bare `interval '45 seconds'`; nothing held it to `TURN_SECONDS`. Now pinned.
+
+**Documents that would have caused a wrong action**
+
+- `CENTURY.md` said `migration-century.sql` goes **after** `migration-profiles.sql`. Backwards — it contradicted
+  the file's own header, its own runbook section and `tests/test-migrations.mjs`, and following it aborts the
+  migration. Its runbook also omitted `migration-guess.sql`.
+- CLAUDE.md had **no** v2.14.0 or v2.15.0 entry, so the Bullseye `badge_rewards` row and the rebuilt pool that
+  `submit-guess` bundles were undocumented; said the guess migrations were "all plpgsql, so the wrong order
+  fails nothing" when `migration-profiles.sql` creates a trigger ON those tables; and pointed the service-worker
+  kill switch at `public/sw.js`, which is gitignored and rewritten by every build.
+- `SCORING.md` described win probability as a sigmoid; it is clamped linear with `SPREAD = 20`.
+- `GUESS.md` still said guess games were not counted and no badge was awarded, both false since v2.15.0.
+
+**Copy**
+
+- The Mini games tile's "N done today" pill never counted Guess the Player, so solving it alone showed no pill.
+- The Mini games screen said "all three pay coins"; there are four.
+- The percentage board said "Minimum 3 finished drafts" - the gate is three GAMES, which one season clears.
+- The privacy policy's list of what is recorded and what is kept on the device omitted Century, Guess the
+  Player and duels. It is the page Google's consent screen requires, and it is live.
 ## [2.16.0] — 2026-09-29
 
 The home screen counts plays, not drafts, and the Stats screen counts players drafted.

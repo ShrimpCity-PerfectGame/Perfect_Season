@@ -244,9 +244,9 @@ returns jsonb language sql stable security invoker set search_path = public as $
         'best_gm', (
           select coalesce(jsonb_agg(jsonb_build_object('username', g.username, 'score', g.score, 'w', g.w, 'l', g.l,
                                                        'guest', coalesce(pr.guest, false))
-                                    order by g.score desc, g.created_at), '[]'::jsonb)
+                                    order by g.score desc, g.created_at, g.username collate "C"), '[]'::jsonb)
             from (select * from runs where gm and not dnf and format = f.format and score is not null
-                   order by score desc, created_at limit (select n from lim)) g
+                   order by score desc, created_at, username collate "C" limit (select n from lim)) g
             left join profiles pr on pr.id = g.user_id
         ),
         -- Title-winning runs, lowest team score first: the lower the score, the bigger the upset.
@@ -256,9 +256,9 @@ returns jsonb language sql stable security invoker set search_path = public as $
           select coalesce(jsonb_agg(jsonb_build_object('username', u.username, 'score', u.score, 'w', u.w, 'l', u.l,
                                                        'perfect', coalesce(u.perfect, false), 'ladder', u.ladder, 'roster', u.roster,
                                                        'guest', coalesce(pr.guest, false))
-                                    order by u.score, u.created_at), '[]'::jsonb)
+                                    order by u.score, u.created_at, u.username collate "C"), '[]'::jsonb)
             from (select * from runs where champ and not dnf and format = f.format and score is not null
-                   order by score, created_at limit (select n from lim)) u
+                   order by score, created_at, username collate "C" limit (select n from lim)) u
             left join profiles pr on pr.id = u.user_id
         )
       )) from fmt f

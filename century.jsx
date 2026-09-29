@@ -14,7 +14,7 @@ import { TEAMS } from "./game-logic.mjs";
 import {
   CENTURY_SLOTS, CENTURY_GOAL, CENTURY_BOARDS, CENTURY_SEASON, CENTURY_TEAMS, CENTURY_FLEX,
   centuryFits, centurySlotPos, centuryPlan, centuryRespinTeam, centuryScore, centuryHit,
-  centuryTeamName, centuryReservedSeed,
+  centuryTeamName, centuryReservedSeed, centuryOutcome,
 } from "./century-logic.mjs";
 import { teamVars, POS_NAME, Confetti, reducedMotion, dailyNumber } from "./ui-common.jsx";
 import { submitCentury, fetchCenturyTop, fetchCenturyBest, fetchMyCentury, sget, sset, clearDraft } from "./storage.js";
@@ -28,6 +28,14 @@ const POS_ORDER = ["QB", "RB", "WR", "TE"];
 // Where a run in progress lives, per device. One slot: a player has at most one Century going, since finishing is
 // the only way out of the seven picks.
 export const CENTURY_WIP = "ps-century-wip";
+// A daily that has been PLAYED, kept on this device whether or not the save reached the server - the same
+// reason guess.jsx keeps one, and the same thing the season draft has always done (DAILY_KEY): `dailyDone`
+// came only from fetchMyCentury, so a refused save left the tile playable with the day's seven teams already
+// revealed. The row the server never wrote cannot stop the replay, so the device has to remember.
+// Keyed by ACCOUNT as well as day. Device-scoped, it leaked: play the daily, sign out, and the next
+// account on the same device - a guest included, who may not play the daily at all - read the day as already
+// spent. The server's row is per-account, so this has to be too.
+export const CENTURY_DONE = (userId, day) => `ps-century-done:${userId || "anon"}:${day}`;
 const utcDay = () => new Date().toISOString().slice(0, 10);
 // A code the submission will accept, so nothing is dealt that cannot be handed in. Same shape the main game's
 // challenge codes have; the alphabet skips nothing, because unlike a match code this is never read aloud.
@@ -177,6 +185,9 @@ export function CenturyScreen({
   // here is seven picks, not a record. Cleared as it is taken so it cannot re-deal on the next render.
   useEffect(() => {
     if (!challenge || !challenge.seed || !userId) return;
+    // Asked here as well as in the app's acceptChallenge, because a rule belongs in every door that opens it.
+    // A seed that hashes like a daily's deals that daily's seven teams, which is the whole prize.
+    if (centuryReservedSeed(challenge.seed)) { if (onChallengeTaken) onChallengeTaken(); return; }
     start("unlimited", challenge.seed);
     if (onChallengeTaken) onChallengeTaken();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,7 +198,11 @@ export function CenturyScreen({
   useEffect(() => {
     const mine = ++acct.current;
     if (!userId) { setDailyDone(null); return; }
-    fetchMyCentury(day).then((r) => { if (mine === acct.current) setDailyDone(r); });
+    // The server first, then this device. Either one means the day is spent.
+    fetchMyCentury(day).then(
+      async (r) => { if (mine === acct.current) setDailyDone(r || (await sget(CENTURY_DONE(userId, day), false)) || null); },
+      async () => { const local = await sget(CENTURY_DONE(userId, day), false); if (mine === acct.current) setDailyDone(local || null); },
+    );
   }, [userId, day]);
 
   const loadBoards = useCallback(() => {
@@ -333,6 +348,13 @@ export function CenturyScreen({
       day: finished.day, seed: finished.seed });
     setStage("done");
     saveWip(null);
+    // Written BEFORE the submission and never conditioned on it; the server's numbers replace them below.
+    if (finished.variant === "daily" && finished.day) {
+      const rec = { day: finished.day, score, hit: centuryHit(score), outcome: centuryOutcome(score),
+                    roster: rosterRows(local), local: true };
+      await sset(CENTURY_DONE(userId, finished.day), rec, false);
+      setDailyDone(rec);
+    }
     const mine = acct.current;
     const answer = await submitCentury({
       variant: finished.variant, seed: finished.seed, day: finished.day, picks: finished.picks,

@@ -611,4 +611,34 @@ await runTest("15. taking a link opens the game on that player, and costs no dra
   window.history.pushState({}, "", "/");
 });
 
+await runTest("16. a daily whose save is refused is still spent - the answer is not a free retry", async () => {
+  // The attack this closes: the end screen names the player from the CLIENT's own replay, before the save
+  // lands. `dailyDone` came only from fetchMyGuess, so a refused save left the tile saying "Let's go" with the
+  // answer on the screen behind it - pull the network before the last guess, read the name, come back and
+  // solve it in one for Bullseye and the top of the board. The device now remembers the day whatever the
+  // server did, keyed by account so it cannot leak to the next person to sign in here.
+  await dropWip();
+  await openGuess();
+  const realInvoke = window.__ps_supabase__.functions.invoke;
+  window.__ps_supabase__.functions.invoke = async (name, opts) =>
+    (name === "submit-guess" ? { data: null, error: { message: "TypeError: Failed to fetch" } } : realInvoke(name, opts));
+  const before = runs().length;
+  await click(variantTiles()[0]);              // the daily
+  await flush();
+  const answer = guessAnswerFor(today());
+  await guessPlayerByName(answer);
+  await flush();
+  window.__ps_supabase__.functions.invoke = realInvoke;
+  assert(view() === "done", "the game still ends and still shows the player");
+  assert(runs().length === before, `and nothing was recorded, which is the whole problem: ${runs().length}`);
+
+  // Back to the menu: the daily must not be offered again.
+  await click(findButtonByText(container, "Boards") || findButtonByText(container, "Back"));
+  await flush();
+  const daily = variantTiles()[0];
+  assert(!/Let's go/.test(daily.textContent),
+    `the daily is spent even though the save failed: ${daily.textContent}`);
+  assert(/See how it went/.test(daily.textContent), `and offers the result instead: ${daily.textContent}`);
+});
+
 console.log("test-guess-screen.mjs done");
