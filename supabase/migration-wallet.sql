@@ -68,6 +68,9 @@ create table if not exists public.badge_rewards (
 
 insert into public.badge_rewards (badge, coins) values
   ('century', 1000),
+  -- Guess the Player's badge (v2.15.0), silver. Awarded by submit-guess itself, the way Century's is, because
+  -- somebody who plays only this may never finish a season for submit-run to pay it from.
+  ('bullseye', 300),
   ('first-down', 100),
   ('starter', 100),
   ('veteran', 300),

@@ -10,6 +10,37 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.15.0] — 2026-09-29
+
+A badge for Guess the Player.
+
+**Deploy order: re-run `migration-guess.sql`, then `migration-runs-log.sql`, then `migration-wallet.sql`, then
+the Edge Functions, then the client.** Guess before runs-log is not optional now: `player_stats` gained a
+`guess` block, and it is `language sql`, so its body is validated the moment it is created and a missing
+`guess_runs` fails the migration outright.
+
+### Added
+
+- **Bullseye** 🎯, silver, 300 coins — **name the daily player in two guesses**. The first guess is blind, so
+  this is one informative opening plus a deduction that lands: rare without being pure luck.
+  - **The daily only.** Practice is unlimited, so two guesses there is something anybody has by tea time.
+  - **`submit-guess` awards it itself**, the way `submit-century` does — submit-run pays every other badge from
+    `player_stats`, but only on the player's next finished *season*, which somebody who plays this and nothing
+    else may never have. A failed award never fails the game.
+  - It **pays**, unlike Stat Nerd and Mad Scientist, because a guess run is verified: the function recomputes
+    the answer from the date and the result from the guesses.
+- **`player_stats` gains a `guess` block** — played, solved, dailies, daily_solved and `daily_best` (the fewest
+  guesses a solved daily took). `min()` over no rows is NULL, so an account that has never solved one has no
+  best rather than a zero, which would have read as "solved it in none" and handed the badge to everybody.
+
+### Fixed
+
+- **`tests/test-player-stats-sql.mjs` was comparing two empty blocks.** Its fixture seeds Over/Under runs and
+  builds but never seeded Century or Guess runs, so the mock and the SQL agreed about nothing for those two.
+  It now seeds guess games — dailies and practice both — and refuses to run if the fixture is too thin to
+  compare. Verified by breaking the mock's rule and watching the comparison fail.
+
+
 ## [2.14.0] — 2026-09-28
 
 Guess the Player asks about the season you are watching. The pool goes from 4,637 players to **193** — everyone

@@ -321,6 +321,36 @@ game on that seed, the way a Century link opens its seven teams, and costs no dr
 code at all**: everybody already has that day's player, and a link that dealt it would be a way round the
 one-go rule.
 
+## 6c. The badge
+
+**Bullseye** 🎯, silver, 300 coins — *name the daily player in two guesses*.
+
+The first guess is blind: there is nothing on the board to reason from. So this is one informative opening plus
+a deduction that lands, which is rare without being pure luck. Five guesses are allowed; two is the badge.
+
+- **The daily only.** Practice is unlimited, so two guesses there is something anybody has by tea time. The
+  number the rule reads is `player_stats`' `guess.daily_best` — the fewest guesses a *solved daily* took.
+- **`submit-guess` awards it itself**, the way `submit-century` does and for the same reason: submit-run pays
+  every other badge from `player_stats`, but only on the player's next finished **season**, which somebody who
+  plays this and nothing else may never have. The function witnessed the game, so it records it. `award_badges`
+  is idempotent per (user, badge) and `badge_rewards` decides the amount, so it can neither pay twice nor pay
+  the wrong number, and a failed award never fails the game.
+- **It pays**, unlike Stat Nerd and Mad Scientist, because a guess run is *verified*: the function recomputes
+  the answer from the date and the result from the guesses, so there is no version of this a browser can assert.
+
+**`min()` over no rows is NULL, and that is the whole of the empty case.** An account that has never solved a
+daily has no best — not a zero, which would read as "solved it in none" and hand the badge to everyone who had
+never played. `badges.mjs`'s `value()` answers NaN for null, and `NaN <= 2` is false.
+
+**A new badge is three files, not one** (CLAUDE.md, SHOP.md): the `badges.mjs` entry, a re-run of
+`migration-wallet.sql` so `badge_rewards` knows the amount, and — because badges are computed from stats — a
+number in `player_stats` for the rule to read. That is why this release also adds a `guess` block to
+`migration-runs-log.sql`, mirrored in `tests/mock-profile-stats.mjs` and held to the SQL row for row.
+
+It is also why **`migration-guess.sql` must run before `migration-runs-log.sql`**: `player_stats` is
+`language sql`, so its body is validated the moment it is created and a missing `guess_runs` fails the whole
+migration outright. The runbook already had that order; now something depends on it.
+
 ## 7. Tests
 
 | File | What only it can hold |

@@ -349,7 +349,14 @@ parts unlike everything else:
   so no new address was needed; a daily's carries no code, because everybody has that day's player already and a
   link would be a second go. The test checks every line is one of the four it may be, not just that known
   spoilers are absent.
-- **Not built:** nothing on the profile, no badge, no streak. GUESS.md 9 says so.
+- **The badge is Bullseye** (v2.15.0): name the daily player in two guesses, silver, and it PAYS because a
+  guess run is verified. `submit-guess` awards it itself for the reason `submit-century` does - somebody who
+  plays only this may never finish a season for submit-run to pay it from. Daily only: practice is unlimited.
+  A new badge is three files - the badges.mjs entry, a re-run of migration-wallet.sql for `badge_rewards`, and
+  a number in `player_stats` for the rule to read, since badges are computed from stats. That last one is why
+  `migration-guess.sql` must run BEFORE `migration-runs-log.sql`: `player_stats` is `language sql` and its body
+  is validated at creation, so a missing `guess_runs` fails the migration outright.
+- **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
 Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`

@@ -140,6 +140,19 @@ export function playerStats(state, userId) {
       daily_best: max(centuryRuns.filter((r) => r.day != null).map((r) => num(r.score))),
       centuries: centuryRuns.filter((r) => r.hit).length,
     },
+    // Guess the Player: the same shape the SQL builds, and min() over no rows is NULL there - so an account
+    // that has never solved a daily has no best, rather than a best of zero.
+    guess: (() => {
+      const mine = [...(state.guessRuns?.values() || [])].filter((r) => r.user_id === userId);
+      const solvedDailies = mine.filter((r) => r.solved && r.day != null);
+      return {
+        played: mine.length,
+        solved: mine.filter((r) => r.solved).length,
+        dailies: mine.filter((r) => r.day != null).length,
+        daily_solved: solvedDailies.length,
+        daily_best: solvedDailies.length ? Math.min(...solvedDailies.map((r) => num(r.tries))) : null,
+      };
+    })(),
     builds: { count: builds.length, best: bestBuild ? { pos: text(bestBuild.pos), overall: num(bestBuild.overall) } : null },
   };
 }

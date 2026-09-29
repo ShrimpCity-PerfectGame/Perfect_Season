@@ -14,12 +14,19 @@
 //   - pay the run's coins. The client claims those with claim_minigame('guess', day) once this answers ok, so
 //     every coin in the game still moves in one place (SHOP.md).
 //
+// It does award ONE badge, and only from a daily solved in GUESS_BADGE_TRIES or fewer - the same arrangement
+// submit-century has, for the same reason: submit-run pays every other badge from player_stats, but only on the
+// player's next finished SEASON, which somebody who plays this and nothing else may never have. This function
+// witnessed the game, so it records it. award_badges is idempotent per (user, badge) and badge_rewards decides
+// the amount, so nothing here can pay twice or pay the wrong number.
+//
 // The daily's date comes from THIS function's clock and is never taken from the client, which is what makes the
 // daily the one variant that cannot be ground for an easier answer.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   initGuessData, replayGuessGame, guessOutcome, GUESS_TRIES,
 } from "../../../guess-logic.mjs";
+import { BADGE_BY_ID, GUESS_BADGE_TRIES } from "../../../badges.mjs";
 import guessPool from "../../../data/guess-pool.json" with { type: "json" };
 
 initGuessData(guessPool);
@@ -122,8 +129,26 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     return json({ error: "failed to save" }, 500);
   }
 
+  // The badge, and only for a daily. Practice is unlimited, so two guesses there is a thing anybody can have by
+  // tea time. A failure here never fails the game: the run is recorded, and submit-run awards the badge from
+  // player_stats the next time a season finishes.
+  let badge = null;
+  if (day && replay.solved && replay.tries <= GUESS_BADGE_TRIES) {
+    try {
+      const { data, error } = await service.rpc("award_badges", {
+        p_user: user.id,
+        p_badges: [{ id: "bullseye", coins: BADGE_BY_ID.bullseye?.coins ?? 0 }],
+      });
+      if (error) console.error("submit-guess award_badges:", error);
+      else if (Array.isArray(data?.awarded) && data.awarded.length) badge = { awarded: data.awarded, credited: data.credited, balance: data.balance };
+    } catch (e) {
+      console.error("submit-guess award_badges:", e);
+    }
+  }
+
   return json({
     ok: true,
+    badge,
     day,
     seed,
     solved: replay.solved,

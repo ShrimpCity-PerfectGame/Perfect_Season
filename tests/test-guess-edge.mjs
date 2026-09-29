@@ -43,7 +43,23 @@ function store() {
       return { row };
     },
     remove() {},
-    rpcs: {},
+    // award_badges as migration-wallet.sql behaves: idempotent per (user, badge), and badge_rewards - not the
+    // caller - decides what is paid, so the caller's `coins` is checked for shape and then ignored here too.
+    awards: [],
+    rpcs: {
+      award_badges: (args) => {
+        const already = new Set(s.awards.map((a) => `${a.user}|${a.badge}`));
+        const awarded = [];
+        for (const b of args.p_badges) {
+          const key = `${args.p_user}|${b.id}`;
+          if (already.has(key)) continue;
+          already.add(key);
+          s.awards.push({ user: args.p_user, badge: b.id });
+          awarded.push(b.id);
+        }
+        return { awarded, credited: awarded.length * 300, balance: 300 * s.awards.length };
+      },
+    },
   };
   return s;
 }
@@ -189,6 +205,53 @@ await runTest("a failed read or write says the save failed and writes nothing", 
   const threw = await invoke({ variant: "daily", guesses: g }, { userId: ME });
   assert(threw.status === 500 && threw.headers.get("Access-Control-Allow-Origin"),
     `a thrown error keeps its CORS headers: ${threw.status}`);
+});
+
+await runTest("the badge is the daily's, is paid once, and never fails a game", async () => {
+  const st = store();
+  globalThis.__edge_store__ = st;
+  const answer = guessAnswerFor(today());
+  const wrong = GUESS_PLAYERS.filter((p) => p.id !== answer.id)[0];
+
+  // Two guesses on the daily: the badge's own case.
+  const win = await invoke({ variant: "daily", day: today(), guesses: [wrong.id, answer.id] }, { userId: ME });
+  assert(win.status === 200 && win.body.solved, `it saves: ${win.status}`);
+  assert(st.awards.length === 1 && st.awards[0].badge === "bullseye", `the badge is awarded: ${JSON.stringify(st.awards)}`);
+  assert(win.body.badge?.awarded?.includes("bullseye"), `and the answer says so, for the screen: ${JSON.stringify(win.body.badge)}`);
+
+  // Practice is unlimited, so it can never earn it however fast it is solved. On a CLEAN store, because
+  // award_badges is idempotent per (user, badge): asking again for a badge this account already has answers
+  // "nothing awarded" either way, so re-using the account above would have passed whatever the function did.
+  const fresh = store();
+  globalThis.__edge_store__ = fresh;
+  const seed = "PRACTICE";
+  const pAnswer = guessAnswerForSeed(seed);
+  const practice = await invoke({ variant: "practice", seed, guesses: [pAnswer.id] }, { userId: ME });
+  assert(practice.status === 200 && practice.body.solved, "a practice game solved first guess");
+  assert(fresh.awards.length === 0, `earns no badge: ${JSON.stringify(fresh.awards)}`);
+  assert(practice.body.badge === null, `and says so: ${JSON.stringify(practice.body.badge)}`);
+});
+
+await runTest("a slow daily earns nothing, and a failed award never fails the game", async () => {
+  const st = store();
+  globalThis.__edge_store__ = st;
+  const answer = guessAnswerFor(today());
+  const misses = GUESS_PLAYERS.filter((p) => p.id !== answer.id).slice(0, 2).map((p) => p.id);
+
+  // Three guesses is one too many for this badge, and the game is still a win.
+  const slow = await invoke({ variant: "daily", day: today(), guesses: [...misses, answer.id] }, { userId: ME });
+  assert(slow.status === 200 && slow.body.solved && slow.body.tries === 3, `solved in three: ${slow.body?.tries}`);
+  assert(st.awards.length === 0, `no badge for three: ${JSON.stringify(st.awards)}`);
+  assert(slow.body.badge === null, "and the answer says so");
+
+  // And when award_badges itself fails, the GAME is still recorded - the badge is not worth losing a daily for.
+  const st2 = store();
+  globalThis.__edge_store__ = st2;
+  st2.rpcFails.award_badges = true;
+  const win = await invoke({ variant: "daily", day: today(), guesses: [answer.id] }, { userId: ME });
+  assert(win.status === 200 && win.body.solved, `the game still saves: ${win.status}`);
+  assert(st2.guesses.length === 1, "and is written");
+  assert(win.body.badge === null, "with no badge claimed");
 });
 
 console.log("test-guess-edge.mjs done");

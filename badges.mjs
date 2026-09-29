@@ -46,6 +46,11 @@ export const DAY_ONE_BEFORE = "2026-10-14T00:00:00.000Z";
 // anywhere (tests/test-badges.mjs enforces that, and it is why submit-run can bundle it). tests/test-badges.mjs
 // holds the two numbers equal instead - the same arrangement the SQL copies of rewards.mjs live under.
 export const CENTURY_BADGE_SCORE = 100;
+// Guess the Player, in two guesses. The first is blind - there is nothing on the board to reason from - so this
+// is one informative opening plus a deduction that lands, which is rare without being pure luck. Five guesses
+// are allowed; doing it in two is the badge. A copy of nothing: this rule is its own, and guess-logic.mjs's
+// GUESS_TRIES is not it.
+export const GUESS_BADGE_TRIES = 2;
 
 // `coins` is paid once, from v1.12.0. Over/Under and Build-a-player scores are saved by the browser
 // rather than checked by the server, so their badges pay nothing.
@@ -73,6 +78,7 @@ export const BADGES = [
   { id: "stat-nerd", name: "Stat Nerd", emoji: "📈", tier: "bronze", how: "Score 15 in Over/Under" },
   { id: "mad-scientist", name: "Mad Scientist", emoji: "⚡", tier: "bronze", how: "Create 10 players in Build-a-player" },
   { id: "century", name: "Century", emoji: "💯", tier: "gold", how: `Reach ${CENTURY_BADGE_SCORE} in the daily Century` },
+  { id: "bullseye", name: "Bullseye", emoji: "🎯", tier: "silver", how: `Name the daily player in ${GUESS_BADGE_TRIES} guesses` },
   { id: "day-one", name: "Day One", emoji: "👑", tier: "special", how: "Join in Gridspin's first month" },
 ].map((b) => ({ ...b, coins: UNPAID.has(b.id) ? 0 : TIER_COINS[b.tier] }));
 export const BADGE_BY_ID = Object.fromEntries(BADGES.map((b) => [b.id, b]));
@@ -127,6 +133,13 @@ export function badgeProgress(input) {
     // recomputes the seven teams from the seed and adds the touchdowns up itself, so there is no version of
     // this a browser can simply assert.
     "century": () => flag(value(x.century?.dailyBest) >= CENTURY_BADGE_SCORE),
+    // The DAILY's fewest guesses, and it pays for the reason Century's does: a guess run is verified, because
+    // submit-guess recomputes the answer from the date and the result from the guesses. Practice is unlimited
+    // and is deliberately not counted - only a daily, the one go everybody gets.
+    //
+    // value() is NaN when nobody has solved one, and NaN <= 2 is false, which is what makes an empty career
+    // fail this. A plain `<= 2` on a null would have earned it for everybody who never played.
+    "bullseye": () => flag(value(x.guess?.dailyBest) <= GUESS_BADGE_TRIES),
     "day-one": () => flag(joinedAt < Date.parse(DAY_ONE_BEFORE)),
   };
   return BADGES.map((b) => ({ id: b.id, ...rules[b.id]() }));

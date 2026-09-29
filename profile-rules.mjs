@@ -110,6 +110,9 @@ export const EMPTY_PLAYER_STATS = Object.freeze({
   // The RAW shape player_stats() answers with, so the keys are its keys and the nulls are its nulls: max()
   // over no rows is NULL in Postgres, not 0.
   century: { played: 0, best: null, daily_best: null, centuries: 0 },
+  // Same raw shape again, from guess_runs. min() over no rows is NULL, so a player who has never solved one
+  // has no best - not a zero, which would read as "solved it in none".
+  guess: { played: 0, solved: 0, dailies: 0, daily_solved: 0, daily_best: null },
 });
 export const emptyPlayerStats = () => JSON.parse(JSON.stringify(EMPTY_PLAYER_STATS));
 
@@ -148,6 +151,10 @@ export function mapPlayerStats(json) {
     century: {
       played: int(s.century?.played), best: num(s.century?.best),
       dailyBest: num(s.century?.daily_best), centuries: int(s.century?.centuries),
+    },
+    guess: {
+      played: int(s.guess?.played), solved: int(s.guess?.solved), dailies: int(s.guess?.dailies),
+      dailySolved: int(s.guess?.daily_solved), dailyBest: num(s.guess?.daily_best),
     },
     builds: { count: int(s.builds?.count), best: s.builds?.best ? { pos: s.builds.best.pos, overall: Number(s.builds.best.overall) } : null },
   };

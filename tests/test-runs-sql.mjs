@@ -19,6 +19,9 @@ const MIGRATION = sql("migration-runs-log.sql");
 // own database, has to do the same. Its trigger lives in migration-profiles.sql, which this file never runs,
 // so the table arrives here without one - which is fine: nothing in this file writes it.
 const CENTURY = sql("migration-century.sql");
+// And guess_runs, for exactly the same reason since v2.15.0: player_stats gained a `guess` block, so the table
+// has to exist before this file's body is validated. Same ordering as the runbook, same as century above.
+const GUESS = sql("migration-guess.sql");
 
 // Supabase provides the auth schema; this is just enough of it for schema.sql's foreign keys,
 // signup trigger and RLS policies to install.
@@ -39,6 +42,7 @@ async function freshDb() {
   `);
   await db.exec(sql("schema.sql"));
   await db.exec(CENTURY);
+  await db.exec(GUESS);
   return db;
 }
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;

@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { assert, runTest } from "./helpers.mjs";
 import {
-  BADGES, BADGE_BY_ID, BADGE_TIERS, TIER_COINS, CINDERELLA_MAX_SCORE, SCOUT_MIN_POINTS, DAY_ONE_BEFORE, badgeProgress, topBadges, CENTURY_BADGE_SCORE,
+  BADGES, BADGE_BY_ID, BADGE_TIERS, TIER_COINS, CINDERELLA_MAX_SCORE, SCOUT_MIN_POINTS, DAY_ONE_BEFORE, badgeProgress, topBadges, CENTURY_BADGE_SCORE, GUESS_BADGE_TRIES,
 } from "../badges.mjs";
 import { mapPlayerStats, emptyPlayerStats } from "../profile-rules.mjs";
 import { rowToProfile } from "../storage-core.js";
@@ -18,9 +18,9 @@ const fromProfile = (p) => ({ stats: p.stats, extra: p.extra, details: p.details
 const ids = (badges) => badges.map((b) => b.id);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-await runTest("the catalog: 23 badges in the contract's shape, coins by tier", async () => {
-  assert(BADGES.length === 23, `expected 23 badges, got ${BADGES.length}`);
-  assert(new Set(BADGES.map((b) => b.id)).size === 23, "badge ids must be unique");
+await runTest("the catalog: 24 badges in the contract's shape, coins by tier", async () => {
+  assert(BADGES.length === 24, `expected 24 badges, got ${BADGES.length}`);
+  assert(new Set(BADGES.map((b) => b.id)).size === BADGES.length, "badge ids must be unique");
   for (const b of BADGES) {
     assert(same(Object.keys(b).sort(), ["coins", "emoji", "how", "id", "name", "tier"]), `${b.id} has keys ${Object.keys(b)}`);
     assert(BADGE_TIERS.includes(b.tier), `${b.id}: unknown tier ${b.tier}`);
@@ -29,7 +29,7 @@ await runTest("the catalog: 23 badges in the contract's shape, coins by tier", a
     const unpaid = b.id === "stat-nerd" || b.id === "mad-scientist"; // browser-saved scores pay nothing
     assert(b.coins === (unpaid ? 0 : TIER_COINS[b.tier]), `${b.id}: coins ${b.coins}`);
   }
-  assert(Object.keys(BADGE_BY_ID).length === 23, "BADGE_BY_ID has exactly the catalog");
+  assert(Object.keys(BADGE_BY_ID).length === BADGES.length, "BADGE_BY_ID has exactly the catalog");
 });
 
 await runTest("the Century badge asks for the same hundred the mode does", async () => {
@@ -47,7 +47,7 @@ await runTest("badges.mjs is pure: no imports, so it loads on its own anywhere",
   const source = readFileSync(new URL("../badges.mjs", import.meta.url), "utf8");
   assert(!/^\s*import\b|\bimport\s*\(|\brequire\s*\(|^\s*export\s*(\*|\{[^}]*\})\s*from\s/m.test(source), "badges.mjs must not import anything");
   const alone = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-  assert(alone.badgeProgress({}).length === 23, "it should work loaded with nothing around it");
+  assert(alone.badgeProgress({}).length === 24, "it should work loaded with nothing around it");
 });
 
 // [badge, need, input carrying a value]. Each is checked at need - 1, need and need + 1.
@@ -99,6 +99,18 @@ await runTest("yes/no badges: just below, at and above the threshold", async () 
 
   // The Century badge reads the DAILY best and nothing else. An Unlimited hundred is a hundred, but it is not
   // the daily's single go, so it must not earn this - that is the whole shape of the badge.
+  // Bullseye: the DAILY's fewest guesses, and nothing else. min() over no rows is NULL in the SQL, so the
+  // empty case arrives as null rather than 0 - and `0 <= 2` would have handed the badge to everybody who had
+  // never played, which is the shape of mistake this file exists to catch.
+  const gs = (dailyBest, rest) => ({ extra: { guess: { dailyBest, dailySolved: 1, played: 1, ...rest } } });
+  check("bullseye", gs(GUESS_BADGE_TRIES + 1), false, "one guess too many");
+  check("bullseye", gs(GUESS_BADGE_TRIES), true, "exactly two");
+  check("bullseye", gs(1), true, "first guess");
+  check("bullseye", gs(null), false, "never solved a daily");
+  check("bullseye", { extra: {} }, false, "never played at all");
+  // Practice is unlimited, so it cannot count: the number the rule reads is the daily's alone.
+  check("bullseye", gs(null, { solved: 40, played: 40 }), false, "forty practice games solved, no daily");
+
   const cent = (dailyBest, best) => ({ extra: { century: { dailyBest, best: best ?? dailyBest } } });
   check("century", cent(CENTURY_BADGE_SCORE - 1), false, "one touchdown short on the daily");
   check("century", cent(CENTURY_BADGE_SCORE), true, "exactly the goal");
@@ -166,13 +178,14 @@ await runTest("topBadges: gold, special, silver, bronze, then catalog order, up 
   const ORDER = [
     "hall-of-famer", "undefeated", "every-single-day", "cinderella", "daily-winner", "century",
     "day-one",
-    "veteran", "dynasty", "playoff-regular", "big-brain", "front-office", "daily-champion", "old-school", "week-warrior", "scout",
+    "veteran", "dynasty", "playoff-regular", "big-brain", "front-office", "daily-champion", "old-school", "week-warrior", "scout", "bullseye",
     "first-down", "starter", "ring-bearer", "hot-streak", "loyal-fan", "stat-nerd", "mad-scientist",
   ];
-  assert(same(ids(topBadges(all, 23)), ORDER), `full order: ${ids(topBadges(all, 23))}`);
+  assert(ORDER.length === BADGES.length, `every badge is in this order: ${BADGES.length} badges, ${ORDER.length} listed`);
+  assert(same(ids(topBadges(all, ORDER.length)), ORDER), `full order: ${ids(topBadges(all, ORDER.length))}`);
   assert(same(ids(topBadges(all)), ORDER.slice(0, 3)), "three by default");
   assert(same(ids(topBadges([...all].reverse(), 7)), ORDER.slice(0, 7)), "the order doesn't depend on the input's order");
-  assert(topBadges(all, 0).length === 0 && topBadges(all, 40).length === 23, "n caps the list");
+  assert(topBadges(all, 0).length === 0 && topBadges(all, 40).length === BADGES.length, "n caps the list");
   assert(topBadges(all, 1)[0] === BADGE_BY_ID["hall-of-famer"], "returns the catalog entries themselves");
 
   const some = all.map((p) => ({ ...p, earned: ["starter", "day-one", "scout", "stat-nerd"].includes(p.id) }));

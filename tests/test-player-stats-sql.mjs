@@ -69,7 +69,7 @@ const roster = (players) => players.map((p, i) => ({ slot: SLOTS[i], ...p, ppr: 
 
 // ---------- The fixture, as rows for both the database and the mock ----------
 const accounts = []; // { id, username, recent? }
-const runs = [], dailyRuns = [], souRuns = [], builds = [];
+const runs = [], dailyRuns = [], souRuns = [], builds = [], guessRuns = [];
 let nextAccount = 1;
 function account(username, extra = {}) {
   const a = { id: uuid(nextAccount++), username, ...extra };
@@ -200,6 +200,26 @@ for (let n = 1; n <= 48; n++) {
     if (offset <= 0 && chance(0.3)) souRuns.push({ date: day(offset), user_id: a.id, username: a.username, score: int(0, 25), created_at: at(offset, int(0, 1439)) });
   }
   if (n % 3 === 0) for (let b = int(1, 12); b > 0; b--) build(a, ["QB", "RB", "WR", "TE"][int(0, 3)], 60 + 2.5 * int(0, 30), at(-int(0, 40), int(0, 1439)));
+  // Guess the Player. Both kinds on purpose: a daily, which is the only one the Bullseye badge may read, and
+  // practice games, which must not count towards it however many are solved. Without rows here the mock and the
+  // SQL would agree on two empty blocks, which is agreement about nothing.
+  for (let offset = -12; offset <= 0; offset++) {
+    if (chance(0.35)) {
+      const solved = chance(0.7);
+      guessRuns.push({
+        user_id: a.id, username: a.username, guest: false, day: day(offset), seed: null,
+        solved, tries: solved ? int(1, 5) : 5, guesses: JSON.stringify(["A|2015|QB"]),
+        answer: "A|2015|QB", outcome: solved ? "Got it." : "Missed. 5 guesses.", created_at: at(offset, int(0, 1439)),
+      });
+    }
+    if (chance(0.25)) {
+      guessRuns.push({
+        user_id: a.id, username: a.username, guest: false, day: null, seed: `PRACTICE${Math.abs(offset)}${n}`,
+        solved: true, tries: 1, guesses: JSON.stringify(["A|2015|QB"]),
+        answer: "A|2015|QB", outcome: "Got it first guess.", created_at: at(offset, int(0, 1439)),
+      });
+    }
+  }
 }
 
 // ---------- Load it into Postgres and the mock ----------
@@ -217,12 +237,22 @@ for (const a of accounts) await addAccount(db, { id: a.id, username: a.username,
 await insertRows(db, "runs", runs);
 await insertRows(db, "daily_runs", dailyRuns);
 await insertRows(db, "sou_runs", souRuns);
+await insertRows(db, "guess_runs", guessRuns);
+// This fixture is only worth anything if it HAS rows: comparing the mock and the SQL on two empty blocks is
+// agreement about nothing, which is exactly what the century and guess blocks had before this line.
+if (guessRuns.length < 20 || !guessRuns.some((r) => r.day) || !guessRuns.some((r) => !r.day)) {
+  throw new Error(`the guess fixture is too thin to compare: ${guessRuns.length} rows`);
+}
 await insertRows(db, "builds", builds);
 
 const mock = makeMockAuth();
 for (const r of runs) mock._runs.set(`${r.user_id}|${r.created_at}|${r.dnf}`, { backfilled: false, ...r });
 for (const r of dailyRuns) mock._dailyRuns.set(`${r.date}:${r.format}:${r.user_id}`, r);
 for (const r of souRuns) mock._souRuns.set(`${r.date}:${r.user_id}`, r);
+// The mock's guess table is keyed by its own id, and `guesses` goes in as the array the SQL stores as jsonb.
+for (const [i, r] of guessRuns.entries()) {
+  mock._guess.add({ ...r, id: i + 1, guesses: JSON.parse(r.guesses) });
+}
 for (const r of builds) mock._builds.set(r.id, r);
 
 // A build a browser logged before 1.11.0 checked them: a numeric NaN, which sorts above every number. It
