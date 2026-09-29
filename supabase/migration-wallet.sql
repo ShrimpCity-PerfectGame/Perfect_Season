@@ -327,19 +327,32 @@ begin
   -- having played too: the mode is one game either way, and the claim is still 15 coins for the day whichever
   -- variant it was. This reads public.century_runs, which migration-century.sql creates - run that file FIRST.
   elsif p_game = 'century' and p_date is not null then
+    -- Bound to ONE day. `or created_at > now() - interval '24 hours'` made p_date unbound: p_date may be UTC
+    -- yesterday, today or tomorrow, the ledger key is '<game>:' || p_date, so one honest run satisfied all
+    -- three keys and paid 45 coins instead of 15. A practice run has no `day`, so it is bound by the UTC date
+    -- it was played on instead - which still lets somebody either side of UTC midnight claim the day their run
+    -- actually landed on, because that date is one of the three p_date may be.
     v_played := exists (select 1 from public.century_runs where user_id = v_uid
-                         and (day = p_date or created_at > now() - interval '24 hours'));
+                         and (day = p_date
+                              or (day is null and (created_at at time zone 'utc')::date = p_date::date)));
   elsif p_game = 'century' then
     v_played := exists (select 1 from public.century_runs where user_id = v_uid and created_at > now() - interval '24 hours');
   -- Guess the Player (v2.13.0), the same shape as Century's arm above. Reads public.guess_runs, which
   -- migration-guess.sql creates - run that file FIRST.
   elsif p_game = 'guess' and p_date is not null then
+    -- Same rule as Century's arm above, for the same reason.
     v_played := exists (select 1 from public.guess_runs where user_id = v_uid
-                         and (day = p_date or created_at > now() - interval '24 hours'));
+                         and (day = p_date
+                              or (day is null and (created_at at time zone 'utc')::date = p_date::date)));
   elsif p_game = 'guess' then
     v_played := exists (select 1 from public.guess_runs where user_id = v_uid and created_at > now() - interval '24 hours');
   else
-    v_played := exists (select 1 from public.builds where user_id = v_uid and created_at > now() - interval '24 hours');
+    -- Build-a-player has no day of its own at all, so the build's UTC date is the only thing that can bind it
+    -- to the day being claimed. Unbound, one build paid all three permitted dates - this arm is where the
+    -- multiplier started, and Century and Guess copied its shape.
+    v_played := exists (select 1 from public.builds where user_id = v_uid
+                         and ((p_date is null and created_at > now() - interval '24 hours')
+                              or (p_date is not null and (created_at at time zone 'utc')::date = p_date::date)));
   end if;
   if not v_played then
     raise exception 'not_played' using errcode = 'P0001';

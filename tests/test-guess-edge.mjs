@@ -87,14 +87,17 @@ await runTest("the result is the FUNCTION's, whatever the client claims", async 
   const s = store();
   globalThis.__edge_store__ = s;
   const answer = guessAnswerFor(today());
-  const wrong = GUESS_PLAYERS.filter((p) => p.id !== answer.id).slice(0, 3).map((p) => p.id);
+  // A FULL board of wrong guesses: since v2.17.0 a game that is not solved has to have spent every guess
+  // (replayGuessGame's short_loss), because a one-guess loss sorted above everyone who honestly used all five.
+  // The client still lies about solved/tries/answer below - that is what this test is about.
+  const wrong = missesFor(answer);
   const res = await invoke({
     variant: "daily", day: today(), guesses: wrong,
     solved: true, tries: 1, answer: wrong[0], outcome: "Got it first guess.", username: "admin",
   }, { userId: ME });
   assert(res.status === 200, `it still saves: ${res.status}`);
   assert(res.body.solved === false, `the claimed win is ignored: ${res.body.solved}`);
-  assert(s.guesses[0].solved === false && s.guesses[0].tries === 3, `and nothing claimed reached the row: ${JSON.stringify(s.guesses[0])}`);
+  assert(s.guesses[0].solved === false && s.guesses[0].tries === GUESS_TRIES, `and nothing claimed reached the row: ${JSON.stringify(s.guesses[0])}`);
   assert(s.guesses[0].answer === answer.id, "the answer is the day's, not the one sent");
   assert(s.guesses[0].username === "someone", "and the name came from the account");
 });

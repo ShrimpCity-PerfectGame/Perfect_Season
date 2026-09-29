@@ -95,8 +95,11 @@ serves the same files from the phone already. The
 offer to install is the game's own: Chrome's `beforeinstallprompt` is held back and shown as an "Install Gridspin"
 pill beside the live counts (iOS has no such event - it installs by hand through Share > Add to Home Screen).
 `tests/test-pwa.mjs` covers the rules, what the build writes and the offer; the offline half was checked in real
-Chrome with the network cut. **Runbook:** to take the worker off the site, deploy a `public/sw.js` whose only line
-is `self.registration.unregister()`. A bad deploy needs no such thing - pages and the bundle are network-first, so
+Chrome with the network cut. **Runbook:** to take the worker off the site, replace the body of **`service-worker.js`** with
+`self.registration.unregister()` and deploy. NOT `public/sw.js`: that path is gitignored and `build.mjs`
+rewrites it from `service-worker.js` on every build, which is what `vercel.json`'s buildCommand runs - so a
+file edited there is gone before it is served. This said `public/sw.js` until v2.17.0, which is a thing to
+discover during the emergency it exists for. A bad deploy needs no such thing - pages and the bundle are network-first, so
 the next load has the fix.
 
 **Sharing (v1.10.0).** `shareText` builds a Wordle-style card and must never name the players (that
@@ -112,7 +115,7 @@ signed-in players first). The `beat` record is the sharer's own claim, shown onl
 
 **Profiles (v1.11.0).** Every account has a public profile at `/u/<username>`: a picture (an uploaded
 photo, one of 12 default avatars, or the initial), a bio checked by a blocked-word list, a favorite
-team, 22 badges, personal stats, and a Report button feeding a moderators' Reports queue. Every username
+team, 24 badges, personal stats, and a Report button feeding a moderators' Reports queue. Every username
 on the Leaderboard and Stats screens opens its profile. **`PROFILES.md` is the reference** for all of it
 (database functions and error codes, the player_stats shape, the storage modules, component props,
 addresses and history) - read it before touching any of the files below. See "Profiles" under
@@ -221,7 +224,7 @@ parts that are unlike every other mode:
   delete the match row (its picks follow) and decrement `pvp_wins` / `pvp_losses` on the two profiles by hand.
 
 **Modes is two groups (v2.10.0).** The front screen is **Drafts** - the daily, Unlimited, Genius, GM, Duel and
-the challenge-code box - and one **Mini games** tile that opens a screen of its own holding **Over/Under,
+the challenge-code box - and one **Mini games** tile that opens a screen of its own holding **Guess the Player, Over/Under,
 Build-a-player and Century**. It had grown to nine tiles and read as a list rather than a shape. Duel stays with
 the drafts because it is one. Three things to know before moving a tile again: the Mini games tile carries an
 "N done today" pill, because the cost of hiding those modes is losing at a glance whether the day's Over/Under
@@ -328,8 +331,11 @@ parts unlike everything else:
   The table's `tries` bound is a named constraint that the migration drops and re-adds, because
   `create table if not exists` leaves an existing table's checks alone - and it fails on a row from the old
   eight-guess rules, which is correct.
-- **`migration-guess.sql` goes after century and before runs-log**, then profiles, moderation and wallet. Three
-  files name its table and all of them are plpgsql, so the wrong order fails nothing until a guest trades up.
+- **`migration-guess.sql` goes after century and before runs-log**, then profiles, moderation and wallet.
+  Runs-log is a HARD dependency - `player_stats` is `language sql` and names `guess_runs`, so it aborts without
+  it - and so is profiles, which creates a trigger ON that table: `create trigger` is DDL and errors at once on
+  a missing relation. Only `mod_act`'s rename and `claim_minigame`'s guess arm are plpgsql bodies that fail
+  nothing until somebody calls them. The same is true of century, and this file used to say all of it was soft.
 - **Colour is never the only signal.** Every cell carries a visually-hidden sentence ("Team KC: exact", "Class
   2014: close, higher") and the printed form is `aria-hidden`. Both coloured states take a **dark** ink: `--win`
   is the game's light green and white on it is 1.8:1, which the `tests/test-a11y.mjs` entry for the grid caught
@@ -554,7 +560,7 @@ node tests/test-century-screen.mjs     # the buttons: the tile, both variants, s
 
 # Guess the Player (v2.13.0). See GUESS.md. guess-logic.mjs holds the rules, so the first of these needs no
 # database and no browser - and it PRINTS the two numbers the game's fairness rests on.
-node tests/test-guess-logic.mjs        # every rule and refusal, that five greens identify exactly one player in the whole pool, and a blind bot's 0.20%
+node tests/test-guess-logic.mjs        # every rule and refusal, that five greens identify exactly one player in the whole pool, and a blind bot's 1.05%
 node tests/test-guess-edge.mjs         # the real submit-guess, executed: who is asking, the daily's clock, the duplicate, and that the result is the server's
 node tests/test-guess-sql.mjs          # the migration in PGlite: nobody writes the table, the daily's unique index, both boards == the mock, a rename, the coin claim
 node tests/test-guess-screen.mjs       # the buttons: the tile, both variants, guesses typed, the colours IN WORDS, resume, the boards, the guest, the refusal map
@@ -568,6 +574,16 @@ node tests/test-economy-security.mjs   # attacks on coins and purchases a modifi
 node tests/test-cosmetics.mjs          # every frame, card theme and title renders; text contrast on every theme and team
 node tests/test-shop-screen.mjs        # ShopScreen on its own: buying, equipping, locked items, showcase, the wallet
 node tests/test-shop-flow.mjs          # the whole app: a season's coins, the shop from the result, a frame in the header
+# Named nowhere else in this file until v2.17.0, though run-all.mjs globs the directory and has always run them.
+node tests/test-build-a-player.mjs      # Build-a-player: rolling a position, a team, the attributes, and the sim at the end
+node tests/test-daily-submit.mjs        # the daily's submission path end to end, including the once-a-day lock
+node tests/test-dnf.mjs                 # what counts as an abandoned draft, and which ladder it is charged to
+node tests/test-leaderboard-format.mjs  # the two scoring formats keep separate boards and never rank against each other
+node tests/test-online-counter.mjs      # the live plays pill and the online count: presence, the broadcast, and the two counters kept apart
+node tests/test-points.mjs              # ladder points: par, the penalty, and where each mode's points land
+node tests/test-stats-ou.mjs            # Over/Under's board and its day
+node tests/test-stats.mjs               # the Stats screen's boards and the Sitewide tiles
+node tests/test-submit-run-integration.mjs # a whole season through the mock submit-run, profile write included
 node tests/run-all.mjs [filter...]     # every test file above in turn (not the difficulty benchmark)
 
 # Rebuild the game data from source (only when adding a season or changing grading)
@@ -1068,23 +1084,36 @@ suite and still broke the live Leaderboard for every existing account.
     every rule 1v1 has and the browser imports it too: change it, push the client, and forget the function, and
     the two are running different rulebooks. That exact miss cost a staging session in v1.19.0 - the client
     offered a powerup the deployed function still refused as "not your turn". `node deploy-function.mjs <env>`
-    deploys both functions by default for this reason; there is no good argument for deploying one.
+    deploys all four functions by default for this reason; there is no good argument for deploying one.
   - A schema change → run its migration in that environment's SQL editor first.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+  v2.17.0's (the bug pass): re-run **`migration-wallet.sql`**, then **`migration-runs-log.sql`**, then the
+  client. No Edge Function change. Wallet binds each `claim_minigame` arm to one day (one run used to pay all
+  three permitted dates); runs-log adds the username tiebreak `best_gm` and `biggest_upsets` never had. Both
+  only replace functions, so they are safe on any shape and the site works between the steps.
   v2.16.0's (the plays counter and players drafted): re-run **`migration-runs-log.sql`**, then the client.
   It only replaces `site_totals()`, so it is safe on any shape and its backfill is a no-op as always. A
   client ahead of the migration reads no `plays` and falls back to the drafts count - the number the pill
   showed before - and no `drafted`, so the Stats screen simply leaves that tile out. The gap is invisible
   rather than broken either way. No Edge Function change.
+  v2.15.0's (the Bullseye badge): re-run **`migration-guess.sql`**, then **`migration-runs-log.sql`**, then
+  **`migration-wallet.sql`**, then **deploy the Edge Functions**, then the client. Guess before runs-log is not
+  optional here: `player_stats` gained a `guess` block and is `language sql`, so a missing `guess_runs` fails
+  the migration outright. Wallet is what adds `badge_rewards`' `bullseye` row, and a badge id with no row is
+  skipped AND not recorded - without it Bullseye silently never pays. `submit-guess` awards it, so the
+  functions have to go too.
+  v2.14.0's (the guess pool rebuilt): **deploy the Edge Functions**, then the client. No migration. The pool
+  file `data/guess-pool.json` is bundled into `submit-guess` AND fetched by the browser, so the two must ship
+  together or the day's answer differs between them - the client plays one player and hands in another.
   v2.13.0's (Guess the Player): run **`migration-century.sql`**, then **`migration-guess.sql`** (new), then
   **`migration-runs-log.sql`**, **`migration-profiles.sql`**, **`migration-moderation.sql`** and
   **`migration-wallet.sql`**, then **deploy the Edge Functions**, then the client. Guess has to come before
   profiles (the `use_account_username` trigger on its table and both of `claim_username`'s blocks), moderation
   (`mod_act`'s rename) and wallet (`claim_minigame`'s `guess` arm) - all plpgsql, so the wrong order fails
   nothing until a guest trades up. It carries v2.12.0's reordering with it (century first, see the Century
-  section) and v2.12.0's own list, since neither has reached production yet: profiles/runs-log also bring the
+  section) and v2.12.0's own list, both of which are in production as of 2026-09-29: profiles/runs-log also bring the
   Century badge's `player_stats` block. `submit-guess` is a NEW function, so `node deploy-function.mjs <env>`
   has to run - it deploys all four (submit-run, match-pick, submit-century, submit-guess). A client ahead of the migration shows a Guess the Player tile whose every
   game fails to save, so do not leave this part done.

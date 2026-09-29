@@ -22,7 +22,9 @@ export const CENTURY_REFUSALS = [
   "wrong_day",      // a tab left open past UTC midnight
   "reserved_code",  // a code that deals a daily's own seven teams
   "bad_code",       // not a code the box would accept
-  "malformed",      // no picks at all
+  "malformed",      // no picks at all, or a body the function could not read
+  "signed_out",     // the session expired while the run was being played
+  "no_profile",     // signed in, but the account has never claimed a name
   // replayCentury's own reasons, which mean the run as submitted was not legal. A player should never see one:
   // the screen enforces the same rules from the same module. If one appears, the two have drifted.
   "bad_seed", "bad_picks", "wrong_length", "bad_pick", "two_respins", "bad_slot", "slot_taken",

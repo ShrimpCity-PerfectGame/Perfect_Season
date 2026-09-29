@@ -14,10 +14,11 @@ import { TEAMS } from "./game-logic.mjs";
 import {
   CENTURY_SLOTS, CENTURY_GOAL, CENTURY_BOARDS, CENTURY_SEASON, CENTURY_TEAMS, CENTURY_FLEX,
   centuryFits, centurySlotPos, centuryPlan, centuryRespinTeam, centuryScore, centuryHit,
-  centuryTeamName, centuryReservedSeed,
+  centuryTeamName, centuryReservedSeed, centuryOutcome,
 } from "./century-logic.mjs";
 import { teamVars, POS_NAME, Confetti, reducedMotion, dailyNumber } from "./ui-common.jsx";
 import { submitCentury, fetchCenturyTop, fetchCenturyBest, fetchMyCentury, sget, sset, clearDraft } from "./storage.js";
+import { BADGE_BY_ID } from "./badges.mjs";
 
 // What a slot is called on screen. The numbers exist so a roster can be keyed by slot (CENTURY_SLOTS' own
 // comment); nobody wants to read "RB1".
@@ -28,6 +29,14 @@ const POS_ORDER = ["QB", "RB", "WR", "TE"];
 // Where a run in progress lives, per device. One slot: a player has at most one Century going, since finishing is
 // the only way out of the seven picks.
 export const CENTURY_WIP = "ps-century-wip";
+// A daily that has been PLAYED, kept on this device whether or not the save reached the server - the same
+// reason guess.jsx keeps one, and the same thing the season draft has always done (DAILY_KEY): `dailyDone`
+// came only from fetchMyCentury, so a refused save left the tile playable with the day's seven teams already
+// revealed. The row the server never wrote cannot stop the replay, so the device has to remember.
+// Keyed by ACCOUNT as well as day. Device-scoped, it leaked: play the daily, sign out, and the next
+// account on the same device - a guest included, who may not play the daily at all - read the day as already
+// spent. The server's row is per-account, so this has to be too.
+export const CENTURY_DONE = (userId, day) => `ps-century-done:${userId || "anon"}:${day}`;
 const utcDay = () => new Date().toISOString().slice(0, 10);
 // A code the submission will accept, so nothing is dealt that cannot be handed in. Same shape the main game's
 // challenge codes have; the alphabet skips nothing, because unlike a match code this is never read aloud.
@@ -116,6 +125,10 @@ export function CenturyScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [coins, setCoins] = useState(0);
+  // The badge this run earned, if it earned one. The function has always returned it so the screen could
+  // say so, and neither screen read it: a first Century or a first Bullseye paid 1,000 or 300 coins while
+  // the end screen said "+15 coins", which is the biggest payout either mode can produce going unmentioned.
+  const [badge, setBadge] = useState(null);
   const [selected, setSelected] = useState(null); // the player tapped on the board, awaiting a slot
   const [showDone, setShowDone] = useState({});   // positions with no room left, expanded again by hand
   // The reel. A cosmetic cycle only - nothing seeded reads it, and the team it settles on was decided by
@@ -177,6 +190,9 @@ export function CenturyScreen({
   // here is seven picks, not a record. Cleared as it is taken so it cannot re-deal on the next render.
   useEffect(() => {
     if (!challenge || !challenge.seed || !userId) return;
+    // Asked here as well as in the app's acceptChallenge, because a rule belongs in every door that opens it.
+    // A seed that hashes like a daily's deals that daily's seven teams, which is the whole prize.
+    if (centuryReservedSeed(challenge.seed)) { if (onChallengeTaken) onChallengeTaken(); return; }
     start("unlimited", challenge.seed);
     if (onChallengeTaken) onChallengeTaken();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,7 +203,11 @@ export function CenturyScreen({
   useEffect(() => {
     const mine = ++acct.current;
     if (!userId) { setDailyDone(null); return; }
-    fetchMyCentury(day).then((r) => { if (mine === acct.current) setDailyDone(r); });
+    // The server first, then this device. Either one means the day is spent.
+    fetchMyCentury(day).then(
+      async (r) => { if (mine === acct.current) setDailyDone(r || (await sget(CENTURY_DONE(userId, day), false)) || null); },
+      async () => { const local = await sget(CENTURY_DONE(userId, day), false); if (mine === acct.current) setDailyDone(local || null); },
+    );
   }, [userId, day]);
 
   const loadBoards = useCallback(() => {
@@ -267,6 +287,7 @@ export function CenturyScreen({
     setError("");
     setResult(null);
     setCoins(0);
+    setBadge(null);
     setSelected(null);
     setShowDone({});
     const next = variant === "daily"
@@ -303,6 +324,7 @@ export function CenturyScreen({
     if (!dailyDone) return;
     setError("");
     setCoins(0);
+    setBadge(null);
     setShared(null);
     setResult({ ...dailyDone, goal: CENTURY_GOAL, replay: true, day });
     setStage("done");
@@ -333,6 +355,13 @@ export function CenturyScreen({
       day: finished.day, seed: finished.seed });
     setStage("done");
     saveWip(null);
+    // Written BEFORE the submission and never conditioned on it; the server's numbers replace them below.
+    if (finished.variant === "daily" && finished.day) {
+      const rec = { day: finished.day, score, hit: centuryHit(score), outcome: centuryOutcome(score),
+                    roster: rosterRows(local), local: true };
+      await sset(CENTURY_DONE(userId, finished.day), rec, false);
+      setDailyDone(rec);
+    }
     const mine = acct.current;
     const answer = await submitCentury({
       variant: finished.variant, seed: finished.seed, day: finished.day, picks: finished.picks,
@@ -350,6 +379,7 @@ export function CenturyScreen({
       // The row is in guess_runs/century_runs now, and site_totals counts those into `plays` -
       // so the home screen's pill may tick. Only on ok: a refused save wrote no row.
       if (onPlayed) onPlayed();
+      if (answer.badge?.awarded?.length) setBadge(answer.badge);
       if (onClaimCoins) onClaimCoins(finished.day || day, (credited) => setCoins(credited));
       loadBoards();
     } else {
@@ -514,6 +544,14 @@ export function CenturyScreen({
           {result.hit && <Confetti />}
         </div>
         {coins > 0 && <p className="note ce-coins" role="status">+{coins} coins</p>}
+        {/* A badge this run earned. Named, because "+1,000 coins" with no reason is a mystery, and the
+            badge is the bigger thing. `credited` is 0 when it was already paid, which is why the line
+            only mentions coins when there are some. */}
+        {badge?.awarded?.map((id) => BADGE_BY_ID[id]).filter(Boolean).map((b) => (
+          <p key={b.id} className="note ce-coins" role="status">
+            {b.emoji} {b.name} unlocked{badge.credited > 0 ? ` · +${badge.credited} coins` : ""}
+          </p>
+        ))}
         {saving && <p className="note" role="status">Saving...</p>}
         {error && <p className="note ce-err" role="status">{error}</p>}
         <table className="ce-card">
@@ -658,6 +696,8 @@ function refusalLine(reason, variant) {
     case "wrong_day": return "A new day started while you were playing, so this run belonged to yesterday's teams and wasn't recorded.";
     case "reserved_code": return "That code deals a daily's own teams, so it can't be played here.";
     case "bad_code": return "That isn't a code this mode can play.";
+    case "signed_out": return "You were signed out while playing, so this run wasn't recorded. Sign in and the next one will be.";
+    case "no_profile": return "This account hasn't picked a username yet, so there was nowhere to record the run.";
     case "network": return "Couldn't save this run — check your connection.";
     default:
       // A replay reason means the screen and the server disagreed about the rules, which is a bug rather than a

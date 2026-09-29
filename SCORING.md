@@ -194,7 +194,9 @@ rating = 125.2 (no efficiency adjustment for WRs)   → A+
 ## How team score maps to results
 
 Opponent strength sits on the same 0–130 scale, drawn from the real point differential of actual
-NFL team-seasons. Win probability is `1 / (1 + e^-((you − them) / 8))`.
+NFL team-seasons. Win probability is **clamped linear**, not a sigmoid: `clamp(0.5 + (you − them) / (2 × SPREAD), 0, 1)` with
+`SPREAD = 20`, so a 20-point gap is a certainty rather than merely a strong favourite. The `1 / (1 + e^…)`
+written here until v2.17.0 described a curve the code has never had, and `/8` was not a knob that existed.
 
 | Team score | Avg wins | Makes playoffs | Chance of 20–0 |
 |---|---|---|---|

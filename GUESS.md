@@ -173,7 +173,7 @@ a list of player ids — so the `submit-guess` Edge Function's service role is t
 `century_runs`.
 
 - Columns: `id`, `user_id`, `username`, `guest`, `day` (null for practice), `seed` (null for the daily),
-  `solved`, `tries` (checked 1–8), `guesses` (the ids, in order), `answer`, `outcome`, `created_at`.
+  `solved`, `tries` (checked 1–5), `guesses` (the ids, in order), `answer`, `outcome`, `created_at`.
 - `username` and `guest` are stamped by the `use_account_username` trigger in `migration-profiles.sql`, like
   every other board — so a name on this board cannot be spoofed and a guest keeps its chip.
 - A **partial unique index** on `(day, user_id) where day is not null`: one daily per account, and any number of
@@ -408,7 +408,8 @@ fifty-third best quarterback of the century".
 
 ## 9. Not built
 
-- **Nothing on the profile.** `player_stats` does not count guess games, and no badge is awarded. Century's
+- **Nothing on the profile SCREEN.** `player_stats` has carried a `guess` block since v2.15.0 and Bullseye is
+  awarded by `submit-guess` itself, but no screen prints either. Century's
   badge took a release of its own; this can have the same.
 - **No streak.** The all-time board counts dailies solved and the average, which is the honest measure; a streak
   would need a day-by-day walk and a rule for the days nobody played.

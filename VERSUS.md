@@ -240,7 +240,7 @@ apply, and a hole in a roster is not something a later move can fill — retryin
 is abandoned (`abandon_match`), logged loudly, and answered `unplayable`: no result, nothing recorded for either
 player, the screen for that already exists, and Duel works again. One match rather than the feature.
 
-**Deploying:** `node deploy-function.mjs <env>` deploys both functions, because `submit-run` and `match-pick`
+**Deploying:** `node deploy-function.mjs <env>` deploys all four functions, because `submit-run` and `match-pick`
 share `game-logic.mjs` and `data/players.json` — deploying one of a pair is exactly the drift the release notes
 warn about. Pass a name to deploy just one.
 
@@ -662,7 +662,9 @@ server re-spins that board itself, charged to no one.
 `profiles.pvp_wins` and `pvp_losses` (integers, default 0), written only by the Edge Function, through
 `record_versus` — which moves the win and the loss together or not at all, because a win that didn't record the
 loss would be a board nobody could explain. The Leaderboard
-screen gains a **1v1** board ranking by wins, and a profile shows the pair as a line of its own. The share text
+screen gains a **1v1** board ranking by wins. A profile does **not** show the pair - `pvp_wins`/`pvp_losses`
+are read by no screen and by neither `player_profile` nor `player_stats`, so that half is written down here as
+done and is not built. The share text
 gets a versus variant: the two scores, the result, and a link to play the winner.
 
 ## 11. Tests
@@ -704,7 +706,7 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 ## 12. Order of work
 
 1. The migration and its SQL tests. ✅
-2. The defense and kicker data, and its test. ✅ (`data/versus-pool.json`, 861 of each)
+2. The defense and kicker data, and its test. ✅ (`data/versus-pool.json`, 859 of each)
 3. `versus-logic.mjs`: the board's three pools, what fits where, the auto-pick's arithmetic, the powerups, the
    result, and `decideMove` — shared by the browser and the function. ✅
 4. The Edge Function and its rule tests. ✅ (all four powerups included)

@@ -49,7 +49,10 @@ export function makeMockAuth() {
     // `guest` goes with the name on the boards that carry it, exactly as claim_username does - sou_runs and
     // builds each have the column, and clearing it on the profile alone left an account that had traded up
     // still wearing the guest chip on two boards, under its own name.
-    for (const table of [runs, dailyRuns, souRuns, builds]) {
+    // SIX tables, as claim_username does in SQL (migration-profiles.sql). century_runs and guess_runs were
+    // never added here, so a jsdom test would read a traded-up guest's Century or Guess board still showing
+    // Guest_XXXXX with its chip - the pre-v1.17.0 bug, asserted as correct.
+    for (const table of [runs, dailyRuns, souRuns, builds, state.centuryRuns, state.guessRuns]) {
       for (const r of table.values()) if (r.user_id === id) Object.assign(r, { username, ...("guest" in r ? { guest: false } : {}) });
     }
     return row;
@@ -562,6 +565,7 @@ export function makeMockAuth() {
   // tests/test-runs-sql.mjs runs the real SQL in PGlite against the same fixture and requires the
   // two to return identical JSON, so this can't quietly drift from what the database does.
   const byName = (a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0);
+  const byTime = (a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0);
   // `guest` rides along with the name on every board, the way stats_card does it - a guest's name
   // carries a chip and is not a link, because there is no profile screen behind it.
   const card = (p) => ({
@@ -607,11 +611,14 @@ export function makeMockAuth() {
       by_format[f] = {
         best_lineups: all.filter((p) => p[col] != null).sort((a, b) => b[col] - a[col] || byName(a, b)).slice(0, 15)
           .map((p) => ({ ...card(p), best_score: p.best_score ?? null, best_run: p.best_run ?? null, best_score_std: p.best_score_std ?? null, best_run_std: p.best_run_std ?? null })),
+        // byTime returns 0 on a tie; `a < b ? -1 : 1` did not, which is an invalid comparator - cmp(a,b) and
+        // cmp(b,a) both answered 1 - so a tied pair came out in whatever order the engine felt like. The
+        // username tiebreak below is what the SQL now carries too, so neither side can be arbitrary.
         best_gm: logged.filter((r) => r.gm && r.format === f && r.score != null)
-          .sort((a, b) => b.score - a.score || (a.created_at < b.created_at ? -1 : 1)).slice(0, limit)
+          .sort((a, b) => b.score - a.score || byTime(a, b) || byName(a, b)).slice(0, limit)
           .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l, guest: guestOf(r.user_id) })),
         biggest_upsets: logged.filter((r) => r.champ && r.format === f && r.score != null)
-          .sort((a, b) => a.score - b.score || (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0)).slice(0, limit)
+          .sort((a, b) => a.score - b.score || byTime(a, b) || byName(a, b)).slice(0, limit)
           .map((r) => ({ username: r.username, score: r.score, w: r.w, l: r.l, perfect: !!r.perfect, ladder: r.ladder, roster: r.roster ?? null, guest: guestOf(r.user_id) })),
       };
     }

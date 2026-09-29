@@ -19,10 +19,12 @@ export const GUESS_REFUSALS = [
   "guest_daily",   // a guest may not play the daily
   "wrong_day",     // a tab left open past UTC midnight
   "bad_code",      // not a practice code the box would accept
-  "malformed",     // no guesses at all
+  "malformed",     // no guesses at all, or a body the function could not read
+  "signed_out",    // the session expired while the game was being played
+  "no_profile",    // signed in, but the account has never claimed a name
   // replayGuessGame's own reasons. A player should never see one: the screen enforces the same rules from the
   // same module. If one appears, the two have drifted.
-  "no_answer", "bad_guesses", "no_guesses", "too_many", "bad_guess", "repeat_guess", "unknown_player",
+  "no_answer", "bad_guesses", "no_guesses", "too_many", "bad_guess", "repeat_guess", "unknown_player", "short_loss",
   "guessed_past_the_end",
 ];
 

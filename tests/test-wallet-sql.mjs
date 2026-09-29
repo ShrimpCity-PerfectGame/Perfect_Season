@@ -489,10 +489,16 @@ await runTest("claim_minigame with the game's own day: once a game day, for an O
   assert(r.data?.credited === 0, `once a game day: ${show(r)}`);
   assert((await call(MAY, "claim_minigame", { p_game: "build", p_date: tomorrow })).error === "not_played", "no build yet");
   await seedBuild(MAY, iso(Date.now() - MINUTE));
+  // A build is bound to the day it was MADE, which is what this line always claimed to be checking while it
+  // passed `tomorrow`. Unbound, one build satisfied all three permitted dates and paid 45 coins instead of 15.
   r = await call(MAY, "claim_minigame", { p_game: "build", p_date: tomorrow });
+  assert(r.error === "not_played", `a build made today does not pay under tomorrow: ${show(r)}`);
+  r = await call(MAY, "claim_minigame", { p_game: "build", p_date: today });
   assert(r.data?.credited === COIN_RULES.minigame, `a build pays under the day it was made: ${show(r)}`);
+  r = await call(MAY, "claim_minigame", { p_game: "build", p_date: yesterday });
+  assert(r.error === "not_played", `and not under yesterday either: ${show(r)}`);
   const refs = (await ledgerOf(MAY)).filter((l) => l.kind === "minigame").map((l) => l.ref).sort();
-  assert(same(refs, [`build:${tomorrow}`, `over_under:${today}`, `over_under:${yesterday}`].sort()), `keyed by the game's day: ${show(refs)}`);
+  assert(same(refs, [`build:${today}`, `over_under:${today}`, `over_under:${yesterday}`].sort()), `keyed by the game's day: ${show(refs)}`);
 });
 
 // ---------- wallet_state ----------
@@ -801,6 +807,10 @@ await runTest("the mock gives the same answers as the SQL for one shared list of
     ["fay_p", "claim_minigame", { p_game: "builds" }],
     ["fay_p", "claim_minigame", { p_game: "over_under" }],
     ["fay_p", "claim_minigame", { p_game: "build" }],
+    // Century and Guess have been claimable since v2.9.0 and v2.13.0 and this list never sent either,
+    // so the mock was free to refuse them - which it did, with bad_game, for two releases.
+    ["fay_p", "claim_minigame", { p_game: "century" }],
+    ["fay_p", "claim_minigame", { p_game: "guess" }],
     ["setup", async () => {
       await setup.souRun(P.fay_p, 24 * HOUR + MINUTE);
       await setup.souRun(P.gil, MINUTE);

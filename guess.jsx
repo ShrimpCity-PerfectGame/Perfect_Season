@@ -16,10 +16,20 @@ import {
   guessDifficulty, guessBand, guessDayNumber, GUESS_POOL_INFO,
 } from "./guess-logic.mjs";
 import { loadGuessPool } from "./guess-pool.mjs";
+import { BADGE_BY_ID } from "./badges.mjs";
 import { teamVars, reducedMotion } from "./ui-common.jsx";
 import { submitGuess, fetchGuessTop, fetchGuessBest, fetchMyGuess, sget, sset, clearDraft } from "./storage.js";
 
 export const GUESS_WIP = "ps-guess-wip";
+// A daily that has been PLAYED, kept on this device whether or not the save reached the server. The season
+// draft has always done this (perfect-season.jsx's DAILY_KEY) and this screen did not: `dailyDone` came only
+// from fetchMyGuess, so a refused save left the tile saying "Let's go" with the answer on the screen behind
+// it - play, pull the network before the last guess, read the answer, come back and solve it in one. The row
+// the server never wrote is exactly the row that cannot stop the replay, so the device has to remember.
+// Keyed by ACCOUNT as well as day. Device-scoped, it leaked: play the daily, sign out, and the next
+// account on the same device - a guest included, who may not play the daily at all - read the day as already
+// spent. The server's row is per-account, so this has to be too.
+export const GUESS_DONE = (userId, day) => `ps-guess-done:${userId || "anon"}:${day}`;
 const utcDay = () => new Date().toISOString().slice(0, 10);
 const newCode = () => {
   let out = "";
@@ -102,6 +112,10 @@ export function GuessScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [coins, setCoins] = useState(0);
+  // The badge this run earned, if it earned one. The function has always returned it so the screen could
+  // say so, and neither screen read it: a first Century or a first Bullseye paid 1,000 or 300 coins while
+  // the end screen said "+15 coins", which is the biggest payout either mode can produce going unmentioned.
+  const [badge, setBadge] = useState(null);
   const [query, setQuery] = useState("");
   const [board, setBoard] = useState({ day: [], best: [], loaded: false });
   const [dailyDone, setDailyDone] = useState(null);
@@ -156,7 +170,12 @@ export function GuessScreen({
   useEffect(() => {
     const mine = ++acct.current;
     if (!userId) { setDailyDone(null); return; }
-    fetchMyGuess(day).then((r) => { if (mine === acct.current) setDailyDone(r); });
+    // The server first, then this device. Either one means the day is spent: a run the server never
+    // recorded is still a run this player has seen the answer to.
+    fetchMyGuess(day).then(
+      async (r) => { if (mine === acct.current) setDailyDone(r || (await sget(GUESS_DONE(userId, day), false)) || null); },
+      async () => { const local = await sget(GUESS_DONE(userId, day), false); if (mine === acct.current) setDailyDone(local || null); },
+    );
   }, [userId, day]);
 
   const loadBoards = useCallback(() => {
@@ -208,6 +227,7 @@ export function GuessScreen({
     setError("");
     setResult(null);
     setCoins(0);
+    setBadge(null);
     setQuery("");
     const next = variant === "daily"
       ? { variant: "daily", day, seed: null, guesses: [] }
@@ -245,6 +265,15 @@ export function GuessScreen({
     });
     setStage("done");
     saveWip(null);
+    // Written BEFORE the submission and never conditioned on it. The numbers are the client's own replay,
+    // which is what the end screen is already showing; the server's answer replaces them below when it lands.
+    if (finished.variant === "daily" && finished.day) {
+      const rec = { day: finished.day, solved: !!local.ok && local.solved, tries: local.ok ? local.tries : finished.guesses.length,
+                    outcome: guessOutcome(!!local.ok && local.solved, local.ok ? local.tries : finished.guesses.length),
+                    guesses: finished.guesses, answer: answer?.id, local: true };
+      await sset(GUESS_DONE(userId, finished.day), rec, false);
+      setDailyDone(rec);
+    }
     const mine = acct.current;
     const sent = await submitGuess({
       variant: finished.variant, seed: finished.seed, day: finished.day, guesses: finished.guesses,
@@ -260,6 +289,7 @@ export function GuessScreen({
       // The row is in guess_runs/century_runs now, and site_totals counts those into `plays` -
       // so the home screen's pill may tick. Only on ok: a refused save wrote no row.
       if (onPlayed) onPlayed();
+      if (sent.badge?.awarded?.length) setBadge(sent.badge);
       if (onClaimCoins) onClaimCoins(finished.day || day, (credited) => setCoins(credited));
       loadBoards();
     } else {
@@ -271,6 +301,7 @@ export function GuessScreen({
     if (!dailyDone) return;
     setError("");
     setCoins(0);
+    setBadge(null);
     setResult({
       solved: dailyDone.solved, tries: dailyDone.tries, tried: GUESS_TRIES, replay: true, day,
       answer: guessPlayer(dailyDone.answer) || null,
@@ -367,6 +398,14 @@ export function GuessScreen({
           )}
         </div>
         {coins > 0 && <p className="note gp-coins" role="status">+{coins} coins</p>}
+        {/* A badge this run earned. Named, because "+1,000 coins" with no reason is a mystery, and the
+            badge is the bigger thing. `credited` is 0 when it was already paid, which is why the line
+            only mentions coins when there are some. */}
+        {badge?.awarded?.map((id) => BADGE_BY_ID[id]).filter(Boolean).map((b) => (
+          <p key={b.id} className="note gp-coins" role="status">
+            {b.emoji} {b.name} unlocked{badge.credited > 0 ? ` · +${badge.credited} coins` : ""}
+          </p>
+        ))}
         {saving && <p className="note" role="status">Saving…</p>}
         {error && <p className="note gp-err" role="status">{error}</p>}
         <GuessTable rows={shown} />
@@ -577,6 +616,8 @@ function refusalLine(reason, variant) {
     case "guest_daily": return "The daily needs an account. This one wasn't recorded.";
     case "wrong_day": return "A new day started while you were playing, so this game belonged to yesterday's player and wasn't recorded.";
     case "bad_code": return "That isn't a code this game can play.";
+    case "signed_out": return "You were signed out while playing, so this game wasn't recorded. Sign in and the next one will be.";
+    case "no_profile": return "This account hasn't picked a username yet, so there was nowhere to record the game.";
     case "network": return "Couldn't save this game — check your connection.";
     default:
       return `This game couldn't be verified (${reason}). Nothing was recorded.${variant === "daily" ? " Your daily is still available." : ""}`;

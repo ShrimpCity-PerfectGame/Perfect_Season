@@ -67,13 +67,13 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return json({ error: "unauthorized" }, 401);
+  if (!authHeader) return json({ error: "unauthorized", reason: "signed_out" }, 401);
   const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: authHeader } } });
   const { data: { user }, error: authError } = await authClient.auth.getUser();
-  if (authError || !user) return json({ error: "unauthorized" }, 401);
+  if (authError || !user) return json({ error: "unauthorized", reason: "signed_out" }, 401);
 
   let body: any;
-  try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+  try { body = await req.json(); } catch { return json({ error: "invalid JSON", reason: "malformed" }, 400); }
 
   const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -82,7 +82,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   const { data: profile, error: profileError } = await service
     .from("profiles").select("id, guest").eq("id", user.id).maybeSingle();
   if (profileError) return json({ error: "failed to save" }, 500);
-  if (!profile) return json({ error: "no profile for this account" }, 400);
+  if (!profile) return json({ error: "no profile for this account", reason: "no_profile" }, 400);
 
   const daily = body?.variant === "daily";
   let day: string | null = null;
@@ -104,7 +104,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   // Only strings reach the replay, so nothing else on a submitted array can mean anything. Capped at one more
   // than the game allows, so `too_many` is the answer rather than a megabyte of ids.
   const raw = Array.isArray(body?.guesses) ? body.guesses : null;
-  if (!raw) return json({ error: "malformed submission" }, 400);
+  if (!raw) return json({ error: "malformed submission", reason: "malformed" }, 400);
   const guesses = raw.slice(0, GUESS_TRIES + 1).map((g: any) => (typeof g === "string" ? g : null));
 
   const replay = replayGuessGame(day ? { date: day, guesses } : { seed, guesses });

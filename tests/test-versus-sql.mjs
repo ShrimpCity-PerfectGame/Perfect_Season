@@ -2,6 +2,8 @@
 // write from a client, opening a lobby, taking an invite, and reading a match back. Everything that decides a
 // *pick* lives in the Edge Function instead, because it needs game-logic.mjs - tests/test-versus-rules.mjs has
 // those.
+import { readFileSync } from "node:fs";
+import * as V from "../versus-logic.mjs";
 import { assert, runTest } from "./helpers.mjs";
 import { freshDb, addAccount, addGuestAccount, asUser, asAnon, uuid, sql } from "./pg-fixture.mjs";
 import { makeVersus } from "./mock-versus.mjs";
@@ -118,6 +120,15 @@ await runTest("taking an invite: the first one through the link is the opponent"
   assert(joined.guestId === GUEST && joined.status === "drafting", `joining starts the draft, got ${JSON.stringify(joined)}`);
   assert(joined.guestName === "opponent", "and says who joined");
   assert(joined.turnDeadline, "with a clock running on the first pick");
+  // ...and that clock is versus-logic's, not a number of its own. join_match writes the FIRST deadline in SQL
+  // while every later one comes from TURN_SECONDS through match-pick, so the two can drift silently: change the
+  // constant, ship, and the opening turn keeps the old length while the screen counts the new one. Every other
+  // duplicated constant in this repo is pinned like this (badge_rewards, claim_minigame's 15).
+  const versusSql = readFileSync(new URL("../supabase/migration-versus.sql", import.meta.url), "utf8");
+  const deadline = versusSql.match(/turn_deadline = now\(\) \+ interval '(\d+) seconds'/);
+  assert(deadline, "join_match sets an opening deadline as an interval literal");
+  assert(Number(deadline[1]) === V.TURN_SECONDS,
+    `join_match's opening clock is TURN_SECONDS: SQL says ${deadline[1]}s, versus-logic.mjs says ${V.TURN_SECONDS}s`);
   assert(typeof joined.picks === "object" && joined.picks.length === 0, "and no picks yet");
 
   assert((await call(GUEST, "join_match", { p_code: code })).data?.code === code, "the opponent reopening the link gets the match back");

@@ -39,7 +39,7 @@ export const DIVISIONS = {
 };
 export const conferenceOf = (team) => (DIVISIONS[team] || "").split(" ")[0];
 
-// One list, and it is short on purpose (v2.14.0): about 700 players, the best known at each position, ranked by
+// One list, and it is short on purpose (v2.14.0): 481 players, the best known at each position, ranked by
 // what they did and doubled-and-a-half for anyone starting now. Everyone here can be typed as a guess AND asked
 // as the answer - the two are the same set, because a game that asks about somebody you cannot name is unfair
 // and a game that refuses a name you can is broken. tools/data/build-guess-pool.mjs holds the ranking.
@@ -139,7 +139,7 @@ export const isGuessSolved = (row) => !!row && GUESS_COLUMNS.every((c) => row[c]
 // about as often as not, and the one thing a daily must never do is ask the same question twice in a fortnight.
 //
 // Every player takes one turn (see GUESS_BANDS), so the cycle is the pool and nobody comes round again until
-// everybody has been asked - about six months at the size the pool is now, and longer every week of the season
+// everybody has been asked - about sixteen months at the size the pool is now, and longer every week of the season
 // as more men pass the snap bar.
 export const GUESS_DAY_ONE = "2026-09-14";
 const SHUFFLE_SEED = "gridspin-guess-order";
@@ -284,6 +284,12 @@ export function replayGuessGame({ date, seed, guesses } = {}) {
     if (id === answer.id && i !== guesses.length - 1) return { ok: false, reason: "guessed_past_the_end" };
   }
   const solved = rows[rows.length - 1].id === answer.id;
+  // A game that was not solved has to have spent every guess. migration-guess.sql states this as the meaning
+  // of the column ("a lost one is always the full number") and nothing enforced it: a trace of one wrong guess
+  // stored solved=false with tries=1, which guess_top orders BEFORE every player who honestly used all five,
+  // while guessOutcome wrote "Missed. 5 guesses." onto the same row. The screen can only ever hand in a full
+  // board or a win, so this refuses nothing a real game produces.
+  if (!solved && rows.length < GUESS_TRIES) return { ok: false, reason: "short_loss" };
   return { ok: true, solved, tries: rows.length, rows, answer };
 }
 

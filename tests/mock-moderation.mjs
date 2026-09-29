@@ -47,7 +47,7 @@ export function makeModeration(state, profileData) {
       const target = byName(p_username) || fail("no_such_player");
       // ...and a guest is not a thing to report: no bio, no picture, no name they chose - and renaming one
       // used to promote it to a full account. Checked in the SQL's own order, straight after the lookup.
-      if (target.guest) fail("guest_not_allowed");
+      if (target.guest) fail("guest_target"); // its own code: reporting a guest is not "keep your seasons first"
       if (target.id === uid) fail("self");
       if (!REPORT_REASONS.includes(p_reason)) fail("bad_reason");
       const note = trimNote(p_note);
@@ -118,7 +118,8 @@ export function makeModeration(state, profileData) {
         if (byName(name) || profileData.isReservedUsername(name)) fail("taken");
         if (!profileData.isClean(name)) fail("blocked");
         Object.assign(state.profiles.get(p_user_id), { username: name, guest: false });
-        for (const table of [state.runs, state.dailyRuns, state.souRuns, state.builds]) {
+        // Six tables, the same list mod_act rewrites in SQL (migration-moderation.sql).
+        for (const table of [state.runs, state.dailyRuns, state.souRuns, state.builds, state.centuryRuns, state.guessRuns]) {
           for (const row of table.values()) if (row.user_id === p_user_id) Object.assign(row, { username: name, guest: false });
         }
         reason = "username";

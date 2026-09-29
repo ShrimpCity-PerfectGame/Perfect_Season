@@ -250,7 +250,8 @@ export function ledgerLabel(entry) {
   if (kind === "badge") return `${BADGE_BY_ID[ref]?.name || ref} badge`;
   if (kind === "minigame") {
     const game = String(ref || "").split(":")[0];
-    return game === "build" ? "Build-a-player" : game === "over_under" ? "Over/Under" : "Minigame";
+    // All four, or a Century and Guess claim showed in the wallet as a bare "Minigame".
+    return { build: "Build-a-player", over_under: "Over/Under", century: "Century", guess: "Guess the Player" }[game] || "Minigame";
   }
   if (kind === "purchase") return itemName(ref);
   return kind || "";
@@ -541,7 +542,11 @@ const showDetails = (d) => setShop((s) => ({
     if (state === "owned") {
       return <div className="sh-acts"><button type="button" className="btn solid" disabled={busy} onClick={() => equip(item, item.id)}>Equip</button></div>;
     }
-    if (state === "equipped" && item.kind === "title") {
+    // Any slot whose default is "nothing" can go back to nothing. Offered for titles only, a name colour or a
+    // nameplate could never be taken off once equipped: neither kind has a free item, so there was no route back
+    // to a plain name at all - which shop-catalog.mjs's own comment promises ("nobody is given a banner they did
+    // not choose"). equip_item has always accepted null for every slot; only this screen refused to send it.
+    if (state === "equipped" && DEFAULT_ITEM[item.kind] === null) {
       return <div className="sh-acts"><button type="button" className="btn" disabled={busy} onClick={() => equip(item, null)}>Take off</button></div>;
     }
     if (state === "equipped") return <p className="sh-dline">Equipped</p>;
