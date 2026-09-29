@@ -36,14 +36,18 @@ export const DIVISIONS = {
 };
 export const conferenceOf = (team) => (DIVISIONS[team] || "").split(" ")[0];
 
+// One list, and it is short on purpose (v2.14.0): about 700 players, the best known at each position, ranked by
+// what they did and doubled-and-a-half for anyone starting now. Everyone here can be typed as a guess AND asked
+// as the answer - the two are the same set, because a game that asks about somebody you cannot name is unfair
+// and a game that refuses a name you can is broken. tools/data/build-guess-pool.mjs holds the ranking.
 export let GUESS_PLAYERS = [];        // every player, in the file's order
 export let GUESS_BY_ID = {};          // id -> player
 export let GUESS_SIDES = {};          // position group -> which side of the ball
 let dailyOrder = null;                // the permutation the daily walks, built once
 
 // A player's id has to be stable across a rebuild of the pool and unique within it. Name alone is not: there
-// are two Adrian Petersons, two Alex Smiths and fifty more. Name plus draft class plus position is unique
-// across all 4,637 - checked by tests/test-guess-logic.mjs against the real file, not assumed.
+// are two Adrian Petersons and two Alex Smiths in the league's history. Name plus draft class plus position is
+// unique across the pool - checked by tests/test-guess-logic.mjs against the real file, not assumed.
 export const guessId = (p) => `${p.name}|${p.draft}|${p.pos}`;
 
 // Expands data/guess-pool.json. Positional rows behind a `columns` list, with team, position and group as
@@ -62,6 +66,10 @@ export function initGuessData(pool) {
       number: row[at.number],
       from: row[at.from],
       to: row[at.to],
+      // 0-100, how guessable tools/data/build-guess-pool.mjs thinks he is. It decides how often he comes up and
+      // what the end screen calls the day's difficulty. A file built before v2.14.0 has no such column, and 0
+      // for everybody is a flat pool - which is what it was.
+      score: at.score === undefined ? 0 : row[at.score],
     };
     p.division = DIVISIONS[p.team] || null;
     p.side = GUESS_SIDES[p.group] || null;
@@ -109,10 +117,12 @@ export const isGuessSolved = (row) => !!row && GUESS_COLUMNS.every((c) => row[c]
 // every player in the pool, because a pool where two players share all five would make a solved row a lie.
 
 // ---------- Which player, on which day ----------
-// The daily walks a fixed permutation of the whole pool rather than picking at random: a random pick repeats
-// somebody within a year about as often as not, and the one thing a daily must never do is ask the same
-// question twice in a fortnight. Walking a shuffle gives every player exactly one turn before any repeat -
-// 4,637 days of them, which is twelve and a half years.
+// The daily walks a fixed cycle rather than picking at random: a random pick repeats somebody within a year
+// about as often as not, and the one thing a daily must never do is ask the same question twice in a fortnight.
+//
+// The cycle is WEIGHTED (v2.14.0). Every player is in it, but the best-known are in it three times and the
+// deepest cuts once, so a typical day is somebody most people can name and the hard ones stay occasional. It
+// runs about 1,300 days - three and a half years - and nobody comes round twice inside about a year.
 export const GUESS_DAY_ONE = "2026-09-14";
 const SHUFFLE_SEED = "gridspin-guess-order";
 
@@ -121,22 +131,87 @@ export function guessDayNumber(date) {
   return Math.round((utc(date) - utc(GUESS_DAY_ONE)) / 86400000);
 }
 
+// How often each band comes round. The best-known third of the pool is asked three times a cycle, the middle
+// twice, the rest once - so most days are a player you know and the deep cuts stay occasional rather than
+// disappearing. The alternative, one turn each, makes every day equally likely to be the 700th-best guard.
+export const GUESS_BANDS = [
+  { name: "easy", share: 0.25, turns: 3 },
+  { name: "medium", share: 0.35, turns: 2 },
+  { name: "hard", share: 0.40, turns: 1 },
+];
+
+// The pool, best-known first. Ties break on id so two builds of the same data give the same order.
+function ranked() {
+  return [...GUESS_PLAYERS].sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
+}
+
+// Which band a player is in, by his place in that ranking.
+export function guessBand(player) {
+  const order = ranked();
+  const at = order.findIndex((p) => p.id === player?.id);
+  if (at < 0) return null;
+  let seen = 0;
+  for (const band of GUESS_BANDS) {
+    seen += Math.round(order.length * band.share);
+    if (at < seen) return band.name;
+  }
+  return GUESS_BANDS[GUESS_BANDS.length - 1].name;
+}
+
+// How hard the day was, 0 (everybody knows him) to 100 (the deepest cut in the pool), as a position in the
+// ranking rather than the raw score - the scores themselves sit in a narrow band and "61 out of 100" would mean
+// nothing to anybody. Shown only when the game is over; before that it would be a hint.
+export function guessDifficulty(player) {
+  const order = ranked();
+  const at = order.findIndex((p) => p.id === player?.id);
+  if (at < 0 || order.length < 2) return null;
+  return Math.round((100 * at) / (order.length - 1));
+}
+
+// The cycle the daily walks. Each player takes his band's number of turns, and his turns are SPREAD - placed a
+// cycle-length apart and nudged off a hash of his own id - so somebody asked three times in 1,300 days is asked
+// about every 450, never twice in a week. A shuffle of three concatenated passes would have been simpler and
+// would have allowed exactly that, which is the one thing a daily may not do.
 function orderOnce() {
   if (dailyOrder) return dailyOrder;
-  const rng = mulberry32(hashStr(SHUFFLE_SEED));
-  const all = GUESS_PLAYERS.map((p) => p.id);
-  // Never a random comparator - how many times an engine calls one is up to the engine, and the client and the
-  // server must agree call for call (CLAUDE.md's engine-independence note).
-  for (let i = all.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [all[i], all[j]] = [all[j], all[i]];
+  const order = ranked();
+  if (!order.length) { dailyOrder = []; return dailyOrder; }
+  const turnsFor = new Map();
+  let seen = 0;
+  for (const band of GUESS_BANDS) {
+    const upto = Math.min(order.length, seen + Math.round(order.length * band.share));
+    for (let i = seen; i < upto; i++) turnsFor.set(order[i].id, band.turns);
+    seen = upto;
   }
-  dailyOrder = all;
+  for (const p of order) if (!turnsFor.has(p.id)) turnsFor.set(p.id, 1);
+
+  const length = [...turnsFor.values()].reduce((n, t) => n + t, 0);
+  const slots = new Array(length).fill(null);
+  // Never a random comparator and never Math.random: the client and the server must agree call for call
+  // (CLAUDE.md's engine-independence note), so every position here comes from the seeded stream in one order.
+  const rng = mulberry32(hashStr(SHUFFLE_SEED));
+  const start = new Map(order.map((p) => [p.id, rng()]));
+  // The most-asked first, because they are the ones whose spacing matters and the ones hardest to place late.
+  const byTurns = [...turnsFor.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  for (const [id, turns] of byTurns) {
+    const gap = length / turns;
+    for (let k = 0; k < turns; k++) {
+      let at = Math.floor(start.get(id) * gap + k * gap) % length;
+      // Taken: walk forward to the next free slot. The walk is why the spacing is "about" rather than "exactly".
+      let steps = 0;
+      while (slots[at] !== null && steps < length) { at = (at + 1) % length; steps++; }
+      slots[at] = id;
+    }
+  }
+  dailyOrder = slots.filter(Boolean);
   return dailyOrder;
 }
 
-// The answer for a date. Dates before day one walk backwards through the same permutation rather than failing,
-// so nothing has to special-case them.
+// How many days before the cycle comes round. Longer than the pool, because the best-known take several turns.
+export const guessCycleLength = () => orderOnce().length;
+
+// The answer for a date. Dates before day one walk backwards through the same cycle rather than failing, so
+// nothing has to special-case them.
 export function guessAnswerFor(date) {
   const order = orderOnce();
   if (!order.length) return null;

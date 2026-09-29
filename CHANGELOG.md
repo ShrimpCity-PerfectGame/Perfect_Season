@@ -10,6 +10,65 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.14.0] — 2026-09-28
+
+Guess the Player asks about people you have heard of. The pool goes from 4,637 players to **731**, chosen by a
+ranking rather than a filter, and the daily leans toward the best known of them.
+
+**Deploy order: no migration. Deploy the Edge Functions, then the client** — `submit-guess` bundles
+`data/guess-pool.json` and `guess-logic.mjs`, and both changed, so a client ahead of the function would play one
+player and hand in another. `GUESS.md` 1 is the reference.
+
+### Changed
+
+- **The pool is a ranking, not a filter.** v2.13.0 kept every drafted player with a five-season career, which was
+  wrong at both ends: 723 men lasted five seasons without ever playing — Rodney Adams took **ten snaps** across
+  six seasons and three teams — while a career takes five years to measure, so the draft classes stopped at 2022
+  and **977 players who played in 2024 or later were shut out**, Jayden Daniels, Brock Bowers, C.J. Stroud, Puka
+  Nacua and Caleb Williams among them.
+  - A **floor** first: 32 career games, or 16 starts, or one season of real playing time, or a Pro Bowl. That
+    removes 2,180 players before anything is scored.
+  - Then a **Guessability Score**, six parts each scaled 0–1: recency (0.30, decaying smoothly), prominence
+    (0.35, as a percentile **within his own position**, so a top-decile guard scores like a top-decile receiver),
+    longevity (0.10), accolades (0.15, the Hall of Fame full marks), starts (0.05) and draft capital (0.05).
+  - Then a **share of each position group** rather than of everybody — a flat tenth of the field gave 34
+    quarterbacks and 141 defensive backs, which is the right shape for a roster and the wrong shape for a quiz.
+  - **Prominence blends into draft capital for a short career**, which is what makes the recency goal work at
+    all: every other term is career-shaped, so a first-year player was a dozen points below any cut *by
+    construction*, and the first pick in the draft could not be in a pool meant to feel current.
+  - What comes out: 731 players, 32 teams, every position group, draft classes 1982–2025, **397 of them from the
+    last three seasons**. The cut line is the test — Jonathan Vilma, Steve Wisniewski, Ahman Green, Donald
+    Driver, with Jay Cutler just outside.
+- **The daily is weighted.** Everybody is still in the cycle, but the best-known quarter take three turns to the
+  deepest cuts' one: 41% easy, 38% medium, 21% hard. Turns are *spread* rather than shuffled together, so nobody
+  comes round twice inside 451 days — three concatenated passes would have been simpler and would have allowed
+  the same player on consecutive days.
+- The search box holds the same 731 players, so what you can type is what can be asked.
+
+### Added
+
+- **The end screen says how hard the day was** — "Difficulty 29/100", plus whether it was one most people get, a
+  fair test or a deep cut. Shown only once the game is over; before that it would narrow the answer.
+- `GP_WHY="Cam Ward"` on the builder prints where a player ranks in his position group and how far he is from the
+  cut, which is how "the score is wrong about him" is told from "he is the 53rd best quarterback of the century".
+
+### Fixed
+
+- **88 players wore a jersey number they never wore.** nflverse writes `0` for a number it does not have, and 0
+  only became a legal NFL number in 2023 — so Aqib Talib was in the game as `#0` rather than 21, Blair Walsh as
+  `#0` rather than 3. The number is one of the five columns, so a player without one is now left out entirely
+  (416 of them, Talib included).
+
+### Notes
+
+- **The Fame Bonus** is the one hand-written thing in the score, for what no column can see. It holds two names:
+  Travis Hunter (a Heisman winner playing both ways) and Cam Ward (first overall, starting from week one, who
+  misses the quarterback cut by a fifth of a point). Both are first-year players whose numbers will speak for
+  themselves next season.
+- **Not built**: per-position statistical formulas for prominence (AV is a cross-position value metric and is
+  what makes this possible at all), and the difficulty score is shown but not yet used to pick a day's *intended*
+  difficulty, order the search box or seed a future match.
+
 ## [2.13.0] — 2026-09-28
 
 **Guess the Player** — a daily Wordle-shaped game. One real player a day, eight guesses, and five columns that

@@ -1,10 +1,11 @@
 // Fetches data/guess-pool.json when the game is opened, instead of shipping it in the bundle every visitor
 // loads.
 //
-// Why this file exists at all: the pool is 195 KB (61 KB compressed), about a sixth of the whole bundle, for one
-// mini-game. tests/test-build-seo.mjs holds the bundle under 1.2 MB and says in as many words that the honest fix
-// for a big data file is to load it when its screen opens rather than at startup - raising the ceiling is how
-// data/versus-pool.json got in, and doing it twice is how a 400 KB bundle happens.
+// Why this file exists at all: page.js sits within a few KB of the 1.2 MB ceiling tests/test-build-seo.mjs holds
+// it to, and that ceiling says in as many words that the honest fix for a data file is to load it when its
+// screen opens rather than at startup - raising it is how data/versus-pool.json got in, and doing that twice is
+// how a 400 KB bundle happens. The pool was 195 KB when this was written and is 36 KB since the v2.14.0 ranking;
+// the bundle still has no room for it, so this stays.
 //
 // The rules and the DATA are separate concerns: guess-logic.mjs is imported normally, because it is small and the
 // screen needs its constants before anything is loaded. Only the pool waits.

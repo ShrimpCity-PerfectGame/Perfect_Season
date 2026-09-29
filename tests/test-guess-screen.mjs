@@ -159,7 +159,7 @@ await runTest("0. the pool is fetched when the game opens, and a failure says so
   // bundled into build/test-component.mjs, so it holds its own guess-logic.mjs. The screen's pool was loaded
   // above through the stub; these are the answers the tests below compare against.
   initGuessData(JSON.parse(POOL_TEXT));
-  assert(GUESS_PLAYERS.length > 4000, `the test's own copy is in too: ${GUESS_PLAYERS.length}`);
+  assert(GUESS_PLAYERS.length > 400, `the test's own copy is in too: ${GUESS_PLAYERS.length}`);
 });
 
 await runTest("1. the Mini games tile opens the game, and the menu says how it is played", async () => {
@@ -183,6 +183,7 @@ await runTest("2. a practice game is won by typing a name, and recorded as solve
   await click(variantTiles()[1]);
   await flush();
   assert(view() === "play", `Practice deals a game: ${view()}`);
+  assert(!gp().querySelector(".gp-difficulty"), "and does not say how hard it is while it is being played");
   const code = seedOnScreen();
   assert(/^[A-Z0-9]{8}$/.test(code || ""), `it shows the code the game was dealt from: ${code}`);
   const answer = guessAnswerForSeed(code);
@@ -205,6 +206,9 @@ await runTest("2. a practice game is won by typing a name, and recorded as solve
   assert(/Got it/.test(gp().querySelector(".gp-eyebrow").textContent), "the hero says it was got");
   assert(gp().textContent.includes(answer.name), `and names the player: ${answer.name}`);
   assert(gridRows().length === 2, "both guesses stay on screen");
+  // How hard the day was, which only appears once it is over - before that it narrows the answer.
+  const hard = gp().querySelector(".gp-difficulty");
+  assert(hard && /Difficulty \d+\/100/.test(hard.textContent), `the end screen says how hard it was: ${hard?.textContent}`);
   assert(GUESS_COLUMNS.every((c) => stateOf(gridRows()[1], c) === "hit"), "the winning row is green the whole way across");
 
   const saved = runs();
@@ -467,7 +471,7 @@ await runTest("12. the pool the screen offers is the pool the server checks agai
   assert(gp().querySelectorAll(".gp-hit").length === 0, "one letter offers nothing");
   await type(box(), "Zzzzzz");
   assert(gp().querySelectorAll(".gp-hit").length === 0, "and a name nobody has offers nothing");
-  assert(/five seasons or more/.test(gp().textContent), "with a line saying which players the game holds");
+  assert(/the best known at every position/.test(gp().textContent), "with a line saying which players the game holds");
   // Every id the screen can hand in resolves in the same module the function replays with.
   for (const p of GUESS_PLAYERS.slice(0, 50)) assert(guessPlayer(p.id) === p, `${p.id} resolves`);
 });

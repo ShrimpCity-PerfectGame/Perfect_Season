@@ -11,80 +11,130 @@ pool is, where each rule lives, what the database holds, and what a submission c
 
 ---
 
-## 1. Why the data is its own file, again
+## 1. Who is in the game
 
-`data/players.json` holds the fantasy positions and nothing else — QB, RB, WR, TE and the kickers and defenses a
+**731 players**, and every one of them can be typed as a guess *and* asked as the answer. Those are the same set
+on purpose: a game that asks about somebody you cannot name is unfair, and a game that refuses a name you *can*
+is broken.
+
+### Why it is not the draft's pool
+
+`data/players.json` holds the fantasy positions and nothing else - QB, RB, WR, TE and the kickers and defenses a
 duel needs. This game asks about **the whole roster**: the owner's words were "this will need additional
 information as it needs defensive as well as offensive players", and a game that only ever asked about
-quarterbacks and receivers would be a quarter of the sport.
+quarterbacks and receivers would be a quarter of the sport. So `data/guess-pool.json` is a third data file,
+built by `tools/data/build-guess-pool.mjs`.
 
-`data/guess-pool.json` (195 KB, 4,637 players) is built by `tools/data/build-guess-pool.mjs` from nflverse's
-`players.csv`, which carries the four things this game needs and the draft data does not: **jersey number,
-draft year, position and the seasons played**. It is stored as positional rows behind a `columns` list, with
-team, position and group as indices into their own tables, because a 4,637-row file of named objects is three
-times the size for no gain — `initGuessData` expands it once, the way `initGameData` and `initCenturyData` do,
-except that this one runs when the game is opened rather than at startup (below).
+### The Guessability Score (v2.14.0)
 
-The knobs at the top of the builder, each with the cost of turning it:
+v2.13.0 used a filter: every drafted player with a five-season career, 4,637 of them. It was wrong at both ends.
 
-| Knob | Value | What it decides |
+- **Five seasons is not fame.** 723 men lasted that long without ever playing. Rodney Adams was a Viking, a
+  Ninety-Niner and a Titan across six seasons and took **ten snaps**. With 4,637 answers, most days were closer
+  to him than to Peyton Manning - which is the owner's complaint, in one sentence: *some obscure player in the
+  almost 4,500 seems almost impossible*.
+- **A career takes five years to measure**, so the pool's draft classes stopped at **2022**. No Jayden Daniels,
+  no Brock Bowers, no C.J. Stroud, no Puka Nacua, no Caleb Williams. 977 men who played in 2024 or later were
+  shut out - every name a fan has watched most recently.
+
+So the question is no longer "did he last" but **"would a fan know him"**, and that is a ranking. Three steps:
+
+**1. A floor**, applied before any scoring. 32 career games, or 16 career starts, or one season of real playing
+time, or a single Pro Bowl. Below that a man is not eligible at any weighting - somebody who played eight
+special-teams snaps for Jacksonville in 2007 should never be a daily answer, and no formula should have to
+decide it. This alone removes 2,180 of the 7,253.
+
+**2. A Guessability Score**, five parts, each scaled 0–1 so the weights mean what they say:
+
+| | Weight | What it is |
 | --- | --- | --- |
-| `MIN_SEASONS` | 5 | How long a career has to be. Below 5 the pool fills with names nobody could place. |
-| `FIRST_SEASON` | 1999 | Where nflverse's coverage starts, the same floor the draft data has. |
-| `INCLUDE_UNDRAFTED` | `false` | **A one-line switch.** Draft class is a column, and an undrafted player has none. |
+| **R** recency | 0.30 | `exp(-0.04 × seasons since he last played)`. 2026 = 1.00, 2020 = 0.79, 2005 = 0.43. |
+| **Q** prominence | 0.35 | `0.6 × peak + 0.4 × career`, both as **percentiles within his own position** — a top-decile guard scores like a top-decile receiver. PFR's *weighted* career AV leans on a player's best seasons and its plain career AV does not, so the pair is the closest this data comes to peak-and-volume. |
+| **L** longevity | 0.10 | `min(1, seasons / 8)`. Keeps familiar veterans who were never stars. |
+| **A** accolades | 0.15 | `min(1, (Pro Bowls + 2 × All-Pros) / 10)`, and the Hall of Fame is 1 outright. This is what lets the legends outrun the decay. |
+| **S** starter | 0.05 | `0.7 × min(1, startingSeasons/4) + 0.3 × min(1, games/64)`. The guard against a long career spent inactive. |
+| **D** draft capital | 0.05 | First overall is 1, the end of round one about a half, nothing after round two. The only term that knows a player before he has done anything. |
 
-Turning `INCLUDE_UNDRAFTED` on would cost the game its draft-class column, or force an "undrafted" value that is
-either always grey or always green and says nothing either way. What it costs to leave off is worth knowing and
-is written into the builder: **Warren Moon, Antonio Gates, James Harrison, London Fletcher and Jon Kitna** are
-not in the pool. That is the trade, and it is deliberate.
+**Prominence blends into draft capital for a short career**, and that detail is what makes the recency goal
+actually work. Every other term is career-shaped, so a first-year player is a dozen points below any cut **by
+construction** - it kept the first pick in the draft out of a pool meant to feel current. So before a man has a
+record his prominence *is* where he was taken, which is exactly what a fan knows about him, and the measured
+value takes over as the seasons arrive (`SETTLED_SEASONS = 4`). It cuts both ways, which is why it is honest: a
+second-year seventh-rounder is pulled *down* by the same blend.
 
-What the pool holds, by position group: DB 885 · OL 829 · DL 748 · LB 650 · WR 495 · RB 402 · TE 295 · QB 232 ·
-SPEC 101.
+**3. A share of each position group**, not of everybody. Ranked together, quarterbacks are crowded out by sheer
+numbers: a flat tenth of the field gave **34 quarterbacks and 141 defensive backs**, which is the right shape
+for a roster and the wrong shape for a quiz. There are 32 starting quarterbacks at a time and every one is a
+household name; the hundredth-best corner of the century is not. QB takes 30% of its group, the line 10.5% of
+its, and the totals still come out roughly roster-shaped because there are so many more linemen to choose from.
+
+**The Fame Bonus** is the one hand-written thing in the score, and the only escape hatch: points on the same
+0–100 scale for a man the columns undersell. It is used **twice** - Travis Hunter (a Heisman winner playing both
+ways, which no column here can see) and Cam Ward (first overall, starting from week one, who misses the
+quarterback cut by a fifth of a point). Every entry carries its reason, a name in it clears the floor by saying
+so, and the list should shrink on its own as careers accumulate.
+
+**Tuning is expected.** The weights above are the third set tried: the first draft of this score put recency at
+0.45 and produced 731 players of whom **691 last played in the 2020s**, with Ray Lewis and Troy Aikman outside
+the pool. That is not a football quiz, it is this season's depth chart. `GP_WHY="Some Player"` on the builder
+prints where a given man ranks in his group and how far he is from the cut, which is how that was found.
+
+### What comes out
+
+731 players, 36 KB, all 32 teams, every position group, draft classes 1982–2025, and **397 of them played in
+the last three seasons**. The names at the cut line are the test of it - Jonathan Vilma and Steve Wisniewski,
+Ahman Green, Todd Heap, Donald Driver, with Jay Cutler and Santana Moss just outside. If the boundary is full
+of household names, the middle is safe.
+
+**Known costs, all deliberate:**
+
+- **A player with no jersey number on record cannot be in the game**, because the number is one of the five
+  columns. That costs 416 players, Aqib Talib among them. nflverse writes `0` for a number it does not have, and
+  0 only became a legal number in 2023 - so 88 players in the v2.13.0 pool wore a `#0` they never wore,
+  including Talib (21), Blair Walsh (3) and Bashaud Breeland (26). Fixed in v2.14.0.
+- **Undrafted players are out entirely** (`INCLUDE_UNDRAFTED`, the one-line switch), because the team column is
+  the team that *drafted* him. That costs Warren Moon, Antonio Gates, James Harrison, London Fletcher, Jon Kitna
+  and **Justin Tucker**. Putting them back needs a roster history and a draft class of "Undrafted".
+- **Per-position statistical formulas are not built.** The obvious refinement to Q is a blend per position -
+  passing yards and starts for a quarterback, sacks and tackles for an edge - rather than AV for everybody. AV
+  is a cross-position value metric and it is what makes the current version possible at all; the per-position
+  version needs per-season stats for defenders and kickers that the draft table does not carry.
 
 ### It is not in the bundle
 
-195 KB (61 KB compressed) is about a sixth of the whole bundle, for one mini-game, so the game **fetches** it when
-its screen opens — `guess-pool.mjs`, one memoised load, and `build.mjs` copies the file to
-`public/data/guess-pool.json`. `tests/test-build-seo.mjs` holds the bundle under 1.2 MB and says in as many words
-that this is the honest fix for a big data file; raising that ceiling is how `data/versus-pool.json` got in, and
-doing it twice is how a 400 KB-compressed bundle happens. The test now checks both halves: the pool **is** served
-from the site root, and it is **not** in `page.js` as well.
+The game **fetches** `data/guess-pool.json` when its screen opens (`guess-pool.mjs`, served from
+`/data/guess-pool.json` by `build.mjs`). At 36 KB that is no longer about weight - it is that `page.js` sits
+within a few KB of the 1.2 MB ceiling `tests/test-build-seo.mjs` holds it to, and that ceiling exists to force
+exactly this question rather than be raised twice. The test checks both halves: the pool **is** served from the
+site root, and it is **not** in `page.js` as well.
 
-The service worker treats it exactly like the bundle — network first, the store only as a fallback
-(`sw-rules.mjs`'s `DATA`). Same reasoning as the bundle's own rule: the daily's answer is a walk through a
-permutation of this file and `submit-guess` walks its own copy, so a browser holding last release's pool would
-play one player and hand in another.
+The service worker treats it exactly like the bundle - network first, the store only as a fallback
+(`sw-rules.mjs`'s `DATA`). Same reasoning as the bundle's own rule: the daily's answer is a walk through a cycle
+built from this file and `submit-guess` walks its own copy, so a browser holding last release's pool would play
+one player and hand in another.
 
 The screen therefore has three states, and the loading one is not cosmetic: with no pool every id resolves to
-null, the search box offers nobody and a resumed game draws an empty grid — a screen that looks like a bug rather
-than a wait. A failed fetch says what is missing and offers a real retry (a failed load is forgotten, not
-remembered as the answer). `tests/test-guess-screen.mjs` test 0 drives all of it through a stubbed fetch, which is
-also what loads the pool for every test after it.
+null, the search box offers nobody and a resumed game draws an empty grid - a screen that looks like a bug
+rather than a wait. A failed fetch says what is missing and offers a real retry (a failed load is forgotten, not
+remembered as the answer). `tests/test-guess-screen.mjs` test 0 drives all of it through a stubbed fetch, which
+is also what loads the pool for every test after it.
 
-**The tests and the UI harness import the file directly** and initialise it before anything mounts — the harness
+**The tests and the UI harness import the file directly** and initialise it before anything mounts - the harness
 is opened over `file://` and has nothing to fetch from. Note that the app under test is bundled, so it holds its
 own copy of `guess-logic.mjs`: a test file initialising its own copy does **not** initialise the app's, which is
 why test 0 does both. The Android app serves `app/www` from its own root, so the same address works there;
 `tools/app/build-app.mjs` copies it along with everything else, but that half has not been checked on a device.
 
-### The 17 hand-picked clashes
+### Clashes
 
-A player's id is `name|draft class|position` (`guessId`), because name alone is not unique — there are two
-Adrian Petersons and two Alex Smiths. That makes every player distinct. What it does **not** fix is two
-different players who happen to share all **five compared columns**: same team, same draft class, same position,
-same number. A game whose answer is one of those can go all green without being solved, which is the worst thing
-this game could do.
+Five greens must identify one man: a row where team, position, draft class and number all match has to **be**
+the answer, or somebody could go all green without winning. At 731 players there are **no clashes at all** - the
+ranking makes them rare, where the 4,637-player pool had 17.
 
-The builder therefore keeps one of each clashing pair and **fails the build on a clash it has not been told
-about**. The choice is made by hand, in a `KEEP` table with a reason per pair, because the rule that was there
-first — keep the longer career — got three of them backwards: Maxx Crosby and Clelin Ferrell both played eight
-seasons, so it fell through to alphabetical and dropped **Crosby**. Same for **Riq Woolen** and **Jonathan
-Cooper**. An automatic rule cannot know which player is remembered; a person can.
-
-There are 17 pairs. Adding a season to the pool will probably add more, and the build will say so rather than
-quietly resolving them.
-
----
+The `KEEP` table survives against the next rebuild. One of each pair stays and **which one is chosen by hand**,
+with a reason; a clash that is not in the table **fails the build**. The automatic rule that was there first -
+keep the longer career - got three backwards, Maxx Crosby among them, because equal eight-season careers fell
+through to alphabetical.
 
 ## 2. Where the rules live
 
@@ -125,10 +175,23 @@ wrong team, and that is worth knowing.
 
 ## 3. Which player, on which day
 
-The daily **walks a fixed permutation** of the whole pool rather than picking at random. A random pick repeats
-somebody inside a year about as often as not, and the one thing a daily must never do is ask the same question
-twice in a fortnight. Walking a shuffle gives every player exactly one turn before any repeat — **4,637 days**,
-which is twelve and a half years.
+The daily **walks a fixed, weighted cycle** rather than picking at random. A random pick repeats somebody inside
+a year about as often as not, and the one thing a daily must never do is ask the same question twice in a
+fortnight.
+
+Everybody is in the cycle, but not equally often (`GUESS_BANDS`): the best-known quarter take **three** turns,
+the next 35% take two, the rest take one. So a typical day is somebody most people can name and the deep cuts
+stay occasional instead of disappearing - measured over a full cycle, **41% easy, 38% medium, 21% hard**.
+
+The cycle runs **1,353 days**, and a player's turns are *spread* - placed a cycle-length apart and nudged off a
+hash of his own id - rather than shuffled together as three passes. Three passes would have been simpler and
+would have allowed the same man on two consecutive days, which is the one thing a daily may not do. Measured:
+**nobody comes round twice inside 451 days**, and `tests/test-guess-logic.mjs` walks the whole cycle and asserts
+it stays over 300.
+
+**How hard was it?** `guessDifficulty(player)` is his place in the pool's own ranking, 0 (everybody knows him)
+to 100 (the deepest cut), and `guessBand` is which band he is in. The end screen prints both once the game is
+over - never before, where it would narrow the answer.
 
 - `GUESS_DAY_ONE = "2026-09-14"`, the same launch day the share cards number from.
 - The shuffle is `mulberry32(hashStr("gridspin-guess-order"))` and a plain Fisher–Yates loop. **Never a random
@@ -254,7 +317,7 @@ and `.mode`. It is reached from **Mini games**, not Modes (v2.10.0).
 
 | File | What only it can hold |
 | --- | --- |
-| `tests/test-guess-logic.mjs` | every rule and refusal; that five greens identify exactly one player **across the whole pool**; that a bot guessing blind solves 0.20% of games in 8; ids unique; the permutation repeats nobody in 4,637 days |
+| `tests/test-guess-logic.mjs` | every rule and refusal; that five greens identify exactly one player **across the whole pool**; that a bot guessing blind solves 1% of games in 8; ids unique; that the weighted cycle asks everybody, repeats nobody inside a year and asks the best-known more than twice as often; the difficulty scale; and who the ranking must never lose (Brady and Aikman) or leave out (Daniels, Bowers, Jeanty, Ward, Hunter) |
 | `tests/test-guess-edge.mjs` | the real `submit-guess`, executed through `tests/edge-harness.mjs`: who is asking, the daily's own clock, the 409, `guest_daily`, every replay refusal, and that the result written is the **function's** whatever the client claims |
 | `tests/test-guess-sql.mjs` | the migration in PGlite: nobody writes the table, the daily's unique index, both boards == the mock, a rename, the coin claim |
 | `tests/test-guess-screen.mjs` | the buttons: the tile, both variants, guesses typed, the colours **in words**, the end screen, resume, the boards, the guest, the refusal map |
@@ -292,9 +355,16 @@ There is deliberately **no** override for the day's player: the answer is a pure
 pool, and a table of exceptions would be a second source of truth for the one thing both the browser and the
 server have to agree on. A player who has to go gets removed from the pool, which moves every later day by one.
 
-Rebuild the pool with `node tools/data/build-guess-pool.mjs` (it needs nflverse's `players.csv`). It refuses to
-write a file with an unlisted clash, and `tests/test-guess-logic.mjs` re-checks every property of the file it
-writes.
+Rebuild the pool with `node tools/data/build-guess-pool.mjs`. It fetches about 45 MB from nflverse - the player
+index, PFR's draft history and every season of snap counts since 2012 - and caches it under `build/nflverse/`,
+so a second run is quick; delete that folder to refetch. It refuses to write a file with an unlisted clash, and
+`tests/test-guess-logic.mjs` re-checks every property of the file it writes.
+
+**Re-run it when a season ends.** The pool is a ranking of the present as much as the past.
+
+`GP_WHY="Cam Ward,Travis Hunter"` prints where those men rank inside their position group, how many that group
+keeps, and how far each is from the cut - which is how you tell "the score is wrong about him" from "he is the
+fifty-third best quarterback of the century".
 
 ---
 
@@ -307,3 +377,6 @@ writes.
   badge took a release of its own; this can have the same.
 - **No streak.** The all-time board counts dailies solved and the average, which is the honest measure; a streak
   would need a day-by-day walk and a rule for the days nobody played.
+- **The difficulty is shown but not used.** It could pick the day's *intended* difficulty (an easy Monday, an
+  expert Sunday), order the search box's suggestions, or seed a future multiplayer match - all of which the
+  score now makes possible, and none of which is built.

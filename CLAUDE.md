@@ -285,30 +285,48 @@ games. **`GUESS.md` is the reference** - read it before touching any of it. The 
 
 - **It needs a THIRD data file, and that is the whole reason it is its own thing.** The draft's pool holds the
   four positions a fantasy score uses; this game asks about the roster, defence included, which is what the owner
-  asked for. `data/guess-pool.json` (4,637 players) is built by `tools/data/build-guess-pool.mjs` from nflverse's
-  player index - the only source here carrying **jersey number and draft class** - and holds DB 885 · OL 829 ·
-  DL 748 · LB 650 · WR 495 · RB 402 · TE 295 · QB 232 · SPEC 101. Drafted players only, because draft class is a
-  column and "undrafted" is a value that is either always grey or always green; the known cost is Warren Moon,
-  Antonio Gates, James Harrison, London Fletcher and Jon Kitna, and `INCLUDE_UNDRAFTED` is the one-line switch.
-- **The pool is FETCHED, not bundled** (`guess-pool.mjs`, `/data/guess-pool.json`): 195 KB is a sixth of the
-  bundle for one mini-game, and `tests/test-build-seo.mjs`'s 1.2 MB ceiling exists to force that question - its
-  comment names lazy loading as the honest answer and raising the ceiling as how versus-pool.json got in. The
-  service worker fetches it like the bundle rather than storing it like an icon, because a stale pool is a
-  different daily answer from the one submit-guess checks. The screen has a loading state and a retry; the tests
-  and the harness import the file and init it before mounting, and the app under test holds its OWN copy of
-  guess-logic.mjs, so initialising the test's copy does not initialise the app's.
-- **Seventeen pairs of players share all five compared columns**, and a game whose answer is one of them can go
-  all green without being solved. The builder keeps one of each **by hand with a reason** and **fails the build**
-  on a clash nobody has listed. The automatic rule that was there first - keep the longer career - got three
-  backwards: equal eight-season careers fell through to alphabetical and dropped Maxx Crosby, Riq Woolen and
-  Jonathan Cooper. An automatic rule cannot know who is remembered.
+  asked for. `data/guess-pool.json` is built by `tools/data/build-guess-pool.mjs` from nflverse's player index,
+  PFR's draft history and every season of snap counts since 2012 - about 45 MB fetched, cached under
+  `build/nflverse/`. Drafted players only, because draft class is a column and "undrafted" is a value that is
+  either always grey or always green; the known cost is Warren Moon, Antonio Gates, James Harrison, London
+  Fletcher, Jon Kitna and Justin Tucker, and `INCLUDE_UNDRAFTED` is the one-line switch.
+- **The pool is a RANKING, not a filter** (v2.14.0), and it is 731 players rather than 4,637. v2.13.0 kept
+  everybody with a five-season career, which was wrong at both ends: 723 men lasted five seasons without ever
+  playing (Rodney Adams took TEN snaps in six), while a career takes five years to measure, so the draft classes
+  stopped at 2022 and no Jayden Daniels, Brock Bowers, C.J. Stroud or Puka Nacua could ever be the answer. The
+  question is now "would a fan know him": a **floor** (32 games, 16 starts, a real season or a Pro Bowl), a
+  **Guessability Score** of six weighted 0-1 parts (recency, prominence as a percentile *within his position*,
+  longevity, accolades, starts, draft capital), and a **share of each position group** - because a flat tenth of
+  the field gave 34 quarterbacks and 141 defensive backs, which is the right shape for a roster and the wrong
+  shape for a quiz. GUESS.md 1 has the weights and what each is for; `GP_WHY="Name"` on the builder says why
+  somebody is or is not in it.
+- **A first-year player is a dozen points below any cut by construction**, because every other term is
+  career-shaped - which kept the first pick in the draft out of a pool meant to feel current. So prominence
+  **blends into draft capital for a short career**: before a man has a record, his prominence is where he was
+  taken. It cuts both ways, which is why it is honest, and it is what a `FAME` bonus would otherwise have to do
+  by hand every year. That table exists for what no column can see and holds exactly two names.
+- **The pool is FETCHED, not bundled** (`guess-pool.mjs`, `/data/guess-pool.json`). At 36 KB that is no longer
+  about weight: `page.js` sits within a few KB of the 1.2 MB ceiling `tests/test-build-seo.mjs` holds it to, and
+  that ceiling exists to force the question rather than be raised twice. The service worker fetches it like the
+  bundle rather than storing it like an icon, because a stale pool is a different daily answer from the one
+  submit-guess checks. The screen has a loading state and a retry; the tests and the harness import the file and
+  init it before mounting, and the app under test holds its OWN copy of guess-logic.mjs, so initialising the
+  test's copy does not initialise the app's.
+- **Two players sharing all five compared columns can go all green without winning.** The builder keeps one of
+  each pair **by hand with a reason** and **fails the build** on a clash nobody has listed - the automatic rule
+  that was there first, keep the longer career, got three backwards because equal eight-season careers fell
+  through to alphabetical. At 731 players there are no clashes at all; the table stands against the next rebuild.
 - **`guess-logic.mjs` owns every rule**, imported by the screen, the Edge Function and the tests, and **solved is
   decided by identity** - the last guess being the answer - never by counting green cells. `compareGuess` is the
   only place "close" is defined, and it differs per column: the same conference, the same side of the ball, a
   draft class within two, a number within five, with an arrow on the two numeric ones.
-- **The daily walks a fixed permutation** of the pool rather than picking at random, so nobody repeats for 4,637
-  days. The shuffle is a plain Fisher-Yates over `mulberry32` - never a random comparator, for the engine-
-  independence reason above.
+- **The daily walks a fixed, WEIGHTED cycle** (v2.14.0). Everybody is in it, the best-known quarter three times
+  and the deepest cuts once, so a typical day is somebody most people can name - 41% easy, 38% medium, 21% hard
+  over a full cycle. A player's turns are SPREAD (a cycle-length apart, nudged off a hash of his id) rather than
+  shuffled as three passes, because three passes would allow the same man on two consecutive days, which is the
+  one thing a daily may not do: measured, nobody comes round twice inside 451 days. `guessDifficulty` is his
+  place in that ranking, 0 to 100, and the end screen prints it **only once the game is over** - before that it
+  narrows the answer. Never a random comparator anywhere in it, for the engine-independence reason above.
 - **`guess_runs` is the second board no client can write** (RLS on, public select, no write policy), and
   `submit-guess` is the only writer. It takes **the guesses, not the result**: the answer follows from the date,
   so it recomputes it and derives solved/tries itself, and the answer goes back in the response **only once the

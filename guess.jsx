@@ -13,6 +13,7 @@ import { TEAMS } from "./game-logic.mjs";
 import {
   GUESS_PLAYERS, GUESS_TRIES, GUESS_COLUMNS, DIVISIONS,
   guessPlayer, compareGuess, guessAnswerFor, guessAnswerForSeed, guessOutcome, replayGuessGame,
+  guessDifficulty, guessBand,
 } from "./guess-logic.mjs";
 import { loadGuessPool } from "./guess-pool.mjs";
 import { teamVars, reducedMotion } from "./ui-common.jsx";
@@ -258,7 +259,7 @@ export function GuessScreen({
             </ul>
           )}
           {query.trim().length >= 2 && matches.length === 0 && (
-            <p className="note">Nobody by that name is in the game. It holds players with five seasons or more.</p>
+            <p className="note">Nobody by that name is in the game. It holds about 700 players — the best known at every position, and most of the league right now.</p>
           )}
         </div>
 
@@ -268,6 +269,8 @@ export function GuessScreen({
   }
 
   if (stage === "done" && result) {
+    const difficulty = result.answer ? guessDifficulty(result.answer) : null;
+    const band = result.answer ? guessBand(result.answer) : null;
     const shown = result.shownGuesses
       ? result.shownGuesses.map((id) => {
         const p = guessPlayer(id);
@@ -286,6 +289,14 @@ export function GuessScreen({
               {TEAMS[result.answer.team] ? TEAMS[result.answer.team][0] : result.answer.team}, drafted{" "}
               {result.answer.draft}, #{result.answer.number}
               {result.answer.from ? ` (${result.answer.from}–${result.answer.to})` : ""}.
+            </p>
+          )}
+          {/* How hard the day was, printed only now the game is over - before it, it is a hint. The number is
+              his place in the pool's own ranking, so 0 is the player everybody knows and 100 the deepest cut. */}
+          {difficulty != null && (
+            <p className="gp-difficulty">
+              Difficulty <strong>{difficulty}</strong>/100
+              {band ? <span className="gp-band"> · {band === "easy" ? "one most people get" : band === "medium" ? "a fair test" : "a deep cut"}</span> : null}
             </p>
           )}
         </div>
@@ -493,6 +504,9 @@ export const GUESS_CSS = `
 .gp-hero .gp-score { font-variant-numeric: tabular-nums; margin: 2px 0 0; }
 .gp-hero .outcome { font-size: 15px; font-weight: 600; opacity: .9; margin: 6px 0 0; }
 .gp-hero .rating { margin: 8px 0 0; text-wrap: pretty; }
+.gp-difficulty { margin: 10px 0 0; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
+.gp-difficulty strong { font-variant-numeric: tabular-nums; }
+.gp-band { opacity: .8; text-transform: none; letter-spacing: 0; }
 
 .gp-lb { width: 100%; border-collapse: collapse; font-size: 14px; }
 .gp-lb caption { text-align: left; font-size: 12px; letter-spacing: .06em; text-transform: uppercase;

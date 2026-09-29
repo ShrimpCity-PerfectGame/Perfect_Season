@@ -58,10 +58,10 @@ check("the share link people see stays gridspin.app", prod.js.includes('"https:/
 // being added belongs in the page every visitor loads: the honest fix for that file is to load it when the 1v1
 // screen opens rather than at startup, which needs the service worker to learn about a second chunk.
 check("the bundle is minified", prod.js.length < 1_200_000, `${prod.js.length} bytes`);
-// Guess the Player's pool is the first data file the bundle does NOT carry - 195 KB for one mini-game, which is
-// what the ceiling above is for (guess-pool.mjs). Two halves, and both matter: the bundle must not have it back,
-// and the site must actually serve it, because there is no longer a copy to fall back on.
-check("the guess pool is served from the site root", (prod.pool || "").length > 100_000, `${(prod.pool || "").length} bytes`);
+// Guess the Player's pool is the one data file the bundle does NOT carry (guess-pool.mjs): 36 KB that page.js,
+// a few KB under the ceiling above, has no room for. Two halves, and both matter: the bundle must not have it
+// back, and the site must actually serve it, because there is no longer a copy to fall back on.
+check("the guess pool is served from the site root", (prod.pool || "").length > 20_000, `${(prod.pool || "").length} bytes`);
 check("and is not in the bundle as well", !prod.js.includes("includesUndrafted"), "the pool's own metadata key is in page.js");
 check("the tab title leads with the name", /<title>Gridspin – /.test(prod.html));
 // The same page answers challenge links (/c/CODE), where relative asset paths would break.
