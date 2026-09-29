@@ -122,34 +122,73 @@ on conflict (user_id, created_at, dnf) do nothing;
 -- whole tables to the browser. tests/helpers.mjs mirrors both, and tests/test-runs-sql.mjs checks
 -- that the mirror and this SQL return identical results.
 
--- The sitewide numbers on the home screen, Leaderboard and Stats. `players`, `runs` and `perfect` are
--- summed from profiles, whose counters have always been complete (the runs log starts partway through
--- the site's history).
+-- The sitewide numbers on the home screen, Leaderboard and Stats.
+--   players / runs / perfect  - summed from profiles, whose counters have always been complete (the
+--                               runs log starts partway through the site's history).
+--   plays   (v2.16.0)         - what the home screen's pill counts: every draft, every mini-game round
+--                               and every duel that was actually played. The pill said "drafts" and
+--                               showed `runs`, which left all of that out of the one number a visitor
+--                               sees first. It is a DIFFERENT number from `runs`, not a replacement -
+--                               the Stats screen's Drafts tile still means drafts, and the two must
+--                               not be swapped for each other.
+--   drafted (v2.16.0)         - players drafted: six a season from the runs log, plus every duel pick.
+--                               Season DNFs have no roster, which is why the sum is over non-null ones.
 --
--- `plays` (v2.16.0) is what the home screen's pill counts: every draft plus every mini-game round. The
--- pill said "drafts" and showed `runs`, which left the four mini-games out of the one number a visitor
--- sees first. It is a DIFFERENT number from `runs`, not a replacement - the Stats screen's "Drafts
--- played" still means drafts, and the two must not be swapped for each other.
+-- A duel counts once somebody JOINED it (`guest_id is not null`), not when it finished. That is the
+-- same rule a draft follows - a season counts from the moment its first board is dealt, picks or not -
+-- so an abandoned duel counts and an open lobby nobody ever joined does not.
 --
--- Duels are deliberately NOT in it, and that is a constraint rather than a judgement. This function is
--- `language sql`, so its body is validated the moment it is created and every table it names has to
--- exist by then. sou_runs and builds come from schema.sql; century_runs and guess_runs are already this
--- file's dependencies, which is exactly why century and guess run before it in the runbook. `matches`
--- is not: migration-versus.sql has to run AFTER migration-profiles.sql (can_play_versus reads
--- profiles.guest) and this file runs BEFORE it, so naming matches here would make the migration list
--- unorderable. Counting duels needs its own function in migration-versus.sql, added on the client.
+-- This is plpgsql rather than `language sql`, and it has to be. A `language sql` body is validated the
+-- moment it is created, so every table it names must exist by then; `matches` does not, because
+-- migration-versus.sql runs AFTER migration-profiles.sql (its can_play_versus reads profiles.guest)
+-- while this file runs BEFORE it. plpgsql plans each statement the first time it RUNS it, so the duel
+-- counts are read through EXECUTE behind a to_regclass guard - the same shape, for the same reason, as
+-- set_avatar's supporters lookup in migration-profiles.sql. On a database that has never had
+-- migration-versus.sql the guard simply leaves the duel counts at zero instead of failing, which is
+-- what tests/test-migrations.mjs running the whole list on a bare database checks.
+--
+-- Still `stable`, so PostgREST is happy to serve it over GET (storage.js calls it with READ).
+-- Still `security invoker`: it exposes nothing a direct select could not, and both client roles hold
+-- SELECT on every table named here - checked against production, because a signed-out visitor is
+-- exactly who the home screen's pill is for.
 create or replace function public.site_totals()
-returns jsonb language sql stable security invoker set search_path = public as $$
-  select jsonb_build_object(
-    'players', (select count(*) from profiles),
-    'runs', (select coalesce(sum(runs + dnf), 0) from profiles),
-    'perfect', (select coalesce(sum(perfect), 0) from profiles),
-    'plays', (select coalesce(sum(runs + dnf), 0) from profiles)
-             + (select count(*) from sou_runs)
-             + (select count(*) from builds)
-             + (select count(*) from century_runs)
-             + (select count(*) from guess_runs)
+returns jsonb language plpgsql stable security invoker set search_path = public as $$
+declare
+  v_players    bigint;
+  v_drafts     bigint;
+  v_perfect    bigint;
+  v_mini       bigint;
+  v_drafted    bigint;
+  v_duels      bigint := 0;
+  v_duel_picks bigint := 0;
+begin
+  select count(*), coalesce(sum(runs + dnf), 0), coalesce(sum(perfect), 0)
+    into v_players, v_drafts, v_perfect
+    from profiles;
+
+  select (select count(*) from sou_runs) + (select count(*) from builds)
+       + (select count(*) from century_runs) + (select count(*) from guess_runs)
+    into v_mini;
+
+  select coalesce(sum(jsonb_array_length(roster)), 0) into v_drafted
+    from runs where roster is not null;
+
+  -- Both reads sit behind one guard because one migration creates both tables. Each is its own EXECUTE
+  -- for the planning reason above: a statement naming matches cannot be planned where there is no such
+  -- table, however it is guarded, unless the planning is deferred to the moment it runs.
+  if to_regclass('public.matches') is not null then
+    execute 'select count(*) from public.matches where guest_id is not null' into v_duels;
+    execute 'select count(*) from public.match_picks' into v_duel_picks;
+  end if;
+
+  return jsonb_build_object(
+    'players', v_players,
+    'runs', v_drafts,
+    'perfect', v_perfect,
+    'plays', v_drafts + v_mini + v_duels,
+    'drafted', v_drafted + v_duel_picks
   );
+end;
 $$;
 
 -- The fields a Stats board shows for an account - career counters only, so a board of ten rows

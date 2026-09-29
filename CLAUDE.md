@@ -856,17 +856,29 @@ in `tests/helpers.mjs` reimplements both, and `tests/test-runs-sql.mjs` runs the
 and fails if the mock and the SQL return different JSON — **change both together**, and keep every
 `order by` fully tiebroken (the test is how the missing team tiebreak in most-drafted was found).
 
-**`site_totals()` returns two counts that must never become one** (v2.16.0). `runs` is drafts -
-`profiles.runs + dnf` - and `plays` is that plus every mini-game row (sou_runs, builds, century_runs,
-guess_runs). The home screen's pill shows **plays** and the Stats screen's Drafts tile shows **runs**;
-they sit on different screens, so the failure mode is one quietly starting to count the other. The
-Realtime broadcast therefore carries a `kind`, and the app keeps `livePlays` and `liveDrafts` as two
-pieces of state off one event. **Duels are not in `plays`**, and that is a constraint rather than a
-choice: the function is `language sql`, so every table it names has to exist when it is created, and
-`migration-versus.sql` runs after `migration-profiles.sql` while runs-log runs before it - naming
-`matches` there makes the migration list unorderable. The reason is written above the function.
-`site_totals` is also **security invoker**, so both client roles need SELECT on all four mini-game
-tables; they have it on both projects, and `tests/test-runs-sql.mjs` grants it by hand in its fixture.
+**`site_totals()` returns counts that must never become one another** (v2.16.0). `runs` is drafts -
+`profiles.runs + dnf`; `plays` is that plus every mini-game row (sou_runs, builds, century_runs,
+guess_runs) plus every duel somebody joined; `drafted` is players drafted, six a season out of the runs
+log plus every duel pick. The home screen's pill shows **plays** and the Stats screen's Drafts tile
+shows **runs**; they sit on different screens, so the failure mode is one quietly starting to count the
+other. The Realtime broadcast therefore carries a `kind`, and the app keeps `livePlays` and `liveDrafts`
+as two pieces of state off one event.
+
+**It is plpgsql, and that is load-bearing.** A `language sql` body is validated the moment it is created,
+so every table it names must exist by then - and `matches` does not, because `migration-versus.sql` runs
+after `migration-profiles.sql` while runs-log runs before it. plpgsql plans each statement the first time
+it RUNS, so the duel counts go through `EXECUTE` behind a `to_regclass` guard, the same shape and for the
+same reason as `set_avatar`'s supporters lookup in migration-profiles.sql. A database that has never had
+the versus migration gets zero duels rather than an error. `tests/test-runs-sql.mjs` has no `matches`
+table and proves the guard; `tests/test-migrations.mjs` runs the real list in order and proves the
+deferred plan. **A duel counts once somebody JOINED it**, not when it finished - the rule a draft
+follows, where a season counts from the moment its first board is dealt.
+
+`site_totals` is **security invoker**, so both client roles need SELECT on profiles, runs, the four
+mini-game tables, `matches` and `match_picks`; they have it on both projects (checked against production
+- a signed-out visitor is who the pill is for), and `tests/test-runs-sql.mjs` grants it by hand in its
+fixture. And **`fetchSiteStats` whitelists the totals field by field**, so a new one in this function has
+to be added there too or the Stats screen reads `undefined` - which is what happened to `drafted`.
 The Stats functions are defined only in `migration-runs-log.sql`; change them by editing that file
 and re-running all of it in each environment (its backfill is a no-op the second time). The log
 starts partway through the site's life: the migration backfilled each account's `recent`
@@ -1061,10 +1073,11 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
-  v2.16.0's (the plays counter): re-run **`migration-runs-log.sql`**, then the client. It only replaces
-  `site_totals()`, so it is safe on any shape and its backfill is a no-op as always. A client ahead of the
-  migration reads no `plays` and falls back to the drafts count - the number the pill showed before - so
-  the gap is invisible rather than broken. No Edge Function change.
+  v2.16.0's (the plays counter and players drafted): re-run **`migration-runs-log.sql`**, then the client.
+  It only replaces `site_totals()`, so it is safe on any shape and its backfill is a no-op as always. A
+  client ahead of the migration reads no `plays` and falls back to the drafts count - the number the pill
+  showed before - and no `drafted`, so the Stats screen simply leaves that tile out. The gap is invisible
+  rather than broken either way. No Edge Function change.
   v2.13.0's (Guess the Player): run **`migration-century.sql`**, then **`migration-guess.sql`** (new), then
   **`migration-runs-log.sql`**, **`migration-profiles.sql`**, **`migration-moderation.sql`** and
   **`migration-wallet.sql`**, then **deploy the Edge Functions**, then the client. Guess has to come before

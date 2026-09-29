@@ -5348,6 +5348,11 @@ export default function PerfectSeason() {
                 <div className="tiles">
                   <div className="tile"><div className="n">{site.totals.players}</div><div className="l">Accounts</div></div>
                   <div className="tile"><div className="n">{(liveDrafts ?? site.totals.runs).toLocaleString()}</div><div className="l">Drafts</div></div>
+                  {/* Six a season plus every duel pick, counted in the database (site_totals). Left out
+                      entirely when the migration hasn't run, rather than shown as a confident 0. */}
+                  {site.totals.drafted != null && (
+                    <div className="tile"><div className="n">{site.totals.drafted.toLocaleString()}</div><div className="l">Players drafted</div></div>
+                  )}
                   <div className="tile"><div className="n">{site.totals.perfect}</div><div className="l">Perfect seasons</div></div>
                   <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
                   <div className="tile"><div className="n">{siteStats.buildCount == null ? "–" : siteStats.buildCount}</div><div className="l">Created players</div></div>

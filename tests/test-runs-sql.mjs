@@ -269,6 +269,23 @@ await runTest("site_stats and site_totals match the mock exactly, past 300 accou
   assert(MINI_TOTAL > 0 && sqlTotals.plays > sqlTotals.runs,
     `the mini-game seeding did nothing: plays ${sqlTotals.plays} vs runs ${sqlTotals.runs}`);
 
+  // This fixture never runs migration-versus.sql, so there is no `matches` table - which makes it the
+  // place that proves site_totals SURVIVES that rather than failing. It is plpgsql precisely so the
+  // duel reads are planned when they run, behind a to_regclass guard; getting an answer at all is the
+  // assertion. tests/test-migrations.mjs covers the other half, where the table does exist.
+  assert((await db.query("select to_regclass('public.matches') as t")).rows[0].t === null,
+    "this fixture is supposed to have no matches table - that is what makes the next line meaningful");
+  assert(sqlTotals.plays === sqlTotals.runs + MINI_TOTAL,
+    "with no matches table the duel counts must fall to zero rather than throwing");
+
+  // Players drafted: six a season from the log, and nothing from a DNF, which has no roster at all.
+  const drafted = Number((await db.query("select coalesce(sum(jsonb_array_length(roster)), 0) as d from runs where roster is not null")).rows[0].d);
+  assert(sqlTotals.drafted === drafted, `drafted: expected ${drafted} from the seeded rosters, got ${sqlTotals.drafted}`);
+  // It has to be counting PLAYERS, not rows - six a season, so it cannot come out at or below the
+  // number of drafts. Summing the wrong thing (count(*), or profiles.runs again) lands under this.
+  assert(sqlTotals.drafted > sqlTotals.runs,
+    `drafted ${sqlTotals.drafted} should be several times the ${sqlTotals.runs} drafts, not row-shaped`);
+
   // And the numbers really cover everything, not a sample.
   assert(sqlTotals.players === N, `expected all ${N} accounts counted, got ${sqlTotals.players}`);
   // Most-drafted's #1 is the true maximum over every logged pick, counted independently here.

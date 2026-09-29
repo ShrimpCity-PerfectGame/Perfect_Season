@@ -239,7 +239,13 @@ export async function fetchSiteTotals() {
   // `plays` falls back to `runs` rather than to 0: a client that is ahead of the migration would
   // otherwise show a pill counting nothing at all, and drafts alone is the honest older answer.
   const runs = Number(data.runs) || 0;
-  return { runs, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0, plays: Number(data.plays) || runs };
+  // `drafted` is null rather than 0 when the database has not got it yet: the Stats tile leaves itself
+  // out on null, and "0 players drafted" beside 170 drafts would be a claim about the world, not a gap.
+  return {
+    runs, perfect: Number(data.perfect) || 0, players: Number(data.players) || 0,
+    plays: Number(data.plays) || runs,
+    drafted: data.drafted == null ? null : Number(data.drafted) || 0,
+  };
 }
 export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
   // Tiebroken on username, for the reason fetchLeaderboardTop is.
@@ -337,7 +343,15 @@ export async function fetchSiteStats(limit = 10) {
     byFormat[f] = { bestLineups: profilesOf(v.best_lineups), bestGm: v.best_gm || [], biggestUpsets: v.biggest_upsets || [] };
   }
   return {
-    totals: { runs: Number(data.totals?.runs) || 0, perfect: Number(data.totals?.perfect) || 0, players: Number(data.totals?.players) || 0 },
+    // Whitelisted field by field, so a new one in site_totals() has to be added HERE too - which is how
+    // `drafted` reached the Stats screen as undefined the first time. Null, not 0, when the database
+    // hasn't got it: the tile leaves itself out rather than claiming nobody has drafted anyone.
+    totals: {
+      runs: Number(data.totals?.runs) || 0, perfect: Number(data.totals?.perfect) || 0,
+      players: Number(data.totals?.players) || 0,
+      plays: Number(data.totals?.plays) || Number(data.totals?.runs) || 0,
+      drafted: data.totals?.drafted == null ? null : Number(data.totals.drafted) || 0,
+    },
     byFormat: { fantasy: byFormat.fantasy || EMPTY_FORMAT, standard: byFormat.standard || EMPTY_FORMAT },
     mostDrafted: data.most_drafted || [],
     mostWins: profilesOf(data.most_wins),

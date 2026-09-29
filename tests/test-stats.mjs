@@ -92,6 +92,19 @@ await runTest("the Stats screen shows sitewide totals once the one fetch resolve
   assert(t.includes("Accounts"), "expected an accounts tile, got: " + t.slice(0, 500));
 });
 
+await runTest("the players-drafted tile counts players, not drafts, and is left out when the database has none", async () => {
+  const tileFor = (label) => [...container.querySelectorAll(".tile")].find((el) => el.querySelector(".l")?.textContent.trim() === label);
+  const drafted = tileFor("Players drafted");
+  assert(drafted, "expected a players-drafted tile on the Sitewide panel, got: " + text(container).slice(0, 400));
+  const n = Number(drafted.querySelector(".n").textContent.replace(/[^\d]/g, ""));
+  const draftsTile = Number(tileFor("Drafts").querySelector(".n").textContent.replace(/[^\d]/g, ""));
+  // Six a season, so the two tiles can never be the same number - which is what a tile wired to the
+  // wrong field would show. The mock computes it from the seeded rosters, like the SQL does.
+  assert(n > draftsTile, `players drafted (${n}) should be several times the drafts (${draftsTile})`);
+  const expected = [...auth._runs.values()].reduce((t, r) => t + (Array.isArray(r.roster) ? r.roster.length : 0), 0);
+  assert(n === expected, `expected ${expected} players from the seeded rosters, got ${n}`);
+});
+
 await runTest("best lineups ever ranks by best score, most-drafted players aggregates across profiles", async () => {
   const t = text(container);
   // Score-ranked boards are per format; Fantasy is the default selection.
