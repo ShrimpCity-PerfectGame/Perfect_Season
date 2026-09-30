@@ -1490,7 +1490,18 @@ export function authErrorFromAddress(loc = typeof window === "undefined" ? null 
 // The screens history entries describe: a player's profile, at profilePath(name), or any other view, at "/".
 // The address alone can only name a profile or Modes, so an entry without a screen of its own (a typed
 // address, or one written before this) is read from its address.
-const HISTORY_VIEWS = ["home", "play", "profile", "players", "board", "stats", "statsou", "buildplayer", "reports", "shop", "versus"];
+// The views an entry may name. A state naming anything else is not trusted - it could be an entry written by
+// an older build, or a hand-edited one - and screenOf falls back to the address, which for every screen but
+// the Leaderboard is "/" and therefore Modes.
+//
+// `minigames`, `century` and `guess` were missing until v2.18.4, which made Back from any of those three land
+// on Modes rather than on the screen the entry named. The state was always written correctly and the popstate
+// handler always had `else if (s.view === "century") openTab("century")` waiting for it - those branches were
+// simply unreachable, because screenOf threw the state away one step earlier. Nothing showed it until v2.18.3
+// gave Century's and Guess's boards profile links, since until then there was no way to leave one of those
+// screens for somewhere that pushes an entry and come back. A view that has a screen belongs on this list.
+const HISTORY_VIEWS = ["home", "play", "profile", "players", "board", "stats", "statsou", "buildplayer",
+  "reports", "shop", "versus", "minigames", "century", "guess"];
 function screenOf(state, pathname) {
   if (state?.ps === "profile" && typeof state.name === "string" && state.name) return state;
   if (state?.ps === "view" && HISTORY_VIEWS.includes(state.view)) return state;

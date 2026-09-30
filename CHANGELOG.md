@@ -19,6 +19,29 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.4] - 2026-09-30
+
+Back from a profile returns to the board it was opened from.
+
+**Client only.** No migration, no Edge Function change.
+
+- **Back from a profile opened off Century's or Guess's board landed on Modes**, losing both the game
+  screen and Mini games with it. `screenOf` only trusts a history state whose view is on
+  `HISTORY_VIEWS`, and `minigames`, `century` and `guess` were never added to it — so the state was
+  thrown away and the fallback read the address, which for those screens is `/`, which means Modes. The
+  entry was always written correctly, and the popstate handler had
+  `else if (s.view === "century") openTab("century")` waiting for it: those branches were **unreachable
+  dead code** from the day they were written, in v2.9.0, v2.10.0 and v2.13.0.
+- **v2.18.3 is what made it reachable.** Until those boards had profile links there was no way to leave
+  one of those three screens for somewhere that pushes a history entry and come back, so the hole had
+  nothing to show it. It was found by driving the promoted build on production, not by the suite — the
+  release that exposed it was green.
+- `tests/test-profile-links.mjs` now walks both mini games: name → profile → Back → the board, then
+  Forward and Back again, so a restored entry is told from a fresh navigation. Verified red by taking
+  the three views back off `HISTORY_VIEWS`. That file is the right home for it — what it is really
+  about is that a screen reachable from a name link can be returned to, which is the rule, not the
+  screen.
+
 ## [2.18.3] - 2026-09-30
 
 Names on Century's and Guess's boards become names, and a handful of comments stop describing a game
