@@ -386,6 +386,16 @@ await runTest("8. the boards render, today's and all time, with a guest chipped 
   // text, so nothing here linked and nothing here was chipped, and the assertions below were about table
   // headings. NameLink was module-scope in perfect-season.jsx, which a screen file may not import, so this
   // screen had no way to render a name the way the rest of the game does.
+  //
+  // THE GUEST ROW BELOW IS A STATE THE SERVER CANNOT CURRENTLY PRODUCE, and it is here deliberately.
+  // Neither Guess board can hold a guest: `guess_top` is keyed on the day, `guess_best` counts only rows
+  // whose day is not null (its HAVING clause), and submit-guess refuses a guest's daily outright
+  // (`guest_daily`). A guest's PRACTICE run has no day, so it reaches neither. Century's all-time board is
+  // the one board in the game where the chip is live - tests/test-century-screen.mjs 7 covers that one
+  // against a row the server really can write, an Unlimited run with no day.
+  // What this keeps is the branch itself: if a guest is ever allowed the daily, or a board stops filtering
+  // on one, the rendering is already held to the rule rather than discovered afterwards. It is defensive
+  // coverage, and calling it anything else would overstate what the four boards actually show today.
   window.__ps_supabase__._guess.add({
     id: 9001, user_id: "guest-on-the-board", username: "Guest_AB12C", guest: true,
     day: new Date().toISOString().slice(0, 10), seed: null, solved: true, tries: 3,
@@ -404,7 +414,7 @@ await runTest("8. the boards render, today's and all time, with a guest chipped 
   const linked = [...open().querySelectorAll(".gp-lb tbody .namelink")].map((b) => b.textContent);
   assert(linked.includes("guesser"), `expected guesser to be a profile link, got: ${JSON.stringify(linked)}`);
   // A guest's is not: it carries the chip and is not a button, because there is no profile behind it and a
-  // throwaway account must not be clickable or reportable.
+  // throwaway account must not be clickable or reportable. (Defensive here - see the note above.)
   const guestCell = [...open().querySelectorAll(".gp-lb tbody tr")].find((r) => r.textContent.includes("Guest_AB12C"));
   assert(guestCell, `the guest's row is on the board: ${open().textContent.slice(0, 200)}`);
   assert(guestCell.querySelector(".guestchip"), `the guest's name carries a chip: ${guestCell.innerHTML.slice(0, 200)}`);

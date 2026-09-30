@@ -252,8 +252,16 @@ export async function fetchDailyTop(date, limit = 10, format = "fantasy") {
   const { data, error } = await getClient().from("daily_runs").select("*").eq("date", date).eq("format", format)
     .order("score", { ascending: false }).order("username", { ascending: true }).limit(limit);
   if (error || !data) return [];
-  // `guest` travels with the name everywhere a name is shown, and this render site already asks for it.
-  // A guest cannot play the daily today, so this is the flag being in place, not a live bug.
+  // `guest` travels with the name everywhere a name is shown, and this render site already asks for it -
+  // but be clear about what this line does, because the comment here used to say the flag was "in place"
+  // and it is not: **`daily_runs` has no `guest` column**, on either project, so `!!r.guest` is `!!undefined`
+  // and always false. Checked against information_schema on both in v2.18.5; of the tables a board reads,
+  // only profiles, sou_runs, builds, century_runs and guess_runs carry one.
+  //
+  // Nothing is wrong today, and not because of this line: `submit-run` refuses a guest's daily outright
+  // (`guest_daily`), so no guest row can exist for the board to chip. The mapping is kept so the shape
+  // matches every other board's, and so that adding the column plus a write in submit-run is all it would
+  // take - but until that happens this is a fallback that cannot fire, not a protection.
   return data.map((r) => ({ username: r.username, w: r.w, l: r.l, score: r.score, outcome: r.outcome, guest: !!r.guest }));
 }
 export async function fetchSouTop(date, limit = 10) {
