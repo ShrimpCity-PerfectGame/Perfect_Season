@@ -1113,6 +1113,20 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+  v2.18.7's (the outbox and the daily gates): run **`migration-wallet.sql`**, then the client. No Edge Function
+  change. It adds `builds.day` and replaces `claim_minigame`, so it is safe on any shape and the site works
+  between the steps - a client ahead of it writes a `day` the old function ignores, which is what happens today.
+  **Build-a-player had paid no coins for a large part of every day since v2.17.0**: the client claims with the
+  player's LOCAL day and that release bound the arm to the build's UTC date, with no column to compare against.
+  A client BEHIND the migration is fine too - the `day is null` fallback is what keeps every existing build
+  paying - so this one is safe in either order, which is unusual and is why it is written down.
+  v2.18.6's (the stranded GM season): **deploy the Edge Functions**, then the client. No migration.
+  `game-logic.mjs` changed, so submit-run and match-pick must go; nothing it DEALS changed, only what
+  `replayDraft` accepts, so every challenge code still deals what it dealt and the sim checksum is unmoved.
+  v2.18.5's (the guest chip) and v2.18.4's (Back from a mini game's board): client only.
+  v2.18.3's (names on Century's and Guess's boards): **deploy the Edge Functions**, then the client. No
+  migration. The functions changed only because `game-logic.mjs`, `versus-logic.mjs` and `rewards.mjs` did,
+  and in those three the change was comments only.
   v2.18.2's (the outbox's lost daily, and the copy that promised a queue): client only. No migration and no
   Edge Function change - `submit-guess` and `submit-century` are unchanged, and what moved is how the BROWSER
   reads their failures. `submitGuess`/`submitCentury` used to answer `network` both for a reason this client

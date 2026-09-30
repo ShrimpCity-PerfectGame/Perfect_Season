@@ -144,7 +144,15 @@ export function CenturyScreen({
   // exactly this class: the race is between two calls that share no promise chain, so only a ref can settle it.
   const started = useRef(false);
   const [board, setBoard] = useState({ day: [], best: [], loaded: false });
-  const [dailyDone, setDailyDone] = useState(null);
+  // `undefined` means NOT ASKED YET; `null` means asked and there is nothing. The two were one value until
+  // v2.18.7, and the Daily tile below branches on it - so while the read was in flight the tile offered the
+  // day as unplayed and `start("daily")` dealt it a SECOND time. That matters most exactly when it is most
+  // likely: the record sits `saved: false` because the POST dropped, which is the outbox's whole case, and a
+  // failing network is also what makes `fetchMy...` slow enough to lose the race. The replay then OVERWRITES
+  // the held record - finish() writes it unconditionally - so the drain posts the replay, played with the
+  // answer already known, and the game actually played is gone from the device and never reaches the board.
+  // Measured: the window is the read's own latency plus about 25ms, and on a hung connection it never closes.
+  const [dailyDone, setDailyDone] = useState(undefined);
   const [tab, setTab] = useState("day");
   const [shared, setShared] = useState(null); // what the share sheet did, in sendShare's own words
   const day = utcDay();
@@ -619,8 +627,11 @@ export function CenturyScreen({
         {/* Never a disabled button that says "Sign in to play". A control that tells you what to do and then
             refuses the tap reads as broken - the same note CLAUDE.md keeps about the Duel tile. It stays live
             and takes you to the Account tab instead. */}
-        <button className="mode daily"
-          onClick={() => (dailyDone ? showDailyResult()
+        {/* Disabled until the read that answers "have you played today?" has landed - see the note on
+            dailyDone. Undefined is not "no": dealing on it hands out the day a second time. */}
+        <button className="mode daily" disabled={dailyDone === undefined}
+          onClick={() => (dailyDone === undefined ? undefined
+            : dailyDone ? showDailyResult()
             : !userId || isGuest ? onNeedsAccount && onNeedsAccount(isGuest ? "guest" : "signedout")
             : start("daily"))}>
           <div className="mt">
@@ -636,7 +647,7 @@ export function CenturyScreen({
               : "The same seven teams for everyone today. One run, no resets."}
           </p>
           <span className="go">
-            {dailyDone ? "See how it went" : isGuest || !userId ? "Sign in to play" : "Let's go"}
+            {dailyDone === undefined ? "Checking…" : dailyDone ? "See how it went" : isGuest || !userId ? "Sign in to play" : "Let's go"}
           </span>
         </button>
 
