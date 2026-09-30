@@ -705,6 +705,13 @@ overwrite each other.
   `check_username` for a friendly message first) and moderator renames. Its matching rules are in
   PROFILES.md 3.4 and migration-profiles.sql. `tests/test-word-filter.mjs` requires every player name in
   `data/players.json` to pass - add a word only with `insert into blocked_words`, and run that test.
+  **The fold table has to pair a character's two cases**, or the filter is one substitution from useless:
+  it held Cyrillic capital T and not lowercase t until v2.18.8, and 14 of the 27 blocked words contain a
+  `t`. Greek nu and upsilon are the deliberate exceptions - their cases look like DIFFERENT Latin letters,
+  so the capital and the small go to different groups. The table lives twice, in migration-profiles.sql
+  and in `tests/mock-profile-data.mjs`, and the check that holds them together reads BOTH files: it used
+  to build its probes from the mock's copy alone, which made anything the SQL folded and the mock did not
+  invisible, and that is exactly how the fix for this bug first shipped half-done with a green suite.
 - **Pictures** are a public Storage bucket, `avatars`: each player writes only under their own
   `<user id>/` folder, with exactly the name `<user id>/<ms>.<ext>` and at most 10 files there (so a script
   can't fill the bucket); the bucket caps size (256 KB) and type (WebP/JPEG/PNG), and every upload gets a
@@ -1113,6 +1120,12 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+  v2.18.8's (the word filter): run **`migration-profiles.sql`**, then the client. No Edge Function change.
+  It replaces `text_is_clean` and the client half is a test-only mirror, so the two are independent - but
+  the filter that matters is the SQL one, so run the migration. **One character defeated 14 of the 27
+  blocked words**: the fold table had Cyrillic capital T and not lowercase t. Six rows gained their
+  missing case counterpart; the ones left unpaired are Greek nu and upsilon, whose two cases look like
+  different Latin letters on purpose.
   v2.18.7's (the outbox and the daily gates): run **`migration-wallet.sql`**, then the client. No Edge Function
   change. It adds `builds.day` and replaces `claim_minigame`, so it is safe on any shape and the site works
   between the steps - a client ahead of it writes a `day` the old function ignores, which is what happens today.

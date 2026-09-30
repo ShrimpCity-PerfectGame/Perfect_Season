@@ -19,6 +19,35 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.8] - 2026-09-30
+
+One character walked 14 of the 27 blocked words straight past the filter.
+
+**Deploy order: run `migration-profiles.sql`, then the client.** No Edge Function change. It replaces
+`text_is_clean` and nothing else here touches the client, so the two halves are independent - but run
+the migration, because the filter that matters is the one in SQL.
+
+- **The word filter folded Cyrillic capital Т and not lowercase т.** Fourteen of the twenty-seven
+  blocked words contain a `t`, so one substitution defeated all of them. Proved against the real
+  migrations in PGlite: plain word blocked, capital-Т spelling blocked 14/14, lowercase-т spelling
+  **through 14/14**, and a control (Cyrillic о inside "gook") still blocked - so the folding mechanism
+  was working and it was that one character.
+- **It was six rows, not one.** An audit of the whole table found fifteen case gaps; most are
+  deliberate, because a Greek letter's two cases often look like different Latin letters - ν is a `v`
+  while Ν is an `n`, and υ/Υ split across `u` and `y` the same way. The six where BOTH cases resemble
+  the same letter are now paired: Cyrillic в, н, м, т and Ӏ, Cyrillic capital Һ, plus Greek β and ε.
+  The test that no real player name is blocked still passes, which is the constraint that decides how
+  far this can go.
+- **The test that exists to keep the two filters in step let them drift.**
+  `tests/test-word-filter.mjs` has a check titled "the SQL and the mock normalize, fold, drop and map
+  exactly the same characters" — and it passed while they disagreed. Every probe it builds comes from
+  `FILTER_FOLD_FROM`, the MOCK's table, so it catches the mock folding something the SQL does not and
+  is blind to the reverse. The original bug hid because neither side folded the character, so there was
+  nothing to disagree about; fixing the SQL alone then left them out of step with the suite still
+  green. A new check reads both tables from their own files and compares the character sets in both
+  directions, and was verified by reverting the mock: "the SQL folds characters the mock does not:
+  U+0442".
+
 ## [2.18.7] - 2026-09-30
 
 The outbox and the daily gates: a mini-game coin that has not been paid since v2.17.0, a daily that
