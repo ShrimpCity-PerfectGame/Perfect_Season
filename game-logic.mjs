@@ -389,7 +389,26 @@ export function replayDraft(seed, history, seq, { gm = false, format } = {}) {
       if (prevKey == null) return fail("a reroll can't happen before any board was shown");
       // Tied to a board the draft already picked from (or one it skipped for having no pick), a re-spin would add a
       // board to pick from rather than replace the one on screen.
-      if (!prevOnScreen) return fail("a reroll must replace a board that was on screen and not picked from");
+      //
+      // ...UNLESS the draft was STRANDED at that moment, which is the one time the app itself tells a player to
+      // re-spin off a board they have already picked from. In GM a roster can spend down to a cap that nothing
+      // left on the plan fits: `boardAt` returns -1, the screen sets `noBoardLeft` and prints "There's no board
+      // left that fits what you still need... Re-spin for a board you can use." The player does exactly that,
+      // completes a legal roster, and until v2.18.6 this line threw the season away - submit-run answered 400
+      // "illegal roster" and no retry could ever succeed, because the trace is the trace. Reproduced on the real
+      // functions: code D073PL, GM + fantasy, five picks leaving $1M and only QB open, re-spin deals ARI|0,
+      // Josh McCown 2004 at $1M completes it at exactly the cap - refused.
+      //
+      // Relaxing it here cannot buy an extra board. Stranded means no remaining entry holds a single affordable,
+      // eligible player, so the alternative to this re-spin is not a worse draft, it is no draft at all - the
+      // cherry-picking this rule exists to stop needs a board it could otherwise have picked from. Everything
+      // else about the insertion is still checked: the budget, the shared team-or-era, and that `rerollCandidate`
+      // deals exactly this board for this seed.
+      // `si` is the inserted board itself, which always has a pick - the question is whether anything AFTER it
+      // did, because that is the rest of the plan as it stood when the player was looking at the stuck screen.
+      if (!prevOnScreen && boardAt(seq, si + 1, roster, capLeftFor(roster, { gm, format })) >= 0) {
+        return fail("a reroll must replace a board that was on screen and not picked from");
+      }
       const [prevTeam, prevW] = prevKey.split("|");
       const [team, w] = key.split("|");
       let kind;

@@ -19,6 +19,68 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.6] - 2026-09-30
+
+A season the app told you to play, thrown away by the server that asked for it — and three smaller
+things a bug hunt turned up.
+
+**Deploy order: DEPLOY THE EDGE FUNCTIONS, then the client.** No migration. `game-logic.mjs` changed,
+so submit-run and match-pick must go; nothing it deals changed, only what it accepts.
+
+- **A stranded GM draft could not be saved, after the app told the player how to finish it.** In GM a
+  roster can spend down to a cap that nothing left on the plan fits — `boardAt` returns -1, the screen
+  sets `noBoardLeft` and prints *"There's no board left that fits what you still need... Re-spin for a
+  board you can use."* Doing exactly that puts the new board straight after one that was picked from,
+  which is the one shape `replayDraft` refused, so `submit-run` answered 400 "illegal roster" and the
+  season was gone. **No retry could ever succeed** — the trace is the trace. Reproduced on the real
+  functions: code `D073PL`, GM + Fantasy, five picks leaving $1M and only QB open, the re-spin deals
+  `ARI|0`, Josh McCown 2004 at $1M completes it at exactly the cap.
+  The rule now permits that insertion **only when the draft was genuinely stranded**, which cannot buy
+  an extra board: stranded means no remaining entry holds one affordable, eligible player, so the
+  alternative is not a worse draft but no draft. The budget, the shared team-or-era and
+  `rerollCandidate`'s own answer are all still checked, and
+  `tests/test-replay-verification.mjs`'s "rejects a re-spin tied to a board the draft already picked
+  from" still passes — the plan is alive in that one, which is the whole distinction.
+  **Nothing seeded moved**: `seededSequence` and `rerollCandidate` are untouched, so every challenge
+  code deals exactly what it dealt before, and the 2,000-season checksum is unchanged.
+- **A guest could charge a DNF to the daily ladder.** The DNF branch returns long before the guest
+  check, so a modified client could post `{dnf: true, mode: "daily"}` from a guest and take
+  `points_daily` down by 50 with a `runs` row tagged `ladder = 'daily'`. Both daily boards already
+  filtered it out — by `> 0` and by `not dnf` — and a DNF only subtracts from the account that sent
+  it, so this is a rule made true rather than a hole plugged. But "a guest cannot touch the daily" is
+  stated in three documents, and a rule that holds on one path and not its neighbour is how the GM cap
+  went three releases enforced on one of the draft screen's two doors. It uses machinery that was
+  already there: the mutator's second argument is the raw row, and `applyToProfile`'s `refused` path
+  had never had a caller.
+- **Century's and Guess's board names wore no supporter star and no name colour** until something else
+  in the session loaded `boardLooks` — open the Leaderboard once, walk back, and the same rows render
+  correctly. v2.18.3 wired `NameLink` into those boards and left the data behind: the effect that
+  loads the decorations still named only board/stats/statsou. It is 2.7.1's bug on two new screens,
+  and it hid a paid entitlement, which is the half that matters.
+- **`offline` had no line in either mini-game's `refusalLine`** — the one reason the outbox exists for.
+  It fell to the default, which leaks the internal code and then says two things that are both false:
+  that nothing was recorded (the run is on the device, `saved: false`, which is exactly what the drain
+  re-sends) and that "Your daily is still available" (since v2.17.0 the device record is written
+  *before* the POST, so the day is spent either way — that is what stops a dropped save being replayed
+  with the answer already known). Both screens now say the run is held and will be sent, `in_flight`
+  has a line too, and the false clause is gone from the default.
+
+**Found, verified, and deliberately NOT fixed here — it needs a decision, not a patch.** A team score
+of 142 beats every opponent in the game outright: the strongest is rated 122, `SPREAD` is 20, so
+`winProb(142, 122)` is exactly 1 and the season is not simulated at all. The arithmetic ceiling is
+`(1.25·130 + 3·130 + 2·flexCap())/6.25` = **143.69**, above it — so a legal draft on a findable
+challenge code is a *guaranteed* 20-0, in both formats. Confirmed end to end on `TL8G97` (143.51),
+`EZPVIR` (143.39) and `NKMX3M` (142.83 Championship, 142.26 Fantasy): all replay as legal, none is a
+reserved code, all return "Perfect season. 20–0." Roughly 7 codes in 200,000.
+Closing it means lowering the Flex ceiling from 172.774 to below **167.5**, which would change
+recorded scores — and CLAUDE.md protects Fantasy's in particular. The cost is small and exact: **five
+player-seasons** sit above that line (LaDainian Tomlinson 2006, Christian McCaffrey 2019, Marshall
+Faulk 2000), so a roster playing one in a Flex would lose at most 0.84 team-score points, 1.69 for
+two. No live score is near 142 — the best Fantasy score sitewide is 120.2. It sits inside the
+already-accepted "codes are the client's choice" gap, but the prize there was a *lucky* season and
+this is a certain one, which is a different thing. `tests/test-scoring-format.mjs` re-checks only the
+one historical roster, which is why it passes while the class is open.
+
 ## [2.18.5] - 2026-09-30
 
 The guest chip, everywhere it belongs — and an honest account of where it can actually appear.
@@ -203,15 +265,17 @@ what the Edge Functions already say, so `submit-guess` and `submit-century` must
   `migration-moderation.sql` from its list. CHANGELOG.md has carried the correction since v2.17.0;
   CLAUDE.md is the file the next session is told to trust, and it now agrees.
 
-**Left alone on purpose, and worth picking up in the next release that deploys a function.** Four stale
-comments live in modules the Edge Functions bundle — `versus-logic.mjs` (twice: "33 of the 160 boards",
-which is 31), `game-logic.mjs` (`if (out.length >= 18) break;` in `seededSequence` is unreachable, since
-no team twice and no era more than twice over five eras caps every sequence at ten — so the comment
-about eighteen entries is wrong too) and `rewards.mjs` (the `minigame: 15` comment names two games;
-`claim_minigame` has taken four since v2.13.0). Every one is a comment and none changes behaviour, but
-editing them would make a module the functions bundle differ from what is deployed, and this release's
-whole subject is that "no Edge Function change" has to mean it. The same 31 was corrected everywhere
-that is not bundled: `CLAUDE.md`, `VERSUS.md` and `tests/test-versus-boards.mjs`.
+**Corrected in v2.18.5: this paragraph said the four stale comments were left alone, and they were not.**
+They were fixed in this release and deployed with it — `versus-logic.mjs` (twice: "33 of the 160
+boards", which is 31), `game-logic.mjs` (its `seededSequence` comment claimed eighteen entries where
+there are always ten, and the `if (out.length >= 18) break;` below it is unreachable) and `rewards.mjs`
+(the `minigame: 15` comment named two games; `claim_minigame` has taken four since v2.13.0). The
+paragraph was written before that work landed and was never reconciled with the deploy note above it,
+which says plainly that the functions changed *because* those three files did. Two statements about the
+same release, in the same entry, disagreeing — which is the failure this release's own subject was.
+The `break` itself is still there, deliberately: it is unreachable, and it is executable code on the
+most seed-sensitive file in the repo. The same 31 was corrected in `CLAUDE.md`, `VERSUS.md` and
+`tests/test-versus-boards.mjs` too.
 
 Also still open and not attempted here: `century.jsx` and `guess.jsx` render board names as bare text
 rather than through `NameLink`, so PROFILES.md's rule that every username shown opens its profile — and

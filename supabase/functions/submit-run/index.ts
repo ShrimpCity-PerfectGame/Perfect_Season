@@ -186,8 +186,22 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     // and the runs log - where the column is an integer, so the insert overflowed and was swallowed, because a
     // failed log must never fail a season that counted. A DNF that looks like it abandoned a trillion picks.
     const picks = Math.min(GL.SLOTS.length, Math.max(0, Math.trunc(Number(bodyRaw.picks) || 0)));
-    const done = await applyToProfile(service, user.id, (p) => GL.applyDnf(p, picks, bodyRaw.mode));
+    // A guest may not charge a DNF to the DAILY ladder, for the reason it may not play the daily at all.
+    // This branch returns long before the guest check further down, so until v2.18.6 the rule was true of
+    // a finished daily and not of an abandoned one: a modified client could post {dnf, mode: "daily"} from
+    // a guest and take `points_daily` down by 50 with a `runs` row tagged `ladder = 'daily'` behind it.
+    // Nothing showed it - both daily boards filter it out, by `> 0` and by `not dnf` respectively - and a
+    // DNF only ever subtracts from the account that sent it, which is why the note above guards this
+    // branch lightly. It is fixed anyway, because "a guest cannot touch the daily" is a rule this repo
+    // states in three documents, and a rule that holds on one path and not its neighbour is how the
+    // salary cap went three releases enforced on one of the draft screen's two doors.
+    //
+    // The mutator's second argument is the raw row, so the flag is already here; returning null is
+    // `applyToProfile`'s own refusal, which until now no caller had ever used.
+    const done = await applyToProfile(service, user.id, (p, row) =>
+      (row?.guest && bodyRaw.mode === "daily" ? null : GL.applyDnf(p, picks, bodyRaw.mode)));
     if (done.reason === "no_profile") return json({ error: "no profile for this account" }, 400);
+    if (done.reason === "refused") return json({ error: "the daily is for accounts", reason: "guest_daily" }, 403);
     if (!done.ok) return json({ error: "failed to save" }, 500);
     await logRun(service, GL.runLogRow(user.id, done.username, done.profile.recent[0]));
     return json({ ok: true });

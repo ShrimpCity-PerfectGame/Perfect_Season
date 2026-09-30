@@ -197,5 +197,44 @@ const lastSpin = simulateDraft("verify-seed-5", [{ kind: "team", beforePick: 5 }
 r = gl.replayDraft(lastSpin.seed, lastSpin.history, lastSpin.seq);
 check("a re-spin before the final pick still replays as legal", r.ok, r);
 
+// THE STRANDED RE-SPIN. In GM a roster can spend down to a cap that nothing left on the plan fits: boardAt
+// returns -1, the screen sets `noBoardLeft` and tells the player in as many words to "Re-spin for a board you
+// can use." Doing that puts the new board straight after one that WAS picked from, which is the one shape the
+// check above refuses - so until v2.18.6 the app instructed a player into a season the server then threw away,
+// 400 "illegal roster", with no retry that could ever succeed.
+//
+// The relaxation cannot buy an extra board: stranded means no remaining entry holds a single affordable,
+// eligible player, so the alternative to this re-spin is no draft at all rather than a worse one. The check
+// above - a re-spin off a picked-from board while the plan is still alive - must keep failing, and does.
+{
+  const SEED = "D073PL", opts = { gm: true, format: "fantasy" };
+  const seq = gl.seededSequence(SEED);
+  const on = (key, name, season) => (gl.BOARDS[key] || []).find((p) => p.name === name && p.season === season);
+  const picks = [["DET|4", "Jahmyr Gibbs", 2024, "FLEX1"], ["HOU|0", "Domanick Williams", 2004, "FLEX2"],
+    ["BAL|4", "Mark Andrews", 2021, "TE"], ["CHI|1", "Matt Forte", 2008, "RB"], ["CLE|0", "Quincy Morgan", 2002, "WR"]];
+  const roster = {}, history = [];
+  for (const [key, name, season, slot] of picks) {
+    const p = on(key, name, season);
+    if (!p) throw new Error(name + " " + season + " is not on " + key + " - the data moved under this test");
+    roster[slot] = p; history.push({ key, slot, id: p.id, season: p.season });
+  }
+  const cap = gl.capLeftFor(roster, opts);
+  check("GM: five legal picks can strand the draft with only QB open and $1M left",
+    cap.left === 1 && gl.SLOTS.filter((s) => !roster[s]).join() === "QB", cap);
+  check("...and the rest of the plan is genuinely dead, which is what the screen calls noBoardLeft",
+    gl.boardAt(seq, 5, roster, cap) < 0, { at: gl.boardAt(seq, 5, roster, cap) });
+
+  const cand = gl.rerollCandidate({ seed: SEED, kind: "team", seqIdx: 4, spinTeam: "CLE", spinW: 0,
+    shown: new Set(seq), drafted: new Set(history.map((h) => h.id)), open: ["QB"], cap });
+  const used = [...seq]; used.splice(5, 0, cand);
+  const qb = (gl.BOARDS[cand] || []).find((p) => p.pos === "QB" && gl.playerSalary(p) <= cap.left);
+  check("the re-spin the screen offers deals a board with an affordable QB on it", !!cand && !!qb, { cand, qb: qb && qb.name });
+  roster.QB = qb; history.push({ key: cand, slot: "QB", id: qb.id, season: qb.season });
+  check("and the roster it completes is legal, exactly at the cap", gl.capLeftFor(roster, opts).left === 0, gl.capLeftFor(roster, opts));
+
+  const v = gl.replayDraft(SEED, history, used, opts);
+  check("a re-spin taken because the draft was STRANDED replays as legal", v.ok, v);
+}
+
 console.log(failures === 0 ? "\nAll replayDraft checks passed." : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);
