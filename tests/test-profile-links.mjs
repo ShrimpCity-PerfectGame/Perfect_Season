@@ -8,6 +8,7 @@ import {
 } from "./helpers.mjs";
 import { runLogRow } from "../game-logic.mjs";
 import { BOARD_PATH } from "../site-pages.mjs";
+import { readFileSync } from "node:fs";
 
 // The app's own day key (local time), for today's daily and Over/Under rows.
 const now = new Date();
@@ -497,6 +498,74 @@ await runTest("landing straight on /leaderboard shows the stars and the colours,
   assert(!shown.includes("No one has earned points"),
     `the points ladder loaded rather than claiming nobody has played: ${shown.slice(0, 200)}`);
   assert(shown.includes("laddergal"), "and it shows who is actually on it");
+});
+
+// Century's and Guess's boards gained profile links in v2.18.3, and doing so reached a hole that had been
+// open since v2.9.0: `screenOf` only trusts a state whose view is on HISTORY_VIEWS, and those two - and Mini
+// games with them - were not on it. The entry was written correctly, the popstate handler had
+// `else if (s.view === "century") openTab("century")` ready for it, and that branch was unreachable, because
+// the state was thrown away one step earlier and fell back to the address: "/", which means Modes.
+//
+// Nothing could show it before v2.18.3. Those boards rendered bare text, so there was no way to leave one of
+// those screens for anywhere that pushes an entry and come back - the bug needed the link to exist first.
+// This is the test that would have caught it, and it belongs here rather than in the two screen tests
+// because what it is really about is that a screen reachable from a profile link can be returned to.
+await runTest("Back from a profile opened off a mini game's board returns to that board, not to Modes", async () => {
+  // A page of its own on the shared site mock: the tests above this one re-open with mocks of their own, so
+  // `container` no longer points at a page that can see these rows.
+  const today = new Date().toISOString().slice(0, 10);
+  site._century.add({
+    id: 7101, user_id: "topdog-id", username: "topdog", guest: false, day: today, seed: null,
+    score: 92, hit: false, ceiling: 110, roster: [], outcome: "92 touchdowns.", created_at: new Date().toISOString(),
+  });
+  site._guess.add({
+    id: 7102, user_id: "runnerup-id", username: "runnerup", guest: false, day: today, seed: null,
+    solved: true, tries: 3, guesses: [], answer: null, outcome: "Got it in 3.", created_at: new Date().toISOString(),
+  });
+
+  // Guess fetches its pool when the screen opens rather than shipping it in the bundle, so without this the
+  // screen draws "Couldn't load the players" and has no board to put a name on.
+  const pool = readFileSync(new URL("../data/guess-pool.json", import.meta.url), "utf8");
+  const hadFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => ({ ok: true, status: 200, json: async () => JSON.parse(pool), url });
+
+  container = await open("http://localhost/", site, makeStorage());
+
+  // Both live behind Mini games, so the route in is two tiles deep - which is the part that was lost.
+  const openMini = async (name) => {
+    await click(tab(container, "Modes"));
+    await flush(2);
+    const mini = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes("Mini games"));
+    assert(mini, "Modes has a Mini games tile");
+    await click(mini);
+    await flush(2);
+    const tile = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes(name));
+    assert(tile, `the Mini games screen has a ${name} tile`);
+    await click(tile);
+    await flush(6);
+  };
+
+  for (const [mode, lb, who] of [["Century", ".ce-lb", "topdog"], ["Guess the Player", ".gp-lb", "runnerup"]]) {
+    await openMini(mode);
+    await until(() => container.querySelector(`${lb} .namelink`), `${mode}'s board with a name on it`);
+    const link = container.querySelector(`${lb} .namelink`);
+    assert(link.textContent === who, `expected ${who} on ${mode}'s board, got ${link.textContent}`);
+    await click(link);
+    await expectProfile(container, who);
+
+    await back();
+    // The board, not Modes. Before v2.18.4 this landed on Modes and lost both the mode and Mini games with it.
+    await until(() => container.querySelector(`${lb} .namelink`),
+      () => `${mode}'s board back after Back, got: ${text(container).slice(0, 200)}`);
+    assert(window.location.pathname === "/", `${mode} lives at "/", got ${window.location.pathname}`);
+
+    // And Forward still works, so the entry was restored rather than rebuilt by a fresh navigation.
+    await forward();
+    await expectProfile(container, who);
+    await back();
+    await until(() => container.querySelector(`${lb} .namelink`), `${mode}'s board again after Forward then Back`);
+  }
+  if (hadFetch) globalThis.fetch = hadFetch; else delete globalThis.fetch;
 });
 
 console.log("test-profile-links.mjs done");
