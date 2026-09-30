@@ -95,9 +95,10 @@
      exactly on the orange bar's top edge and on the right the pink bar covers it. Under the numbers,
      because it printed straight through Mahomes' 120.4 while the bars grew.
      `.bar` keeps z-index auto on purpose. Given one it would form a stacking context, and `.v` could no
-     longer be lifted out of it above the line. */
+     longer be lifted out of it above the line.
+     The line carries no label of its own: both `.ceil` divs are empty, and what it MEANS is said once
+     by the `#s2note` kicker under the bars rather than by a caption riding on the rule itself. */
   .ceil { position:absolute; left:0; right:0; bottom:calc(var(--ch,0) * 1%); height:3px; background:var(--lime); opacity:var(--co,0); z-index:1; }
-  .ceil span { position:absolute; right:0; top:-4.6cqw; font-family:var(--display); font-size:3.2cqw; color:var(--lime); letter-spacing:.06em; }
 
   .stamp { font-family:var(--display); font-size:6.4cqw; color:var(--ink); background:var(--lime);
     padding:.1em .3em .14em; transform:rotate(-7deg) scale(var(--sc,0)); opacity:var(--so,0); }
@@ -222,6 +223,11 @@
     <!-- 6. the close -->
     <section class="scene" id="s6"><div class="safe"><div class="col">
       <div class="lockup">
+        <!-- A hand copy of the mark from static/icon.svg, one of six across five files - the list and
+             the one-line check are in tools/brand/avatar.mjs's header. It is spelled out here rather
+             than <use>d or fetched because the film renders from a file:// URL with no server, and
+             because <g id="mark"> has to wrap only the arrow and its head so the spin turns those two
+             and leaves the football still. Any edit to the mark has to reach this copy as well. -->
         <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
           <rect x="2" y="2" width="60" height="60" rx="15" fill="#B8F500" stroke="#101114" stroke-width="3"/>
           <g id="mark">

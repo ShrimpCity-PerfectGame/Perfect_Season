@@ -1470,7 +1470,7 @@ await runTest("10. the economy from real seasons graded as submit-run grades the
   const lines = [];
   // game-logic.mjs's replayDraft checks each pick against the boards in order, but lets a trace pass over a board it
   // could have picked from - which the app never does (it moves on only by picking, or by a re-spin, which puts the new
-  // board straight after). So a modified client can take its six boards from the sequence's eighteen.
+  // board straight after). So a modified client can take its six boards from the sequence's ten.
   let accepted = 0, traces = 0, gain = 0;
   for (let i = 0; i < 80; i++) {
     const seed = `PASSOVER-${i}`;

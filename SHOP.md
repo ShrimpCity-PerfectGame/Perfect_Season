@@ -268,7 +268,7 @@ season, after the existing verification:
    `genius` flags (the app offers neither on it). A GM season whose verified roster is over `GM_CAP` is an illegal
    roster (400) — the app never lets a pick past the cap, but whether a draft was GM is the client's word. And
    `replayDraft` (game-logic.mjs) refuses a trace that walks past a board it could have picked from without
-   re-spinning it, which would otherwise draft the best six of a sequence's eighteen boards.
+   re-spinning it, which would otherwise draft the best six of a sequence's ten boards.
 2. **The duplicate guard.** Daily: the existing `daily_runs` insert; its 409 answer gains `reason: "duplicate"`.
    Free: insert `finished_codes (user_id, code)` first. A unique violation (23505) answers 409
    `{ "error": "this draft is already recorded", "reason": "duplicate" }`; any other error answers 500

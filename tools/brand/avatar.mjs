@@ -6,9 +6,35 @@
 // it the same way: icon-maskable-512.png is full-bleed lime with no border and the mark held well
 // inside. This is that idea for a circle.
 //
-// Nothing here redraws the mark. The arrow, the arrowhead, the football and its lace are the exact paths
-// from static/icon.svg, so the avatar cannot drift from the app icon - only the frame around them
-// changes. Keep in step with static/icon.svg and GridspinMark in perfect-season.jsx.
+// Nothing here REDRAWS the mark - the arrow, the arrowhead, the football and its lace are the paths
+// from static/icon.svg and only the frame around them changes. But read that as a promise about care,
+// not about mechanism: they are pasted in below as literal strings, so nothing stops this file and the
+// icon from disagreeing. tools/brand/render.mjs and tools/app/icons.mjs read static/icon.svg off disk
+// and so genuinely cannot drift; this one can, because a `<g>` is scaled around the mark and the navy
+// variant inverts its colours, and neither is expressible by re-serving the icon file whole.
+//
+// The mark is hand-copied in SIX places across five tracked files, which is worth knowing before
+// nudging a single coordinate:
+//
+//   static/icon.svg                 the source of truth, and the only one the two renderers above read
+//   perfect-season.jsx              GridspinMark, the header logo
+//   tools/brand/avatar.mjs          MARK, and again inside avatarDark with the colours inverted
+//   tools/film/spin-an-era.html     inside <g id="mark">, so the film can spin the arrow
+//   tools/film/tiktok-ad.html       the same
+//
+// All six agree character for character as this is written. To find them all again, look for the arrow
+// - it is the longest path and the one any edit to the ring would touch:
+//
+//   git ls-files -z | xargs -0 grep -l "M43.57 18.21"
+//
+// That lists FILES rather than counting hits, which matters: the line above quotes the path it is
+// searching for, so a count would find itself and report seven. The file list is unaffected, because
+// the self-match lands in this file, which belongs in the list anyway. A sixth file appearing means a
+// seventh copy of the mark exists and this comment is out of date.
+//
+// The colours are copied too, and they are theme.mjs's: #101114 is PALETTE.ink, #B8F500 PALETTE.lime,
+// and the navy #0B1020 is the dark scope's background. theme.mjs is not imported here on purpose -
+// this script renders an SVG string for a headless browser rather than running inside the app.
 //
 //   node tools/brand/avatar.mjs [--size 1024] [--out build/brand]
 
@@ -32,7 +58,7 @@ function findChrome() {
   return found;
 }
 
-// The mark's own paths, on a 64 grid, with no rect around them.
+// The mark's own paths, on a 64 grid, with no rect around them. A hand copy - see the header.
 const MARK = `
   <path d="M43.57 18.21A18 18 0 1 1 20.43 18.21" fill="none" stroke="#101114" stroke-width="6" stroke-linecap="round"/>
   <path d="M25.9 12.6 16.2 13.9 22.4 22.2Z" fill="#101114"/>
@@ -51,7 +77,10 @@ const avatar = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   </g>
 </svg>`;
 
-// The same mark on navy, for anywhere a lime circle would sit on a light page and shout.
+// The same mark on navy, for anywhere a lime circle would sit on a light page and shout. The paths are
+// spelled out again rather than reusing MARK because every colour in them is inverted, and a MARK with
+// its two inks parameterised would be a small template language for the sake of one more variant.
+// The cost is the second of this file's two copies: an edit to MARK must be made here as well.
 const avatarDark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" fill="#0B1020"/>
   <g transform="translate(32 32) scale(${SCALE}) translate(-32 -32)">

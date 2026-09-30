@@ -302,6 +302,13 @@ await runTest("6. the daily is once, and the tile says so afterwards", async () 
 });
 
 await runTest("7. the boards show the day and all time, and mark a player's own row", async () => {
+  // A guest's run on the same board, seeded BEFORE the screen opens - the boards are fetched once when it
+  // does, and switching tabs reads what is already held rather than going back to the server.
+  window.__ps_supabase__._century.add({
+    id: 9001, user_id: "guest-on-the-board", username: "Guest_AB12C", guest: true,
+    day: new Date().toISOString().slice(0, 10), seed: null, score: 71, hit: false, ceiling: 104,
+    roster: [], outcome: "71 touchdowns.", created_at: new Date().toISOString(),
+  });
   await openCentury();
   // BOTH tab panels are in the document (one `hidden`), so every read here is scoped to the open one - the
   // other is real markup a loose querySelector would happily return instead. That is the shape a tabs widget
@@ -319,10 +326,22 @@ await runTest("7. the boards show the day and all time, and mark a player's own 
   assert(tabs[1].getAttribute("aria-selected") === "true", "All time opens");
   const caption = open().querySelector(".ce-lb caption").textContent;
   assert(/one per player/.test(caption), `it is one row per player: ${caption}`);
-  // Every board in the game renders a guest's name with a chip rather than as a link, and this one is no
-  // different - that is what stops a throwaway account being clickable.
   const head = [...open().querySelectorAll(".ce-lb th")].map((h) => h.textContent);
   assert(head.includes("Runs"), `the all-time board counts runs: ${JSON.stringify(head)}`);
+
+  // An account's name links to its profile and a guest's does not, the way it is on every other board in
+  // the game. The comment saying so sat here from v2.9.0 with nothing under it checking it, and it was
+  // wrong the whole time: this board rendered every name as bare text, so nothing linked and nothing was
+  // chipped. NameLink was module-scope in perfect-season.jsx and a screen file may not import that back,
+  // so there was no way to render one - which is why v2.18.3 moved it rather than copying it here.
+  await click(tabs[0]);
+  await flush();
+  const linked = [...open().querySelectorAll(".ce-lb tbody .namelink")].map((b) => b.textContent);
+  assert(linked.includes("centurion"), `expected centurion to be a profile link, got: ${JSON.stringify(linked)}`);
+  const guestRow = [...open().querySelectorAll(".ce-lb tbody tr")].find((r) => r.textContent.includes("Guest_AB12C"));
+  assert(guestRow, `the guest's row is on the board: ${open().textContent.slice(0, 200)}`);
+  assert(guestRow.querySelector(".guestchip"), `the guest's name carries a chip: ${guestRow.innerHTML.slice(0, 200)}`);
+  assert(!guestRow.querySelector(".namelink"), `and is not a link: ${guestRow.innerHTML.slice(0, 200)}`);
 });
 
 await runTest("8. a guest plays Unlimited and is refused the daily, with a reason", async () => {

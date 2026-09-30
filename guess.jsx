@@ -5,9 +5,12 @@
 // do, and exports its stylesheet for perfect-season.jsx to append.
 //
 // Known and accepted, the same way it is accepted for every other seeded mode in this game: the answer is
-// derivable from the date and the pool, both of which ship in the bundle. Somebody willing to run guess-logic
-// in a console can read today's player. What is closed is the in-app rehearsal - and the BOARD is honest
-// either way, because submit-guess recomputes the answer and the result from the date alone.
+// derivable from the date and the pool, and both are public. The cycle ships in the bundle; the pool does NOT -
+// it is fetched from /data/guess-pool.json, which tests/test-build-seo.mjs holds page.js to NOT containing -
+// and a file served from the site root is every bit as readable, so this is the same gap either way. Somebody
+// willing to run guess-logic in a console can read today's player, and every later day's. What is closed is
+// the in-app rehearsal - and the BOARD is honest either way, because submit-guess recomputes the answer and
+// the result from the date alone. GUESS.md 5 prices both this and the replay gap beside it.
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { TEAMS } from "./game-logic.mjs";
 import {
@@ -17,6 +20,7 @@ import {
 } from "./guess-logic.mjs";
 import { loadGuessPool } from "./guess-pool.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
+import { NameLink } from "./cosmetics.jsx";
 import { teamVars, reducedMotion } from "./ui-common.jsx";
 import { submitGuess, fetchGuessTop, fetchGuessBest, fetchMyGuess, sget, sset, clearDraft, GUESS_RETRY } from "./storage.js";
 import { sendOnce } from "./pending-daily.mjs";
@@ -612,7 +616,7 @@ function GuessBoard({ rows, loaded, username, allTime }) {
         {rows.map((r, i) => (
           <tr key={`${r.id}-${i}`} className={username && r.username === username ? "me" : undefined}>
             <td>{i + 1}</td>
-            <td>{r.username}{r.guest && <span className="pill">guest</span>}</td>
+            <td><NameLink name={r.username} guest={r.guest} /></td>
             {allTime
               ? <><td>{r.solved} of {r.dailies}</td><td>{r.avgTries == null ? "—" : r.avgTries.toFixed(2)}</td></>
               : <td>{r.solved ? r.tries : "—"}</td>}

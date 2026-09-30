@@ -6,6 +6,18 @@ import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { TEAMS, BEST_FIELDS, normFormat, WINDOWS, passerRating } from "./game-logic.mjs";
 import { PALETTE } from "./theme.mjs";
 
+// Opening a player's profile, handed down rather than threaded (PROFILES.md 7). The boards that show a
+// username are module-scope components with no route to the app's navigation, so the app puts its
+// openProfile here and NameLink reads it.
+//
+// It lives HERE for the same reason BoardWear does, and moved here in v2.18.3: Century's and Guess's boards
+// need it, and a screen file never imports the main component back. While it sat in perfect-season.jsx those
+// two boards had no way to reach it, so they rendered their names as bare text - which quietly made
+// PROFILES.md 7's "every username shown for an account opens that player's profile" untrue of them for two
+// releases. A component rendered outside the provider gets null and renders a plain name, which is what a
+// test or a preview should see.
+export const OpenProfile = createContext(null);
+
 // What the screens decorate a name with, and the scope they are drawing in:
 // { supporters: Set of names, looks: Map of name -> name-colour id, scope }. A context rather than props
 // threaded through every board, because every name on a board renders through one NameLink - and it lives

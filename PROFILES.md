@@ -407,10 +407,17 @@ modAction(userId, action, newName)   → { ok: true } | { ok: false, reason }
   `badgeProgress({ stats, extra, details, joined })` → `[{ id, earned, have, need }]` in
   catalog order, `topBadges(progress, n)`. Pure; no imports from the app (the Edge Function will import
   it in v1.12.0).
-- **`ui-common.jsx`** (phase 0, lead): display helpers moved out of perfect-season.jsx — `SLOT_LABEL`,
-  `FORMAT_LABEL`, `LADDER_LABEL`, `teamVars`, `gradeTier`, `grade`, `cityFor`, `teamLabel`, `shortYr`,
-  `fmtDate`, `outcomeSentence`, `draftsOf`, `scoreOf`, `runOf`, `RosterRows`, `RosterChips`. Import these;
-  don't copy them.
+- **`ui-common.jsx`** (phase 0, lead): display helpers moved out of perfect-season.jsx. It shipped with
+  sixteen and holds **thirty** as of v2.18.3, so the list below is worth re-reading rather than trusted:
+  `SLOT_LABEL`, `FORMAT_LABEL`, `LADDER_LABEL`, `teamVars`, `gradeTier`, `grade`, `cityFor`, `teamLabel`,
+  `shortYr`, `fmtDate`, `outcomeSentence`, `draftsOf`, `scoreOf`, `runOf`, `RosterRows`, `RosterChips`,
+  `POS_NAME`, `cityRange`, `statCells`, `Confetti`, `reducedMotion`, `GRIDSPIN_DAY_ONE`, `dailyNumber`,
+  `keepFocusInside`, `useCloseOnBack`, `closeTopDialog`, and the four that carry board decoration —
+  `BoardWear`, `useNameLook`, `useWearScope` and, since v2.18.3, `OpenProfile`. Import these; don't copy
+  them. The two contexts live here rather than in perfect-season.jsx for the same reason: the duel, Century
+  and Guess screens all read them, and a screen file never imports the main component back. `NameLink`
+  itself is the exception and lives in `cosmetics.jsx`, because it needs `NameInk` and cosmetics.jsx
+  already imports this file — putting it here would make the two import each other.
 
 ---
 
@@ -547,10 +554,21 @@ Profile tab (signed in) opens your own profile; `isOwner` is `profile.id === use
 
 **Name links.** Every username shown for an account opens its profile: Top 10 and the best-ever card,
 today's daily board, the points ladder, every Stats board (best lineups ever, biggest upsets, career
-boards via RankRows, GM scores, created players), and the Over/Under board. Use one button component
-(a React context carrying `openProfile` works for module-scope components like `PlayerName` and
-`RankRows`): it looks like the name (no button chrome), underlines on hover inside `(hover:hover)`,
-has a visible focus ring, and gets a `pointer:coarse` hit area per CLAUDE.md.
+boards via RankRows, GM scores, created players), the Over/Under board, and — since v2.18.3 — **Century's
+and Guess the Player's boards**, both of which rendered bare text until then. Use one button component,
+`NameLink` in `cosmetics.jsx`, reading `openProfile` from ui-common.jsx's `OpenProfile` context (a context
+rather than a prop, because the boards are module-scope components like `PlayerName` and `RankRows` with
+no route to the app's navigation): it looks like the name (no button chrome), underlines on hover inside
+`(hover:hover)`, has a visible focus ring, and gets a `pointer:coarse` hit area per CLAUDE.md.
+
+**One component, and this is why.** A board that renders its own name eventually drops one of the four
+things a name carries — the link, the guest chip, the supporter star, the name colour. Eight boards
+dropped the chip before v2.0.0, which made throwaway accounts clickable and reportable; Century and Guess
+dropped all four, for two releases, because `NameLink` sat in perfect-season.jsx where a screen file
+cannot reach it. Neither failure was visible in a test: both screens' board tests carried a comment saying
+a guest is "chipped rather than linked" and asserted nothing of the kind. The duel screen is the one
+deliberate exception (`DuelName`), and it paints without linking because a profile link would push a
+history entry and take a player off a match on a clock.
 
 **Data.** Fetch `fetchPlayerProfile(profileOf)` whenever the profile view opens or `profileOf` changes
 (status loading → ok/missing/error). Rank: `fetchOwnRank` for each best score, in parallel. Header

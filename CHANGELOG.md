@@ -6,10 +6,80 @@ Versions follow [semantic versioning](https://semver.org): the **minor** number 
 features, the **patch** number for fixes. Each release is tagged in git (`v1.1.1`) and the version
 in `package.json` is the source of truth for what is deployed.
 
+Two footnotes to that, both checked in v2.18.3. **`1.19.1` carries no tag on purpose**: its heading below
+reads "unreleased", and it is the only one of the sixty-one version headings here with no date, because it
+never went to production on its own — it shipped inside `2.0.0`. A version that was never released has
+nothing to tag. **`1.16.0`'s tag was simply missing** and was written late, at the release commit
+`118d934`; it reached production inside `1.17.0`'s promotion, which is ordinary — seventeen of the tags
+here are versions that shipped inside a later one. And one oddity worth knowing rather than fixing:
+**`v2.12.0` sits on a commit whose `package.json` reads `2.13.0`**, because `2.12.0` never existed as a
+version — one commit wrote both changelog headings. The tag is published, so it stays where it is.
+
 Releases go to the staging site and are verified there before production — see "Releasing" in
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.3] - 2026-09-30
+
+Names on Century's and Guess's boards become names, and a handful of comments stop describing a game
+that isn't there.
+
+**Deploy order: DEPLOY THE EDGE FUNCTIONS, then the client.** No migration. The functions change only
+because `game-logic.mjs`, `versus-logic.mjs` and `rewards.mjs` do, and in those three the change is
+comments only — the comment-stripped source is byte-identical to v2.18.2, so nothing a function computes
+moves. They are deployed anyway, because a bundled module that differs from what is deployed is the drift
+this repo keeps paying for.
+
+- **Century's and Guess's boards rendered names as bare text**, from v2.9.0 and v2.13.0 — no profile
+  link, no guest chip, no supporter star, no name colour. Not an oversight: `NameLink` was module-scope in
+  `perfect-season.jsx`, and a screen file never imports the main component back, so those two screens had
+  no way to reach it. `NameLink` now lives in **`cosmetics.jsx`** beside `NameInk`, which it needs — and
+  which is why it could not go to `ui-common.jsx`, where a shared display helper would normally sit:
+  cosmetics.jsx already imports ui-common.jsx, so that would have made the two import each other.
+  `OpenProfile` went to ui-common.jsx beside `BoardWear`, for the reason `BoardWear` is there. The duel
+  screen still deliberately does not link (`DuelName`): a profile link would push a history entry and take
+  a player off a match on a clock.
+- **Both screens' board tests already claimed this rule held.** `test-guess-screen.mjs` 8 is titled "with
+  a guest chipped rather than linked" and `test-century-screen.mjs` 7 carries a comment saying "every
+  board in the game renders a guest's name with a chip rather than as a link, and this one is no
+  different". Neither asserted it, and both were false: those boards linked nobody and chipped nobody.
+  They seed a guest row now and check both halves.
+- **`seededSequence` holds ten entries, not eighteen**, and five comments plus two documents said
+  eighteen. No team twice and no era more than twice, over five eras, caps it at ten — measured across
+  270,000 seeds, every one length 10. The `if (out.length >= 18) break;` line is therefore unreachable and
+  is deliberately **left in place**: it is executable code on the most seed-sensitive file in the repo and
+  removing it buys nothing. What the comments got wrong was the safety margin — eight boards are dealt
+  from ten, so the slack is two, and the guarantee that a re-spin never runs out comes from `nextBoard`
+  widening to the rest of the boards, not from the length of the list.
+- **VERSUS.md had the re-spin pool backwards.** It said a re-spin "draws from the same ten". It draws from
+  the other hundred and fifty: `respinBoard` builds `shown = new Set([...seq, ...used])` and
+  `rerollCandidate` refuses anything in it, which is the same exclusion single player has and for the same
+  reason — a re-spin onto a board still to come would resurface later.
+- **31 boards hold a single quarterback or a single tight end, not 33.** An arithmetic slip rather than
+  stale data: both one-tight-end boards are Pittsburgh's and both also hold one quarterback, so the two
+  shapes overlap instead of adding. `VERSUS.md` already said 31 and the code had drifted away from it.
+- **The brand mark is six hand copies across five files, not two.** `static/icon.svg`, `GridspinMark`,
+  `tools/brand/avatar.mjs` twice, and both films. They all agree today — verified by diffing the path
+  geometry, not by reading — but CLAUDE.md promised they could not drift, and two of the six are only
+  kept in step by hand.
+- **The scored film is reproducible from the repo again.** `tools/film/render.mjs` gained `--audio`, so
+  the 30-second film's silent render and `score.wav` can be muxed by something committed; the command that
+  produced the delivered file existed nowhere. And `tools/film/overlap.mjs` **crashed outright** on
+  `spin-an-era.html` and always had — it assumed every film has the TikTok safe-area wrapper — so the
+  composition checker had never once run against the title sequence. It runs, and reports 0.
+- **`versus.jsx` held two raw NUL bytes**, a `join("\0")`/`split("\0")` written as literal control
+  characters. Ripgrep skips such a file silently: it printed no match, no warning, and exited 0, so a
+  1,100-line screen was invisible to the default search tool. Now the two-character escape, with the same
+  runtime value.
+- The dead `.ceil span` rule in the TikTok ad is gone, after a mechanical sweep of both films that
+  confirmed it was the only dead selector; `join_match`'s header comment now lists all eight refusal codes
+  its body returns; `rewards.mjs` says four mini-games where `claim_minigame` takes four; `guess.jsx`'s
+  header no longer claims the pool ships in the bundle, which `tests/test-build-seo.mjs` asserts it does
+  not; and PROFILES.md's `ui-common.jsx` export list says thirty rather than sixteen.
+- **`v1.16.0` was never tagged** and now is, at its release commit `118d934`. **`1.19.1` stays untagged on
+  purpose** — its heading says "unreleased" and it is the only version heading here with no date, because
+  it shipped inside `2.0.0`. Both footnotes are at the top of this file, with `v2.12.0`'s misplacement.
+
 ## [2.18.2] - 2026-09-30
 
 The outbox stops throwing away the daily it exists to save, and two panels stop promising a queue that

@@ -611,9 +611,14 @@ already, nobody is stranded.
 A board that fails is **skipped**, exactly as `boardAt` skips one in single player — though there is less slack
 in the sequence than the code reads as. `seededSequence` stops at eighteen entries and never reaches eighteen: no
 team twice and no era more than twice, over five eras, caps every sequence it can produce at **ten**. Eight boards
-therefore have two spares between them, and a re-spin draws from the same ten — so if they were ever exhausted the
-server widens to the rest of the boards in the same seeded order (`nextBoard`), and it is that widening rather than
-the length of the list that actually carries the guarantee. Both clients compute the skip from the same public
+therefore have two spares between them — and a re-spin does **not** draw from those two. `respinBoard` builds
+`shown = new Set([...seq, ...used])` and hands it to `rerollCandidate`, whose `match()` refuses any key in it, so
+a re-spin lands on a board that is not in the sequence at all: it draws from the other hundred and fifty. That is
+the same exclusion single player has, and for the same reason (CLAUDE.md, "Reroll pool exclusion") — a re-spin
+onto a board still to come would resurface later, since nothing removes the original. The two spares are what the
+*skip* eats into, not the re-spin, and if even those ran out the server widens to the rest of the boards in the
+same seeded order (`nextBoard`). It is that widening rather than the length of the list that carries the
+guarantee. Both clients compute the skip from the same public
 picks, so neither has to be told. The skip is free and belongs to nobody: it costs no re-spin.
 
 What this deliberately does *not* do is constrain the first picker. Taking the last quarterback on a board when

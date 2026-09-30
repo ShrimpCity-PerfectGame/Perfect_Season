@@ -761,9 +761,13 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
   const theirs = state && side ? powerupsFor(match, side === "host" ? "guest" : "host") : null;
   // Tell the app which two accounts are on this screen, so it can fetch exactly THEIR name colours rather than
   // hope both sit inside the boards' first few hundred wearers. Keyed on the pair rather than on the match,
-  // which changes on every pick and every tick of the clock.
-  const players = [match?.hostName, match?.guestName].filter(Boolean).join(" ");
-  useEffect(() => { if (players) onPlayers?.(players.split(" ")); }, [players, onPlayers]);
+  // which changes on every pick and every tick of the clock. The separator is NUL because no username may
+  // contain one, so the join can never be split back into the wrong pair - and it is written as the escape
+  // `\0` rather than typed as a raw byte. Typed raw it shipped from v2.7.0 to v2.18.2, and a raw NUL makes this
+  // the one text file in the repo that ripgrep reads as binary: a recursive search skips it entirely, finds
+  // nothing in it, and says nothing about having skipped it, so every repo-wide grep for a duel quietly lied.
+  const players = [match?.hostName, match?.guestName].filter(Boolean).join("\0");
+  useEffect(() => { if (players) onPlayers?.(players.split("\0")); }, [players, onPlayers]);
 
   const flash = useFlash(latestEvent(match, state, (s) => name(match, s), side));
   // Armed, and still your turn. The effect below clears `stealing` when the turn moves, but an effect runs

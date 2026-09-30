@@ -20,6 +20,7 @@ import { teamVars, POS_NAME, Confetti, reducedMotion, dailyNumber } from "./ui-c
 import { submitCentury, fetchCenturyTop, fetchCenturyBest, fetchMyCentury, sget, sset, clearDraft, CENTURY_RETRY } from "./storage.js";
 import { sendOnce } from "./pending-daily.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
+import { NameLink } from "./cosmetics.jsx";
 
 // What a slot is called on screen. The numbers exist so a roster can be keyed by slot (CENTURY_SLOTS' own
 // comment); nobody wants to read "RB1".
@@ -688,8 +689,7 @@ function CenturyBoard({ rows, loaded, username, allTime }) {
           <tr key={`${r.id}-${i}`} className={username && r.username === username ? "me" : undefined}>
             <td>{i + 1}</td>
             <td>
-              {r.username}
-              {r.guest && <span className="pill">guest</span>}
+              <NameLink name={r.username} guest={r.guest} />
               {r.hit && <span className="ce-hit" title={`Reached ${CENTURY_GOAL}`}>💯</span>}
             </td>
             <td>{r.score}</td>

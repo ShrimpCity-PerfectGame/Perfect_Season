@@ -275,6 +275,21 @@ export function boardHasOption(key, drafted, open, cap = null) {
 
 // The draft sequence for a seed: six boards plus alternates for re-spins, with no repeated team
 // and no era more than twice.
+//
+// It is always TEN entries long, never the eighteen the break below implies. The era rule is what fixes
+// the length: WINDOWS holds five eras and each may appear at most twice, so 5 x 2 = 10 is the ceiling,
+// and every seed reaches it because each era offers all 32 teams while at most nine are ever already
+// spoken for - measured at ten for every one of 270,000 seeds, and true by construction rather than by
+// luck. The `out.length >= 18` line is therefore a bound the rule above it can never reach. It stays
+// where it is anyway: this is the most seed-sensitive function in the repo, every challenge code and
+// every Daily ever played is a replay of it, and a dead line costs nothing next to touching one.
+//
+// Nothing relies on this list being long enough to cover re-spins, which is the part worth knowing
+// before anyone shortens or lengthens it on purpose. A single-player re-spin comes from
+// rerollCandidate, which draws from every board there is and only excludes the ones already shown; a
+// duel's board comes from versus-logic's nextBoard, which walks this list and then widens to the rest
+// of the boards when none of it serves. The guarantee that a re-spin always has somewhere to go lives
+// in those two, never in the length of what this returns.
 export function seededSequence(seed) {
   const rng = mulberry32(hashStr(seed));
   const all = Object.keys(BOARDS);
@@ -406,7 +421,8 @@ export function replayDraft(seed, history, seq, { gm = false, format } = {}) {
     } else if (si + 1 >= seq.length || seq[si + 1] === base[basePtr]) {
       // The app leaves a board it could pick from only by picking or by re-spinning it, which puts the new board
       // straight after this one. Walking past it to the next base board instead would let a trace draft the best six
-      // of the sequence's eighteen boards (on a Daily, better than any draft the app allows).
+      // of the sequence's ten boards (ten, not eighteen - see seededSequence; on a Daily, better than any draft the
+      // app allows).
       return fail("a board with a legal pick was passed over");
     } else {
       prevOnScreen = true;
