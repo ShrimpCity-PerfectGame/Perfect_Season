@@ -599,6 +599,15 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
 .skip:focus{left:8px;top:8px;background:var(--accent);color:var(--on-accent);border:2px solid var(--ink);
   border-radius:10px;padding:8px 14px;font-weight:800;text-decoration:none;box-shadow:3px 3px 0 var(--hard)}
 .namelink{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit}
+/* Every name on a board, plain or coloured, in ONE weight - which is the weight a name colour needs to be
+   visible at all. A look is a gradient clipped to the letters, so how much of it a reader sees is how much
+   ink the letters have; at Inter's regular weight and the Leaderboard's 14.5px there is next to none, and a
+   bought colour arrived looking like a slightly different grey. Boldening only the COLOURED names would have
+   fixed that and left a leaderboard column in two weights, reading as emphasis on one row rather than as a
+   cosmetic - so every board name takes it, and the colour is still the only thing that differs.
+   It goes on a span of NameLink's own rather than on .namelink, because a guest is not a button and would
+   otherwise be the one thin name in the column. */
+.bname{font-weight:700}
 /* A guest's name on a board: the name as plain text, with a quiet chip saying what it is. */
 /* The supporter star. --accent-ink is the one accent token that is AA in every scope (game blue on cream,
    lime on the dark and night ones), which is exactly what an accent-coloured mark beside text needs. It is
@@ -782,6 +791,9 @@ p.gamecoins .earned{display:flex}
 .lb th{text-align:left;font-weight:800;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:2px solid var(--ink)}
 .lb td{padding:10px 8px;border-bottom:1px solid var(--line)}
 .lb td.r,.lb th.r{text-align:right}
+/* Base rule, so the narrow-screen .lb td.nm below still overrides it. Only the name grows: .lb's 14.5px is
+   what the scores and records are measured at and they are Anton and tabular anyway. */
+.lb td.nm{font-size:16px}
 .lb tr.me td{background:color-mix(in srgb,var(--accent) 30%,transparent)}
 .lb .rk{font-family:var(--display);font-weight:400;font-size:22px;width:36px}
 .you{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--on-accent);background:var(--accent);
@@ -1466,11 +1478,11 @@ function NameLink({ name, guest }) {
   // A guest has no profile screen to open - no picture, no bio, nothing it could set - so its name is
   // shown as what it is instead of offering an empty page. A guest is never a supporter: the shop refuses
   // one, so there is no star to show either.
-  if (guest) return <>{name}<span className="guestchip">guest</span></>;
+  if (guest) return <><span className="bname">{name}</span><span className="guestchip">guest</span></>;
   const look = wear?.looks?.get(name) || null;
   // The colour goes on the name and nothing else. The star and the guest chip stay outside it, in their own
   // tokens, or a drifting gradient would take the chip with it and the one thing it has to stay is legible.
-  const inked = <NameInk look={look} scope={wear?.scope || "light"}>{name}</NameInk>;
+  const inked = <span className="bname"><NameInk look={look} scope={wear?.scope || "light"}>{name}</NameInk></span>;
   if (!name || !openProfile) return name ? inked : null;
   const star = wear?.supporters?.has(name)
     ? <span className="supchip" role="img" aria-label="Supporter">{"★"}</span>

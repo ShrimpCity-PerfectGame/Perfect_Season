@@ -70,7 +70,7 @@ export const VERSUS_CSS = `
    on 32 team colours. Flame on Pittsburgh measured 1.00:1 - the same luminance, an invisible name.
    --surface is deliberate: it is one of the surfaces tests/test-cosmetics.mjs already measures every name
    colour against, so the pill puts the name somewhere the contrast test has covered rather than somewhere new. */
-.vs-who{background:var(--surface);border-radius:8px;padding:1px 7px;display:inline-block;max-width:100%;
+.vs-who{background:var(--surface);border-radius:8px;padding:1px 7px;display:inline-block;max-width:100%;font-weight:700;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:baseline}
 .vs-link{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .vs-link code{font-size:15px;padding:8px 10px;border:2px solid var(--line);border-radius:10px;background:var(--surface);word-break:break-all}

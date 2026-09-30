@@ -25,10 +25,19 @@
     background-image:radial-gradient(circle at 1px 1px, rgba(247,244,234,.05) 1px, transparent 1px);
     background-size:7px 7px; }
 
-  /* TikTok's own UI sits over the video. Everything READABLE lives in this box: the account row eats
-     the top, the caption and the ad's CTA button eat the bottom, the like/share rail eats the right.
-     Percentages of 1080x1920, so they hold at any render size. See ?guides=1. */
-  .safe { position:absolute; z-index:4; top:7.3%; bottom:26%; left:5.9%; right:16.7%;
+  /* TikTok's own UI sits over the video. Everything READABLE lives in this box. Percentages of
+     1080x1920, so they hold at any render size. See ?guides=1.
+
+     The horizontal insets are SYMMETRIC, and that is the whole point of them. The obvious box reserves
+     the like/share rail on the right (right:16.7%) and keeps the left gutter at 5.9% - but a centred
+     stack inside THAT box centres on 44.6% of the frame, which is 58px left of the middle at 1080 wide.
+     In the feed the rail fills the gap and it reads as centred; everywhere else the ad will ever be
+     watched - a preview, a download, a repost stripped of the chrome - it reads as a layout that
+     slipped. A centred composition has to centre on the FRAME.
+     What pays for the rail instead is the bottom inset. The rail's icons run from roughly half-height
+     down, so the answer to "don't sit under the rail" is to sit ABOVE it, which 32% does: the readable
+     band ends at 68% of the frame and the rail, the caption and the CTA button all live below that. */
+  .safe { position:absolute; z-index:4; top:7.3%; bottom:32%; left:7%; right:7%;
     display:grid; place-content:center; justify-items:center; text-align:center; }
   body.guides .safe { outline:2px dashed rgba(184,245,0,.45); }
 
@@ -66,7 +75,9 @@
   .bar .who { position:absolute; bottom:-5.4cqw; left:0; right:0; text-align:center;
     font-family:var(--body); font-weight:800; font-size:2.9cqw; letter-spacing:.14em;
     text-transform:uppercase; color:var(--muted); }
-  .bar .v { position:absolute; top:-6.6cqw; left:0; right:0; text-align:center;
+  /* -7.8, not -6.6: a bar that stops just short of the ceiling puts its value exactly where the ceiling
+     line is drawn, and the line printed straight through Mahomes' 120.4. The value clears the line now. */
+  .bar .v { position:absolute; top:-7.8cqw; left:0; right:0; text-align:center;
     font-family:var(--display); font-size:5cqw; color:var(--cream); font-variant-numeric:tabular-nums; }
   .ceil { position:absolute; left:0; right:0; bottom:calc(var(--ch,0) * 1%); height:3px; background:var(--lime); opacity:var(--co,0); }
   .ceil span { position:absolute; right:0; top:-4.6cqw; font-family:var(--display); font-size:3.2cqw; color:var(--lime); letter-spacing:.06em; }
@@ -154,11 +165,11 @@
         </div>
       </div>
       <div class="bars" id="bars">
-        <div class="ceil" id="ceil" style="--ch:87"><span>130.0 &mdash; the ceiling</span></div>
+        <div class="ceil" id="ceil" style="--ch:87"></div>
         <div class="bar" id="bK" style="--pos:var(--te)"><span class="v" id="vK">0</span><span class="who">Travis Kelce</span></div>
         <div class="bar" id="bM" style="--pos:var(--qb)"><span class="v" id="vM">0</span><span class="who">Patrick Mahomes</span></div>
       </div>
-      <div class="kicker" id="s2note" style="opacity:0;color:var(--muted);letter-spacing:.08em">Only 40 seasons since 1999 reach it</div>
+      <div class="kicker" id="s2note" style="opacity:0;color:var(--muted);letter-spacing:.08em">130.0 is the ceiling &middot; only 40 seasons since 1999 reach it</div>
     </div></div></section>
 
     <!-- 3. the reversal -->
