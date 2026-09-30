@@ -2591,17 +2591,28 @@ export default function PerfectSeason() {
     draining.current = true;
     try {
       const day = utcDayKey();
-      for (const [key, submit, retry] of [
-        [GUESS_DONE(userId, day), (r) => submitGuess({ variant: "daily", day: r.day, guesses: r.guesses }), GUESS_RETRY],
-        [CENTURY_DONE(userId, day), (r) => submitCentury({ variant: "daily", day: r.day, picks: r.picks }), CENTURY_RETRY],
+      for (const [game, key, submit, retry, noteDay] of [
+        ["guess", GUESS_DONE(userId, day), (r) => submitGuess({ variant: "daily", day: r.day, guesses: r.guesses }), GUESS_RETRY,
+          (r) => onGuessDaily({ day: r.day, solved: r.solved, tries: r.tries })],
+        ["century", CENTURY_DONE(userId, day), (r) => submitCentury({ variant: "daily", day: r.day, picks: r.picks }), CENTURY_RETRY,
+          (r) => onCenturyDaily({ day: r.day, score: r.score, hit: r.hit })],
       ]) {
         const rec = await sget(key, false);
         if (!rec || rec.saved !== false) continue;
-        await drainOne({
+        const out = await drainOne({
           key, rec, day, retry, submit,
           keep: (next) => sset(key, next, false),
           drop: () => sdel(key, false),
         });
+        // A run the drain lands has to settle exactly as one the screen landed itself, and until v2.18.7 the
+        // return value was thrown away - so a rescued daily went onto the board unpaid, and the Mini games
+        // tile's "N done today" pill never counted it. Both of these are what the screens' own ok branch
+        // calls. `claim_minigame`'s ledger key is `<game>:<day>` under a unique (user, kind, ref), so claiming
+        // here cannot double-pay a day the screen already claimed - it credits 0 and says so.
+        if (out === "sent") {
+          try { await noteDay(rec); } catch (e) { /* the pill is a hint; a failed write is not worth a throw */ }
+          claimMinigame(game, rec.day, () => {});
+        }
       }
     } catch (e) { /* a drain that throws is simply a drain that did not happen */ }
     finally { draining.current = false; }
@@ -2621,7 +2632,12 @@ export default function PerfectSeason() {
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", check);
       if (typeof window !== "undefined") window.removeEventListener("focus", check);
     };
-  }, [view]);
+    // `userId` as well as `view`: drainMinigames returns immediately without one, and on a page load the
+    // session is adopted AFTER this first binds. Keyed on the view alone, the listeners held a closure over a
+    // null userId and the first focus after a resume drained nothing - the exact moment the outbox exists
+    // for - until the player happened to change screens. Re-binding on the session also re-runs `check()`,
+    // which is what actually sends the held run.
+  }, [view, userId]);
 
   // Google sent them back without signing them in. Said once, and the address tidied so a reload doesn't
   // repeat it.
@@ -3799,8 +3815,19 @@ export default function PerfectSeason() {
 
   async function openSou() {
     setView("statsou");
-    if (souDone) { loadSouBoard(todayKey()); return; }
     const date = todayKey();
+    // The DATED key, not the `souDone` flag beside it, which carries no date of its own. The [view] effect
+    // that refreshes that flag fires AFTER this function has already taken its early return, so a tab parked
+    // on Mini games across local midnight tapped Over/Under, went down the "already played" path on
+    // yesterday's flag, and then had the effect behind it clear the flag for the new day - leaving
+    // `!sou && !souIntro && !souDone` and a "Loading…" with nothing in flight to resolve it. Any other screen
+    // change recovered it, which is why it took the Over/Under tap being the FIRST one after the rollover.
+    //
+    // Re-reading the day here instead would not do: `souDone` is state, so it still holds the old value for
+    // the rest of this call whatever the effect does. Asking storage for today's key is the answer that
+    // cannot be stale.
+    const doneToday = await sget(SOU_DONE_KEY(date), false);
+    if (doneToday) { setSouDone(doneToday); loadSouBoard(date); return; }
     // The day's own row is what really decides whether you have played: the flag above lives in
     // personal, per-device storage, so a phone after a laptop knew nothing about it and dealt a whole
     // second run - which was then dropped on the way out, because the table's (date, user_id) key
@@ -3994,7 +4021,9 @@ export default function PerfectSeason() {
       // on neither, and the coins land on this build (its `filled`) only if it's still on screen.
       if (user && userId) {
         (async () => {
-          await logBuild(userId, { username: user, pos: bap.pos, overall: bapOverallScore(filled), filled });
+          // The same day the claim below sends, stamped on the row, so the two cannot disagree - which is
+          // exactly what they did between v2.17.0 and v2.18.7 for every player whose local date isn't UTC's.
+          await logBuild(userId, { username: user, pos: bap.pos, overall: bapOverallScore(filled), filled, day: todayKey() });
           siteActivity.current?.broadcastPlayFinished("minigame");
           await claimMinigame("build", todayKey(), (credited) => setBap((b) => (b && b.filled === filled ? { ...b, coins: credited } : b)));
         })().catch(() => {});

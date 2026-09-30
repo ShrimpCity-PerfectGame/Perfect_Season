@@ -126,6 +126,10 @@ revoke all on sequence public.wallet_ledger_id_seq from anon, authenticated;
 -- lock before anything else, which makes two purchases (or a purchase and a credit) at the same moment wait for
 -- each other instead of both spending the same coins - and since every path locks the wallet before it touches
 -- the ledger, two of them can't deadlock.
+-- Build-a-player's own day, in the player's calendar, written by the browser the way sou_runs.date is
+-- (v2.18.7). claim_minigame's build arm matches on it; see the note there for what its absence cost.
+alter table public.builds add column if not exists day text;
+
 create or replace function public.wallet_lock(p_user uuid)
 returns bigint language plpgsql volatile security invoker set search_path = public, pg_temp as $$
 declare
@@ -347,12 +351,24 @@ begin
   elsif p_game = 'guess' then
     v_played := exists (select 1 from public.guess_runs where user_id = v_uid and created_at > now() - interval '24 hours');
   else
-    -- Build-a-player has no day of its own at all, so the build's UTC date is the only thing that can bind it
-    -- to the day being claimed. Unbound, one build paid all three permitted dates - this arm is where the
-    -- multiplier started, and Century and Guess copied its shape.
+    -- Build-a-player. Bound to one day, the same shape Century and Guess use above - and since v2.18.7 by the
+    -- build's OWN day rather than by its UTC date, because those are not the same thing for most of the world.
+    --
+    -- v2.17.0 bound this arm to `(created_at at time zone 'utc')::date = p_date::date` to stop one build paying
+    -- all three permitted dates, which it did. But the client claims with the player's LOCAL day (CLAUDE.md,
+    -- "Minigame coins count the player's own days"), and `builds` had no day column to compare it to - so for
+    -- every player whose local date differs from UTC at the moment they build, the two never matched and the
+    -- claim raised not_played. That is five hours a day at UTC-5, fourteen at UTC+10, and all of it silent:
+    -- the screen shows no coins and says nothing. Over/Under never had the problem because `sou_runs` has
+    -- carried its own `date` since it shipped.
+    --
+    -- `day` is client-written, like sou_runs.date, and bounded by the same rule: claim_minigame only accepts a
+    -- p_date of UTC yesterday, today or tomorrow, so a build cannot claim a day outside that window however it
+    -- was stamped. The `day is null` fallback is what keeps every build written before this column paying.
     v_played := exists (select 1 from public.builds where user_id = v_uid
                          and ((p_date is null and created_at > now() - interval '24 hours')
-                              or (p_date is not null and (created_at at time zone 'utc')::date = p_date::date)));
+                              or (p_date is not null and (day = p_date
+                                   or (day is null and (created_at at time zone 'utc')::date = p_date::date)))));
   end if;
   if not v_played then
     raise exception 'not_played' using errcode = 'P0001';

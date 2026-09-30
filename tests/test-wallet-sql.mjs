@@ -92,7 +92,9 @@ async function seedLedger(uid, amount, kind, ref, createdAt = null) {
 }
 let souDay = 0;
 const seedSouRun = (uid, createdAt) => owner("insert into sou_runs (date, user_id, username, score, created_at) values ($1, $2, 'x', 9, $3)", [`d-${++souDay}`, uid, createdAt]);
-const seedBuild = (uid, createdAt) => owner("insert into builds (user_id, username, pos, overall, filled, created_at) values ($1, 'x', 'WR', 91.5, '{}', $2)", [uid, createdAt]);
+const seedBuild = (uid, createdAt, day = null) => owner(
+  "insert into builds (user_id, username, pos, overall, filled, created_at, day) values ($1, 'x', 'WR', 91.5, '{}', $2, $3)",
+  [uid, createdAt, day]);
 // Runs fn with the session in another time zone, then back to UTC (Supabase's).
 async function inZone(zone, fn) {
   await db.exec(`set timezone = '${zone}'`);
@@ -497,6 +499,22 @@ await runTest("claim_minigame with the game's own day: once a game day, for an O
   assert(r.data?.credited === COIN_RULES.minigame, `a build pays under the day it was made: ${show(r)}`);
   r = await call(MAY, "claim_minigame", { p_game: "build", p_date: yesterday });
   assert(r.error === "not_played", `and not under yesterday either: ${show(r)}`);
+  // THE REGRESSION. The client claims with the player's LOCAL day, and between v2.17.0 and v2.18.7 this arm
+  // compared it against the row's UTC date - so a build made in the hours where those differ matched nothing
+  // and paid nothing, silently. That is five hours a day at UTC-5 and fourteen at UTC+10. NIA is that player:
+  // the build was made a minute ago, which is UTC today, but their calendar still says yesterday.
+  assert((await call(NIA, "claim_minigame", { p_game: "build", p_date: yesterday })).error === "not_played",
+    "NIA has no build yet");
+  await seedBuild(NIA, iso(Date.now() - MINUTE), yesterday);
+  let n = await call(NIA, "claim_minigame", { p_game: "build", p_date: yesterday });
+  assert(n.data?.credited === COIN_RULES.minigame,
+    `a build stamped with the player's own day pays under that day, whatever its UTC date says: ${show(n)}`);
+  // And it is still bound to ONE day: the day it was stamped with, not the UTC date it happens to carry.
+  n = await call(NIA, "claim_minigame", { p_game: "build", p_date: today });
+  assert(n.error === "not_played", `and not under the UTC date it was written on: ${show(n)}`);
+  n = await call(NIA, "claim_minigame", { p_game: "build", p_date: yesterday });
+  assert(n.data?.credited === 0, `nor twice under its own: ${show(n)}`);
+
   const refs = (await ledgerOf(MAY)).filter((l) => l.kind === "minigame").map((l) => l.ref).sort();
   assert(same(refs, [`build:${today}`, `over_under:${today}`, `over_under:${yesterday}`].sort()), `keyed by the game's day: ${show(refs)}`);
 });

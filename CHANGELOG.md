@@ -19,6 +19,50 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.7] - 2026-09-30
+
+The outbox and the daily gates: a mini-game coin that has not been paid since v2.17.0, a daily that
+could be dealt twice, and three ways a rescued run did not settle like a played one.
+
+**Deploy order: run `migration-wallet.sql`, then the client.** No Edge Function change. The migration
+adds one column and replaces `claim_minigame`, so it is safe on any shape and the site works between
+the steps — a client ahead of it writes a `day` the old function ignores, which is exactly what it does
+today.
+
+- **Build-a-player has paid no coins for a large part of every day since v2.17.0.** The client claims
+  with the player's **local** day (CLAUDE.md, "Minigame coins count the player's own days"), and
+  v2.17.0 bound the SQL arm to the build's **UTC** date — and `builds` had no day column to compare it
+  against. Wherever those differ the claim raised `not_played` and the screen said nothing: five hours
+  a day at UTC-5, fourteen at UTC+10. Over/Under never had it, because `sou_runs` has carried its own
+  `date` since it shipped, and that is the shape the fix takes — a client-written `builds.day`, with a
+  `day is null` fallback so every build already on the board keeps paying. Reproduced against the real
+  migrations in PGlite, and the one-day binding v2.17.0 added still holds.
+- **The Daily tile dealt the day a second time while the "have you played today?" read was in
+  flight.** `dailyDone` was `useState(null)` and the tile branched on it, so `null` meant both *not
+  asked yet* and *nothing there* — and `start("daily")` dealt a second game for the same day. The
+  replay then **overwrote the held outbox record**, because `finish()` writes it unconditionally, so
+  the drain posted the replay — played with the answer already known — and the game actually played was
+  gone from the device and never reached the board. The window is the read's own latency plus about
+  25ms, and it is widest exactly when it matters: a record sits `saved: false` because the POST
+  dropped, and the network that dropped it is the one that makes the read slow. `dailyDone` is
+  three-state now and the tile is disabled until the answer lands.
+- **A daily rescued by the drain was unpaid and uncounted.** `drainOne`'s return value was thrown
+  away, so a run the outbox landed never claimed its 15 coins and never wrote the "done today" key the
+  Mini games pill counts. It now makes both of the calls the screens' own ok branch makes;
+  `claim_minigame`'s ledger key is `<game>:<day>` under a unique (user, kind, ref), so it cannot
+  double-pay a day the screen already claimed.
+- **The drain listener held a stale `userId`.** Bound in an effect keyed on `[view]` alone, it closed
+  over a null session on page load — so the first focus after a resume drained nothing, which is the
+  precise moment the outbox exists for, until the player happened to change screens.
+- **Over/Under could wedge on "Loading…"** after local midnight, for a tab parked on Mini games that
+  tapped it first. `openSou` took its early return on `souDone`, which carries no date, before the
+  effect that refreshes it had fired; the effect then cleared the flag behind it, leaving nothing in
+  flight to resolve the screen. It reads the dated storage key directly now — re-reading the day would
+  not have worked, because `souDone` is state and holds its old value for the rest of the call whatever
+  the effect does.
+- `tests/test-economy-security.mjs`'s column allowlist gained `builds.day`, with the reason: it is a
+  date on a table that is already public and already client-written, not a balance.
+
 ## [2.18.6] - 2026-09-30
 
 A season the app told you to play, thrown away by the server that asked for it — and three smaller
@@ -65,7 +109,7 @@ so submit-run and match-pick must go; nothing it deals changed, only what it acc
   with the answer already known). Both screens now say the run is held and will be sent, `in_flight`
   has a line too, and the false clause is gone from the default.
 
-**Found, verified, and deliberately NOT fixed here — it needs a decision, not a patch.** A team score
+**Found, verified, and ACCEPTED by the owner on 2026-09-30 — it stays open on purpose. Do not re-raise it.** A team score
 of 142 beats every opponent in the game outright: the strongest is rated 122, `SPREAD` is 20, so
 `winProb(142, 122)` is exactly 1 and the season is not simulated at all. The arithmetic ceiling is
 `(1.25·130 + 3·130 + 2·flexCap())/6.25` = **143.69**, above it — so a legal draft on a findable
@@ -79,7 +123,10 @@ Faulk 2000), so a roster playing one in a Flex would lose at most 0.84 team-scor
 two. No live score is near 142 — the best Fantasy score sitewide is 120.2. It sits inside the
 already-accepted "codes are the client's choice" gap, but the prize there was a *lucky* season and
 this is a certain one, which is a different thing. `tests/test-scoring-format.mjs` re-checks only the
-one historical roster, which is why it passes while the class is open.
+one historical roster, which is why it passes while the class is open. The owner's call, asked and
+answered with these numbers in front of them: the trade is not worth changing five recorded all-time
+Flex grades for, and it sits inside the "codes are the client's choice" gap CLAUDE.md already accepts
+and says cannot be closed.
 
 ## [2.18.5] - 2026-09-30
 

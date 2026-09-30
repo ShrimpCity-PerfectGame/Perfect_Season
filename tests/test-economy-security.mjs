@@ -271,11 +271,16 @@ await runTest("1b. every table, column, sequence and view they add: the coin tab
   const oldColumns = new Set((await baseline.query(COLUMNS)).rows.map((r) => r.c));
   const newColumns = (await owner(COLUMNS)).map((r) => r.c).filter((c) => !oldColumns.has(c) && oldNames.has(c.split(".")[0]));
   // What a player WEARS, plus - since v2.6.0 - whether they support the game, which is public the way the
-  // guest chip is and has to be readable before anything decides whether to show an ad. Still nothing about
-  // coins: a balance on a public table would be every player's wallet on every board.
-  assert(same(newColumns.sort(), ["profile_details.card_theme", "profile_details.celebration", "profile_details.frame",
-    "profile_details.namecolor", "profile_details.nameplate", "profile_details.showcase", "profile_details.title",
-    "profiles.supporter"]),
+  // guest chip is and has to be readable before anything decides whether to show an ad. And since v2.18.7
+  // `builds.day`, which is a DATE and not a balance: the day the build was made in the player's own calendar,
+  // written by the browser exactly as `sou_runs.date` always has been, so claim_minigame's build arm can bind
+  // a claim to one day. It is on a table that is already public and already client-written, it says nothing
+  // about coins, and the bound it enforces is the one that stops a build paying three days at once.
+  // Still nothing about coins on a profile: a balance on a public table would be every player's wallet on
+  // every board.
+  assert(same(newColumns.sort(), ["builds.day", "profile_details.card_theme", "profile_details.celebration",
+    "profile_details.frame", "profile_details.namecolor", "profile_details.nameplate", "profile_details.showcase",
+    "profile_details.title", "profiles.supporter"]),
     `the only columns added to existing tables are what a player wears and whether they support the game - nothing about coins lands on profiles: ${show(newColumns)}`);
 
   // The ledger's id sequence. Whoever holds it can set it to its last value, after which no ledger row can be written:

@@ -123,7 +123,15 @@ export function GuessScreen({
   const [badge, setBadge] = useState(null);
   const [query, setQuery] = useState("");
   const [board, setBoard] = useState({ day: [], best: [], loaded: false });
-  const [dailyDone, setDailyDone] = useState(null);
+  // `undefined` means NOT ASKED YET; `null` means asked and there is nothing. The two were one value until
+  // v2.18.7, and the Daily tile below branches on it - so while the read was in flight the tile offered the
+  // day as unplayed and `start("daily")` dealt it a SECOND time. That matters most exactly when it is most
+  // likely: the record sits `saved: false` because the POST dropped, which is the outbox's whole case, and a
+  // failing network is also what makes `fetchMy...` slow enough to lose the race. The replay then OVERWRITES
+  // the held record - finish() writes it unconditionally - so the drain posts the replay, played with the
+  // answer already known, and the game actually played is gone from the device and never reaches the board.
+  // Measured: the window is the read's own latency plus about 25ms, and on a hung connection it never closes.
+  const [dailyDone, setDailyDone] = useState(undefined);
   const [tab, setTab] = useState("day");
   const [shared, setShared] = useState(null); // what the share sheet did, in sendShare's own words
   const [rosterOpen, setRosterOpen] = useState(false);
@@ -473,8 +481,11 @@ export function GuessScreen({
       </p>
       <GuessRoster open={rosterOpen} onToggle={() => setRosterOpen((v) => !v)} />
       <div className="modes">
-        <button className="mode daily"
-          onClick={() => (dailyDone ? showDailyResult()
+        {/* Disabled until the read that answers "have you played today?" has landed - see the note on
+            dailyDone. Undefined is not "no": dealing on it hands out the day a second time. */}
+        <button className="mode daily" disabled={dailyDone === undefined}
+          onClick={() => (dailyDone === undefined ? undefined
+            : dailyDone ? showDailyResult()
             : !userId || isGuest ? onNeedsAccount && onNeedsAccount(isGuest ? "guest" : "signedout")
             : start("daily"))}>
           <div className="mt">
@@ -489,7 +500,7 @@ export function GuessScreen({
               : dailyDone ? dailyDone.outcome
               : `The same player for everyone today. One go, ${GUESS_TRIES} guesses.`}
           </p>
-          <span className="go">{dailyDone ? "See how it went" : isGuest || !userId ? "Sign in to play" : "Let's go"}</span>
+          <span className="go">{dailyDone === undefined ? "Checking…" : dailyDone ? "See how it went" : isGuest || !userId ? "Sign in to play" : "Let's go"}</span>
         </button>
 
         <button className="mode m-unlimited" onClick={() => (userId ? start("practice") : onNeedsAccount && onNeedsAccount("signedout"))}>

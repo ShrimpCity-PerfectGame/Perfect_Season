@@ -300,8 +300,14 @@ export async function upsertSouRun(date, userId, row) {
 // Build-a-player is stat-free for the player's own account (see playBapSim's own comment in
 // perfect-season.jsx) - this is a separate, additive, sitewide-only tally logged once a build
 // completes, purely for the Stats screen's "created players" count and "highest-OVR" leaderboard.
-export async function logBuild(userId, { username, pos, overall, filled }) {
-  const { error } = await getClient().from("builds").insert({ user_id: userId, username, pos, overall, filled });
+// `day` is the build's day in the PLAYER's calendar, not UTC - the same thing sou_runs.date has always been,
+// and what claim_minigame's build arm matches on since v2.18.7. Without it that arm compared the client's local
+// day against the row's UTC date, so a build made in the hours where those differ paid no coins at all and said
+// nothing about it. A row written by an older client has no `day`; the arm still falls back to the UTC date for
+// those, so nothing already on the board stops paying.
+export async function logBuild(userId, { username, pos, overall, filled, day }) {
+  const { error } = await getClient().from("builds")
+    .insert({ user_id: userId, username, pos, overall, filled, ...(day ? { day } : {}) });
   return !error;
 }
 // builds was browser-written with no checks before 1.11.0, so an old row can hold a numeric NaN (PostgREST

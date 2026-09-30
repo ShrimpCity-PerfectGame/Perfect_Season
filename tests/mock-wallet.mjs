@@ -119,8 +119,10 @@ export function makeWallet(state) {
       const day = p_date ?? utcDate(new Date());
       const since = Date.now() - DAY_MS;
       // Every arm binds to ONE day when p_date is given, the way the SQL does: Over/Under by its own `date`
-      // column, Century and Guess by `day` for a daily or the run's UTC date for a practice game, and a build
-      // by its UTC date. Unbound, one run satisfied all three permitted dates and paid three times.
+      // column, and Century, Guess and - since v2.18.7 - a build by `day`, falling back to the row's UTC date
+      // for rows that have none. Unbound, one run satisfied all three permitted dates and paid three times.
+      // A build matched ONLY on its UTC date between v2.17.0 and v2.18.7, while the client claimed with the
+      // player's local day, so the two never met for anyone whose date differs from UTC's.
       // Empty when a harness does not carry that table - tests/test-wallet-sql.mjs builds its own state with
       // only the two it needs, and "no rows" is the right answer there rather than a crash.
       const rowsFor = { over_under: state.souRuns, build: state.builds, century: state.centuryRuns, guess: state.guessRuns }[p_game] || new Map();
@@ -129,7 +131,6 @@ export function makeWallet(state) {
       const played = p_date == null
         ? mine.some((r) => time(r.created_at) > since) // no p_date: the 24-hour window, for all four
         : p_game === "over_under" ? mine.some((r) => r.date === p_date)
-        : p_game === "build" ? mine.some((r) => utcOf(r) === p_date)
         : mine.some((r) => r.day === p_date || (r.day == null && utcOf(r) === p_date));
       if (!played) fail("not_played");
       lock(uid);
