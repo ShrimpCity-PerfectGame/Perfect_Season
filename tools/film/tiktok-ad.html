@@ -25,11 +25,27 @@
     background-image:radial-gradient(circle at 1px 1px, rgba(247,244,234,.05) 1px, transparent 1px);
     background-size:7px 7px; }
 
-  /* TikTok's own UI sits over the video. Everything READABLE lives in this box: the account row eats
-     the top, the caption and the ad's CTA button eat the bottom, the like/share rail eats the right.
-     Percentages of 1080x1920, so they hold at any render size. See ?guides=1. */
-  .safe { position:absolute; z-index:4; top:7.3%; bottom:26%; left:5.9%; right:16.7%;
-    display:grid; place-content:center; justify-items:center; text-align:center; }
+  /* TikTok's own UI sits over the video. Everything READABLE lives in this box. Percentages of
+     1080x1920, so they hold at any render size. See ?guides=1.
+
+     The horizontal insets are SYMMETRIC, and that is the whole point of them. The obvious box reserves
+     the like/share rail on the right (right:16.7%) and keeps the left gutter at 5.9% - but a centred
+     stack inside THAT box centres on 44.6% of the frame, which is 58px left of the middle at 1080 wide.
+     In the feed the rail fills the gap and it reads as centred; everywhere else the ad will ever be
+     watched - a preview, a download, a repost stripped of the chrome - it reads as a layout that
+     slipped. A centred composition has to centre on the FRAME.
+     What pays for the rail instead is the bottom inset. The rail's icons run from roughly half-height
+     down, so the answer to "don't sit under the rail" is to sit ABOVE it, which 32% does: the readable
+     band ends at 68% of the frame and the rail, the caption and the CTA button all live below that. */
+  /* align-content, NOT place-content. place-content:center is align-content:center AND
+     justify-content:center, and that second half sizes the grid's column track to its CONTENT - so
+     `.col { width:100% }` resolved against the widest element in that scene rather than against this box.
+     Measured: .safe was 929px in all six scenes while .col came out 929, 929, 679, 779, 704, 752. Every
+     scene was composed to a different width, and scene 3's bars were 73% of scene 2's for no reason
+     anyone chose. It also wrapped "Patrick Mahomes" onto a second line under a bar narrow enough to
+     force it, which is how this was found. Vertical centring is the half that was actually wanted. */
+  .safe { position:absolute; z-index:4; top:7.3%; bottom:32%; left:7%; right:7%;
+    display:grid; align-content:center; justify-items:center; text-align:center; }
   body.guides .safe { outline:2px dashed rgba(184,245,0,.45); }
 
   .scene { position:absolute; inset:0; opacity:var(--vis,0); pointer-events:none; }
@@ -63,12 +79,24 @@
   /* the rating bars */
   .bars { width:100%; display:grid; grid-template-columns:1fr 1fr; gap:2.4cqw; align-items:end; height:34cqw; position:relative; margin-bottom:6cqw; }
   .bar { background:var(--pos); width:100%; height:calc(var(--h,0) * 1%); border-radius:2px 2px 0 0; position:relative; }
-  .bar .who { position:absolute; bottom:-5.4cqw; left:0; right:0; text-align:center;
+  /* Anchored by its TOP, so a name that wraps grows DOWN into empty space. Pinned by `bottom` it grew
+     UP, and the first line printed inside the bar. The width above is why it wrapped at all; this is so
+     that a longer name than any now in the ad cannot put the defect back. */
+  .bar .who { position:absolute; z-index:2; top:100%; margin-top:1.9cqw; left:0; right:0; text-align:center;
     font-family:var(--body); font-weight:800; font-size:2.9cqw; letter-spacing:.14em;
     text-transform:uppercase; color:var(--muted); }
-  .bar .v { position:absolute; top:-6.6cqw; left:0; right:0; text-align:center;
+  /* -7.8, not -6.6: a bar that stops just short of the ceiling puts its value exactly where the ceiling
+     line is drawn, and the line printed straight through Mahomes' 120.4. The value clears the line now. */
+  .bar .v { position:absolute; z-index:2; top:-7.8cqw; left:0; right:0; text-align:center;
     font-family:var(--display); font-size:5cqw; color:var(--cream); font-variant-numeric:tabular-nums; }
-  .ceil { position:absolute; left:0; right:0; bottom:calc(var(--ch,0) * 1%); height:3px; background:var(--lime); opacity:var(--co,0); }
+  /* The rule is painted OVER the bars and UNDER their numbers, and both halves are load-bearing.
+     Over the bars, because scene 3 is the pink bar going through the line the orange one stopped at - and
+     with the bars filling the width there is nowhere else for the line to be seen: on the left it sits
+     exactly on the orange bar's top edge and on the right the pink bar covers it. Under the numbers,
+     because it printed straight through Mahomes' 120.4 while the bars grew.
+     `.bar` keeps z-index auto on purpose. Given one it would form a stacking context, and `.v` could no
+     longer be lifted out of it above the line. */
+  .ceil { position:absolute; left:0; right:0; bottom:calc(var(--ch,0) * 1%); height:3px; background:var(--lime); opacity:var(--co,0); z-index:1; }
   .ceil span { position:absolute; right:0; top:-4.6cqw; font-family:var(--display); font-size:3.2cqw; color:var(--lime); letter-spacing:.06em; }
 
   .stamp { font-family:var(--display); font-size:6.4cqw; color:var(--ink); background:var(--lime);
@@ -153,20 +181,20 @@
           <div class="hid">Fantasy pts hidden</div>
         </div>
       </div>
-      <div class="bars" id="bars">
-        <div class="ceil" id="ceil" style="--ch:87"><span>130.0 &mdash; the ceiling</span></div>
+      <div class="bars" id="bars" style="margin-top:7cqw">
+        <div class="ceil" id="ceil" style="--ch:87"></div>
         <div class="bar" id="bK" style="--pos:var(--te)"><span class="v" id="vK">0</span><span class="who">Travis Kelce</span></div>
         <div class="bar" id="bM" style="--pos:var(--qb)"><span class="v" id="vM">0</span><span class="who">Patrick Mahomes</span></div>
       </div>
-      <div class="kicker" id="s2note" style="opacity:0;color:var(--muted);letter-spacing:.08em">Only 40 seasons since 1999 reach it</div>
+      <div class="kicker" id="s2note" style="opacity:0;color:var(--muted);letter-spacing:.08em">130.0 is the ceiling &middot; only 40 seasons in the whole game reach it</div>
     </div></div></section>
 
     <!-- 3. the reversal -->
     <section class="scene" id="s3"><div class="safe"><div class="col">
       <div class="stamp" id="stamp">&times;1.25 &mdash; QB counts more</div>
-      <div class="bars" id="bars2" style="height:40cqw">
-        <div class="ceil" style="--ch:72;--co:1"><span>130.0</span></div>
-        <div class="bar" id="bK2" style="--pos:var(--te);--h:72"><span class="v">130.0</span><span class="who">Travis Kelce</span></div>
+      <div class="bars" id="bars2" style="height:40cqw;margin-top:8cqw">
+        <div class="ceil" id="ceil2" style="--co:1"></div>
+        <div class="bar" id="bK2" style="--pos:var(--te)"><span class="v">130.0</span><span class="who">Travis Kelce</span></div>
         <div class="bar" id="bM2" style="--pos:var(--qb)"><span class="v" id="vM2">120.4</span><span class="who">Patrick Mahomes</span></div>
       </div>
       <div class="huge" id="s3say" style="font-size:6cqw;opacity:0">So who&rsquo;s worth more?</div>
@@ -180,7 +208,7 @@
         <div class="row"><b>Chad Henne &middot; 2013</b><span>44.8</span></div>
         <div class="row"><b>Blaine Gabbert &middot; 2011</b><span>24.3</span></div>
       </div>
-      <div class="kicker" id="uglysay" style="opacity:0;color:var(--muted);letter-spacing:.08em">Some boards are like that</div>
+      <div class="kicker" id="uglysay" style="opacity:0;color:var(--muted);letter-spacing:.08em">That&rsquo;s every QB on the board</div>
       <div class="slots" id="slots"></div>
     </div></div></section>
 
@@ -258,9 +286,10 @@
     return 0;
   }
 
-  // Every one of these is the game's own stored rating - verified against BOARDS in game-logic.mjs.
-  // Kelce's 2022 is one of exactly 40 seasons since 1999 that reach RATING_CAP (130). Mahomes' 2022 is
-  // 120.4, which loses the argument until QB_WEIGHT (1.25) is applied and it becomes 150.5.
+  // Every one of these is the game's own stored rating, and the place to re-check them is
+  // data/players.json - field 17 of each row (game-logic.mjs only builds BOARDS from it in
+  // initGameData). Kelce's 2022 is one of exactly 40 rows in that file at RATING_CAP (130), out of
+  // 3,124. Mahomes' 2022 is 120.4, which loses the argument until QB_WEIGHT (1.25) makes it 150.5.
   var KELCE = 130.0, MAHOMES = 120.4, WEIGHTED = 150.5, CAP = 130;
   var PICKS = [
     { ps: "QB",   ink: "--qb",   nm: "Patrick Mahomes",    mt: "Chiefs · 2022",   at: 8.4 },
@@ -278,7 +307,15 @@
     $("slots").appendChild(d);
     return d;
   });
-  var SEASON = ["w","w","u","w","w","w","w","u","w","w","w","w","w","u","w","w","w","w"];
+  // Seventeen, all won, and both halves were wrong before. The count was EIGHTEEN under a caption reading
+  // "17 games", while game-logic.mjs draws exactly `shuffle(OPPS).slice(0, 17)`. And three squares were
+  // amber, which in this game's vocabulary is an upset WIN - isUpsetWin, a win with a 35% chance or less.
+  // The roster this advert drafts cannot have one: scored with the real functions it comes to 126.37
+  // (129.37 in Championship), so an upset needs an opponent rated 132.37, and the strongest anywhere in
+  // the data is 120.0 in the regular season and 122.0 in the playoffs - 0 of 1,197. Its hardest game in
+  // the whole game is a 60.9% favourite. Seventeen wins is what that team's 20-0 actually looks like,
+  // and the squares fall 6/6/5, which is how the share card lays a season out too.
+  var SEASON = ["w","w","w","w","w","w","w","w","w","w","w","w","w","w","w","w","w"];
   var gameEls = SEASON.map(function (r) {
     var d = document.createElement("div");
     d.className = "g";
@@ -323,6 +360,9 @@
     var mv = MAHOMES + (WEIGHTED - MAHOMES) * flip;
     $("bM2").style.setProperty("--h", mv / 160 * 100);
     $("bK2").style.setProperty("--h", KELCE / 160 * 100);
+    // Same rating, same height as scene 2's rule - from CAP, never a literal. Kelce's bar tops out
+    // exactly on it and the pink bar goes through it, which is the whole point of this scene.
+    $("ceil2").style.setProperty("--ch", CAP / 160 * 100);
     $("vM2").textContent = mv.toFixed(1);
     $("s3say").style.opacity = outCubic(at(t, 7.5, .3));
 

@@ -10,6 +10,22 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.1] - 2026-09-30
+
+Names on the boards are set in one weight, which is the weight a name colour needs to be seen at all.
+
+**No migration, no Edge Function change.** Client only.
+
+- **A bought name colour looked like a slightly different grey.** A look is a gradient clipped to the
+  letters, so how much of it a reader sees is how much ink the letters have - and the Leaderboard set its
+  names in Inter at regular weight and 14.5px, which is almost none. The drift the lively looks paint had
+  nowhere to show. Every board name is now 700, and the Leaderboard's name cell is 16px while the scores
+  and records beside it keep the 14.5px they are measured at.
+- **Every board name, not just the coloured ones.** Boldening only the names wearing a look would have
+  fixed the same thing and left a leaderboard column in two weights, reading as emphasis on one row rather
+  than as a cosmetic. The weight goes on a span of `NameLink`'s own rather than on `.namelink`, because a
+  guest's name is not a button and would otherwise have been the one thin name in the column; the duel
+  screen carries it on `.vs-who`, which paints a name without ever linking one.
 ## [2.18.0] — 2026-09-30
 
 A daily that was played but never recorded now gets a second chance at the board.
