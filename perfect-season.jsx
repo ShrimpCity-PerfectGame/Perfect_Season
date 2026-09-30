@@ -2481,8 +2481,9 @@ export default function PerfectSeason() {
       setUserId(id); setUser(prof.username); setStats(prof); loadAccountExtras(id);
       // A season finished while this account couldn't be read is waiting in `pending` - nothing else ever
       // consumes it here, so without this it was orphaned the moment a later read succeeded (auth-js
-      // re-emits SIGNED_IN on every tab refocus), while the notice told the player to reload, which is the
-      // one thing that loses it. onAuthed does the same for the signup path.
+      // re-emits SIGNED_IN on every tab refocus). `pending` is state and nothing else, so a reload throws
+      // the season away: the notice told the player to reload until v2.18.2 and now tells them to stay,
+      // which is what this path actually rescues. onAuthed does the same for the signup path.
       if (held) {
         setPending(null);
         const res = await submitAndSync(id, held);
@@ -3568,7 +3569,7 @@ export default function PerfectSeason() {
         // here would sign the real one out. The season waits in `pending` instead, which is what it is
         // for - the next successful read posts it under the account it belongs to.
         if (mode.kind !== "daily" && !sessionUnread.current) postAsGuest(trace, sim.runId);
-        else if (sessionUnread.current) setNotice("Your account didn't load, so this season is waiting. Reload the page and it'll be saved.");
+        else if (sessionUnread.current) setNotice("Your account didn't load, so this season is waiting. Keep this page open and it'll be saved as soon as your account loads.");
       }
       addSeasonContext(sim, fmt, saving, mode.kind === "daily" && user ? (stats?.dailyBestStreak || 0) : null);
       // Point the leaderboard at the format just played before refreshing it, so the rank shown
@@ -4511,7 +4512,7 @@ export default function PerfectSeason() {
         {/* A reserved code is refused for good, so it must not be told it will be picked up later. */}
         {saveError && <div className="panel"><p style={{ margin: 0 }}>{saveError === "reserved_code"
           ? "That code is the daily's own draft, so this season can't be counted. Play the daily itself from Modes."
-          : "Your last season couldn't be saved. It will be included the next time a save goes through."}</p></div>}
+          : "Your last season couldn't be saved, so it isn't on the board. There's no queue behind this one — the season you just played stands, but it won't be counted."}</p></div>}
         {notice && <div className="panel"><p style={{ margin: 0 }}>{notice}</p></div>}
         {howTo && <HowTo onClose={closeHowTo} />}
         {needsName && <PickName email={needsName.email} onClaimed={onNameClaimed} onSignOut={logOut} />}

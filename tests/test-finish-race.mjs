@@ -128,9 +128,18 @@ await runTest("a pick is saved while the reel is still spinning", async () => {
   await flush(4);
   await click(modeButton(container, "Unlimited"));
   await flush(4);
-  for (let i = 0; i < 60 && !container.querySelector(".card .hit"); i++) await flush(2);
+  // The reel is REAL in this case - matchMedia says motion is fine, so animateTo runs its full ~910ms -
+  // and the poll that waits for the first board has to outlast it. Counting flushes does not: flush(2)
+  // is two setTimeout(0) ticks, so sixty of them buy a few hundred milliseconds on an idle machine and
+  // the board is dealt or it is not depending on what else is running. That made this the one flaky
+  // test in the suite - about one run in five - and it failed as `null.click()` on line 133 rather than
+  // as anything that named the problem. Poll on the clock, the way test-daily.mjs's `settle` does.
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (let i = 0; i < 40 && !container.querySelector(".card .hit"); i++) { await sleep(100); await flush(1); }
 
-  container.querySelector(".card .hit").click();
+  const firstPick = container.querySelector(".card .hit");
+  assert(firstPick, "the first board is dealt within four seconds");
+  firstPick.click();
   await flush(2);
   const lock = [...container.querySelectorAll("button")].find((b) => /Lock in/i.test(b.textContent));
   assert(lock, "a Lock in button to press");

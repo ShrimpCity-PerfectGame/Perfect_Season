@@ -36,7 +36,7 @@ The shape has changed three times, and the reasoning is worth keeping because ea
 | | What it was | Why it went |
 | --- | --- | --- |
 | v2.13.0 | every drafted player with a 5-season career — **4,637** | Wrong at both ends. 723 men lasted five seasons without ever playing (Rodney Adams took **ten snaps** in six); and a career takes five years to measure, so the draft classes stopped at 2022 and no Jayden Daniels or Brock Bowers could ever be the answer. Most days were closer to Rodney Adams than to Peyton Manning. |
-| then | a Guessability Score — recency, prominence within position, longevity, accolades, starts, draft capital — taking a share of each position group, **773** | Much better, and still asking about the hundredth-best corner of the century. |
+| then | a Guessability Score — recency, prominence within position, longevity, accolades, starts, draft capital — taking a share of each position group, **731** | Much better, and still asking about the hundredth-best corner of the century. |
 | now | the men on the field, and the greats — **481** | A fan can place the players he has been watching far more readily than anyone else, whatever a career-value model says. The point of a daily is that most people can get it. |
 
 **What it costs, and it is not small:** there is no defence in this game and no offensive line, and of the
@@ -81,9 +81,10 @@ the check stays, and a clash nobody has decided **fails the build** rather than 
 ### It is not in the bundle
 
 The game **fetches** `data/guess-pool.json` when its screen opens (`guess-pool.mjs`, served from
-`/data/guess-pool.json` by `build.mjs`). At 10 KB that is no longer about weight — it is that `page.js` sits
-within a few KB of the 1.2 MB ceiling `tests/test-build-seo.mjs` holds it to. The test checks both halves: the
-pool **is** served from the site root, and it is **not** in `page.js` as well.
+`/data/guess-pool.json` by `build.mjs`). At 24 KB that is no longer about weight — it is that `page.js` is about
+1.21 MB against the 1,300,000-byte ceiling `tests/test-build-seo.mjs` holds it to, and that ceiling was 1.2 MB
+until this game's own SCREEN took the bundle past it in v2.14.0 and it had to be raised. The test checks both
+halves: the pool **is** served from the site root, and it is **not** in `page.js` as well.
 
 The service worker treats it exactly like the bundle — network first, the store only as a fallback
 (`sw-rules.mjs`'s `DATA`). The daily's answer is a walk through a cycle built from this file and `submit-guess`
@@ -143,18 +144,24 @@ permutation gives every player exactly one turn before anybody comes round again
 months, at the size the pool is now.
 
 - `GUESS_DAY_ONE = "2026-09-14"`, the same launch day the share cards number from.
-- The shuffle is `mulberry32(hashStr("gridspin-guess-order"))` and a plain Fisher–Yates loop. **Never a random
-  comparator**: how many times an engine calls one is up to the engine, and the client and the server must agree
-  call for call (CLAUDE.md's engine-independence note).
+- The order is seeded by `mulberry32(hashStr("gridspin-guess-order"))`, and it is a **placement rather than a
+  shuffle**: each player takes one draw from that stream, which fixes the slot he starts at, and a slot already
+  taken walks forward to the next free one. That shape is left over from the weighting — a man asked three times
+  a cycle had his turns spread an equal share of it apart on purpose — and at one turn each the forward walk is
+  the only thing that moves anybody off his draw. **Never a random comparator**, in either shape: how many times
+  an engine calls one is up to the engine, and the client and the server must agree call for call (CLAUDE.md's
+  engine-independence note).
 - Dates before day one walk backwards through the same cycle rather than failing.
 - Practice is `guessAnswerForSeed(code)`, seeded like an Unlimited Century, so a code can be shared and replayed.
 
 **The weighting is gone, and that is a deliberate reversal.** `GUESS_BANDS` still names how hard a player is
 (easy, medium, hard) but every band now takes **one** turn. Over 731 players, giving the best-known quarter three
-turns was worth it: a 1,353-day cycle still left 451 days between one man's turns. Over a couple of hundred the
-same weighting brings a player back inside four months, and a daily that repeats a question inside a season is
-worse than one that asks a hard question. The pool is already only current players and legends, which is what
-the weighting was for.
+turns was worth it: a 1,353-day cycle still left 451 days between one man's turns. It came off at the one-season
+pool — the 168 men of a September, plus the legends — where the same weighting brought a player back inside four
+months, and a daily that repeats a question inside a season is worse than one that asks a hard question. At the
+481 the two-season window restored it would be nearer ten months than four, which is better and still well short
+of the 481 days one turn each buys. The pool is already only current players and legends, which is what the
+weighting was for.
 
 **How hard was it?** `guessDifficulty(player)` is his place in the pool's ranking, 0 (everybody knows him) to 100
 (the hardest in the pool), and `guessBand` is his band. The end screen prints both once the game is over — never
@@ -212,22 +219,85 @@ silently re-filed.
 The answer goes back in the response **only once the row is written** — that is the one moment it is safe to
 send, because there is no way left to ask for it and keep playing.
 
+**Accepted gap: the day's answer is computable by anybody who wants it, and that timing is an ordering, not a
+secret.** `guessAnswerFor(date)` is pure, the cycle and its shuffle seed ship in `page.js`, and the pool the
+cycle walks is served to the whole internet at `/data/guess-pool.json` — fetching it rather than bundling it
+(§1) is a difference in weight and none at all in reach. The screen computes the day's player into a memo the
+moment a run exists, because it has to colour the rows against something. So a console and thirty seconds are
+the whole of it. What that buys is real: the top of `guess_top` every day, an average of 1.00 on `guess_best`,
+and **Bullseye's 300 coins** the first time a looked-up daily is solved in two. What it costs is **a real
+account**, since `guest_daily` refuses the free kind. What it cannot reach is anything outside this board —
+`submit-guess` never touches `profiles`, so no season leaderboard, no ladder, no streak and no best score moves,
+which is what that rule is worth. And what is closed is closed deliberately: the **in-app** rehearsal, the way
+`isReservedCode` closes the season daily's. No practice code deals the day's player, the who's-in-the-game list
+is names only (§6a), and the share card carries no player and no difficulty (§6b), so nothing an ordinary player
+would ever stumble into hands the answer over. There is no reserved-code check here, unlike the season's daily
+and Century's, because there would be nothing for one to refuse: the daily is a position in a cycle walked from
+the date, while a practice seed hashes `guess|<seed>` and picks uniformly from the pool, so no code reproduces a
+given day. One code in 481 lands on today's player by coincidence, which is not a way of asking for him.
+
+**Accepted gap, and it has already happened: a daily whose save never lands is playable again, with the answer
+already known.** The one-go rule is the partial unique index on `(day, user_id)` and the `duplicate` it raises,
+and both need a row to work from — a POST that is simply lost leaves nothing to catch. The other half of the
+gate is the per-account record the screen writes to the device before it submits (§6), and a device is a device:
+another browser, another phone or cleared site data has never heard of it. On its own that would be no more than
+a second attempt. With the gap above it is a **better** one, because the answer was on the end screen of the
+first. On 2026-09-30 a player's daily was lost exactly this way, and the row that reached the board was solved
+in two, carrying the same two guesses another account had already posted, where the game they had actually
+played took four. That one was an honest recovery of a run the site had thrown away; the mechanism is the one
+somebody would use on purpose. Two things narrow it and neither closes it. Since v2.18.0 the device record is an
+outbox (`pending-daily.mjs`), so a dropped POST usually re-sends itself and there is nothing left to recover —
+but it re-sends only on the reasons in `GUESS_RETRY`, and every other answer is read as the server's verdict on
+the run and retired unsent (bar `duplicate`, which is the verdict that the row is already in and settles the
+record as saved rather than as lost). Since v2.17.0 that same record spends the day whatever the server
+answered — but only on the device that wrote it. Closing the rest needs the server to know a daily is in
+flight before it is finished, which is a round trip at the start of every daily, and that was judged out of
+proportion to one mini-game — the same call CHANGELOG v2.18.0 records for the re-send.
+
 ### Refusals
+
+The first nine rows are the **function's**, and each one names itself in the body it answers with. The last two
+are the **client's own**, invented by `storage-guess.js`'s `submitGuess` for a failure the function never got to
+have an opinion about — and they sit on opposite sides of the same list. `offline` is **in** `GUESS_REFUSALS`,
+so a request that never arrived is carried as a reason of its own and can never be read as a rule; `network` is
+what a reason **absent** from that list becomes, which is exactly why it cannot be in it.
 
 | Reason | Status | When |
 | --- | --- | --- |
-| `unauthorized` | 401 | no token, or a token for nobody |
+| `signed_out` | 401 | no token, or a token for nobody |
+| `no_profile` | 400 | signed in, but the account has never claimed a name — the reason `use_account_username` raises without one |
 | `guest_daily` | 403 | a guest asking for the daily |
 | `wrong_day` | 400 | a `day` that is not the function's today |
 | `bad_code` | 400 | a practice seed outside `^[A-Z0-9]{4,16}$` |
 | `duplicate` | 409 | today's daily is already recorded for this account |
-| `malformed` | 400 | no guesses at all |
-| `no_guesses` `too_many` `bad_guess` `repeat_guess` `unknown_player` `guessed_past_the_end` `bad_guesses` `no_answer` | 400 | `replayGuessGame` refusing the game |
+| `malformed` | 400 | a body that would not parse, or no guesses at all |
+| `server` | 500 | the profile read or the insert failed. It is logged first and says "that one is on us, not your connection", because telling somebody to check a connection that was working sent us looking in the wrong place for an evening. Since v2.18.2 the client answers it for the **platform** as well — see below — and it is in `GUESS_RETRY`, so the outbox re-sends |
+| `no_guesses` `too_many` `bad_guess` `repeat_guess` `unknown_player` `guessed_past_the_end` `short_loss` `bad_guesses` `no_answer` | 400 | `replayGuessGame` refusing the game |
+| `offline` | — | the client's own: nothing reached the function at all — `invoke()` threw, which is DNS, TLS, CORS or a dead radio — or what came back had no readable body. It is in `GUESS_RETRY`, so the outbox **re-sends** the held run |
+| `network` | — | the client's own too, and the opposite: the function answered and named a reason **this build has never heard of**, which is a newer function's verdict on the game. Re-sending cannot change a verdict, so it is deliberately **not** in `GUESS_RETRY` and the outbox **retires** the run |
 
-Every one of those is mapped in `storage-guess.js`'s `GUESS_REFUSALS` and has a line in `guess.jsx`'s
-`refusalLine`. A code that reaches the app unmapped is read as `"network"` and shown as "check your connection"
-— forever, for a rule rather than a fault. `tests/test-guess-screen.mjs` holds the map to the function's own
-source and to `guess-logic.mjs`'s, so a new reason cannot arrive unmapped.
+**Which reason a failed POST becomes is decided by the body**, and v2.18.2 is where that stopped being one
+bucket. A body naming a reason this client knows is that reason. A body that cannot be read, or that is not
+there at all, is `offline` — nothing arrived, or nothing came back. A body naming a reason this client does not
+know is `network`. A body naming **no** reason is `server`, because every answer `submit-guess` gives a POST
+names one, so a body without one came from the platform in between — the Functions relay, a gateway, a worker
+that failed to boot — which is transient and worth another go; a 200 that is not `{ ok: true }` is the same
+thing and is read the same way. Until v2.18.2 the last two landed on `network` together, so the outbox threw a
+played daily away on exactly the failure it was written to survive.
+
+Every reason the function can answer with is mapped in `storage-guess.js`'s `GUESS_REFUSALS`. A code that
+reaches the app unmapped is read as `"network"` and shown as "check your connection" — forever, for a rule
+rather than a fault. `tests/test-guess-screen.mjs` 11 holds the map to the function's own source and to
+`guess-logic.mjs`'s, so a new reason cannot arrive unmapped.
+
+**A line of its own is a different thing, and only eight reasons have one.** `guess.jsx`'s `refusalLine` words
+`duplicate`, `guest_daily`, `wrong_day`, `bad_code`, `signed_out`, `no_profile`, `server` and `network`;
+`malformed`, `offline` and all nine of `replayGuessGame`'s fall to its **default**, which names the reason
+rather than blaming the connection. That is the right shape for them — a player should never cause one, and if
+one ever appears the reason is the whole of what wants reporting. Test 11 holds exactly that split: a sentence
+of its own for the four a player can actually cause, and a default for everything else. **The default's daily
+clause is the one line of refusal copy still out of date**: it ends "Your daily is still available", which has
+not been true since v2.17.0, when the device record began spending the day whatever the save answered (§6).
 
 A practice seed is held to the shape the code box accepts rather than to any string the column would take: a
 seed nobody could type is a seed nobody can be challenged with.
@@ -253,8 +323,10 @@ and `.mode`. It is reached from **Mini games**, not Modes (v2.10.0).
 - **Both paints take a dark ink** (`CELL_INK`), and it has to be dark: `--win` is the game's light green and
   white on it is 1.8:1. `tests/test-a11y.mjs`'s entry for this grid caught that on its first run.
 - **The search box offers eight names at most**, needs two letters, drops anyone already guessed, and shows
-  `{pos} · {draft}` beside each name — the pool holds two Adrian Petersons, and a name alone does not say which
-  player you mean.
+  `{pos} · {draft}` beside each name, because a name alone need not say which player you mean. The 4,637-player
+  pool had 49 names belonging to two men, two Adrian Petersons among them; the 481 has none, and the line stays
+  anyway — the build guarantees only that no two men share all five **columns** (§1), never that no two share a
+  name, and the pool is rebuilt every season.
 - **The instant result is computed by `replayGuessGame`**, the function the server replays with, not by a
   comparison written in the screen. It is what the end screen shows until the save answers, and a **refused**
   save never replaces it at all — a tab left open on a daily finished elsewhere. A second copy of "was it
@@ -263,6 +335,15 @@ and `.mode`. It is reached from **Mini games**, not Modes (v2.10.0).
   ref guards the resume race — a slow read landing on top of a game that has since been started, which is what
   a Century share link cost on staging (CENTURY.md). A saved daily from another day is thrown away rather than
   resumed.
+- **A finished daily is recorded on the device before it is submitted**, and whatever the submission answers
+  (`GUESS_DONE(userId, day)`, `ps-guess-done:<account>:<day>`). That is what stops a refused save being turned
+  into a fresh attempt with the answer still on the screen behind it. It is keyed by ACCOUNT as well as by day
+  because device-scoped it leaked: play the daily, sign out, and the next person to sign in here — a guest
+  included, who may not play it at all — read the day as already spent. Since v2.18.0 it carries `saved`, and
+  while that is false the run is still owed to the board; `pending-daily.mjs` re-sends it verbatim, never
+  rebuilt and never merged, so a re-send can only ever post the game that was played. The re-send runs from the
+  app rather than from this screen, because the end screen's Done button leaves for Mini games and a drain that
+  only ran here would never run again. What none of it covers is a second device — §5.
 - **The daily's "played today" hint is keyed in UTC** (`GUESS_DONE_KEY(utcDayKey())`), because UTC is the day the
   run is filed under. Keying it locally is a real bug that shipped in Century and only surfaces on a session
   either side of UTC midnight.
@@ -393,16 +474,22 @@ There is deliberately **no** override for the day's player: the answer is a pure
 pool, and a table of exceptions would be a second source of truth for the one thing both the browser and the
 server have to agree on. A player who has to go gets removed from the pool, which moves every later day by one.
 
-Rebuild the pool with `node tools/data/build-guess-pool.mjs`. It fetches about 45 MB from nflverse - the player
-index, PFR's draft history and every season of snap counts since 2012 - and caches it under `build/nflverse/`,
+Rebuild the pool with `node tools/data/build-guess-pool.mjs`. It fetches about 30 MB from nflverse - the player
+index, PFR's draft history, every season of rosters back to 1999 (jersey numbers, and the team an undrafted man
+came in with) and snap counts for the two seasons the window covers - and caches it under `build/nflverse/`,
 so a second run is quick; delete that folder to refetch. It refuses to write a file with an unlisted clash, and
 `tests/test-guess-logic.mjs` re-checks every property of the file it writes.
 
 **Re-run it when a season ends.** The pool is a ranking of the present as much as the past.
 
-`GP_WHY="Cam Ward,Travis Hunter"` prints where those men rank inside their position group, how many that group
-keeps, and how far each is from the cut - which is how you tell "the score is wrong about him" from "he is the
-fifty-third best quarterback of the century".
+`GP_WHY` went with the score-ranked pool it belonged to. It named men and printed where each stood inside his
+position group and how far he was from the cut, which was the question worth asking when a share of every group
+was kept - it is how you told "the score is wrong about him" from "he is the fifty-third best quarterback of the
+century". Membership is a snap count now, so the question answers itself: 100 snaps since the 2025 season, or
+not. What the run prints instead is everything still worth knowing about a build - how many men cleared the bar,
+the legends it took, how many rows were dropped for having no jersey number or no team the game knows, the five
+easiest and the five hardest, and how many days the cycle comes round in. `GP_SEASON` pins the season it treats
+as the current one, for a rebuild run out of season.
 
 ---
 

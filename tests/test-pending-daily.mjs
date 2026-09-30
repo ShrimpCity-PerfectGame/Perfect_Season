@@ -7,9 +7,14 @@
 //   node tests/test-pending-daily.mjs
 import { assert, runTest } from "./helpers.mjs";
 import { drainOne, sendOnce, _resetPending } from "../pending-daily.mjs";
+import { GUESS_RETRY } from "../storage-guess.js";
 
 const DAY = "2026-09-30";
-const RETRY = ["offline", "server", "signed_out", "no_profile"];
+// The real list, not a copy of it. Held as a local copy until v2.18.2, which meant this file could go on
+// passing while the list the app actually drains with said something else - and what a reason is called
+// is the whole of what this module does. tests/test-submit-reasons.mjs covers the other half of the seam:
+// which failure gets which name in the first place.
+const RETRY = GUESS_RETRY;
 
 // A store that behaves the way window.storage does: everything swallowed, nothing guaranteed.
 function harness({ rec, answers }) {
@@ -68,10 +73,15 @@ await runTest("a transport failure is held; the server's verdict is not", async 
   }
 });
 
-await runTest("`network` is NOT retried, because it also means a reason this client does not know", async () => {
-  // storage-guess.js answers "network" for an unmapped reason and for a 200 without ok, as well as for a
-  // genuine oddity. Retrying it would define "retryable" over the one value that means "no idea" - so a
-  // new server rule would be re-sent for ever. `offline` exists to carry the transport case instead.
+await runTest("`network` is NOT retried, because it means a reason this client does not know", async () => {
+  // storage-guess.js answers "network" when a reason came back that is not on GUESS_REFUSALS - which can
+  // only be a newer function's rule. Retrying it would re-send a verdict on every focus until midnight
+  // and could never change the answer.
+  //
+  // It used to answer "network" for two more things: a body carrying no reason at all, and a 200 that was
+  // not `{ ok: true }`. Neither is a verdict - the function names a reason on every answer it gives - and
+  // retiring a played daily on one of them is how a solved run was lost on production on 2026-09-30.
+  // Since v2.18.2 those are "server" and are held. The rule did not change; what reaches it did.
   _resetPending();
   const h = harness({ rec: owed, answers: [{ ok: false, reason: "network" }, { ok: true }] });
   assert(await h.run() === "retired", "an unknown answer retires");

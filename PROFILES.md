@@ -27,7 +27,8 @@ The owner approved all of this (2026-09-14):
 - **Favorite team**: any of the 32 teams, or none.
 - **Personal stats**: headline tiles, badges, seasons by wins (chart), record by mode, best lineups,
   go-to players and most-drafted team, records, minigames, recent drafts.
-- **Badges**: 22 of them, worked out from stats the site already keeps (retroactive, never lost).
+- **Badges**: 22 of them at v1.11.0, and 24 since - Century joined in v2.12.0 and Bullseye in v2.15.0 -
+  worked out from stats the site already keeps (retroactive, never lost).
 - **Public profiles** at `gridspin.app/u/<username>`, viewable by anyone, **noindexed** for now. Every
   username on the Leaderboard and Stats screens (and the Over/Under and builds boards) opens that
   player's profile; Back returns where you were.
@@ -74,9 +75,10 @@ folder.
 
 All new SQL is re-runnable (`create ... if not exists`, `create or replace`, `drop policy if exists` then
 `create policy`, `on conflict do nothing` / `do update` for seeds). Every function sets its search path:
-security-definer functions and trigger functions use `set search_path = public, pg_temp` (temporary
-objects last, so a session can't shadow `moderators` or `blocked_words` with a temp table), read-only
-security-invoker ones `public`. Functions that only read are `stable` so the client can call them as GET
+security-definer functions, trigger functions and every security-invoker one a policy or another
+function calls use `set search_path = public, pg_temp` (temporary objects last, so a session can't
+shadow `moderators` or `blocked_words` with a temp table). `player_profile`, read-only and called only
+by the client, is the one left on plain `public`. Functions that only read are `stable` so the client can call them as GET
 (they get supabase-js's retry). Every `order by` is fully tiebroken.
 
 A function refusing something raises its code as the whole message, e.g.
@@ -108,8 +110,9 @@ season is already waiting for one) with a name from `new_guest_name()`: `Guest_`
 `username_is_reserved` holds back from everyone else, so a guest's name reads as one wherever it's shown. A guest
 plays and posts like anyone else except the daily, which `submit-run` refuses for it (`guest_daily`, 403), and it
 has no profile screen or shop in the app. `claim_username` is the way out: it is allowed to replace a guest's
-name (once - the flag clears), and it rewrites the account's name snapshots in `runs`, `daily_runs`, `sou_runs`
-and `builds`, exactly as `mod_act`'s rename does.
+name (once - the flag clears), and it rewrites the account's name snapshots in `runs`, `daily_runs`, `sou_runs`,
+`builds`, `century_runs` and `guess_runs`, exactly as `mod_act`'s rename does - every board that carries a name
+snapshot, so a board added later has to be added to both functions or a renamed account keeps its old name there.
 
 **What a guest is refused, and where the refusal lives.** Every one of these is in SQL, because these functions
 and policies are the boundary - a modified browser calls them directly, and the app's own version of the rule is
@@ -169,27 +172,37 @@ delete an object.)
 update trigger (`use_account_username`) replaces the row's `username` with the account's own, and a before
 insert trigger on `builds` (`check_new_build`) refuses a position other than QB/RB/WR/TE or an overall that
 isn't a finite number (`bad_build`). Old rows are left alone; after migrating, `update sou_runs set username
-= username; update builds set username = username;` rewrites any spoofed names.
+= username; update builds set username = username;` rewrites any spoofed names. The two minigame boards added
+since - `century_runs` (v2.9.0) and `guess_runs` (v2.13.0) - are written by an Edge Function's service role
+rather than by the browser, and carry the **same trigger** anyway: their tables belong to their own
+migrations, which run before this file, but the trigger is defined here, so it is created here for all four
+boards. Putting it in those files would have made them depend on this one, which they cannot - each has to
+run before `migration-runs-log.sql`.
 
 **Functions**
 
 | function | returns | notes / raises |
 |---|---|---|
 | `text_is_clean(t text)` | boolean | security definer, stable. The word filter. Execute revoked from public, anon, authenticated. |
-| `save_profile(p_bio text, p_favorite_team text)` | jsonb: the details row `{user_id, bio, avatar_path, avatar_preset, favorite_team, updated_at}` | security definer. Trims `p_bio`. Upserts the caller's row, leaving the picture alone. Raises `not_signed_in`, `bio_too_long`, `bio_invalid` (disallowed character), `bio_blocked`, `bad_team`. |
-| `set_avatar(p_path text, p_preset text)` | jsonb: the details row | security definer. At most one non-null (`bad_request`). A path must be in the caller's own folder and match the pattern (`bad_path`); a preset must exist and be free (`bad_preset`). Sets both columns (so choosing one clears the other; both null clears the picture). Doesn't touch storage — the client deletes the old file. Raises `not_signed_in`. |
+| `save_profile(p_bio text, p_favorite_team text)` | jsonb: the details row `{user_id, bio, avatar_path, avatar_preset, favorite_team, updated_at}` | security definer. Trims `p_bio`. Upserts the caller's row, leaving the picture alone. Raises `not_signed_in`, **`guest_not_allowed`** (v2.0.0 — a guest has no profile screen for anyone to look at or report and costs nothing to make again, so without this one sign-in and one POST puts arbitrary text on the site under a name nobody can act on), `bio_too_long`, `bio_invalid` (disallowed character), `bio_blocked`, `bad_team`. |
+| `set_avatar(p_path text, p_preset text)` | jsonb: the details row | security definer. At most one non-null (`bad_request`). A path must be in the caller's own folder and match the pattern (`bad_path`). A preset must exist, and then be one the caller may actually wear — all of it `bad_preset`: free, or (v1.12.0) a paid pack's, **owned exactly the way `shop_state` says it is** (the shop item `pack-<pack>` at `free` rarity, bought into `inventory`, or a badge item whose badge is in `badge_awards`), or (v2.8.0) a supporter pack's, held by a row in `supporters`. Anything narrower than shop_state's own rule would let the picker offer avatars this then refuses, which is the drift the comment above that check warns about. **The supporter entitlement is read through `EXECUTE` into a variable, and the paid arm sits behind `to_regclass`**, because this file also runs on a database that has never had `migration-shop.sql`: plpgsql plans a statement whole, so an arm naming `public.supporters` inside a guarded condition would fail to plan rather than be skipped — which is why the two migrations go shop first, then this one (CLAUDE.md, "Coins and the shop"). Sets both columns (so choosing one clears the other; both null clears the picture). Doesn't touch storage — the client deletes the old file. Raises `not_signed_in`, **`guest_not_allowed`** (v2.0.0 — pictures go in a **public** bucket, ten per account, on an account that costs nothing to make again and has no profile screen to report). |
 | `check_username(p_username text)` | text: `ok` \| `taken` \| `blocked` \| `invalid` | security definer, stable, callable by anon. `invalid` unless `^[A-Za-z0-9_]{3,16}$`; `taken` if a profile has exactly that username, or it's a reserved name another account holds in any capitalization; `blocked` if not clean. |
-| `username_is_reserved(p_username text)` | boolean | 1.11.1. security invoker, execute revoked from clients. True for a reserved name (`admin`, which unlocks the testing tools whatever its capitalization) when some account already holds it in any capitalization - so the first account keeps it and "Admin" can't join it. Used by `check_username`, the signup trigger (`username_reserved`) and `mod_act`'s rename (`taken`). |
+| `username_is_reserved(p_username text)` | boolean | 1.11.1. security invoker, execute revoked from clients. True for a reserved name (`admin`, which unlocks the testing tools whatever its capitalization) when some account already holds it in any capitalization - so the first account keeps it and "Admin" can't join it. **v1.17.0 also holds back any guest-shaped name** (`^guest_[a-z0-9]{1,10}$`, case-insensitive), whoever is asking and whether or not any account holds it: the rule is that nobody else may look like a guest, so the shape is reserved far more broadly than `new_guest_name` ever produces. Used by `check_username`, the signup trigger (`username_reserved`) and `mod_act`'s rename (`taken`). |
 | `handle_new_user()` | trigger | `create or replace` of schema.sql's signup trigger, now raising `username_invalid` for a username outside `^[A-Za-z0-9_]{3,16}$` (a modified client can call Auth's signup directly), `username_reserved` for a reserved name another account holds in any capitalization, and `username_blocked` for one that isn't clean. **v1.16.0:** an account from a provider (`raw_app_meta_data->>'provider'` is not `email`) arrives with no username - Google has none to give - and gets **no profile row at all** until it claims one; an email and password signup still brings its name and still passes every check above. |
-| `claim_username(p_username text)` | text: `ok` \| `invalid` \| `taken` \| `blocked` \| `already_named` \| `not_signed_in` | v1.16.0. security definer; execute revoked from anon. The name an account picks for itself, and the only way a profile row is created outside the signup trigger. Same three rules as that trigger (reserved reads as `taken`, as in `check_username`). Refuses once the caller has a profile, **unless it is a guest** (v1.17.0), which may trade the given name for a real one once: that clears `guest` and rewrites the account's name in `runs`, `daily_runs`, `sou_runs` and `builds`. Everyone else is refused, so this is never a rename - that stays `mod_act`'s job. A name taken between the check and the insert comes back as `taken`. |
-| `new_guest_name()` | text | v1.17.0. security definer; execute revoked from clients. `Guest_` and five uppercase hex characters, retried until unused. Only the signup trigger calls it. |
+| `claim_username(p_username text)` | text: `ok` \| `invalid` \| `taken` \| `blocked` \| `already_named` \| `not_signed_in` \| `still_anonymous` | v1.16.0. security definer; execute revoked from anon. The name an account picks for itself, and the only way a profile row is created outside the signup trigger. Same three rules as that trigger (reserved reads as `taken`, as in `check_username`). Refuses once the caller has a profile, **unless it is a guest** (v1.17.0), which may trade the given name for a real one once: that clears `guest` and rewrites the account's name in `runs`, `daily_runs`, `sou_runs`, `builds`, `century_runs` and `guess_runs`. **The trade-up is gated here, not on the form** (v2.8.1): clearing `guest` is what opens the daily, the shop, a duel, reports and the avatars bucket, so it answers `still_anonymous` unless a credential is actually attached to the `auth.users` row - an email, a pending `email_change`, a phone, or no longer being anonymous - or an anonymous session would call the RPC itself and promote a throwaway account for the price of one sign-in and one POST. The test is permissive on purpose: with email confirmation on, the address sits in `email_change` while `is_anonymous` stays true, so gating on that flag alone would refuse the real trade-up. Everyone else is refused, so this is never a rename - that stays `mod_act`'s job. A name taken between the check and the insert comes back as `taken`. |
+| `new_guest_name()` | text | v1.17.0. security definer; execute revoked from clients. `Guest_` and five uppercase hex characters, drawn again if the name is taken but **at most 20 times** — five hex characters is a million names, so the retries are there to keep a collision from being a surprise rather than to guarantee anything. If all 20 draws collide it returns the last one anyway, with no error: **`profiles.username` being unique is the real guarantee**, so the insert is refused and the anonymous sign-in fails with it, rather than two guests ending up under one name. Only the signup trigger calls it. |
 | `avatar_folder_has_room()` | boolean | security invoker, volatile; execute for `authenticated` only, because the storage insert policy calls it as the uploading player. Counts the caller's own avatars files (through their read policy) under a per-player lock, so a burst of uploads can't all squeeze past the 10-file cap. |
-| `player_profile(p_username text)` | jsonb or null | stable, security invoker. Exact username match first; otherwise a case-insensitive match only if exactly one account matches. Returns `{ "profile": <the profiles row, every column, to_jsonb>, "details": <details row as above, or null>, "stats": player_stats(id) }`. |
+| `player_profile(p_username text)` | jsonb or null | stable, security invoker. Exact username match first; otherwise a case-insensitive match only if exactly one account matches. **Never a guest** (v1.17.0): a guest has no profile screen, so both matches exclude one and `/u/Guest_XXXXX` reads as missing rather than handing anybody the full screen for an account that costs nothing to make. Returns `{ "profile": <the profiles row, every column, to_jsonb>, "details": <details row as above, or null>, "stats": player_stats(id) }`. |
 
 ### 3.2 `player_stats(p_user_id uuid)` in `migration-runs-log.sql` (agent A)
 
-`stable`, `security invoker`, reads `runs`, `daily_runs`, `sou_runs`, `builds` (all publicly readable).
-Also add `create index if not exists` on `daily_runs (user_id)`, `sou_runs (user_id)`, `builds (user_id)`.
+`stable`, `security invoker`, reads `runs`, `daily_runs`, `sou_runs`, `builds` and, since the two minigames
+that keep boards of their own, `century_runs` (v2.12.0) and `guess_runs` (v2.15.0) - all publicly readable.
+That last pair is why `migration-century.sql` and `migration-guess.sql` have to run **before** this file: it
+is `language sql`, so its body is validated the moment it is created and a missing table fails the migration
+outright.
+Also add `create index if not exists` on `daily_runs (user_id)`, `sou_runs (user_id)`, `builds (user_id)`;
+the two newer boards bring their own `(user_id, created_at desc)` index in their own migration.
 Returns exactly this shape (the empty version is profile-rules.mjs's `EMPTY_PLAYER_STATS`):
 
 ```json
@@ -208,6 +221,8 @@ Returns exactly this shape (the empty version is profile-rules.mjs's `EMPTY_PLAY
   },
   "dailies": { "played": 9, "best_score": 97.1, "best_w": 18, "best_l": 2, "best_rank": 1 },
   "over_under": { "played": 4, "best": 17 },
+  "century": { "played": 6, "best": 104, "daily_best": 98, "centuries": 1 },
+  "guess": { "played": 11, "solved": 8, "dailies": 9, "daily_solved": 7, "daily_best": 2 },
   "builds": { "count": 3, "best": { "pos": "WR", "overall": 131.2 } }
 }
 ```
@@ -231,9 +246,20 @@ Definitions ("finished" = `not dnf`):
 - `dailies`: over the player's `daily_runs` rows, both formats. `played` count; `best_score`/`best_w`/
   `best_l` from the highest score (ties: earliest `created_at`); `best_rank` = the best (lowest) finish,
   where a row's finish is 1 + the number of rows with the same date and format and a strictly higher
-  score — counting **only days that are over everywhere**, `date::date <= current_date - 2` (UTC). Null
-  when there are no such days.
+  score — counting **only days that are over everywhere**,
+  `date::date <= (now() at time zone 'utc')::date - 2`. The UTC date is worked out explicitly rather than
+  with `current_date`, which follows the session's time zone. Null when there are no such days.
 - `over_under`: `played` count of the player's `sou_runs` rows, `best` max score (null if none).
+- `century` (v2.12.0): over the player's `century_runs` rows. `played` count, `best` max score,
+  `daily_best` the max score among rows with a `day` (the daily's own go), `centuries` the count of `hit`.
+  `daily_best` is separate from `best` on purpose, and it is the number the Century badge reads: Unlimited
+  is unlimited, so a hundred ground out over an evening of retries is not the same thing as one reached on
+  the day's single go.
+- `guess` (v2.15.0): over the player's `guess_runs` rows. `played` count, `solved` count of `solved`,
+  `dailies` count of rows with a `day`, `daily_solved` count of both, and `daily_best` the **fewest** tries
+  a solved daily took — `min`, and null over no rows, because "has never solved one" must not read as
+  solving one in no guesses. That last one is what the Bullseye badge reads, daily only, for the same
+  reason Century's is: practice is unlimited.
 - `builds`: `count` of the player's `builds` rows; `best` the highest `overall` (ties: earliest
   `created_at`) as `{pos, overall}`, or null.
 
@@ -266,9 +292,9 @@ Unique index on `(reporter_id, target_id, reason) where status = 'open'`. RLS on
 | function | returns | notes / raises |
 |---|---|---|
 | `is_moderator()` | boolean | stable. |
-| `report_player(p_username text, p_reason text, p_note text)` | jsonb `{ "ok": true }` | Exact username. Raises `not_signed_in`, `no_such_player`, `self`, `bad_reason`, `note_too_long` (after trim), `limit` (10 by this reporter in the last 24 hours), `duplicate` (an open report with the same reporter, target and reason). |
-| `mod_queue()` | jsonb array | stable. Raises `not_moderator`. One entry per player with open reports: `{ user_id, username, avatar_path, avatar_preset, bio, favorite_team, reports: [{ id, reason, note, reporter (username), created_at }] }`; players ordered by their oldest open report (then username), reports by created_at then id. |
-| `mod_act(p_user_id uuid, p_action text, p_new_name text)` | jsonb `{ "ok": true, "removed_path": text or null }` | Raises `not_moderator`, `no_such_player`, `bad_action`. `remove_picture`: clears avatar_path and avatar_preset, returns the old path, resolves the player's open `picture` reports. `clear_bio`: bio `''`, resolves `bio` reports. `rename`: `p_new_name` must match the username rule (`invalid`), not be taken (`taken`) and be clean (`blocked`); updates `username` in profiles, runs, daily_runs, sou_runs and builds; resolves `username` reports. `dismiss`: resolves all the player's open reports as dismissed. Actions other than dismiss mark resolved reports `actioned`; all set resolved_by/resolved_at/action. |
+| `report_player(p_username text, p_reason text, p_note text)` | jsonb `{ "ok": true }` | Exact username. Raises `not_signed_in`, `guest_not_allowed` (the reporter is a guest, v2.0.0), `no_such_player`, `guest_target` (the player reported is a guest — its own code since v2.17.0, because both rules raising `guest_not_allowed` told a full account "Keep your seasons first", advice for somebody else's problem), `self`, `bad_reason`, `note_too_long` (counted after the note is cleaned the way a bio is, not merely trimmed — `cleanNote`, v2.0.0), `limit` (10 by this reporter in the last 24 hours), `duplicate` (an open report with the same reporter, target and reason). |
+| `mod_queue()` | jsonb array | stable. Raises `not_moderator`. One entry per player with open reports: `{ user_id, username, guest, avatar_path, avatar_preset, bio, favorite_team, reports: [{ id, reason, note, reporter (username), created_at }] }`; players ordered by their oldest open report (then username), reports by created_at then id. `guest` is on each entry (v2.0.0) so the queue says which is which and the screen can leave Rename off for one. |
+| `mod_act(p_user_id uuid, p_action text, p_new_name text)` | jsonb `{ "ok": true, "removed_path": text or null }` | Raises `not_moderator`, `no_such_player`, `bad_action`. `remove_picture`: clears avatar_path and avatar_preset, returns the old path, resolves the player's open `picture` reports. `clear_bio`: bio `''`, resolves `bio` reports. `rename`: raises `guest_not_allowed` for a guest (v2.0.0 — a renamed guest is stranded under a name it can never attach an email to; the other three actions still work on one); `p_new_name` must match the username rule (`invalid`), not be taken (`taken`) and be clean (`blocked`); updates `username` in profiles, runs, daily_runs, sou_runs, century_runs, guess_runs and builds — the same six boards `claim_username` rewrites, because the two functions that move a name snapshot must not differ about what a name snapshot is; resolves `username` reports. `dismiss`: resolves all the player's open reports as dismissed. Actions other than dismiss mark resolved reports `actioned`; all set resolved_by/resolved_at/action. |
 
 Plus storage policies letting a moderator select and delete any `avatars` object.
 
@@ -327,9 +353,9 @@ fetchPlayerProfile(username)
     // profile = { id, username, joined /* created_at */, details, stats /* rowToProfile */, extra /* mapPlayerStats */ }
 fetchProfileDetails(userId)                  → details | null          // the header picture
 saveProfile({ bio, favoriteTeam })           → { ok: true, details } | { ok: false, reason }
-    // reason: "too_long" | "blocked" | "invalid" | "signed_out" | "network"
+    // reason: "too_long" | "blocked" | "invalid" | "guest" | "signed_out" | "network"
 saveAvatarPhoto(userId, blob, previousPath)  → { ok: true, details } | { ok: false, reason }
-    // reason: "type" | "too_large" | "paused" | "invalid" | "signed_out" | "network"
+    // reason: "type" | "too_large" | "paused" | "guest" | "invalid" | "signed_out" | "network"
 setAvatarPreset(key, previousPath)           → { ok: true, details } | { ok: false, reason }
 removeAvatar(previousPath)                   → { ok: true, details } | { ok: false, reason }
 checkUsername(name)                          → "ok" | "taken" | "blocked" | "invalid" | null
@@ -349,14 +375,15 @@ those (never the current photo) and retries once. A refusal while uploads are on
 
 ```js
 reportPlayer(username, reason, note) → { ok: true } | { ok: false, reason }
-    // reason: "limit" | "duplicate" | "self" | "signed_out" | "missing" | "invalid" | "network"
+    // reason: "limit" | "duplicate" | "self" | "guest" | "guest_target" | "signed_out" | "missing"
+    //       | "invalid" | "network"
 isModerator()                        → boolean                 // false when it can't be checked
 fetchModQueue()                      → queue | null
-    // [{ userId, username, avatarPath, avatarUrl, avatarPreset, bio, favoriteTeam,
+    // [{ userId, username, guest, avatarPath, avatarUrl, avatarPreset, bio, favoriteTeam,
     //    reports: [{ id, reason, note, reporter, createdAt }] }]
 modAction(userId, action, newName)   → { ok: true } | { ok: false, reason }
     // action: "remove_picture" | "clear_bio" | "rename" | "dismiss"
-    // reason: "not_moderator" | "taken" | "blocked" | "invalid" | "missing" | "network"
+    // reason: "not_moderator" | "guest" | "taken" | "blocked" | "invalid" | "missing" | "network"
     // remove_picture also deletes the returned file (moderator storage policy)
 ```
 
@@ -367,11 +394,17 @@ modAction(userId, action, newName)   → { ok: true } | { ok: false, reason }
 - **`profile-rules.mjs`** (phase 0, lead): `BIO_MAX`, `USERNAME_RE`, `TEAM_CODES`, `REPORT_REASONS`,
   `REPORT_REASON_LABEL`, `REPORT_NOTE_MAX`, `REPORTS_PER_DAY`, `AVATAR_BUCKET`, `AVATAR_SIZE`,
   `AVATAR_MAX_BYTES`, `AVATAR_TYPES`, `avatarObjectPath`, `isOwnAvatarPath`, `FREE_AVATAR_PRESETS`,
-  `hasDisallowedChars`, `cleanBio`, `bioLength` (code points, like `char_length`), `profilePath`,
-  `parseProfilePath`, `EMPTY_PLAYER_STATS`, `emptyPlayerStats`, `mapPlayerStats`. Needs a change? Report it.
+  `hasDisallowedChars`, `cleanBio`, `cleanNote` (v2.0.0, a report's note - **not** `cleanBio`, see the
+  free-text note in CLAUDE.md: it matches Postgres character for character, because `report_player` does the
+  cleaning in SQL), `bioLength` (code points, like `char_length`), `profilePath`, `parseProfilePath`,
+  `EMPTY_PLAYER_STATS`, `emptyPlayerStats`, `mapPlayerStats`. Needs a change? Report it.
 - **`badges.mjs`** (agent A; phase 0 wrote the catalog and rules): `BADGES` (`{ id, name, emoji, tier,
-  how, coins }`), `BADGE_BY_ID`, `TIER_COINS`, `CINDERELLA_MAX_SCORE`, `SCOUT_MIN_POINTS`,
-  `DAY_ONE_BEFORE`, `badgeProgress({ stats, extra, details, joined })` → `[{ id, earned, have, need }]` in
+  how, coins }`), `BADGE_BY_ID`, `BADGE_TIERS`, `TIER_COINS`, `CINDERELLA_MAX_SCORE`, `SCOUT_MIN_POINTS`,
+  `DAY_ONE_BEFORE`, and since the two newest badges `CENTURY_BADGE_SCORE` (v2.12.0) - a **copy** of
+  century-logic.mjs's `CENTURY_GOAL` rather than an import, because this file is pure by rule and has to
+  load on its own anywhere - and `GUESS_BADGE_TRIES` (v2.15.0), which is a copy of nothing: two guesses is
+  the badge's own rule and is not guess-logic.mjs's `GUESS_TRIES`, which is the five you are allowed. Plus
+  `badgeProgress({ stats, extra, details, joined })` → `[{ id, earned, have, need }]` in
   catalog order, `topBadges(progress, n)`. Pure; no imports from the app (the Edge Function will import
   it in v1.12.0).
 - **`ui-common.jsx`** (phase 0, lead): display helpers moved out of perfect-season.jsx — `SLOT_LABEL`,
@@ -394,9 +427,10 @@ string, after your base rules. `.pf-card` is already in the dark scope.
 
 ```jsx
 <Avatar username photoUrl preset size={40} className="" decorative={false} />
-AVATAR_PRESETS   // [{ key, name, pack, free }] - FREE_AVATAR_PRESETS plus drawings
+AVATAR_PRESETS   // [{ key, name, pack, free }] - FREE_AVATAR_PRESETS plus drawings, and since v1.12.0
+                 // shop-catalog.mjs's paid AVATAR_PACKS as well: 24 more across six packs (SHOP.md)
 ```
-Photo → default avatar → initial, falling back if the photo fails to load. The 12 drawings are inline
+Photo → default avatar → initial, falling back if the photo fails to load. The 12 free drawings are inline
 SVG in Gridspin's style (cream/ink/lime/blue/orange/violet, ink strokes, like the mark in
 `static/icon.svg`) — **no NFL logos or anything resembling a real team's marks**. Readable at 24px
 (header) and 96px. Not decorative: `role="img"` with an `aria-label`.
@@ -415,7 +449,10 @@ made them dangerous. The other three actions deliberately still work on a guest:
 v2.0.0 has to be clearable, and `dismiss` is the only way an old report against a guest gets closed at all.
 `mod_queue` carries `guest` on each entry so the queue says which is which, and the screen does not offer
 Rename for one. `mod_act`'s rename clears `guest`
-on `profiles` and `sou_runs` as well as rewriting the username.
+on `profiles` and on all four boards that carry it - `sou_runs`, `builds`, `century_runs` and `guess_runs` -
+as well as rewriting the username. It cleared only `sou_runs` at first, so a renamed account's builds kept the
+chip under its new name; unreachable since the gate above, and put right anyway, because the two functions
+that rewrite a name snapshot should not differ about what a name snapshot is.
 
 **Accepted, and deliberate (v2.0.0):** the 25 MB limit is on the file's *bytes*, and nothing checks its
 *pixels* before decoding it. A two-page PNG can declare 30,000 x 30,000 and decode to ~3.6 GB, which ends the
@@ -424,14 +461,16 @@ only thing harmed is your own tab, nothing has been uploaded by then, and no ser
 an image. The full reasoning, and what a fix would cost, is at `MAX_INPUT_BYTES` in `avatar-image.mjs`.
 
 ```jsx
-<AvatarPicker username current={{ photoUrl, preset }} busy error
+<AvatarPicker username current={{ photoUrl, preset }} busy error ownedPacks
   onPhoto={(blob) => Promise} onPreset={(key) => Promise} onRemove={() => Promise} onCancel={() => {}} />
 ```
 Two tabs: **Upload photo** (file input `accept="image/*"`; drag to move and a zoom slider — the slider is
 a real `<input type="range">` with a label, so the keyboard works; a round preview; **Use this photo**)
 and **Choose an avatar** (a grid of the defaults, the current one marked). **Remove picture** when there
-is one. `avatar-image.mjs`: `loadImage(file)` → `{ source, width, height }` (rejects `{ code:
-"unsupported" }` for anything that won't decode, `{ code: "too_big" }` over 25 MB) and
+is one. `ownedPacks` (v1.12.0) is which paid packs this player owns, so the grid offers their avatars and
+dims the rest; the pack of the avatar already worn counts as owned, since the database only let them choose
+it in the first place if it was. `avatar-image.mjs`: `loadImage(file)` → `{ source, width, height }`
+(rejects `{ code: "unsupported" }` for anything that won't decode, `{ code: "too_big" }` over 25 MB) and
 `prepareAvatar(source, crop)` → `{ blob, type }` (crop `{ x, y, size }` in source pixels; 256×256; WebP
 at a quality that fits 256 KB, else JPEG; EXIF orientation respected). Friendly errors, e.g. "That file
 isn't a picture we can use. Try a JPEG or PNG." Respect reduced motion.
@@ -538,7 +577,9 @@ for `/u/(.*)`. `tests/test-build-seo.mjs` checks both, like the `/c/` rules.
   `playerStats(state, userId)`), `mock-profile-data.mjs` (B: `makeProfileData(state, { playerStats })` →
   `{ tables, rpcs, storage, isClean, objects }`), `mock-moderation.mjs` (F: `makeModeration(state,
   profileData)` → `{ tables, rpcs, isModerator }`). `state` is `{ profiles, runs, dailyRuns, souRuns,
-  builds, currentUserId(), isModerator(uid) }`. A mock database function refuses by
+  builds, currentUserId(), isModerator(uid) }`, and has grown with the game: `supporters`,
+  `centuryRuns` and `guessRuns` for the boards added since, `currentUser()` and `ownsAvatarPack()`, and
+  `createProfile`/`renameAccount` for setting an account up. A mock database function refuses by
   `throw new Error("<code>")`. Direct client writes to the new tables return an RLS error. Escape
   hatches: `_profileDetails`, `_avatarPresets`, `_blockedWords`, `_siteFlags`, `_storageObjects`,
   `_reports`, `_moderators` (plus the existing ones). The mock's storage `getPublicUrl` returns an

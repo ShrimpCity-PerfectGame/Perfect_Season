@@ -10,6 +10,74 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.2] - 2026-09-30
+
+The outbox stops throwing away the daily it exists to save, and two panels stop promising a queue that
+was never built.
+
+**No migration, no Edge Function change.** Client only — but the change is about how the browser reads
+what the Edge Functions already say, so `submit-guess` and `submit-century` must be the v2.18.0 ones
+(they are; nothing has touched them since).
+
+- **A played daily could be lost in silence, on exactly the failure the outbox was written to survive.**
+  `submitGuess` and `submitCentury` answered `network` for two different things: a reason this client
+  cannot read, and a body carrying no reason at all. Only the first is a verdict. Every answer those
+  functions give a POST names a reason, so a body without one never came from the function — it is the
+  platform in between (the Functions relay, a gateway, a worker that failed to boot), and it is
+  transient. `network` is deliberately not retryable, so `drainOne` retired the run for good and wrote
+  `unrecorded`, a field nothing reads: the day was gone and nobody was told. The two are told apart now,
+  and a platform failure is `server`, which was already retryable and already reads as "that one is on
+  us, not your connection". A 200 whose body is not `{ ok: true }` is the platform too, and is held
+  rather than retired. **This is the best explanation yet for the solved daily lost on production on
+  2026-09-30**; it is not proof, because nothing recorded which branch that submission took.
+- **`network` stays off the retry lists, and that was right.** The objection the original author wrote
+  down — that retrying it would re-send a newer function's verdict on every focus until midnight — still
+  holds. What changed is what reaches it, not what it means.
+- **The seam had never been executed by a test.** `tests/mock-guess.mjs` and `tests/mock-century.mjs`
+  stand in for the whole `functions.invoke` layer, so `error.context.json()` and the mapping around it
+  had never run under a test in either direction. `tests/test-submit-reasons.mjs` drives both modules
+  against every failure shape a real client sees and checks each one through to what the outbox then does
+  with it — held, retired or sent — rather than stopping at the string.
+- **`tests/test-pending-daily.mjs` held its own copy of the retry list**, so it could have gone on
+  passing while the list the app drains with said something else. It imports `GUESS_RETRY` now.
+- **Two panels promised a queue that does not exist.** The season save-error panel said "It will be
+  included the next time a save goes through" — there is no season outbox, and 2.0-STATUS.md flagged
+  this at v2.0. It now says plainly that the season stands but will not be counted. The other was worse
+  than untrue: a season finished while the account could not be read waits in `pending`, which is React
+  state and nothing else, and the notice told the player to **reload** — the one action that throws it
+  away. The code comment beside the rescue has said so since v2.0.0 while the notice went on saying the
+  opposite. It now says to keep the page open, which is what that path actually rescues.
+- **The suite's one flaky test is fixed.** `test-finish-race.mjs` failed about one run in five, as
+  `null.click()` rather than as anything that named the problem. Its poll for the first board counted
+  `flush(2)` calls — two `setTimeout(0)` ticks each — while the case it covers deliberately turns real
+  motion ON, so it was racing a ~910ms reel with a few hundred milliseconds of budget. It polls the clock
+  now, the way `test-daily.mjs`'s `settle` already did, and fails with a sentence if the board never
+  arrives. 0 failures in 12 runs, from 3 in 15.
+- **The reference documents caught up with the code**: stale counts across `VERSUS.md`, `SHOP.md`,
+  `PROFILES.md`, `CENTURY.md` and `GUESS.md`, and two accepted gaps written into `GUESS.md` that were
+  only ever recorded in a source comment — the day's answer is computable by anyone, and a daily whose
+  save fails is replayable with the answer already known.
+- **CLAUDE.md's release runbook was wrong about v2.17.0 and silent about v2.18.0.** It said "No Edge
+  Function change" for a release that changed both mini-game functions, and omitted
+  `migration-moderation.sql` from its list. CHANGELOG.md has carried the correction since v2.17.0;
+  CLAUDE.md is the file the next session is told to trust, and it now agrees.
+
+**Left alone on purpose, and worth picking up in the next release that deploys a function.** Four stale
+comments live in modules the Edge Functions bundle — `versus-logic.mjs` (twice: "33 of the 160 boards",
+which is 31), `game-logic.mjs` (`if (out.length >= 18) break;` in `seededSequence` is unreachable, since
+no team twice and no era more than twice over five eras caps every sequence at ten — so the comment
+about eighteen entries is wrong too) and `rewards.mjs` (the `minigame: 15` comment names two games;
+`claim_minigame` has taken four since v2.13.0). Every one is a comment and none changes behaviour, but
+editing them would make a module the functions bundle differ from what is deployed, and this release's
+whole subject is that "no Edge Function change" has to mean it. The same 31 was corrected everywhere
+that is not bundled: `CLAUDE.md`, `VERSUS.md` and `tests/test-versus-boards.mjs`.
+
+Also still open and not attempted here: `century.jsx` and `guess.jsx` render board names as bare text
+rather than through `NameLink`, so PROFILES.md's rule that every username shown opens its profile — and
+CLAUDE.md's "every board renders names through one `NameLink`" — are untrue of those two boards. Both
+carry the guest chip correctly, so this is a missing link rather than the failure CLAUDE.md warns about.
+The documents were deliberately not weakened to match: the code is the defect.
+
 ## [2.18.1] - 2026-09-30
 
 Names on the boards are set in one weight, which is the weight a name colour needs to be seen at all.
@@ -77,6 +145,10 @@ because a laptop opened the game. Closing that needs the server to know a daily 
 a round trip on every daily, and that is not proportionate to one mini-game. And the season path's
 `saveError` panel still promises "It will be included the next time a save goes through" — there is no
 queue behind that sentence, and it predates this one.
+
+That last sentence was true when it was written and is not any more: **v2.18.2 changed the copy** rather
+than building the queue, so the panel now says the season stands but will not be counted. The first half
+stands — the re-send is still one browser profile.
 ## [2.17.0] — 2026-09-29
 
 A bug pass: two ways to cheat the daily, a coin over-payment, three client races, and the tests and

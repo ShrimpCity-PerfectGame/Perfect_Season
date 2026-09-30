@@ -163,10 +163,15 @@ inherit that, which is why `tests/test-century-sql.mjs` drives a real rename and
 
 ### Refusals
 
-Every one of these is mapped in `storage-century.js`'s `CENTURY_REFUSALS` and worded in `century.jsx`'s
-`refusalLine`. **A code that reaches the app unmapped is read as `"network"`** and shown as "check your
-connection" — forever, for a rule rather than a fault. `tests/test-century-screen.mjs` holds the map to the
-function's own source and to `century-logic.mjs`'s, so a new one cannot arrive unmapped.
+Every reason the function can answer with is mapped in `storage-century.js`'s `CENTURY_REFUSALS` and worded in
+`century.jsx`'s `refusalLine`. **A code that reaches the app unmapped is read as `"network"`** and shown as
+"check your connection" — forever, for a rule rather than a fault. `tests/test-century-screen.mjs` holds the map
+to the function's own source and to `century-logic.mjs`'s, so a new one cannot arrive unmapped. **`offline` and
+`network` are never the function's**, and `server` is only half of it: those three are what the client makes of
+a submission that failed without telling it a rule, and the difference between them is the difference between a
+run worth another go and one that is over. `tests/test-submit-reasons.mjs` drives `submitCentury` through every
+shape a real answer takes, and on through `drainOne`, so each one is checked as far as what the outbox then does
+with the run rather than stopping at the string.
 
 | Reason | Means |
 |---|---|
@@ -175,7 +180,12 @@ function's own source and to `century-logic.mjs`'s, so a new one cannot arrive u
 | `wrong_day` | a tab left open past UTC midnight |
 | `reserved_code` | a code that deals a daily's own seven teams |
 | `bad_code` | not a code the box would accept |
-| `malformed` | no picks at all |
+| `malformed` | no picks at all, or a body the function could not read |
+| `signed_out` | no Authorization header, or a session that expired while the run was being played (401) |
+| `no_profile` | signed in, but the account has never claimed a username, so there is no name for the board (400) |
+| `server` | the function reached the database and something there went wrong (500) — **and since v2.18.2 the client's reading of a failure that names no reason at all**, because every answer `submit-century` gives a POST names one, so a body without one (and a 200 whose body is not `{ ok: true }`) came from the platform in between rather than from the function. Either way it says so in those words rather than blaming a connection that was working — that wording sent us looking in the wrong place for a whole evening |
+| `offline` | the client's own, not the function's: `invoke()` threw, so nothing reached it at all, or what came back had no body that could be read. It is in `CENTURY_REFUSALS` so a dropped request is never read as a rule, and it has no line of its own — it falls to `refusalLine`'s default, which names the reason, as `malformed` does |
+| `network` | the client's own too, and the narrowest of the three: **a body that does name a reason, but one this build has never heard of** — a newer function's verdict on the run, which is why it is not in `CENTURY_REFUSALS` and cannot be. It is the only reason worded as "check your connection", which is what makes an unmapped code a bug rather than a refusal. It is deliberately **off `CENTURY_RETRY`**, so the outbox retires a run held under it instead of handing a verdict it cannot read back in on every focus until midnight |
 | `bad_seed` `bad_picks` `wrong_length` `bad_pick` `two_respins` `bad_slot` `slot_taken` `not_on_board` `wrong_position` `already_drafted` `no_team` | `replayCentury`'s own. A player should never see one — the screen enforces the same rules from the same module. If one appears, the two have drifted. |
 
 `already_drafted` is not theoretical: four players are on two boards in 2025, so the same person really can be
@@ -204,8 +214,9 @@ Two things follow from that and are worth stating, because both were got wrong f
   the same expression that darkens the play and duel views. The result screen is dark too, because a season's is.
 - **Reusing a class means inheriting its rules, which is the point.** Century adds no `pointer: coarse` or
   reduced-motion block of its own: every control on these screens is one of the app's, and those already carry
-  their touch targets and their motion rules. A copy would be a second, quietly diverging set. The only override
-  is the roster's column count, because seven slots do not fit a grid built for six.
+  their touch targets and their motion rules. A copy would be a second, quietly diverging set. What it does
+  override is the two places seven slots do not fit a layout built for six: the roster's column count, and the
+  word breaking inside a slot tile, which the draft never hits because six tiles are wider than seven.
 
 It draws the rules and holds none of them, with one exception that matters:
 
@@ -226,6 +237,20 @@ Other things worth knowing:
   It resumes, which is the rule for every daily in the game. Clearing it overwrites with an unusable snapshot
   before deleting, because a delete that does not land must never bring a finished run back as a resumable one.
   A daily snapshot from a day that has passed is dropped — its seven teams were yesterday's.
+- **A finished daily is remembered before it is saved, and that record is the outbox** (v2.17.0, made an outbox
+  in v2.18.0). `century.jsx` writes `ps-century-done:<account>:<day>` the moment the seventh slot locks in,
+  whatever the submission then answers, because a refused save must never leave the tile playable with the day's
+  seven teams already revealed — and it is keyed by account as well as day, or signing out would hand the next
+  player on the device a day already spent. It carries `saved`, and **while that is false the run is still owed
+  to the board**: `drainMinigames` in perfect-season.jsx re-sends it on focus through `pending-daily.mjs`'s
+  `drainOne`, verbatim and never rebuilt, holding it for a reason in `CENTURY_RETRY` — `offline`, `server`,
+  `signed_out`, `no_profile`, the four that may not still be true in a minute — and retiring it for anything
+  else, since every other reason is the server's verdict on the run itself and re-sending cannot change it. The
+  drain deliberately does not live on this screen: the result screen's Done button leaves for Mini games, so one
+  that only ran where the player had just been told it had not saved would never run again. **The resume path
+  reads this record too**, ahead of the snapshot — `sset`/`clearDraft` guarantee nothing, and a WIP that outlived
+  a finish would otherwise be a way back onto a board whose score was on the previous screen, which with a
+  re-send behind it would be POSTED.
 - **A started run beats a resume that is still in flight** (v2.11.1). The snapshot read is async and starting a
   run is not, so a read begun before a link was taken landed after it and restored the old run over the shared
   one - with the saved snapshot correct and only the screen wrong, which is why storage-checking tests missed
@@ -235,16 +260,21 @@ Other things worth knowing:
   **not**, and sharing one counter is a bug that was made here: the snapshot read started, the
   daily-already-played read bumped the counter, and the resume was thrown away as stale — so a half-finished
   run came back as the menu for anyone signed in. `tests/test-century-screen.mjs` 5 is that test.
-- **A played daily is still openable** (v2.10.1). The tile reopens that run from the roster `fetchMyCentury`
-  already returns, and looking at it records nothing. It used to be disabled while the Mini games tile promised
-  "See today's result", which is the kind of gap only a click finds.
+- **A played daily is still openable** (v2.10.1). The tile reopens that run from the roster it already holds —
+  `fetchMyCentury`'s, or the device record's when the save is still owed — and looking at it records nothing. It
+  used to be disabled while the Mini games tile promised "See today's result", which is the kind of gap only a
+  click finds.
 - **No disabled control says "Sign in to play"** (v2.10.1). Signed out, or a guest on the daily, the tile stays
   live and calls `onNeedsAccount`, which the app answers with a notice and the Account tab.
 - **Both board tab panels are rendered**, the closed one `hidden` (v2.10.1). Rendering only the open one left
   the closed tab's `aria-controls` pointing at nothing; `tests/test-a11y.mjs` now refuses that on any screen.
-- **The Modes tile's "Done · N" is a per-device hint**, kept the way Over/Under's is. The record is
-  `century_runs`, which the screen asks directly (`fetchMyCentury`) before offering the daily; the two can
-  disagree across devices and the screen's answer decides.
+- **The Century tile's "Done · N" is a per-device hint**, kept the way Over/Under's is — the tile sits on the
+  Mini games screen beside it since v2.10.0, not on Modes. It is `ps-century:<day>`, written only once the
+  server has accepted the run, so it says what is on the board rather than what was played. **The screen's own
+  gate is the stricter of the two**: `CenturyScreen` asks `century_runs` directly (`fetchMyCentury`) and falls
+  back to this device's per-account record, and *either* one spends the day — which is what stops a refused save
+  from being replayed with the seven teams already seen. So the hint and the gate can disagree on one device
+  while a run is still held, as well as across devices, and the screen's answer is the one that decides.
 - The spin panel and the result hero are **stadium-dark wherever they appear**, so both are named in
   perfect-season.jsx's dark-scope selector list and take `--bg` / `--ink` / `--accent` from there. Nothing in
   `CENTURY_CSS` hardcodes a colour; the team tints the panel through `--tc-deep`.
@@ -259,7 +289,8 @@ Other things worth knowing:
 | `tests/test-century-edge.mjs` | the real `index.ts`, executed: who is asking, the daily's clock, the duplicate, the guest, a found hash collision, and that the score written is the function's whatever the client claims |
 | `tests/test-century-sql.mjs` | the migration in PGlite: nobody writes the table, the daily's unique index, both boards against the mock, a rename, a guest trade-up, and the coin claim |
 | `tests/test-century-screen.mjs` | the buttons: the tile, both variants, seven picks clicked through, the re-spin, resume, the boards, the guest, the two doors, and the refusal map |
-| `tests/test-a11y.mjs` | the menu and the board, both under axe-core |
+| `tests/test-submit-reasons.mjs` | `submitCentury` against every shape a failed answer takes — a reason it knows, an unreadable body, a body naming no reason, a reason it has never heard of, a 200 that is not `{ ok: true }`, a thrown `invoke()` — each followed through `drainOne` to held, retired or sent, and Century held to the same answers as Guess |
+| `tests/test-a11y.mjs` | the menu, the board and the result, all three under axe-core |
 | `tests/test-migrations.mjs` | the migration's place in the runbook order |
 
 The UI harness serves it at `?screen=century[&picks=N][&finish=1]` - a run part-played, written into the same
@@ -276,10 +307,11 @@ hundred there is an evening of retries at roughly one run in twenty, while the d
 seven teams. `player_stats()`'s `century.daily_best` is the only number that tells the two apart, which is why
 it is carried separately from `best`.
 
-It is the first minigame badge that **pays**. Stat Nerd and Mad Scientist pay nothing because Over/Under and
-Build-a-player are browser-written; a Century run is verified, so there is no version of this a browser can
-assert. And `submit-century` awards it itself rather than leaving it to submit-run's next finished season,
-because somebody who plays Century and nothing else may never finish one. A failed award never fails the run.
+It was the first minigame badge that **pays**, and Bullseye (v2.15.0) is the second on the same argument: Stat
+Nerd and Mad Scientist pay nothing because Over/Under and Build-a-player are browser-written, while a Century
+run is verified, so there is no version of this a browser can assert. And `submit-century` awards it itself
+rather than leaving it to submit-run's next finished season, because somebody who plays Century and nothing
+else may never finish one. A failed award never fails the run.
 
 `badges.mjs` holds its own `CENTURY_BADGE_SCORE` rather than importing `CENTURY_GOAL` — that file is pure by
 rule and `tests/test-badges.mjs` enforces it — and a test holds the two numbers equal.

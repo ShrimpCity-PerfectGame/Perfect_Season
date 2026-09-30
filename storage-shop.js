@@ -84,7 +84,10 @@ export async function buyItem(id) {
 }
 
 const EQUIP_REASONS = { not_owned: "not_owned", bad_slot: "invalid", bad_item: "invalid", not_signed_in: "signed_out", guest_not_allowed: "guest" };
-// Wears an item you own in its slot ("frame" | "card" | "title"), or clears the slot with a null id.
+// Wears an item you own in its slot, or clears the slot with a null id. The slots are the keys of
+// shop-catalog.mjs's DEFAULT_ITEM and the list `equip_item` checks against in migration-shop.sql:
+// "frame" | "card" | "title" | "nameplate" | "namecolor" | "celebration". This said three until
+// v2.18.2 - nameplates and celebrations arrived in v2.6.0 and v2.5.0, name colours in v2.7.0.
 //   { ok: true, details } | { ok: false, reason: "not_owned" | "invalid" | "guest" | "signed_out" | "network" }
 export async function equipItem(slot, id) {
   try {
