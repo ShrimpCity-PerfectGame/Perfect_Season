@@ -302,11 +302,19 @@ await runTest("6. the daily is once, and the tile says so afterwards", async () 
 });
 
 await runTest("7. the boards show the day and all time, and mark a player's own row", async () => {
-  // A guest's run on the same board, seeded BEFORE the screen opens - the boards are fetched once when it
-  // does, and switching tabs reads what is already held rather than going back to the server.
+  // A guest's run, seeded BEFORE the screen opens - the boards are fetched once when it does, and switching
+  // tabs reads what is already held rather than going back to the server.
+  //
+  // `day: null`, an UNLIMITED run, because that is the only shape the server can produce for a guest and so
+  // the only way one reaches a board at all. A guest may not play the daily (submit-century answers
+  // guest_daily), so no guest row ever carries a day - which means `century_top`, keyed on the day, can
+  // never hold one. `century_best` has no day filter, so a guest's Unlimited run lands there, and that
+  // board is the ONE place in the game where the guest chip is live rather than defensive.
+  // Seeded WITH a day, as this was when it was written in v2.18.3, the test asserted a row the server
+  // cannot write - it proved the rendering against a state that cannot occur.
   window.__ps_supabase__._century.add({
     id: 9001, user_id: "guest-on-the-board", username: "Guest_AB12C", guest: true,
-    day: new Date().toISOString().slice(0, 10), seed: null, score: 71, hit: false, ceiling: 104,
+    day: null, seed: "GUESTRUN", score: 71, hit: false, ceiling: 104,
     roster: [], outcome: "71 touchdowns.", created_at: new Date().toISOString(),
   });
   await openCentury();
@@ -334,14 +342,22 @@ await runTest("7. the boards show the day and all time, and mark a player's own 
   // wrong the whole time: this board rendered every name as bare text, so nothing linked and nothing was
   // chipped. NameLink was module-scope in perfect-season.jsx and a screen file may not import that back,
   // so there was no way to render one - which is why v2.18.3 moved it rather than copying it here.
-  await click(tabs[0]);
-  await flush();
-  const linked = [...open().querySelectorAll(".ce-lb tbody .namelink")].map((b) => b.textContent);
-  assert(linked.includes("centurion"), `expected centurion to be a profile link, got: ${JSON.stringify(linked)}`);
+  // Both halves are checked HERE, on the all-time board, because this is the one board a guest can reach.
+  const linkedBest = [...open().querySelectorAll(".ce-lb tbody .namelink")].map((b) => b.textContent);
+  assert(linkedBest.includes("centurion"), `expected centurion to be a profile link, got: ${JSON.stringify(linkedBest)}`);
   const guestRow = [...open().querySelectorAll(".ce-lb tbody tr")].find((r) => r.textContent.includes("Guest_AB12C"));
-  assert(guestRow, `the guest's row is on the board: ${open().textContent.slice(0, 200)}`);
+  assert(guestRow, `the guest's Unlimited run is on the all-time board: ${open().textContent.slice(0, 200)}`);
   assert(guestRow.querySelector(".guestchip"), `the guest's name carries a chip: ${guestRow.innerHTML.slice(0, 200)}`);
   assert(!guestRow.querySelector(".namelink"), `and is not a link: ${guestRow.innerHTML.slice(0, 200)}`);
+
+  // The day's board still links an account, so the check above is not the only thing proving NameLink is
+  // wired into this screen - and it carries no guest at all, because it is keyed on a day a guest may
+  // never play.
+  await click(tabs[0]);
+  await flush();
+  const linkedDay = [...open().querySelectorAll(".ce-lb tbody .namelink")].map((b) => b.textContent);
+  assert(linkedDay.includes("centurion"), `expected centurion linked on the day's board, got: ${JSON.stringify(linkedDay)}`);
+  assert(!open().querySelector(".ce-lb .guestchip"), "and no guest on the day's board");
 });
 
 await runTest("8. a guest plays Unlimited and is refused the daily, with a reason", async () => {

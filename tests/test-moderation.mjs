@@ -924,6 +924,17 @@ await runTest("ModerationQueue offers no Rename for a guest, and says why if one
   assert(actionsOf(card).includes("Dismiss"), `but Dismiss is: ${actionsOf(card)}`);
   // A real account in the same queue still has it, so this is a rule about guests and not a broken screen.
   assert(actionsOf(cardOf(c, "bob")).includes("Rename player"), "a real account still offers Rename");
+
+  // And the NAME is chipped rather than linked, the way it is on every board (PROFILES.md 7). Until v2.18.5
+  // this card rendered a guest's name as an md-link like anyone else's, and the only thing that link could
+  // ever do was take a moderator to "no player with that name" - player_profile refuses a guest. The flag was
+  // already in scope; the Rename button two lines above has been reading it since guests shipped.
+  assert(!card.querySelector(".md-name .md-link"), `a guest's name is not a link: ${card.querySelector(".md-name").innerHTML}`);
+  assert(card.querySelector(".md-name .guestchip"), `it carries the chip instead: ${card.querySelector(".md-name").innerHTML}`);
+  assert(card.querySelector(".md-name").textContent.startsWith(guestName), `and still says who it is: ${card.querySelector(".md-name").textContent}`);
+  // A real account's name is still a link, so this is the guest rule and not the name cell breaking.
+  assert(cardOf(c, "bob").querySelector(".md-name .md-link"), "a real account's name is still a link");
+  assert(!cardOf(c, "bob").querySelector(".md-name .guestchip"), "and carries no chip");
 });
 
 await runTest("ModerationQueue: Remove picture and Clear bio ask first, then act and resolve just their reports", async () => {

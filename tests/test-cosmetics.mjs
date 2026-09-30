@@ -357,6 +357,25 @@ const NAME_SURFACES = {
     glowOver(THEME.night.glow, THEME.night.surface)],
 };
 
+// The guest chip sits beside a name on every board a guest can reach, and it is the one thing on a board
+// that carries meaning in WORDS rather than in colour - so it has to be readable wherever the name is. Its ink
+// is `--muted`, a token, which test-theme-contrast.mjs already measures against each scope's own background;
+// what that test cannot see is the same surfaces this one models, in particular the 30% lime wash the
+// Leaderboard paints over your own row. Nothing held the chip to AA before v2.18.5, and the lime wash is its
+// thinnest margin by some way.
+await runTest("the guest chip is AA-readable on every surface a board name sits on", async () => {
+  const below = [];
+  for (const scope of NAME_SCOPES) {
+    const ink = THEME[scope].muted;
+    assert(/^#[0-9A-F]{6}$/i.test(ink), `the ${scope} scope's --muted is a solid colour, got ${ink}`);
+    for (const bg of NAME_SURFACES[scope]) {
+      const r = contrast(ink, bg);
+      if (r < 4.5) below.push(`guest chip ${scope}: ${ink} on ${bg} is ${r.toFixed(2)}:1`);
+    }
+  }
+  assert(below.length === 0, "the guest chip is below AA on: " + below.join(" | "));
+});
+
 await runTest("every name colour is AA-readable on every board surface, in all three scopes", async () => {
   const looks = SHOP_ITEMS.filter((i) => i.kind === "namecolor");
   assert(looks.length > 0, "there are name colours to check");

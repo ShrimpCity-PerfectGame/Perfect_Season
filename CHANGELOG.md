@@ -19,6 +19,54 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.5] - 2026-09-30
+
+The guest chip, everywhere it belongs — and an honest account of where it can actually appear.
+
+**Client only.** No migration, no Edge Function change.
+
+- **The moderators' Reports queue rendered a guest's name as a link.** `player_profile` refuses a
+  guest, so the only thing that link could ever do was take a moderator to "no player with that name".
+  It is chipped and unlinked now, the way every board does it. The flag was already in scope — the
+  Rename button on the same card has been reading `player.guest` to hide itself since guests shipped.
+  Unreachable since v2.17.0, when `report_player` gained `guest_target` and stopped accepting a guest
+  as a target; reports filed **before** that gate are still in the queue, and they are the exposure.
+- **The Duels board was the one name render site in the app that passed no `guest` prop**, and
+  `NameLink` reads a missing prop as "not a guest" — a link plus a supporter star. Safe today, twice
+  over: `versus_top` filters `not p.guest` and `can_play_versus` means a guest can never earn a record
+  to filter. It passes the prop now, so the day that SQL relaxes this board does not quietly start
+  linking throwaway accounts.
+- **`storage.js`'s daily-board mapping claimed a protection it does not have.** Its comment said the
+  guest flag was "in place, not a live bug". **`daily_runs` has no `guest` column at all** — checked
+  against `information_schema` on both projects — so `!!r.guest` is `!!undefined` and always false. The
+  board is safe because `submit-run` refuses a guest's daily, not because of that line. The comment now
+  says so, and says what adding the column would take.
+- **Nothing held the chip's ink to AA.** `--muted` is a token, so `test-theme-contrast.mjs` measures it
+  against each scope's background — but not against the surfaces a board name actually sits on, in
+  particular the 30% lime wash the Leaderboard paints over your own row. `tests/test-cosmetics.mjs` now
+  measures the chip across all 13 scope/surface pairs `NAME_SURFACES` models. The thinnest is
+  **4.78:1**, night scope over that wash, against AA's 4.5.
+- **The guest fixture written in v2.18.3 asserted a row the server cannot produce.** Both screen tests
+  seeded a guest with `day: today`, and every one of the three submit functions refuses a guest's
+  daily. Century's test now seeds an **Unlimited** run with `day: null` and checks the **all-time**
+  board — because `century_best` has no day filter, that is the one board in the game a guest can
+  reach, and the one place the chip is live rather than defensive. Verified on staging by playing a
+  guest Century run end to end: `Guest_AD503` renders as a plain `.bname` span plus `.guestchip`, not a
+  button.
+- **Guess's boards can never hold a guest**, and its test now says so rather than implying coverage it
+  does not have. `guess_top` is keyed on the day; `guess_best` ends
+  `having count(*) filter (where g.day is not null) > 0`, so an account with only practice rows is
+  dropped from the grouping entirely. The guest row there is deliberate defensive coverage, labelled as
+  such.
+
+**Worth knowing, not changed here.** `submit-run`'s DNF branch returns before the guest check, so a
+guest *can* charge a DNF tagged `mode: "daily"` — `points_daily -= 50` and a `runs` row with
+`ladder = 'daily'`. Both daily boards exclude it by their own filters (`> 0`, and `not dnf`) rather
+than by the guest gate, and a DNF only ever subtracts from your own stats, which is the reasoning the
+comment above that branch already gives for guarding it lightly. So "a guest cannot touch the daily" is
+not literally true, and anyone relaxing either filter, or adding a board that counts daily DNFs, should
+know that before they do.
+
 ## [2.18.4] - 2026-09-30
 
 Back from a profile returns to the board it was opened from.

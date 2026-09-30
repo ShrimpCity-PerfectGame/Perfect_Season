@@ -357,8 +357,17 @@ function QueueItem({ player, onOpenProfile, onDone }) {
       <div className="md-head">
         <Avatar username={player.username} photoUrl={player.avatarUrl} preset={player.avatarPreset} size={80} />
         <div className="md-headtext">
+          {/* A guest is chipped and not linked here, the way it is on every board (PROFILES.md 7). It had
+              been a clickable name since the queue shipped, and `player_profile` refuses a guest - so the
+              one thing that link could ever do was take a moderator to "no player with that name".
+              Unreachable since v2.17.0, when report_player gained `guest_target` and stopped accepting a
+              guest as the target at all; a report filed BEFORE that is the exposure, and those rows are
+              still in the queue. The flag was already here - the Rename button below has been reading it
+              to hide itself - so this was a hole with the answer already in scope. */}
           <h3 className="md-name" id={`${id}-name`}>
-            <button type="button" className="md-link" onClick={() => onOpenProfile?.(player.username)}>{player.username}</button>
+            {player.guest
+              ? <><span className="bname">{player.username}</span><span className="guestchip">guest</span></>
+              : <button type="button" className="md-link" onClick={() => onOpenProfile?.(player.username)}>{player.username}</button>}
           </h3>
           <p className="md-meta">{plural(n, "open report")}</p>
         </div>

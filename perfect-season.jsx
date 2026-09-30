@@ -5398,7 +5398,13 @@ export default function PerfectSeason() {
                         const mine = !!user && q.username === user;
                         return (
                           <tr key={q.username} className={rankRowClass(i, mine)}>
-                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} /><span className="subrec">{q.wins}–{q.losses}</span></td>
+                            {/* `guest` is passed here although `versus_top` does not return it and a guest can
+                                never be on this board - it filters `not p.guest`, and `can_play_versus` means
+                                one can never earn a record to filter. It is passed because this was the ONE
+                                name render site in the app that left it off, and an omitted prop reads as
+                                "not a guest": the day that SQL relaxes, this is the board that would quietly
+                                start linking and starring throwaway accounts. Cheaper to say so now. */}
+                            <RankCell i={i} /><td className="nm"><PlayerName name={q.username} mine={mine} guest={!!q.guest} /><span className="subrec">{q.wins}–{q.losses}</span></td>
                             <td className="r v">{q.wins}</td>
                             <td className="r lbrec">{q.wins}–{q.losses}</td>
                             <td className="r hide">{q.pct == null ? "–" : `${q.pct}%`}</td>
