@@ -1,0 +1,642 @@
+<title>Spin an Era</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+  /* Gridspin's own dark scope (theme.mjs): the navy "scoreboard" treatment. One committed visual
+     world - a stadium board at night - so no light theme, but every colour is painted explicitly. */
+  :root {
+    --navy:    #0B1020;
+    --surface: #131A2E;
+    --surface2:#1B2440;
+    --line:    #26304D;
+    --line2:   #36416A;
+    --cream:   #F7F4EA;
+    --muted:   #A9B0C3;
+    --lime:    #B8F500;
+    --ink:     #101114;
+    --win:     #6FD49B;
+    --loss:    #F07B6B;
+    --upset:   #F5C451;
+    --qb:      #F2557A;
+    --rb:      #2FD3B5;
+    --wr:      #5AA9FF;
+    --te:      #F5A04A;
+    --flex:    #B18CFF;
+    --display: 'Anton', Impact, 'Arial Narrow', sans-serif;
+    --body:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--navy);
+    color: var(--cream);
+    font-family: var(--body);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding-block: 20px;
+    padding-inline: 16px;
+    box-sizing: border-box;
+  }
+
+  .wrap { width: 100%; max-width: 980px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* ---- the stage ------------------------------------------------------------------ */
+  .stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-width: 100%;
+    background:
+      radial-gradient(120% 90% at 50% 0%, #16203c 0%, var(--navy) 62%),
+      var(--navy);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    container-type: size;
+    box-shadow: 0 20px 60px -30px #000;
+  }
+
+  /* Scoreboard texture: a faint dot matrix, the way the game draws its big numerals. */
+  .stage::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle at 1px 1px, rgba(247,244,234,.055) 1px, transparent 1px);
+    background-size: 7px 7px;
+    pointer-events: none;
+    z-index: 5;
+  }
+  /* Vignette, so the type sits in the middle of a lit field. */
+  .stage::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(130% 100% at 50% 45%, transparent 45%, rgba(3,6,16,.72) 100%);
+    pointer-events: none;
+    z-index: 6;
+  }
+
+  .scene {
+    position: absolute; inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    text-align: center;
+    opacity: var(--vis, 0);
+    pointer-events: none;
+    padding: 4cqw;
+    box-sizing: border-box;
+  }
+
+  /* ---- shared type ---------------------------------------------------------------- */
+  .eyebrow {
+    font-family: var(--body);
+    font-weight: 700;
+    font-size: 1.55cqw;
+    letter-spacing: .28em;
+    text-transform: uppercase;
+    color: var(--lime);
+  }
+  .sub {
+    font-family: var(--body);
+    font-weight: 500;
+    font-size: 1.9cqw;
+    color: var(--muted);
+    letter-spacing: .01em;
+  }
+  .huge {
+    font-family: var(--display);
+    line-height: .84;
+    letter-spacing: .005em;
+    text-transform: uppercase;
+  }
+
+  /* A mask reveal rather than a fade: Anton has weight to it, and weight should arrive from
+     somewhere. Each line clips its own overflow and the inner span slides up into frame. */
+  /* Anton's caps stand taller than a .84 line box and this clip was shaving their tops. The pad
+     gives the mask headroom; the negative margin puts the type back where it was. */
+  .rev { overflow: hidden; display: block; padding-top: .12em; margin-top: -.12em; }
+  .rev > span { display: block; transform: translateY(calc((1 - var(--r, 0)) * 118%)); }
+
+  /* ---- beat 1: the question ------------------------------------------------------- */
+  #b1 { gap: 2.2cqw; }
+  #b1 .l1 { font-size: 7.4cqw; color: var(--cream); }
+  #b1 .l2 { font-size: 15.5cqw; color: var(--cream); }
+  /* The flex row goes on the INNER span, not on .rev itself - .rev has to stay a block with its
+     overflow clipped, or the mask reveal has nothing to clip against. */
+  #b1 .l2row { display: flex; align-items: baseline; gap: .1em; justify-content: center; font-style: normal; }
+  #b1 .score, #b1 .q { font-style: normal; }
+  #b1 .score { color: var(--ink); background: var(--lime); padding: .05em .1em .09em; }
+  #b1 .q { color: var(--lime); }
+  #b1 .rule { height: 2px; background: var(--line2); width: var(--ruleW, 0%); }
+
+  /* ---- beat 2: the spin ----------------------------------------------------------- */
+  #b2 { gap: 2.4cqw; }
+  .reel {
+    width: 62cqw;
+    height: 13cqw;
+    position: relative;
+    overflow: hidden;
+    border-top: 2px solid var(--line2);
+    border-bottom: 2px solid var(--line2);
+    background: linear-gradient(180deg, rgba(11,16,32,.9), rgba(27,36,64,.5), rgba(11,16,32,.9));
+  }
+  .reel-strip { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+  .reel-item {
+    height: 13cqw;
+    display: flex; align-items: baseline; justify-content: center; gap: 1.4cqw;
+    font-family: var(--display);
+    font-size: 6.6cqw;
+    text-transform: uppercase;
+    color: var(--cream);
+    white-space: nowrap;
+  }
+  .reel-item .era { color: var(--muted); font-size: .62em; letter-spacing: .04em; }
+  /* The landed row lights up - lime as ink, which is only legal on the dark scope. */
+  .reel-item.hit { color: var(--lime); }
+  .reel-item.hit .era { color: var(--cream); }
+  .reel-edge {
+    position: absolute; left: 0; right: 0; height: 2px; background: var(--lime);
+    opacity: var(--edge, 0);
+  }
+  .reel-edge.t { top: 0; } .reel-edge.b { bottom: 0; }
+
+  /* ---- beat 3: the draft ---------------------------------------------------------- */
+  #b3 { gap: 2.6cqw; width: 100%; }
+  .roster { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5cqw; width: 92cqw; }
+  .slot {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: .55cqw solid var(--pos, var(--line2));
+    padding: 1.5cqw 1.6cqw;
+    text-align: left;
+    display: grid;
+    gap: .5cqw;
+    transform: translateY(calc((1 - var(--s, 0)) * 26%)) scale(calc(.96 + var(--s, 0) * .04));
+    opacity: var(--s, 0);
+  }
+  .slot .pos {
+    font-weight: 800; font-size: 1.5cqw; letter-spacing: .16em; color: var(--pos, var(--muted));
+    text-transform: uppercase;
+  }
+  .slot .name { font-family: var(--display); font-size: 2.8cqw; color: var(--cream); text-transform: uppercase; line-height: 1; white-space: nowrap; }
+  .slot .from { font-size: 1.5cqw; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---- beat 4: the season --------------------------------------------------------- */
+  #b4 { gap: 2.4cqw; }
+  .games { display: grid; grid-template-columns: repeat(17, 1fr); gap: .75cqw; width: 74cqw; }
+  .g {
+    aspect-ratio: 1; border-radius: 2px; background: var(--c, var(--line));
+    transform: scale(var(--gs, 0));
+  }
+  .playoffs { display: flex; gap: 1.1cqw; align-items: center; justify-content: center; }
+  .p {
+    width: 5.2cqw; aspect-ratio: 1; border-radius: 3px; background: var(--c, var(--line));
+    transform: scale(var(--gs, 0));
+    display: grid; place-content: center;
+    font-family: var(--display); font-size: 2cqw; color: var(--ink);
+  }
+  .tally {
+    font-family: var(--display); font-size: 4.6cqw; color: var(--cream);
+    font-variant-numeric: tabular-nums; letter-spacing: .04em;
+  }
+  .tally b { color: var(--win); font-weight: 400; }
+
+  /* ---- beat 5: the result --------------------------------------------------------- */
+  #b5 { gap: 1.6cqw; }
+  #b5 .rec {
+    font-family: var(--display); font-size: 21cqw; line-height: .8;
+    color: var(--ink); background: var(--lime);
+    padding: .06em .09em .09em;  // the numerals overshot the plate into the navy
+    transform: scale(var(--pop, 1));
+  }
+  #b5 .said { font-family: var(--display); font-size: 5.2cqw; color: var(--cream); text-transform: uppercase; }
+
+  /* ---- beat 6: the mark ----------------------------------------------------------- */
+  #b6 { gap: 2cqw; }
+  .lockup { display: flex; align-items: center; gap: 2.2cqw; }
+  .mark { width: 11cqw; height: 11cqw; }
+  /* The ARROW turns, not the badge. Rotating the whole lockup read as a tumbling sticker; the
+     mark is a re-spin arrow around a football, and the arrow is the part that spins. */
+  #mark { transform: rotate(calc(var(--spin, 0) * 360deg)); transform-origin: 32px 32px; transform-box: view-box; }
+  .word { font-family: var(--display); font-size: 9.6cqw; color: var(--cream); text-transform: uppercase; letter-spacing: .01em; }
+  .tagline { font-size: 2.1cqw; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; font-weight: 600; }
+  .url { font-family: var(--display); font-size: 2.8cqw; color: var(--lime); letter-spacing: .06em; }
+
+  /* ---- transport ------------------------------------------------------------------ */
+  .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    font: inherit; font-weight: 600; font-size: 13px;
+    color: var(--cream); background: var(--surface2);
+    border: 1px solid var(--line2); border-radius: 4px;
+    padding: 8px 14px; cursor: pointer;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  .btn:hover { background: var(--line); }
+  .btn:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
+  .btn.primary { background: var(--lime); color: var(--ink); border-color: var(--lime); }
+  .btn.primary:hover { background: #a8e000; }
+
+  .track {
+    position: relative; flex: 1 1 220px; min-width: 180px; height: 26px;
+    display: flex; align-items: center; cursor: pointer;
+  }
+  .track-bar { position: absolute; left: 0; right: 0; height: 4px; background: var(--line); border-radius: 2px; }
+  .track-fill { position: absolute; left: 0; height: 4px; width: var(--pct, 0%); background: var(--lime); border-radius: 2px; }
+  .track-tick { position: absolute; top: 4px; width: 1px; height: 14px; background: var(--line2); }
+  .clock { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 82px; text-align: right; }
+
+  .beats { display: flex; gap: 6px; flex-wrap: wrap; }
+  .beat-chip {
+    font: inherit; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); background: transparent; border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 10px; cursor: pointer;
+  }
+  .beat-chip[aria-current="true"] { color: var(--ink); background: var(--lime); border-color: var(--lime); }
+  .beat-chip:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
+
+  .credit { font-size: 12px; color: var(--muted); line-height: 1.6; max-width: 62ch; }
+  .credit strong { color: var(--cream); font-weight: 600; }
+
+  @media (max-width: 560px) {
+    .clock { min-width: 0; }
+    .credit { font-size: 11px; }
+  }
+
+  /* Render mode (?render=1). The stage IS the frame: no page chrome, no transport, no border or
+     radius to leave a seam at the edge of the video, and no drop shadow to composite against. Driven
+     by tools/film/render.mjs, which sets the clock itself and screenshots each frame. */
+  body.render { padding: 0; gap: 0; display: block; background: var(--navy); }
+  body.render .wrap { max-width: none; gap: 0; }
+  body.render .transport,
+  body.render .beats,
+  body.render .credit { display: none; }
+  body.render .stage {
+    width: 100vw; height: 100vh; aspect-ratio: auto;
+    border: 0; border-radius: 0; box-shadow: none;
+  }
+
+  /* Reduced motion: hold the film on its own last frame rather than running it. */
+  @media (prefers-reduced-motion: reduce) {
+    .rev > span { transform: none; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="A thirty-second title sequence for Gridspin: the question can you go 20 and 0, a team and era spinning up, six players drafted, a seventeen game season, a perfect record, and the Gridspin mark.">
+
+    <!-- 1. the question -->
+    <section class="scene" id="b1">
+      <div class="eyebrow rev"><span>The ultimate season challenge</span></div>
+      <div class="huge l1 rev"><span>Can you go</span></div>
+      <div class="huge l2 rev"><span class="l2row"><em class="score">20&ndash;0</em><em class="q">?</em></span></div>
+      <div class="rule"></div>
+    </section>
+
+    <!-- 2. the spin -->
+    <section class="scene" id="b2">
+      <div class="eyebrow rev"><span>Every round spins a team and an era</span></div>
+      <div class="reel" id="reel">
+        <div class="reel-strip" id="strip"></div>
+        <div class="reel-edge t"></div>
+        <div class="reel-edge b"></div>
+      </div>
+      <div class="sub" id="b2sub">One board. One player. Then it spins again.</div>
+    </section>
+
+    <!-- 3. the draft -->
+    <section class="scene" id="b3">
+      <div class="eyebrow rev"><span>Draft six &mdash; one from every spin</span></div>
+      <div class="roster" id="roster"></div>
+    </section>
+
+    <!-- 4. the season -->
+    <section class="scene" id="b4">
+      <div class="eyebrow rev"><span>Your six play a 17-game season against real NFL teams</span></div>
+      <div class="games" id="games"></div>
+      <div class="tally" id="tally">0&ndash;0</div>
+      <div class="playoffs" id="playoffs"></div>
+    </section>
+
+    <!-- 5. the result -->
+    <section class="scene" id="b5">
+      <div class="huge rec" id="rec">20&ndash;0</div>
+      <div class="said">Perfect season</div>
+    </section>
+
+    <!-- 6. the mark -->
+    <section class="scene" id="b6">
+      <div class="lockup">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="2" y="2" width="60" height="60" rx="15" fill="#B8F500" stroke="#101114" stroke-width="3"/>
+          <g id="mark">
+            <path d="M43.57 18.21A18 18 0 1 1 20.43 18.21" fill="none" stroke="#101114" stroke-width="6" stroke-linecap="round"/>
+            <path d="M25.9 12.6 16.2 13.9 22.4 22.2Z" fill="#101114"/>
+          </g>
+          <ellipse cx="32" cy="33.5" rx="9.5" ry="6.2" transform="rotate(-35 32 33.5)" fill="#101114"/>
+          <path d="M29 35.8 35 31.2" stroke="#B8F500" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <div class="word">Gridspin</div>
+      </div>
+      <div class="tagline">Spin an era. Draft the greats. Go 20&ndash;0.</div>
+      <div class="url">gridspin.app</div>
+    </section>
+  </div>
+
+  <div class="transport">
+    <button class="btn primary" id="play" type="button">Pause</button>
+    <button class="btn" id="replay" type="button">Replay</button>
+    <div class="track" id="track" role="slider" tabindex="0"
+         aria-label="Scrub the sequence" aria-valuemin="0" aria-valuemax="30" aria-valuenow="0">
+      <div class="track-bar"></div>
+      <div class="track-fill" id="fill"></div>
+    </div>
+    <div class="clock" id="clock">0.0 / 30.0s</div>
+  </div>
+
+  <div class="beats" id="chips"></div>
+
+  <p class="credit">
+    A thirty-second title sequence for <strong>Gridspin</strong>, cut to the game's own beats &mdash; the spin,
+    the six picks, the season, the record. Type is <strong>Anton</strong> over
+    <strong>Inter</strong>; the palette is the game's dark &ldquo;scoreboard&rdquo; scope, where electric lime
+    is the only colour allowed to be ink. Scrub the bar or jump to any beat.
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var DUR = 30;
+  var RENDER = /(^|[?&])render=1(&|$)/.test(location.search);
+  if (RENDER) document.body.classList.add("render");
+  // In render mode the film must never advance by itself: the renderer owns the clock, and a rAF loop
+  // ticking alongside it would put a frame or two of drift between the time asked for and the time
+  // drawn. prefers-reduced-motion is ignored there too - the renderer is not a person.
+  var reduced = !RENDER && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- easing -------------------------------------------------------------------
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function at(t, start, dur) { return clamp01((t - start) / dur); }
+  function outCubic(p) { return 1 - Math.pow(1 - p, 3); }
+  function outQuint(p) { return 1 - Math.pow(1 - p, 5); }
+  function inOutCubic(p) { return p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
+  function outBack(p) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); }
+  // A scene is visible for its whole window and cross-fades at the seams only.
+  // A scene is FULLY up for its whole window. The outgoing beat keeps its opacity to its end and then
+  // falls away UNDERNEATH the incoming one, which paints on top because it is later in the DOM - so the
+  // two overlap and the frame is never empty. Taking the min of a rise and a fall, as this did, drove
+  // both to zero at the instant of a cut: five of the 1800 frames were blank navy, and the very last
+  // frame - the one a thumbnail grabs - sat at 8% opacity with the logo on it.
+  function hold(t, start, end) {
+    var xf = .10;
+    if (t < start) return 0;
+    if (start > 0 && t < start + xf) return (t - start) / xf;
+    if (t <= end) return 1;
+    if (t < end + xf) return 1 - (t - end) / xf;
+    return 0;
+  }
+
+  // ---- the cut ------------------------------------------------------------------
+  // 160 BPM: a beat is 0.375s, a bar 1.5s, and 30.000s is exactly 20 bars - five 4-bar phrases of 6s.
+  // Every cut lands on a bar line, so the score can hit the picture rather than run underneath it.
+  // The old cut points (5.0 / 11.2 / 18.4 / 24.2 / 27.4) sat on no grid at all; the largest nudge to
+  // get here was one second, on the title card, which had the most room to give.
+  var BPM = 160, BEAT = 60 / BPM, BAR = BEAT * 4;
+  var BEATS = [
+    { id: "b1", label: "The question", start: 0,  end: 6  },   // bars 1-4
+    { id: "b2", label: "The spin",     start: 6,  end: 12 },   // bars 5-8
+    { id: "b3", label: "The draft",    start: 12, end: 18 },   // bars 9-12
+    { id: "b4", label: "The season",   start: 18, end: 24 },   // bars 13-16
+    { id: "b5", label: "The record",   start: 24, end: 27 },   // bars 17-18
+    { id: "b6", label: "Gridspin",     start: 27, end: 30 }    // bars 19-20
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var scenes = {};
+  BEATS.forEach(function (b) { scenes[b.id] = $(b.id); });
+
+  // ---- content: real boards, real players ---------------------------------------
+  // Each pick comes from its own spin, which is how a round actually works.
+  // The six used to sit in just TWO era windows, three apiece - and seededSequence deals no era more
+  // than twice, so that roster could not come up under any seed. These spread across four of the five
+  // windows, each man's season inside the window beside him. It draws the game better too: spanning
+  // eras IS the game.
+  var PICKS = [
+    { pos: "QB",   ink: "--qb",   name: "Patrick Mahomes", from: "Chiefs · 2022",   era: "2021–2025" },
+    { pos: "RB",   ink: "--rb",   name: "Adrian Peterson", from: "Vikings · 2008",  era: "2006–2010" },
+    { pos: "WR",   ink: "--wr",   name: "Randy Moss",      from: "Vikings · 2003",  era: "1999–2005" },
+    { pos: "TE",   ink: "--te",   name: "Rob Gronkowski",  from: "Patriots · 2011", era: "2011–2015" },
+    { pos: "FLEX", ink: "--flex", name: "Derrick Henry",   from: "Titans · 2020",   era: "2016–2020" },
+    { pos: "FLEX", ink: "--flex", name: "Cooper Kupp",     from: "Rams · 2021",     era: "2021–2025" }
+  ];
+
+  // THE GAME'S OWN WINDOWS, from game-logic.mjs WINDOWS: [1999,2005] [2006,2010] [2011,2015]
+  // [2016,2020] [2021,2025]. Every era on this reel used to be invented - "Chiefs 2019-2023" is not
+  // a board Gridspin can deal, and "1996-2000" predates the data, which starts in 1999. A promo
+  // showing boards the game cannot produce is caught by the first person who plays it.
+  var REEL = [
+    { team: "Rams",     era: "1999–2005" },
+    { team: "Colts",    era: "2006–2010" },
+    { team: "Packers",  era: "2011–2015" },
+    { team: "Saints",   era: "1999–2005" },
+    { team: "Patriots", era: "2016–2020" },
+    { team: "Vikings",  era: "2006–2010" },
+    { team: "Ravens",   era: "2011–2015" },
+    { team: "Chiefs",   era: "2021–2025" }
+  ];
+  var LAND = REEL.length - 1;
+
+  // 17 regular-season results. Three are upsets - a win the game gave you little chance of.
+  var SEASON = ["w","w","u","w","w","w","w","u","w","w","w","w","w","u","w","w","w"];
+
+  // ---- build the DOM once -------------------------------------------------------
+  // One continuous strip rather than eight rows and a modulo: a wrap mid-spin snaps the reel back to
+  // the top, which is the one thing a slot machine never does. The last row IS the landing row.
+  var SPIN_ROWS = REEL.length * 2 + LAND;   // two full turns, then settle on the Chiefs
+  var strip = $("strip");
+  for (var k = 0; k <= SPIN_ROWS; k++) {
+    var r = REEL[k % REEL.length];
+    var d = document.createElement("div");
+    d.className = "reel-item" + (k === SPIN_ROWS ? " hit" : "");
+    d.innerHTML = '<span>' + r.team + '</span><span class="era">' + r.era + '</span>';
+    strip.appendChild(d);
+  }
+
+  var roster = $("roster");
+  var slotEls = PICKS.map(function (p) {
+    var d = document.createElement("div");
+    d.className = "slot";
+    d.style.setProperty("--pos", "var(" + p.ink + ")");
+    d.innerHTML = '<div class="pos">' + p.pos + '</div>' +
+                  '<div class="name">' + p.name + '</div>' +
+                  '<div class="from">' + p.from + '</div>';
+    roster.appendChild(d);
+    return d;
+  });
+
+  var games = $("games");
+  var gameEls = SEASON.map(function (r) {
+    var d = document.createElement("div");
+    d.className = "g";
+    d.style.setProperty("--c", r === "u" ? "var(--upset)" : "var(--win)");
+    games.appendChild(d);
+    return d;
+  });
+
+  var playoffs = $("playoffs");
+  var poEls = ["Div", "Conf", "Title"].map(function (label) {
+    var d = document.createElement("div");
+    d.className = "p";
+    d.style.setProperty("--c", "var(--win)");
+    d.textContent = label;
+    playoffs.appendChild(d);
+    return d;
+  });
+
+  var chips = $("chips");
+  var chipEls = BEATS.map(function (b) {
+    var el = document.createElement("button");
+    el.type = "button";
+    el.className = "beat-chip";
+    el.textContent = b.label;
+    el.addEventListener("click", function () { seek(b.start + .01); });
+    chips.appendChild(el);
+    return el;
+  });
+
+  var track = $("track"), fill = $("fill");
+  BEATS.slice(1).forEach(function (b) {
+    var t = document.createElement("div");
+    t.className = "track-tick";
+    t.style.left = (b.start / DUR * 100) + "%";
+    track.appendChild(t);
+  });
+
+  // ---- render one frame ---------------------------------------------------------
+  function setRev(scene, sel, p) {
+    var el = scene.querySelector(sel);
+    if (el) el.style.setProperty("--r", p);
+  }
+
+  function render(t) {
+    // Scene visibility
+    BEATS.forEach(function (b) {
+      scenes[b.id].style.setProperty("--vis", hold(t, b.start, b.end));
+    });
+
+    // 1. THE QUESTION - the eyebrow, then the line, then the number, each overlapping the last.
+    var b1 = scenes.b1;
+    setRev(b1, ".eyebrow", outCubic(at(t, .05, .6)));
+    setRev(b1, ".l1",      outCubic(at(t, .65, .8)));
+    setRev(b1, ".l2",      outQuint(at(t, 1.15, .95)));
+    b1.querySelector(".rule").style.setProperty("--ruleW", (outCubic(at(t, 1.9, 1.5)) * 46) + "%");
+
+    // 2. THE SPIN - a long ease into the landing row, with a lime edge snapping on as it settles.
+    var p2 = at(t, 6.3, 3.45);   // decelerates into 9.75s = beat 26
+    var eased = outQuint(p2);   // a flicked reel leaves at speed and settles; it does not ease in
+    strip.style.transform = "translateY(" + (-(eased * SPIN_ROWS) * 13) + "cqw)";
+    var settled = at(t, 9.75, .3);
+    scenes.b2.querySelectorAll(".reel-edge").forEach(function (e) {
+      e.style.setProperty("--edge", settled);
+    });
+    setRev(scenes.b2, ".eyebrow", outCubic(at(t, 6.2, .7)));
+    $("b2sub").style.opacity = outCubic(at(t, 10.5, .7));
+
+    // 3. THE DRAFT - six picks, a beat apart, each settling with a little overshoot.
+    setRev(scenes.b3, ".eyebrow", outCubic(at(t, 12.2, .6)));
+    slotEls.forEach(function (el, i) {
+      var p = at(t, 12.75 + i * (BEAT * 2), .86);  // lands on the beat, still settling as the next arrives
+      el.style.setProperty("--s", reduced ? (p > 0 ? 1 : 0) : outBack(p));
+    });
+
+    // 4. THE SEASON - the games tick in fast enough to feel like a season, slow enough to read.
+    setRev(scenes.b4, ".eyebrow", outCubic(at(t, 18.2, .55)));
+    var wins = 0;
+    gameEls.forEach(function (el, i) {
+      var p = at(t, 18.75 + i * (BEAT / 4), .22);   // a season in sixteenth notes
+      el.style.setProperty("--gs", outBack(p));
+      if (p >= 1) wins++;
+    });
+    poEls.forEach(function (el, i) {
+      var p = at(t, 21.0 + i * BEAT, .3);           // the playoffs, one a beat
+      el.style.setProperty("--gs", outBack(p));
+      if (p >= 1) wins++;
+    });
+    $("tally").innerHTML = "<b>" + wins + "</b>–0";
+
+    // 5. THE RECORD - one hit, one settle. Nothing else moves.
+    var pop = at(t, 24.0, .6);
+    $("rec").style.setProperty("--pop", reduced ? 1 : (.72 + outBack(pop) * .28));
+
+    // 6. THE MARK - the re-spin arrow does exactly one turn, then stops.
+    $("mark").style.setProperty("--spin", outQuint(at(t, 27.15, 1.2)));
+
+    // transport
+    fill.style.setProperty("--pct", (t / DUR * 100) + "%");
+    $("clock").textContent = t.toFixed(1) + " / " + DUR.toFixed(1) + "s";
+    track.setAttribute("aria-valuenow", t.toFixed(1));
+    var active = BEATS.findIndex(function (b) { return t >= b.start && t < b.end; });
+    chipEls.forEach(function (el, i) { el.setAttribute("aria-current", i === active ? "true" : "false"); });
+  }
+
+  // ---- the clock ----------------------------------------------------------------
+  var t = 0, playing = !reduced, last = null;
+
+  function frame(now) {
+    if (last === null) last = now;
+    var dt = Math.min((now - last) / 1000, .12);
+    last = now;
+    if (playing) {
+      t += dt;
+      if (t >= DUR) { t = DUR; playing = false; syncPlay(); }
+    }
+    render(t);
+    requestAnimationFrame(frame);
+  }
+
+  function syncPlay() { $("play").textContent = playing ? "Pause" : (t >= DUR ? "Replay" : "Play"); }
+  function seek(v) { t = Math.max(0, Math.min(DUR, v)); syncPlay(); render(t); }
+
+  $("play").addEventListener("click", function () {
+    if (t >= DUR) { t = 0; playing = true; }
+    else playing = !playing;
+    syncPlay();
+  });
+  $("replay").addEventListener("click", function () { t = 0; playing = true; syncPlay(); });
+
+  function fromEvent(e) {
+    var r = track.getBoundingClientRect();
+    var x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+    seek(x / r.width * DUR);
+  }
+  var scrubbing = false;
+  track.addEventListener("pointerdown", function (e) { scrubbing = true; playing = false; syncPlay(); track.setPointerCapture(e.pointerId); fromEvent(e); });
+  track.addEventListener("pointermove", function (e) { if (scrubbing) fromEvent(e); });
+  track.addEventListener("pointerup", function () { scrubbing = false; });
+  track.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowRight") { seek(t + 1); playing = false; syncPlay(); e.preventDefault(); }
+    if (e.key === "ArrowLeft")  { seek(t - 1); playing = false; syncPlay(); e.preventDefault(); }
+  });
+
+  // Reduced motion: hold the last frame, which is the lockup, and leave the transport for anyone
+  // who wants to step through it themselves.
+  if (reduced) { t = DUR; syncPlay(); }
+  syncPlay();
+  render(t);
+  if (RENDER) {
+    // The whole contract with the renderer: put the film at exactly this second and draw it. Every
+    // beat is a pure function of t, so a frame seeked to cold is identical to the same frame played
+    // through - which is what makes a frame-by-frame render possible at all.
+    window.__seek = function (time) { t = Math.max(0, Math.min(DUR, time)); render(t); };
+    window.__duration = DUR;
+  } else {
+    requestAnimationFrame(frame);
+  }
+})();
+</script>

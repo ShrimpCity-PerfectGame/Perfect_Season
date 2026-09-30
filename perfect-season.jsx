@@ -9,6 +9,7 @@ import {
   fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
   versusPath, parseVersusPath, fetchVersusTop,
+  submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY,
 } from "./storage.js";
 import gameData from "./data/players.json";
 import versusPool from "./data/versus-pool.json";
@@ -37,9 +38,10 @@ import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk } from "./co
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
-import { CENTURY_CSS, CenturyScreen } from "./century.jsx";
+import { CENTURY_CSS, CenturyScreen, CENTURY_DONE } from "./century.jsx";
 import { initCenturyData, CENTURY_GOAL, centuryReservedSeed } from "./century-logic.mjs";
-import { GUESS_CSS, GuessScreen } from "./guess.jsx";
+import { drainOne } from "./pending-daily.mjs";
+import { GUESS_CSS, GuessScreen, GUESS_DONE } from "./guess.jsx";
 import { GUESS_TRIES } from "./guess-logic.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { COIN_RULES } from "./rewards.mjs";
@@ -2574,10 +2576,41 @@ export default function PerfectSeason() {
     setGuessDone(guessed);
   };
 
+  // A daily that was played but never recorded. Both mini-games write a per-account record to the device
+  // when a daily finishes - that is what stops the day being replayed once the answer has been seen - and
+  // since v2.18.0 that record carries `saved`. While it is false the run is still owed to the board, and
+  // this re-sends it. It is deliberately NOT on the Guess or Century screen: the end screen's Done button
+  // leaves for Mini games, so a player told "it didn't save" is one tap from somewhere a screen-local
+  // drain would never run again.
+  const draining = useRef(false);
+  async function drainMinigames() {
+    if (draining.current || !userId) return;
+    draining.current = true;
+    try {
+      const day = utcDayKey();
+      for (const [key, submit, retry] of [
+        [GUESS_DONE(userId, day), (r) => submitGuess({ variant: "daily", day: r.day, guesses: r.guesses }), GUESS_RETRY],
+        [CENTURY_DONE(userId, day), (r) => submitCentury({ variant: "daily", day: r.day, picks: r.picks }), CENTURY_RETRY],
+      ]) {
+        const rec = await sget(key, false);
+        if (!rec || rec.saved !== false) continue;
+        await drainOne({
+          key, rec, day, retry, submit,
+          keep: (next) => sset(key, next, false),
+          drop: () => sdel(key, false),
+        });
+      }
+    } catch (e) { /* a drain that throws is simply a drain that did not happen */ }
+    finally { draining.current = false; }
+  }
+
   // Checked whenever the player comes back to the app, and on the screens those answers are shown on. A
   // sleeping tab fires no timers, so the moment that matters is the one where somebody looks at it again.
   useEffect(() => {
-    const check = () => { if (dayRead.current && dayRead.current !== `${todayKey()}|${utcDayKey()}`) readDay.current(); };
+    const check = () => {
+      if (dayRead.current && dayRead.current !== `${todayKey()}|${utcDayKey()}`) readDay.current();
+      drainMinigames();
+    };
     check();
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", check);
     if (typeof window !== "undefined") window.addEventListener("focus", check);

@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     return await handle(req, json);
   } catch (e) {
     console.error("submit-century:", e);
-    return json({ error: "failed to save" }, 500);
+    return json({ error: "failed to save", reason: "server" }, 500);
   }
 });
 
@@ -92,7 +92,10 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   // Asked here so the answer is a sentence rather than a trigger's exception.
   const { data: profile, error: profileError } = await service
     .from("profiles").select("id, guest").eq("id", user.id).maybeSingle();
-  if (profileError) return json({ error: "failed to save" }, 500);
+  if (profileError) {
+    console.error("submit-century profile read:", profileError);
+    return json({ error: "failed to save", reason: "server" }, 500);
+  }
   if (!profile) return json({ error: "no profile for this account", reason: "no_profile" }, 400);
 
   const daily = body?.variant === "daily";
@@ -158,7 +161,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   }
   if (insertError) {
     console.error("submit-century insert:", insertError);
-    return json({ error: "failed to save" }, 500);
+    return json({ error: "failed to save", reason: "server" }, 500);
   }
 
   // The badge, and only for a daily that got there. Unlimited is unlimited, so a hundred ground out over an

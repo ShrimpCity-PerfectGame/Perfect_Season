@@ -1,0 +1,384 @@
+<title>Kelce or Mahomes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<style>
+  :root {
+    --navy:#0B1020; --surface:#131A2E; --surface2:#1B2440; --line:#26304D; --line2:#36416A;
+    --cream:#F7F4EA; --muted:#A9B0C3; --lime:#B8F500; --ink:#101114;
+    --win:#6FD49B; --upset:#F5C451;
+    --qb:#F2557A; --rb:#2FD3B5; --wr:#5AA9FF; --te:#F5A04A; --flex:#B18CFF;
+    --display:'Anton',Impact,'Arial Narrow',sans-serif;
+    --body:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  html, body { height: 100%; }
+  body { margin:0; background:var(--navy); color:var(--cream); font-family:var(--body);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; padding-block:20px; padding-inline:16px; box-sizing:border-box; }
+  .wrap { width:100%; max-width:400px; display:flex; flex-direction:column; gap:12px; }
+
+  .stage { position:relative; width:100%; aspect-ratio:9/16; max-width:100%;
+    background: radial-gradient(120% 70% at 50% 20%, #16203c 0%, var(--navy) 62%), var(--navy);
+    border:1px solid var(--line); border-radius:6px; overflow:hidden;
+    container-type:size; box-shadow:0 20px 60px -30px #000; }
+  .stage::before { content:""; position:absolute; inset:0; z-index:5; pointer-events:none;
+    background-image:radial-gradient(circle at 1px 1px, rgba(247,244,234,.05) 1px, transparent 1px);
+    background-size:7px 7px; }
+
+  /* TikTok's own UI sits over the video. Everything READABLE lives in this box: the account row eats
+     the top, the caption and the ad's CTA button eat the bottom, the like/share rail eats the right.
+     Percentages of 1080x1920, so they hold at any render size. See ?guides=1. */
+  .safe { position:absolute; z-index:4; top:7.3%; bottom:26%; left:5.9%; right:16.7%;
+    display:grid; place-content:center; justify-items:center; text-align:center; }
+  body.guides .safe { outline:2px dashed rgba(184,245,0,.45); }
+
+  .scene { position:absolute; inset:0; opacity:var(--vis,0); pointer-events:none; }
+  .col { display:grid; justify-items:center; gap:3cqw; width:100%; }
+
+  .rev { overflow:hidden; display:block; padding-top:.12em; margin-top:-.12em; }
+  .rev > span { display:block; transform:translateY(calc((1 - var(--r,0)) * 118%)); }
+  .huge { font-family:var(--display); line-height:.86; text-transform:uppercase; }
+  .kicker { font-family:var(--body); font-weight:800; font-size:3.2cqw; letter-spacing:.24em;
+    text-transform:uppercase; color:var(--lime); }
+  .board-line { font-family:var(--display); font-size:6cqw; text-transform:uppercase; color:var(--cream);
+    display:flex; align-items:baseline; gap:2cqw; justify-content:center; white-space:nowrap; }
+  .board-line .era { font-size:.62em; color:var(--muted); }
+
+  /* the take */
+  .take { display:grid; justify-items:center; gap:.4cqw; }
+  .take .nm { font-family:var(--display); font-size:17cqw; line-height:.84; color:var(--cream); }
+  .take .gt { font-family:var(--display); font-size:13cqw; color:var(--lime); transform:rotate(-4deg); line-height:.8; }
+
+  /* the two cards */
+  .cards { display:grid; grid-template-columns:1fr 1fr; gap:2.4cqw; width:100%; }
+  .card { background:var(--surface); border:1px solid var(--line); border-top:1.4cqw solid var(--pos);
+    padding:2.6cqw 2.4cqw; text-align:left; display:grid; gap:1cqw;
+    opacity:var(--s,0); transform:translateX(calc(var(--dir,0) * (1 - var(--s,0)) * 26%)); }
+  .card .nm { font-family:var(--display); font-size:5.2cqw; line-height:.94; text-transform:uppercase; color:var(--cream); }
+  .card .ps { font-weight:900; font-size:2.8cqw; letter-spacing:.14em; color:var(--pos); }
+  .card .st { font-size:2.7cqw; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1.5; }
+  .card .hid { font-size:2.6cqw; color:var(--lime); font-weight:700; letter-spacing:.06em;
+    text-decoration:line-through; text-decoration-thickness:2px; opacity:var(--hid,0); }
+
+  /* the rating bars */
+  .bars { width:100%; display:grid; grid-template-columns:1fr 1fr; gap:2.4cqw; align-items:end; height:34cqw; position:relative; margin-bottom:6cqw; }
+  .bar { background:var(--pos); width:100%; height:calc(var(--h,0) * 1%); border-radius:2px 2px 0 0; position:relative; }
+  .bar .who { position:absolute; bottom:-5.4cqw; left:0; right:0; text-align:center;
+    font-family:var(--body); font-weight:800; font-size:2.9cqw; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--muted); }
+  .bar .v { position:absolute; top:-6.6cqw; left:0; right:0; text-align:center;
+    font-family:var(--display); font-size:5cqw; color:var(--cream); font-variant-numeric:tabular-nums; }
+  .ceil { position:absolute; left:0; right:0; bottom:calc(var(--ch,0) * 1%); height:3px; background:var(--lime); opacity:var(--co,0); }
+  .ceil span { position:absolute; right:0; top:-4.6cqw; font-family:var(--display); font-size:3.2cqw; color:var(--lime); letter-spacing:.06em; }
+
+  .stamp { font-family:var(--display); font-size:6.4cqw; color:var(--ink); background:var(--lime);
+    padding:.1em .3em .14em; transform:rotate(-7deg) scale(var(--sc,0)); opacity:var(--so,0); }
+
+  /* roster */
+  .slots { width:100%; display:grid; grid-template-columns:1fr 1fr; gap:2cqw; }
+  .sl { background:var(--surface); border:1px solid var(--line); border-left:1.3cqw solid var(--pos,var(--line2));
+    padding:2.2cqw 2.4cqw; text-align:left; display:grid; gap:.7cqw;
+    opacity:var(--s,.18); transform:scale(calc(.94 + var(--s,0)*.06)); }
+  .sl .ps { font-weight:900; font-size:2.7cqw; letter-spacing:.14em; color:var(--pos); }
+  .sl .nm { font-family:var(--display); font-size:3.5cqw; line-height:1; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; opacity:var(--f,0); }
+  .sl .mt { font-size:2.5cqw; color:var(--muted); font-variant-numeric:tabular-nums; opacity:var(--f,0); }
+
+  /* the ugly board */
+  .ugly { width:100%; display:grid; gap:1.4cqw; }
+  .ugly .row { display:flex; justify-content:space-between; font-size:3cqw; color:var(--muted);
+    font-variant-numeric:tabular-nums; opacity:var(--s,0); }
+  .ugly .row b { color:var(--cream); font-weight:600; }
+
+  /* season + record */
+  .games { display:grid; grid-template-columns:repeat(6,1fr); gap:1.8cqw; width:78%; }
+  .g { aspect-ratio:1; border-radius:2px; background:var(--c,var(--line)); transform:scale(var(--gs,0)); }
+  .rec { font-family:var(--display); font-size:30cqw; line-height:.82; color:var(--ink);
+    background:var(--lime); padding:.04em .09em .08em; transform:scale(var(--pop,1)); }
+
+  .lockup { display:flex; align-items:center; gap:3cqw; }
+  .mark { width:14cqw; height:14cqw; }
+  .word { font-family:var(--display); font-size:12cqw; text-transform:uppercase; color:var(--cream); }
+  .url { font-family:var(--display); font-size:6.4cqw; color:var(--lime); letter-spacing:.04em; }
+  .free { font-size:3.1cqw; color:var(--muted); font-weight:600; letter-spacing:.1em; text-transform:uppercase; }
+
+  .transport { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .btn { font:inherit; font-weight:600; font-size:13px; color:var(--cream); background:var(--surface2);
+    border:1px solid var(--line2); border-radius:4px; padding:8px 14px; cursor:pointer; }
+  .btn.primary { background:var(--lime); color:var(--ink); border-color:var(--lime); }
+  .btn:focus-visible { outline:2px solid var(--lime); outline-offset:2px; }
+  .track { position:relative; flex:1 1 150px; min-width:130px; height:26px; display:flex; align-items:center; cursor:pointer; }
+  .track-bar { position:absolute; left:0; right:0; height:4px; background:var(--line); border-radius:2px; }
+  .track-fill { position:absolute; left:0; height:4px; width:var(--pct,0%); background:var(--lime); border-radius:2px; }
+  .clock { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .credit { font-size:12px; color:var(--muted); line-height:1.6; }
+  .credit strong { color:var(--cream); font-weight:600; }
+
+  body.render { padding:0; gap:0; display:block; background:var(--navy); }
+  body.render .wrap { max-width:none; gap:0; }
+  body.render .transport, body.render .credit { display:none; }
+  body.render .stage { width:100vw; height:100vh; aspect-ratio:auto; border:0; border-radius:0; box-shadow:none; }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="A fifteen-second vertical advert for Gridspin. It argues that Travis Kelce's 2022 rates higher than Patrick Mahomes' 2022, shows both real ratings, then reveals the game weights a quarterback 1.25 times, which reverses it. Then a roster is drafted, plays a season and goes 20-0.">
+
+    <!-- 1. the take -->
+    <section class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="kicker rev"><span>Pick 1 of 6</span></div>
+      <div class="board-line rev"><span>Chiefs <i class="era" style="font-style:normal">2021&ndash;2025</i></span></div>
+      <div class="take">
+        <div class="nm rev"><span>Kelce</span></div>
+        <div class="gt rev"><span>&gt;</span></div>
+        <div class="nm rev"><span>Mahomes</span></div>
+      </div>
+      <div class="kicker" id="s1rule" style="opacity:0;color:var(--muted);letter-spacing:.1em">One board. One era. You take one of them.</div>
+    </div></div></section>
+
+    <!-- 2. the two real seasons -->
+    <section class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="kicker rev"><span>Their best real season</span></div>
+      <div class="cards">
+        <div class="card" id="cK" style="--pos:var(--te);--dir:-1">
+          <div class="ps">TE &middot; 2022</div>
+          <div class="nm">Travis<br>Kelce</div>
+          <div class="st">1,338 rec yds<br>12 TD &middot; 110 rec</div>
+          <div class="hid">Fantasy pts hidden</div>
+        </div>
+        <div class="card" id="cM" style="--pos:var(--qb);--dir:1">
+          <div class="ps">QB &middot; 2022</div>
+          <div class="nm">Patrick<br>Mahomes</div>
+          <div class="st">5,250 pass yds<br>41 TD &middot; 12 INT</div>
+          <div class="hid">Fantasy pts hidden</div>
+        </div>
+      </div>
+      <div class="bars" id="bars">
+        <div class="ceil" id="ceil" style="--ch:87"><span>130.0 &mdash; the ceiling</span></div>
+        <div class="bar" id="bK" style="--pos:var(--te)"><span class="v" id="vK">0</span><span class="who">Travis Kelce</span></div>
+        <div class="bar" id="bM" style="--pos:var(--qb)"><span class="v" id="vM">0</span><span class="who">Patrick Mahomes</span></div>
+      </div>
+      <div class="kicker" id="s2note" style="opacity:0;color:var(--muted);letter-spacing:.08em">Only 40 seasons since 1999 reach it</div>
+    </div></div></section>
+
+    <!-- 3. the reversal -->
+    <section class="scene" id="s3"><div class="safe"><div class="col">
+      <div class="stamp" id="stamp">&times;1.25 &mdash; QB counts more</div>
+      <div class="bars" id="bars2" style="height:40cqw">
+        <div class="ceil" style="--ch:72;--co:1"><span>130.0</span></div>
+        <div class="bar" id="bK2" style="--pos:var(--te);--h:72"><span class="v">130.0</span><span class="who">Travis Kelce</span></div>
+        <div class="bar" id="bM2" style="--pos:var(--qb)"><span class="v" id="vM2">120.4</span><span class="who">Patrick Mahomes</span></div>
+      </div>
+      <div class="huge" id="s3say" style="font-size:6cqw;opacity:0">So who&rsquo;s worth more?</div>
+    </div></div></section>
+
+    <!-- 4. the roster fills, including one ugly board -->
+    <section class="scene" id="s4"><div class="safe"><div class="col">
+      <div class="board-line" id="bl4"><span id="bl4t">Jaguars</span> <i class="era" id="bl4e" style="font-style:normal">2011&ndash;2015</i></div>
+      <div class="ugly" id="ugly">
+        <div class="row"><b>Blake Bortles &middot; 2015</b><span>93.6</span></div>
+        <div class="row"><b>Chad Henne &middot; 2013</b><span>44.8</span></div>
+        <div class="row"><b>Blaine Gabbert &middot; 2011</b><span>24.3</span></div>
+      </div>
+      <div class="kicker" id="uglysay" style="opacity:0;color:var(--muted);letter-spacing:.08em">Some boards are like that</div>
+      <div class="slots" id="slots"></div>
+    </div></div></section>
+
+    <!-- 5. the season and the record -->
+    <section class="scene" id="s5"><div class="safe"><div class="col">
+      <div class="kicker rev"><span>17 games &middot; real NFL teams</span></div>
+      <div class="games" id="games"></div>
+      <div class="huge rec" id="rec">20&ndash;0</div>
+    </div></div></section>
+
+    <!-- 6. the close -->
+    <section class="scene" id="s6"><div class="safe"><div class="col">
+      <div class="lockup">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="2" y="2" width="60" height="60" rx="15" fill="#B8F500" stroke="#101114" stroke-width="3"/>
+          <g id="mark">
+            <path d="M43.57 18.21A18 18 0 1 1 20.43 18.21" fill="none" stroke="#101114" stroke-width="6" stroke-linecap="round"/>
+            <path d="M25.9 12.6 16.2 13.9 22.4 22.2Z" fill="#101114"/>
+          </g>
+          <ellipse cx="32" cy="33.5" rx="9.5" ry="6.2" transform="rotate(-35 32 33.5)" fill="#101114"/>
+          <path d="M29 35.8 35 31.2" stroke="#B8F500" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <div class="word">Gridspin</div>
+      </div>
+      <div class="url">gridspin.app</div>
+      <div class="free">Free &middot; in your browser &middot; no signup</div>
+    </div></div></section>
+  </div>
+
+  <div class="transport">
+    <button class="btn primary" id="play" type="button">Pause</button>
+    <button class="btn" id="replay" type="button">Replay</button>
+    <div class="track" id="track"><div class="track-bar"></div><div class="track-fill" id="fill"></div></div>
+    <div class="clock" id="clock">0.0 / 15.0s</div>
+  </div>
+  <p class="credit">
+    <strong>15s vertical, silent by design</strong> &mdash; add the track in TikTok, where it is licensed.
+    Every number is the game&rsquo;s own: Kelce 2022 rates <strong>130.0</strong>, Mahomes 2022
+    <strong>120.4</strong>, and <code>QB_WEIGHT</code> is <strong>1.25</strong>, so the game settles the
+    argument the ad starts. <code>?guides=1</code> shows TikTok&rsquo;s safe area.
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var DUR = 15;
+  var RENDER = /(^|[?&])render=1(&|$)/.test(location.search);
+  if (RENDER) document.body.classList.add("render");
+  if (/(^|[?&])guides=1(&|$)/.test(location.search)) document.body.classList.add("guides");
+
+  var BPM = 160, BEAT = 60 / BPM, BAR = BEAT * 4;   // 15.000s = 10 bars
+  var $ = function (id) { return document.getElementById(id); };
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function at(t, s, d) { return clamp01((t - s) / d); }
+  function outCubic(p) { return 1 - Math.pow(1 - p, 3); }
+  function outQuint(p) { return 1 - Math.pow(1 - p, 5); }
+  function outBack(p) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); }
+
+  var BEATS = [
+    { id: "s1", start: 0,    end: 3    },   // the take
+    { id: "s2", start: 3,    end: 6    },   // the two seasons, and the ceiling
+    { id: "s3", start: 6,    end: 8.25 },   // the reversal
+    { id: "s4", start: 8.25, end: 11.25 },  // the rest of the roster
+    { id: "s5", start: 11.25, end: 13.5 },  // the season and the record
+    { id: "s6", start: 13.5, end: 15 }      // the close
+  ];
+  var scenes = {}; BEATS.forEach(function (b) { scenes[b.id] = $(b.id); });
+  function hold(t, s, e) {
+    var xf = .08;
+    if (t < s) return 0;
+    if (s > 0 && t < s + xf) return (t - s) / xf;
+    if (t <= e) return 1;
+    if (t < e + xf) return 1 - (t - e) / xf;
+    return 0;
+  }
+
+  // Every one of these is the game's own stored rating - verified against BOARDS in game-logic.mjs.
+  // Kelce's 2022 is one of exactly 40 seasons since 1999 that reach RATING_CAP (130). Mahomes' 2022 is
+  // 120.4, which loses the argument until QB_WEIGHT (1.25) is applied and it becomes 150.5.
+  var KELCE = 130.0, MAHOMES = 120.4, WEIGHTED = 150.5, CAP = 130;
+  var PICKS = [
+    { ps: "QB",   ink: "--qb",   nm: "Patrick Mahomes",    mt: "Chiefs · 2022",   at: 8.4 },
+    { ps: "RB",   ink: "--rb",   nm: "Derrick Henry",      mt: "Titans · 2020",   at: 9.0 },
+    { ps: "WR",   ink: "--wr",   nm: "Randy Moss",         mt: "Vikings · 2003",  at: 9.6 },
+    { ps: "TE",   ink: "--te",   nm: "Rob Gronkowski",     mt: "Patriots · 2011", at: 10.2 },
+    { ps: "FLEX", ink: "--flex", nm: "Maurice Jones-Drew", mt: "Jaguars · 2011",  at: 10.5 },
+    { ps: "FLEX", ink: "--flex", nm: "Cooper Kupp",        mt: "Rams · 2021",     at: 10.8 }
+  ];
+  var slotEls = PICKS.map(function (p) {
+    var d = document.createElement("div");
+    d.className = "sl";
+    d.style.setProperty("--pos", "var(" + p.ink + ")");
+    d.innerHTML = '<div class="ps">' + p.ps + '</div><div class="nm">' + p.nm + '</div><div class="mt">' + p.mt + '</div>';
+    $("slots").appendChild(d);
+    return d;
+  });
+  var SEASON = ["w","w","u","w","w","w","w","u","w","w","w","w","w","u","w","w","w","w"];
+  var gameEls = SEASON.map(function (r) {
+    var d = document.createElement("div");
+    d.className = "g";
+    d.style.setProperty("--c", r === "u" ? "var(--upset)" : "var(--win)");
+    $("games").appendChild(d);
+    return d;
+  });
+  var uglyRows = $("ugly").querySelectorAll(".row");
+
+  function revs(scene, times) {
+    var els = scene.querySelectorAll(".rev");
+    times.forEach(function (x, i) { if (els[i]) els[i].style.setProperty("--r", outCubic(x)); });
+  }
+
+  function render(t) {
+    BEATS.forEach(function (b) { scenes[b.id].style.setProperty("--vis", hold(t, b.start, b.end)); });
+
+    // 1. THE TAKE. Legible by 1.1s - on TikTok the first second is the whole ad.
+    revs(scenes.s1, [at(t, .04, .30), at(t, .18, .32), at(t, .38, .34), at(t, .60, .26), at(t, .76, .34)]);
+    $("s1rule").style.opacity = outCubic(at(t, 1.5, .4));
+
+    // 2. THE SEASONS, then the bars race to the ceiling.
+    revs(scenes.s2, [at(t, 3.06, .28)]);
+    $("cK").style.setProperty("--s", outBack(at(t, 3.3, .4)));
+    $("cM").style.setProperty("--s", outBack(at(t, 3.45, .4)));
+    var hid = outCubic(at(t, 4.1, .3));
+    $("cK").style.setProperty("--hid", hid); $("cM").style.setProperty("--hid", hid);
+    var gk = outQuint(at(t, 4.5, .8)), gm = outQuint(at(t, 4.58, .8));
+    $("bK").style.setProperty("--h", (KELCE / 150 * 100) * gk);
+    $("bM").style.setProperty("--h", (MAHOMES / 150 * 100) * gm);
+    $("vK").textContent = (KELCE * gk).toFixed(1);
+    $("vM").textContent = (MAHOMES * gm).toFixed(1);
+    $("ceil").style.setProperty("--ch", CAP / 150 * 100);
+    $("ceil").style.setProperty("--co", outCubic(at(t, 4.4, .25)));
+    $("s2note").style.opacity = outCubic(at(t, 5.3, .35));
+
+    // 3. THE REVERSAL. The stamp lands, and the pink bar goes through the rule the orange one stopped at.
+    var sc = outBack(at(t, 6.1, .34));
+    $("stamp").style.setProperty("--sc", .6 + sc * .4);
+    $("stamp").style.setProperty("--so", outCubic(at(t, 6.1, .2)));
+    var flip = outQuint(at(t, 6.55, .85));
+    var mv = MAHOMES + (WEIGHTED - MAHOMES) * flip;
+    $("bM2").style.setProperty("--h", mv / 160 * 100);
+    $("bK2").style.setProperty("--h", KELCE / 160 * 100);
+    $("vM2").textContent = mv.toFixed(1);
+    $("s3say").style.opacity = outCubic(at(t, 7.5, .3));
+
+    // 4. THE REST OF THE ROSTER - and one board that is simply bad, which is true of the game.
+    $("bl4").style.opacity = outCubic(at(t, 8.3, .25)) * (1 - outCubic(at(t, 9.5, .3)));
+    uglyRows.forEach(function (el, i) {
+      var o = outCubic(at(t, 8.5 + i * .16, .22)) * (1 - outCubic(at(t, 9.5, .3)));
+      el.style.setProperty("--s", o);
+    });
+    $("uglysay").style.opacity = outCubic(at(t, 9.05, .3)) * (1 - outCubic(at(t, 9.5, .3)));
+    slotEls.forEach(function (el, i) {
+      var p = at(t, PICKS[i].at, .34);
+      el.style.setProperty("--s", .18 + outBack(p) * .82);
+      el.style.setProperty("--f", outCubic(p));
+    });
+
+    // 5. THE SEASON on sixteenths, then the record.
+    revs(scenes.s5, [at(t, 11.35, .26)]);
+    gameEls.forEach(function (el, i) {
+      el.style.setProperty("--gs", outBack(at(t, 11.6 + i * (BEAT / 4), .2)));
+    });
+    var pop = at(t, 12.5, .45);
+    $("rec").style.opacity = outCubic(at(t, 12.5, .22));
+    $("rec").style.setProperty("--pop", .78 + outBack(pop) * .22);
+
+    // 6. THE CLOSE.
+    $("mark").style.setProperty("transform", "rotate(" + (outQuint(at(t, 13.6, .9)) * 360) + "deg)");
+
+    $("fill").style.setProperty("--pct", (t / DUR * 100) + "%");
+    $("clock").textContent = t.toFixed(1) + " / " + DUR.toFixed(1) + "s";
+  }
+
+  var t = 0, playing = !RENDER, last = null;
+  function frame(now) {
+    if (last === null) last = now;
+    var dt = Math.min((now - last) / 1000, .12); last = now;
+    if (playing) { t += dt; if (t >= DUR) t = 0; }   // loops, the way a feed does
+    render(t);
+    requestAnimationFrame(frame);
+  }
+  function sync() { $("play").textContent = playing ? "Pause" : "Play"; }
+  $("play").addEventListener("click", function () { playing = !playing; sync(); });
+  $("replay").addEventListener("click", function () { t = 0; playing = true; sync(); });
+  $("track").addEventListener("pointerdown", function (e) {
+    playing = false; sync();
+    var r = $("track").getBoundingClientRect();
+    t = Math.max(0, Math.min(DUR, (e.clientX - r.left) / r.width * DUR));
+    render(t);
+  });
+
+  sync(); render(t);
+  if (RENDER) {
+    window.__seek = function (x) { t = Math.max(0, Math.min(DUR, x)); render(t); };
+    window.__duration = DUR;
+  } else {
+    requestAnimationFrame(frame);
+  }
+})();
+</script>

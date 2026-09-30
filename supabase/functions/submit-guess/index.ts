@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
     return await handle(req, json);
   } catch (e) {
     console.error("submit-guess:", e);
-    return json({ error: "failed to save" }, 500);
+    return json({ error: "failed to save", reason: "server" }, 500);
   }
 });
 
@@ -81,7 +81,10 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   // board comes from the account, and an account signed in with Google has none until it claims a name.
   const { data: profile, error: profileError } = await service
     .from("profiles").select("id, guest").eq("id", user.id).maybeSingle();
-  if (profileError) return json({ error: "failed to save" }, 500);
+  if (profileError) {
+    console.error("submit-guess profile read:", profileError);
+    return json({ error: "failed to save", reason: "server" }, 500);
+  }
   if (!profile) return json({ error: "no profile for this account", reason: "no_profile" }, 400);
 
   const daily = body?.variant === "daily";
@@ -126,7 +129,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   }
   if (insertError) {
     console.error("submit-guess insert:", insertError);
-    return json({ error: "failed to save" }, 500);
+    return json({ error: "failed to save", reason: "server" }, 500);
   }
 
   // The badge, and only for a daily. Practice is unlimited, so two guesses there is a thing anybody can have by

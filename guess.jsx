@@ -18,7 +18,8 @@ import {
 import { loadGuessPool } from "./guess-pool.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { teamVars, reducedMotion } from "./ui-common.jsx";
-import { submitGuess, fetchGuessTop, fetchGuessBest, fetchMyGuess, sget, sset, clearDraft } from "./storage.js";
+import { submitGuess, fetchGuessTop, fetchGuessBest, fetchMyGuess, sget, sset, clearDraft, GUESS_RETRY } from "./storage.js";
+import { sendOnce } from "./pending-daily.mjs";
 
 export const GUESS_WIP = "ps-guess-wip";
 // A daily that has been PLAYED, kept on this device whether or not the save reached the server. The season
@@ -149,13 +150,16 @@ export function GuessScreen({
     (async () => {
       const saved = await sget(GUESS_WIP, false);
       if (!alive || started.current) return;
-      const usable = saved && Array.isArray(saved.guesses) && saved.guesses.length < GUESS_TRIES
+      const spent = saved && saved.variant === "daily" && saved.day === day && userId
+        ? !!(await sget(GUESS_DONE(userId, day), false)) : false;
+      if (!alive || started.current) return;
+      const usable = saved && !spent && Array.isArray(saved.guesses) && saved.guesses.length < GUESS_TRIES
         && (saved.variant !== "daily" || saved.day === day);
       if (usable) { setRun(saved); setStage("play"); }
       else if (saved) saveWip(null);
     })();
     return () => { alive = false; };
-  }, [day, saveWip, pool]);
+  }, [day, saveWip, pool, userId]);
 
   // A link somebody sent: its code IS the seed, so the same player comes up. It replaces whatever was in
   // progress - a game here is five guesses, not a record - and is cleared as it is taken so it cannot re-deal
@@ -268,22 +272,31 @@ export function GuessScreen({
     // Written BEFORE the submission and never conditioned on it. The numbers are the client's own replay,
     // which is what the end screen is already showing; the server's answer replaces them below when it lands.
     if (finished.variant === "daily" && finished.day) {
+      // `saved: false` is the whole of the outbox: while it is false this run is still owed to the board
+      // and pending-daily.mjs will re-send it. `guesses` is what gets re-sent, so it is written ONCE,
+      // here, and never merged or rebuilt - a drain must not be able to post a better game than was played.
       const rec = { day: finished.day, solved: !!local.ok && local.solved, tries: local.ok ? local.tries : finished.guesses.length,
                     outcome: guessOutcome(!!local.ok && local.solved, local.ok ? local.tries : finished.guesses.length),
-                    guesses: finished.guesses, answer: answer?.id, local: true };
+                    guesses: finished.guesses, answer: answer?.id, saved: false };
       await sset(GUESS_DONE(userId, finished.day), rec, false);
       setDailyDone(rec);
     }
     const mine = acct.current;
-    const sent = await submitGuess({
-      variant: finished.variant, seed: finished.seed, day: finished.day, guesses: finished.guesses,
-    });
+    // Through the same lock the drain uses, so a drain firing while this is in the air cannot put a
+    // second copy of the run on the wire.
+    const sent = await sendOnce(finished.variant === "daily" && finished.day ? GUESS_DONE(userId, finished.day) : "guess:practice",
+      () => submitGuess({ variant: finished.variant, seed: finished.seed, day: finished.day, guesses: finished.guesses }));
     if (mine !== acct.current) return;
     setSaving(false);
     if (sent.ok) {
       setResult({ ...sent, local: false, answer: sent.answer });
       if (finished.variant === "daily") {
-        setDailyDone({ solved: sent.solved, tries: sent.tries, outcome: sent.outcome, guesses: finished.guesses, answer: sent.answer?.id });
+        // Settle the stored record too. Until v2.18.0 this only set React state, so EVERY stored record
+        // said the save had failed and a remount would have re-sent a run that was already on the board.
+        const done = { day: finished.day, solved: sent.solved, tries: sent.tries, outcome: sent.outcome,
+                       guesses: finished.guesses, answer: sent.answer?.id, saved: true };
+        if (finished.day) await sset(GUESS_DONE(userId, finished.day), done, false);
+        setDailyDone(done);
         if (onDailySaved) onDailySaved({ day: sent.day, solved: sent.solved, tries: sent.tries });
       }
       // The row is in guess_runs/century_runs now, and site_totals counts those into `plays` -
@@ -618,6 +631,9 @@ function refusalLine(reason, variant) {
     case "bad_code": return "That isn't a code this game can play.";
     case "signed_out": return "You were signed out while playing, so this game wasn't recorded. Sign in and the next one will be.";
     case "no_profile": return "This account hasn't picked a username yet, so there was nowhere to record the game.";
+    // Distinct from "network" on purpose. Telling somebody to check a connection that was working
+    // is worse than saying nothing, and it sent us looking in the wrong place for a whole evening.
+    case "server": return "This game didn't save — that one is on us, not your connection.";
     case "network": return "Couldn't save this game — check your connection.";
     default:
       return `This game couldn't be verified (${reason}). Nothing was recorded.${variant === "daily" ? " Your daily is still available." : ""}`;
@@ -691,7 +707,11 @@ export const GUESS_CSS = `
 .gp-lb th, .gp-lb td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--line); }
 .gp-lb tr.me { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .gp-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.gp-row { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Centred, because everything above it is: the hero, the answer line and the difficulty all sit on
+   the centre line, and the grid fills the width. Left as flex-start this row hung off the left -
+   and once Share is there (it is absent in the harness, present in a real browser) four buttons
+   wrap and Done sits alone against the left edge with two thirds of the row empty beside it. */
+.gp-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 
 @media (max-width: 520px) {
   /* Every pixel the cells give back goes to the name. The cells hold at most "N-North" and "2018 down-arrow",

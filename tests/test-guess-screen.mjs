@@ -314,6 +314,10 @@ await runTest("6. a second daily is refused, and the player is told rather than 
   const day = today();
   const answer = guessAnswerFor(day);
   const wrong = someoneElse(answer);
+  // A tab stale because the day was finished SOMEWHERE ELSE is by definition a device holding no done
+  // record for it - and since v2.18.0 the resume path consults that record, because a WIP surviving a
+  // finish is otherwise a way to replay a day whose answer has been seen.
+  for (const k of (await window.storage.list("ps-guess-done", false)).keys) await window.storage.delete(k, false);
   await putWip({ variant: "daily", day, seed: null, guesses: [] });
   await openGuess();
   assert(view() === "play", `the saved daily resumes: ${view()}`);
@@ -332,6 +336,10 @@ await runTest("6b. a refused game still shows the result the game actually had",
   // replays with, so it cannot be kinder than the truth.
   const day = today();
   const answer = guessAnswerFor(day);
+  // A tab stale because the day was finished SOMEWHERE ELSE is by definition a device holding no done
+  // record for it - and since v2.18.0 the resume path consults that record, because a WIP surviving a
+  // finish is otherwise a way to replay a day whose answer has been seen.
+  for (const k of (await window.storage.list("ps-guess-done", false)).keys) await window.storage.delete(k, false);
   await putWip({ variant: "daily", day, seed: null, guesses: [] });
   await openGuess();
   assert(view() === "play", `the saved daily resumes: ${view()}`);
@@ -659,6 +667,55 @@ await runTest("17. a badge the run earns is named on the end screen, not just pa
   const said = gp().textContent;
   assert(/Bullseye/.test(said), `the end screen names the badge: ${said.slice(-260)}`);
   assert(/unlocked/.test(said), "and says it was unlocked");
+});
+
+await runTest("18. a daily whose save failed cannot be replayed from a surviving WIP", async () => {
+  // THE hole the re-send could have opened. The day is spent the moment the game ends, but that gate used
+  // to be in-memory only: `dailyDone` starts null on every mount, and the resume path never consulted the
+  // stored record. So a WIP that outlived the finish - sset/sdel guarantee nothing and clearDraft can
+  // simply fail - was a way back onto a board whose answer is on the previous screen. With a re-send
+  // behind it the replay would then be POSTED, and the player would end the day with a better result than
+  // they played. That is strictly worse than losing the run, which is what this whole change is fixing.
+  await dropWip();
+  for (const k of (await window.storage.list("ps-guess-done", false)).keys) await window.storage.delete(k, false);
+  window.__ps_supabase__._guess.clear();
+  await openGuess();
+
+  const realInvoke = window.__ps_supabase__.functions.invoke;
+  window.__ps_supabase__.functions.invoke = async (n, o) =>
+    (n === "submit-guess" ? { data: null, error: { message: "TypeError: Failed to fetch" } } : realInvoke(n, o));
+  await click(variantTiles()[0]);
+  await flush();
+  const answer = guessAnswerFor(today());
+  // THREE guesses, deliberately: if a replay were laundered it would come back as one, so the recorded
+  // tries is what tells the two apart. Solving in one here would make the test unable to fail.
+  const used = new Set();
+  await guessPlayerByName(someoneElse(answer, used));
+  await guessPlayerByName(someoneElse(answer, used));
+  await guessPlayerByName(answer);            // solved in three, and the save drops
+  await flush();
+  window.__ps_supabase__.functions.invoke = realInvoke;
+  assert(view() === "done", "the game ends");
+  assert(runs().length === 0, "and nothing reached the board");
+
+  // Now put a fresh WIP for the same day back, exactly as a failed clearDraft would leave one, and
+  // remount so nothing is carried in memory.
+  await putWip({ variant: "daily", day: today(), seed: null, guesses: [] });
+  const fresh = await mount();
+  container = fresh.container;
+  await flush();
+  await openGuess();
+  assert(view() !== "play", `the spent daily is not dealt again: ${view()}`);
+  // The re-send is allowed to land - that is the point of it - but only ever with the game that was
+  // actually played. One row, and it says three.
+  await flush();
+  await flush();
+  const rows = runs();
+  assert(rows.length <= 1, `at most one row for the day: ${rows.length}`);
+  if (rows.length === 1) {
+    assert(rows[0].tries === 3, `the re-send carries the game that was played, not a replay: tries ${rows[0].tries}`);
+    assert(rows[0].day === today(), "filed under its own day");
+  }
 });
 
 console.log("test-guess-screen.mjs done");

@@ -14,6 +14,11 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+// The refusals a held game may be re-sent after. Each is "not your fault, and it may not be true in a
+// minute": the radio was off, the function fell over, the session had lapsed, the name was not claimed
+// yet. Every OTHER reason is the server's verdict on the game itself and re-sending cannot change it.
+export const GUESS_RETRY = ["offline", "server", "signed_out", "no_profile"];
+
 export const GUESS_REFUSALS = [
   "duplicate",     // today's game is already recorded for this account
   "guest_daily",   // a guest may not play the daily
@@ -22,6 +27,8 @@ export const GUESS_REFUSALS = [
   "malformed",     // no guesses at all, or a body the function could not read
   "signed_out",    // the session expired while the game was being played
   "no_profile",    // signed in, but the account has never claimed a name
+  "server",
+  "offline",       // the function reached the database and something there went wrong
   // replayGuessGame's own reasons. A player should never see one: the screen enforces the same rules from the
   // same module. If one appears, the two have drifted.
   "no_answer", "bad_guesses", "no_guesses", "too_many", "bad_guess", "repeat_guess", "unknown_player", "short_loss",
@@ -36,14 +43,18 @@ export async function submitGuess({ variant, seed, day, guesses }) {
     const { data, error } = await getClient().functions.invoke("submit-guess", { body });
     if (error) {
       let answer = null;
-      try { answer = await error.context?.json?.(); } catch (e) { /* no readable body */ }
+      let readable = true;
+      try { answer = await error.context?.json?.(); } catch (e) { readable = false; }
       const reason = answer?.reason;
-      return failed(GUESS_REFUSALS.includes(reason) ? reason : "network");
+      if (GUESS_REFUSALS.includes(reason)) return failed(reason);
+      // No body at all is the shape of a request that never arrived or never came back.
+      return failed(readable && answer ? "network" : "offline");
     }
     if (!data?.ok) return failed("network");
     return { ok: true, ...data };
   } catch (e) {
-    return failed("network");
+    // invoke() threw: DNS, TLS, CORS, a dead radio. Nothing reached the function.
+    return failed("offline");
   }
 }
 
