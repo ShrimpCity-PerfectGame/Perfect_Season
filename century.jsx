@@ -716,10 +716,18 @@ function refusalLine(reason, variant) {
     // is worse than saying nothing, and it sent us looking in the wrong place for a whole evening.
     case "server": return "This run didn't save — that one is on us, not your connection.";
     case "network": return "Couldn't save this run — check your connection.";
+    // The reason the outbox exists, and it had no line of its own until v2.18.6 - it fell to the default
+    // below, which leaks the internal code and then says two things that are both false: nothing was
+    // recorded (the run is on this device, `saved: false`, which is exactly what the drain re-sends) and
+    // the daily is still available (since v2.17.0 the device record is written BEFORE the POST, so the
+    // day is spent either way - that is what stops a dropped save being replayed with the answer known).
+    case "offline": return "Couldn't reach the server, so this run is saved on this device and will be sent as soon as you're back online.";
+    // The screen's own lock, when a drain already has this run in the air. Nothing is wrong and nothing is lost.
+    case "in_flight": return "This run is already on its way.";
     default:
       // A replay reason means the screen and the server disagreed about the rules, which is a bug rather than a
       // refusal a player can act on. Say so honestly instead of blaming their connection.
-      return `This run couldn't be verified (${reason}). Nothing was recorded.${variant === "daily" ? " Your daily is still available." : ""}`;
+      return `This run couldn't be verified (${reason}). Nothing was recorded.`;
   }
 }
 

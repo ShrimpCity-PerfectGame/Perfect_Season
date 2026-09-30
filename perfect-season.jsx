@@ -2811,7 +2811,14 @@ export default function PerfectSeason() {
   useEffect(() => {
     if (view === "board") { loadLeaderboard(); loadDailyBoard(); loadLadder(); loadVersusBoard(); }
     if (view === "stats" && !siteStats.loaded) loadSiteStats();
-    if (view === "board" || view === "stats" || view === "statsou") loadBoardWear();
+    // Century and Guess joined this list in v2.18.6, and were missing from it for exactly as long as their
+    // boards have rendered a NameLink - v2.18.3 wired the component in and left the data behind, so those two
+    // screens drew every name in plain ink with no supporter star until something else in the session happened
+    // to load `boardLooks`. Open the Leaderboard once and walk back and the same rows render correctly, which
+    // is the tell: the rendering was right and the data was absent. It is 2.7.1's bug on two new screens - the
+    // Leaderboard's own decorations were once loaded by a tab click and by nothing else - and it hides a paid
+    // entitlement, which is the half worth caring about.
+    if (view === "board" || view === "stats" || view === "statsou" || view === "century" || view === "guess") loadBoardWear();
   }, [view, userId]);
   function openProfile(name) {
     leftAt.current = window.scrollY || 0;

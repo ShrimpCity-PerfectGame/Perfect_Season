@@ -59,6 +59,39 @@ await runTest("a DNF goes through the real function and lands on the profile", a
   assert(s.runs.length === 1 && s.runs[0].dnf === true, `and it is in the runs log: ${JSON.stringify(s.runs)}`);
 });
 
+// A guest may not play the daily, and until v2.18.6 that was true of a FINISHED daily and not of an abandoned
+// one: this branch returns long before the guest check further down, so a modified client could post a DNF
+// tagged `daily` from a guest account and take `points_daily` down by 50, with a `runs` row tagged
+// `ladder = 'daily'` behind it. Nothing ever showed it - both daily boards filter it out, by `> 0` and by
+// `not dnf` - and it only subtracts from the account that sent it, so this is a rule being made true rather
+// than a hole being plugged. It is worth a test precisely because nothing downstream would ever complain.
+await runTest("a guest cannot charge a DNF to the daily ladder, but can to any other", async () => {
+  const s = store();
+  s.profiles.get(ME).guest = true;
+  globalThis.__edge_store__ = s;
+
+  const refused = await invoke({ dnf: true, picks: 3, mode: "daily" }, { userId: ME });
+  assert(refused.status === 403 && refused.body?.reason === "guest_daily",
+    `a guest's daily DNF is refused with the same code a finished daily gets: ${refused.status} ${JSON.stringify(refused.body)}`);
+  assert(me(s).dnf === 1 && me(s).points_daily === 0 && me(s).rev === 0,
+    `and nothing was written: dnf ${me(s).dnf}, points_daily ${me(s).points_daily}, rev ${me(s).rev}`);
+  assert(s.runs.length === 0, `nor logged: ${JSON.stringify(s.runs)}`);
+
+  // Every other ladder is untouched: a guest plays Unlimited, Genius and GM like anyone else, and
+  // abandoning one still counts against them.
+  const ok = await invoke({ dnf: true, picks: 2, mode: "unlimited" }, { userId: ME });
+  assert(ok.status === 200 && ok.body?.ok, `a guest's Unlimited DNF still saves: ${ok.status} ${JSON.stringify(ok.body)}`);
+  assert(me(s).dnf === 2, `and counts: ${me(s).dnf}`);
+
+  // And a real account's daily DNF is not caught by the new guard.
+  const s2 = store();
+  globalThis.__edge_store__ = s2;
+  const real = await invoke({ dnf: true, picks: 4, mode: "daily" }, { userId: ME });
+  assert(real.status === 200 && real.body?.ok, `an account's daily DNF still saves: ${real.status} ${JSON.stringify(real.body)}`);
+  assert(s2.profiles.get(ME).points_daily === GL.DNF_POINTS,
+    `and charges the daily ladder: ${s2.profiles.get(ME).points_daily}`);
+});
+
 await runTest("a write that matched no row is retried, never reported as saved", async () => {
   // THE bug §3.6 is about, driven rather than read. Something else writes the profile between this request's
   // read and its write - which is not exotic: finish() does not await the submission, so the result screen is

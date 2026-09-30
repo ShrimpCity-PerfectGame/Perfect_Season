@@ -639,8 +639,16 @@ function refusalLine(reason, variant) {
     // is worse than saying nothing, and it sent us looking in the wrong place for a whole evening.
     case "server": return "This game didn't save — that one is on us, not your connection.";
     case "network": return "Couldn't save this game — check your connection.";
+    // The reason the outbox exists, and it had no line of its own until v2.18.6 - it fell to the default
+    // below, which leaks the internal code and then says two things that are both false: nothing was
+    // recorded (the game is on this device, `saved: false`, which is exactly what the drain re-sends) and
+    // the daily is still available (since v2.17.0 the device record is written BEFORE the POST, so the
+    // day is spent either way - that is what stops a dropped save being replayed with the answer known).
+    case "offline": return "Couldn't reach the server, so this game is saved on this device and will be sent as soon as you're back online.";
+    // The screen's own lock, when a drain already has this game in the air. Nothing is wrong and nothing is lost.
+    case "in_flight": return "This game is already on its way.";
     default:
-      return `This game couldn't be verified (${reason}). Nothing was recorded.${variant === "daily" ? " Your daily is still available." : ""}`;
+      return `This game couldn't be verified (${reason}). Nothing was recorded.`;
   }
 }
 
