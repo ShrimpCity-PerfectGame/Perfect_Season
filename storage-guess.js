@@ -17,6 +17,11 @@ const num = (v) => {
 // The refusals a held game may be re-sent after. Each is "not your fault, and it may not be true in a
 // minute": the radio was off, the function fell over, the session had lapsed, the name was not claimed
 // yet. Every OTHER reason is the server's verdict on the game itself and re-sending cannot change it.
+//
+// `network` stays OFF this list on purpose, and v2.18.2 did not move it: it is what submitGuess answers
+// when a reason came back that this client cannot read, and a newer function's verdict must not be
+// re-sent for ever. What v2.18.2 fixed is that `network` was also carrying failures that are not
+// verdicts at all - see submitGuess, where they are now told apart.
 export const GUESS_RETRY = ["offline", "server", "signed_out", "no_profile"];
 
 export const GUESS_REFUSALS = [
@@ -27,8 +32,10 @@ export const GUESS_REFUSALS = [
   "malformed",     // no guesses at all, or a body the function could not read
   "signed_out",    // the session expired while the game was being played
   "no_profile",    // signed in, but the account has never claimed a name
-  "server",
-  "offline",       // the function reached the database and something there went wrong
+  // These two are the pair v2.18.2 had to tell apart, and the comment below used to sit on the wrong one
+  // of them - which is a fair account of how they came to be confused in the first place.
+  "server",        // the function answered, or the platform did: something on that side went wrong
+  "offline",       // nothing came back that could be read, so nothing reached the function at all
   // replayGuessGame's own reasons. A player should never see one: the screen enforces the same rules from the
   // same module. If one appears, the two have drifted.
   "no_answer", "bad_guesses", "no_guesses", "too_many", "bad_guess", "repeat_guess", "unknown_player", "short_loss",
@@ -48,9 +55,22 @@ export async function submitGuess({ variant, seed, day, guesses }) {
       const reason = answer?.reason;
       if (GUESS_REFUSALS.includes(reason)) return failed(reason);
       // No body at all is the shape of a request that never arrived or never came back.
-      return failed(readable && answer ? "network" : "offline");
+      if (!readable || !answer) return failed("offline");
+      // A body that names a reason this client does not know is a NEWER function's verdict on the game,
+      // and re-sending it cannot change the answer - that is `network`, and the outbox retires it.
+      //
+      // A body that names NO reason never came from the function: every answer it gives a POST names one
+      // (submit-guess/index.ts). So this is the platform in between - the Functions relay, a gateway, a
+      // worker that failed to boot - which is transient and is worth another go. Until v2.18.2 both
+      // landed on `network` together, so the outbox threw away a played daily on exactly the failure it
+      // was written to survive, and marked it `unrecorded`, which nothing reads: the day vanished in
+      // silence. It is `server` because that is what it is, and because that is already the reason the
+      // screen renders as "on us, not your connection".
+      return failed(reason ? "network" : "server");
     }
-    if (!data?.ok) return failed("network");
+    // The function answers a POST with `{ ok: true }` or with an error status. A 200 that is neither is
+    // the platform again - a truncated or rewritten response - not a verdict, so it is worth re-sending.
+    if (!data?.ok) return failed("server");
     return { ok: true, ...data };
   } catch (e) {
     // invoke() threw: DNS, TLS, CORS, a dead radio. Nothing reached the function.

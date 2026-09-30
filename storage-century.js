@@ -19,6 +19,11 @@ const num = (v) => {
 // The refusals a held run may be re-sent after. Each is "not your fault, and it may not be true in a
 // minute": the radio was off, the function fell over, the session had lapsed, the name was not claimed
 // yet. Every OTHER reason is the server's verdict on the run itself and re-sending cannot change it.
+//
+// `network` stays OFF this list for the reason set out beside GUESS_RETRY, and v2.18.2 did not move it:
+// it means a reason this client cannot read, and a newer function's verdict must not be re-sent for
+// ever. The two lists are the same list twice on purpose, so a held Century and a held Guess cannot
+// drift apart; change them together.
 export const CENTURY_RETRY = ["offline", "server", "signed_out", "no_profile"];
 
 export const CENTURY_REFUSALS = [
@@ -30,8 +35,10 @@ export const CENTURY_REFUSALS = [
   "malformed",      // no picks at all, or a body the function could not read
   "signed_out",     // the session expired while the run was being played
   "no_profile",     // signed in, but the account has never claimed a name
-  "server",
-  "offline",         // the function reached the database and something there went wrong
+  // The pair v2.18.2 had to tell apart, described here the way storage-guess.js describes them - the
+  // comment below used to sit on `offline`, which means very nearly the opposite of what it says.
+  "server",          // the function answered, or the platform did: something on that side went wrong
+  "offline",         // nothing came back that could be read, so nothing reached the function at all
   // replayCentury's own reasons, which mean the run as submitted was not legal. A player should never see one:
   // the screen enforces the same rules from the same module. If one appears, the two have drifted.
   "bad_seed", "bad_picks", "wrong_length", "bad_pick", "two_respins", "bad_slot", "slot_taken",
@@ -59,9 +66,15 @@ export async function submitCentury({ variant, seed, day, picks }) {
       const reason = answer?.reason;
       if (CENTURY_REFUSALS.includes(reason)) return failed(reason);
       // No body at all is the shape of a request that never arrived or never came back.
-      return failed(readable && answer ? "network" : "offline");
+      if (!readable || !answer) return failed("offline");
+      // Told apart since v2.18.2, for the reason set out in submitGuess, which this mirrors line for
+      // line: a body naming a reason this client cannot read is a newer function's verdict (`network`,
+      // retired), while a body naming no reason at all never came from the function - every answer it
+      // gives a POST names one - so it is the platform in between, and that is worth another go.
+      return failed(reason ? "network" : "server");
     }
-    if (!data?.ok) return failed("network");
+    // A 200 that is not `{ ok: true }` is the platform too, not a verdict on the run.
+    if (!data?.ok) return failed("server");
     return { ok: true, ...data };
   } catch (e) {
     // invoke() threw: DNS, TLS, CORS, a dead radio. Nothing reached the function.

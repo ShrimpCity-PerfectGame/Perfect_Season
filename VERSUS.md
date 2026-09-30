@@ -86,6 +86,7 @@ that stops.
 | `respins` | jsonb not null default `[]` | every re-spin spent, `{ pickNo, kind, by, key }` (section 7) — enough for a reconnecting client to rebuild the same boards |
 | `dips` | jsonb not null default `[]` | every double dip spent, `{ boardIdx, by }` (section 7) — which board was drafted three times, and which one after it only once |
 | `steals` | jsonb not null default `[]` | every steal spent, `{ at, by, pickNo, slot }` (section 7) — the turn it cost, who spent it, the pick it took and where he landed. `at` is why this is a record rather than an edit to the pick |
+| `rev` | integer not null default 0 | how many times the picks or the three lists above have changed. Every write bumps it and every write is conditional on the value its writer read — the same read-modify-write guard `profiles.rev` is, and section 4 says what it stops |
 | `result` | jsonb null | both sides' scores and the three parts each was built from (section 6), written once, by the server |
 | `winner_id` | uuid null | set with `result`; null for a draw |
 | `created_at` / `ended_at` | timestamptz | |
@@ -117,12 +118,16 @@ draft — **what one player takes is gone for the other**: `(match_id, kind, pla
 conflicts in a unique index, and `kind` is in the second one so a team's defense and its kicker from the same
 year aren't mistaken for each other.
 
-**Functions** (security definer, `search_path = public, pg_temp`, execute granted to `authenticated` only):
+**Functions** (security definer, `search_path = public, pg_temp`). `create_match` and `join_match` are granted to
+`authenticated` only; the two read-only ones below are granted to `anon` as well, because somebody arriving on an
+invite link reads the match before they have signed in (section 9) and the Leaderboard is read signed out:
 
 | function | returns | does |
 |---|---|---|
 | `create_match(p_format text)` | jsonb: the match row | One open match per host at a time (a second call returns the existing one). Generates the code. Guests (`profiles.guest`) may not create one — see 5. |
 | `join_match(p_code text)` | jsonb: the match row, or a code | `not_found`, `already_full`, `already_finished`, `match_abandoned`, `already_started`, `own_match`, `not_signed_in`, `guest_not_allowed`. Sets `guest_id`, `status = 'drafting'` and the first `turn_deadline`. |
+| `match_state(p_code text)` | jsonb | The match plus its picks, for a client that has just opened the page or reconnected. Read-only (`stable`), called as GET. |
+| `versus_top(p_limit integer)` | jsonb | The 1v1 board (section 10): ranked by wins, then by how few losses they took getting them, then by name under `collate "C"` so the order is fully tiebroken. Guests and accounts that have never played one are left off. Read-only (`stable`), called as GET. |
 
 A link outlives the duel it opened, so **being too late has three answers, not one**. Either player reopening
 their own match gets it back whatever state it is in — the link is how they reach the result — and a stranger
@@ -131,7 +136,6 @@ is told which way they missed it: `already_full` while it is being drafted, `alr
 answer for it, so the status does; it used to reach `already_started`, which told them a match had begun that
 never did. Every one of those codes needs words in `versus.jsx`'s `ERRORS` and a mention in `storage-versus.js`'s
 `joinMatch` contract, or `tests/test-versus-screen.mjs`'s refusal-words test calls it orphaned.
-| `match_state(p_code text)` | jsonb | The match plus its picks, for a client that has just opened the page or reconnected. Read-only (`stable`), called as GET. |
 
 Everything that decides a pick lives in the Edge Function below, not here, because it needs the game's own rules.
 
@@ -270,12 +274,21 @@ rating — and it was the wrong answer: a team-season's point differential is mo
 
 **The data.** `tools/data/build-versus-pool.mjs` writes `data/versus-pool.json` from public nflverse data, the
 same project the player seasons came from: `nfldata/games.csv` for points allowed, `stats_team_reg_YYYY` for the
-defensive totals, and `stats_player_week_YYYY` for the kickers. One defense and one kicker for **every one of the
-861 team-seasons from 1999 to 2025** — the same span as the players, so no board can come up empty. Re-run it when
-a season ends, the way the player data is rebuilt. Two traps it already walks around, both documented in the
-script: the CSVs quote fields containing commas, and the season-level player file credits a traded kicker's whole
-year to the team he ended it on (Riley Patterson's 2023 was fourteen games in Detroit and three in Cleveland), so
-kickers are counted week by week instead.
+defensive totals, and `stats_player_week_YYYY` for the kickers. One defense and one kicker for **859 team-seasons
+between 1999 and 2025** — every one there is except JAX 2001 and 2002, which nflverse only half has, eight weeks
+of sixteen, while `games.csv` gives the whole year's points allowed: the row would be a full season's points
+against beside half a season's sacks and takeaways, there is no Pro Football Reference correction on this side of
+the data the way there is for the players, and an incomplete team-season is left out rather than shipped as a
+whole one. Its kicker goes with it, so the two lists stay identical and no board offers a three-game fill-in
+beside no defense at all. It is otherwise the players' own span, so no board comes up empty — what the
+exclusion costs is two years off Jacksonville's 1999–2005 board, which offers five defenses where its
+seven-year era would otherwise give seven. **Five is the ordinary depth rather than a thin one**, though: eras
+1–4 are five-year windows, so 128 boards carry exactly five before Jacksonville's is counted at all, and the
+genuinely thinnest board in the game is Houston's 1999–2005 with four, three years before the Texans existed.
+Re-run it when a season ends, the way the player data is rebuilt. Two more traps it already walks around, both
+documented in the script: the CSVs quote fields containing commas, and the season-level player file credits a
+traded kicker's whole year to the team he ended it on (Riley Patterson's 2023 was fourteen games in Detroit and
+three in Cleveland), so kickers are counted week by week instead.
 
 **The ratings** are on the players' own 0–130 scale, and are measured **against their own season**, not against
 history — a z-score across that year's 32 teams, mapped onto the scale (65 is average, 18 points to a standard
@@ -283,8 +296,8 @@ deviation). That is the whole reason the number can sit beside a quarterback's: 
 is being compared to 2005, exactly as the quarterback beside it is. A defense is points allowed per game (half the
 weight — it is the job, and the one number that cannot be padded), takeaways, sacks, and the points it scored
 itself. A kicker is accuracy, distance and volume, with accuracy shrunk toward the league's rate so a fill-in who
-went 3-for-3 in December isn't the best kicker of the year. The 2006 Ravens come out at 112.2, the 2005 Lions at
-64.0, Vanderjagt's perfect 2003 at 100.2.
+went 3-for-3 in December isn't the best kicker of the year. The 2006 Ravens come out at 112.7, the 2005 Lions at
+63.0, Vanderjagt's perfect 2003 at 100.2.
 
 **On the board.** A board is a team and an era, as everywhere else. Its **defenses** are that team's in each year
 of the era — two years of one team are two different defenses, which is the point of offering a year at a time.
@@ -374,7 +387,9 @@ people see constantly, so a result never reads as arithmetic wearing a jersey. T
 games have actually tied at.
 
 `LOSER_PTS` and `MARGINS` in game-logic.mjs are deliberately **not** touched: the season sim is seeded and its
-outcomes are stored, so changing them would replay every challenge code differently (CLAUDE.md). **The upset rate in 1v1 is zero by construction** — `winProb` and `gameResult` are not called at all, and
+outcomes are stored, so changing them would replay every challenge code differently (CLAUDE.md).
+
+**The upset rate in 1v1 is zero by construction** — `winProb` and `gameResult` are not called at all, and
 their randomness is exactly what 1v1 must not have: in single player a 17-game season is a story and an upset is
 the best part of it, but a head-to-head is one game between two people who each made eight decisions, and losing
 it to a dice roll would make those decisions pointless. An exact tie is shown as a tied score, which football has.
@@ -387,7 +402,9 @@ defense/kicker position in the main game would be a different project with its o
 packed as arrays with the column names given once (`initVersusData` expands them), which takes it from 170 KB
 to 67 KB — but 67 KB it remains, and it took the built bundle past the 1,000,000-byte ceiling
 `tests/test-build-seo.mjs` keeps as a minification check (the bundle was already ~988 KB). The ceiling moved to
-1.2 MB. **The honest fix, if this ever needs to move again:** load the pool when the 1v1 screen opens rather
+1.2 MB, and again to **1,300,000 in v2.14.0**, which is where that test holds it now — and its comment names
+*this* pool as the reclaim to take before the number is raised a third time. **The honest fix, if this ever
+needs to move again:** load the pool when the 1v1 screen opens rather
 than at startup. That needs `service-worker.js`'s `planFor` to learn about a second chunk, which is why it
 didn't happen in this release rather than because it isn't worth doing.
 
@@ -574,9 +591,10 @@ the turns it still owes each player. Measured over 1,500 matches: 32 bricks from
 leader case, both now zero. **Do not reintroduce a pick-number shortcut here** — the pick number stops being
 the truth the moment any powerup is spent.
 
-This is not a corner case. Of the 160 boards, **33 carry only one quarterback or only one tight end** — the
+This is not a corner case. Of the 160 boards, **31 carry only one quarterback or only one tight end** — the
 Colts' 1999–2005 board has exactly one quarterback, and everyone knows which. If both players come to that board
-still needing a QB, the first takes Manning and the second has nothing to do.
+still needing a QB, the first takes Manning and the second has nothing to do. Both of the one-tight-end boards are
+Pittsburgh's, and both of those hold a single quarterback too, so the two shapes overlap rather than adding up.
 
 So a board is dealt only when it can serve both, and the server checks that before it deals it:
 
@@ -590,10 +608,13 @@ Two is enough because the first picker removes exactly one. The second clause is
 for no reason: if the only thing left for the second picker is a kicker and the first picker has their kicker
 already, nobody is stranded.
 
-A board that fails is **skipped**, exactly as `boardAt` skips one in single player — the sequence has eighteen
-entries for eight boards, so there is always somewhere to go, and if they were ever exhausted the server widens
-to the rest of the boards in the same seeded order. Both clients compute the skip from the same public picks, so
-neither has to be told. The skip is free and belongs to nobody: it costs no re-spin.
+A board that fails is **skipped**, exactly as `boardAt` skips one in single player — though there is less slack
+in the sequence than the code reads as. `seededSequence` stops at eighteen entries and never reaches eighteen: no
+team twice and no era more than twice, over five eras, caps every sequence it can produce at **ten**. Eight boards
+therefore have two spares between them, and a re-spin draws from the same ten — so if they were ever exhausted the
+server widens to the rest of the boards in the same seeded order (`nextBoard`), and it is that widening rather than
+the length of the list that actually carries the guarantee. Both clients compute the skip from the same public
+picks, so neither has to be told. The skip is free and belongs to nobody: it costs no re-spin.
 
 What this deliberately does *not* do is constrain the first picker. Taking the last quarterback on a board when
 you know the other player needs one is a good move, not an exploit, and the draft is supposed to reward seeing
@@ -669,11 +690,19 @@ gets a versus variant: the two scores, the result, and a link to play the winner
 
 ## 11. Tests
 
-- `tests/test-versus-pool.mjs` — the data file: a defense and a kicker for every team-season 1999–2025, every
-  team code one `TEAMS` knows, every rating finite and inside the scale, and a handful of seasons pinned by hand
-  (the 2006 Ravens above the 2006 Lions, Vanderjagt's 2003 above a replacement kicker's). It also pins the fact
-  section 8 exists for: that boards with a single quarterback are real, and that every board carries at least
-  two defenses and two kickers.
+- `tests/test-versus-pool.mjs` — the data file: a defense and a kicker for every team-season 1999–2025 bar the
+  five it names (Houston before it existed, and the two half-seasons in section 6), and both lists missing
+  exactly the same five, every team code one `TEAMS` knows, every rating finite and inside the scale, and a
+  handful of seasons pinned by hand (the 2006 Ravens above the 2006 Lions, Vanderjagt's 2003 above a
+  replacement kicker's). It also pins the fact
+  section 8 exists for: that boards with a single quarterback are real, that every board is at least two deep at
+  defense, and that **boards offering exactly one kicker are real and never the majority** while none offers
+  zero. That last one is a band rather than a number — more than none, fewer than half of the 160 — because what
+  section 8 has to handle is that such a board exists at all, not how many there are: **47 today, and the test
+  would not notice that moving to 46 or to 70**. Both halves are asked of `unitsOn` — what a board actually
+  offers — rather than of rows in the file, because a defense appears once per year of the era and a kicker
+  once per *kicker*, in his best season: counting rows instead said both players could always be served a
+  kicker, over a board holding one.
 - `tests/test-versus-sql.mjs` — the migration in PGlite: the tables' RLS (nobody writes them), `create_match`,
   `join_match` and their codes, and `match_state`'s shape. Mock parity, as the other SQL tests do.
 - `tests/test-versus-rules.mjs` — every refusal in 4 and 7, driving `decideMove` itself rather than a mirror of

@@ -193,7 +193,7 @@ parts that are unlike every other mode:
   does not know, so a new call in a function is a loud failure rather than a silent `undefined`.
 - **Eight boards, sixteen picks**, and every board offers that team's players, its defense in each year of the
   era and its kicker - a defense can go fifth and a kicker first. A board that cannot serve *both* players is
-  skipped before it is dealt (VERSUS.md 8): 33 of the 160 boards hold one quarterback or one tight end, so two
+  skipped before it is dealt (VERSUS.md 8): 31 of the 160 boards hold one quarterback or one tight end, so two
   players who both need one cannot both be served from it.
 - **No probability anywhere.** The higher score wins, every time. `winProb` and `gameResult` are not called: an
   upset is the best part of a 17-game season and the worst possible end to one game between two people. The
@@ -301,7 +301,7 @@ parts unlike everything else:
   a five-season career (4,637) - wrong at both ends, because 723 men lasted five seasons without ever playing
   (Rodney Adams took TEN snaps in six) while the draft classes stopped at 2022, so no Jayden Daniels or Brock
   Bowers could be the answer. Then a Guessability Score over six weighted terms took a share of each position
-  group (773) - better, and still asking about the hundredth-best corner of the century. Now: the men on the
+  group (731) - better, and still asking about the hundredth-best corner of the century. Now: the men on the
   field. Each version is in GUESS.md 1 with what it cost.
 - **IT AGES.** Two seasons wide, so it does not go stale in a week - but a rookie arriving mid-season is not in
   it until `node tools/data/build-guess-pool.mjs` is re-run (`GP_SEASON` pins a season). Rebuild when a season
@@ -362,6 +362,15 @@ parts unlike everything else:
   a number in `player_stats` for the rule to read, since badges are computed from stats. That last one is why
   `migration-guess.sql` must run BEFORE `migration-runs-log.sql`: `player_stats` is `language sql` and its body
   is validated at creation, so a missing `guess_runs` fails the migration outright.
+- **Two accepted gaps, both written up in GUESS.md 5** and neither closeable from here. The day's answer is
+  a pure function of the date and the pool, and both are public - the pool is served at
+  `/data/guess-pool.json` and the cycle ships in `page.js` - so anyone willing to run `guess-logic.mjs`
+  reads today's player and the next sixteen months of them. It is the season daily's gap for the same
+  reason (see "Protect the daily"); what it buys is a permanent #1 on `guess_top` and Bullseye's coins, and
+  what it cannot reach is `profiles`, which `submit-guess` never touches. And a daily whose save FAILS is
+  replayable: no row means the `duplicate` guard has nothing to catch, and the `GUESS_DONE` gate is
+  per-device - so because the answer is already on screen, a failed save converts into a *better* score.
+  That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
@@ -578,6 +587,8 @@ node tests/test-shop-flow.mjs          # the whole app: a season's coins, the sh
 node tests/test-build-a-player.mjs      # Build-a-player: rolling a position, a team, the attributes, and the sim at the end
 node tests/test-daily-submit.mjs        # the daily's submission path end to end, including the once-a-day lock
 node tests/test-dnf.mjs                 # what counts as an abandoned draft, and which ladder it is charged to
+node tests/test-pending-daily.mjs       # the daily re-send: a held run never becomes a better run, and is never held for ever
+node tests/test-submit-reasons.mjs      # what a failed submission is CALLED, and what the outbox does with it - the seam that lost a daily
 node tests/test-leaderboard-format.mjs  # the two scoring formats keep separate boards and never rank against each other
 node tests/test-online-counter.mjs      # the live plays pill and the online count: presence, the broadcast, and the two counters kept apart
 node tests/test-points.mjs              # ladder points: par, the penalty, and where each mode's points land
@@ -1089,10 +1100,31 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
-  v2.17.0's (the bug pass): re-run **`migration-wallet.sql`**, then **`migration-runs-log.sql`**, then the
-  client. No Edge Function change. Wallet binds each `claim_minigame` arm to one day (one run used to pay all
-  three permitted dates); runs-log adds the username tiebreak `best_gm` and `biggest_upsets` never had. Both
-  only replace functions, so they are safe on any shape and the site works between the steps.
+  v2.18.2's (the outbox's lost daily, and the copy that promised a queue): client only. No migration and no
+  Edge Function change - `submit-guess` and `submit-century` are unchanged, and what moved is how the BROWSER
+  reads their failures. `submitGuess`/`submitCentury` used to answer `network` both for a reason this client
+  cannot read and for a body carrying no reason at all; only the first is a verdict, because every answer
+  those functions give a POST names a reason - so the second is the platform in between, and `network` is not
+  retryable. The outbox therefore retired a played daily for good and wrote `unrecorded`, which nothing reads.
+  That is how a solved daily was lost on production on 2026-09-30. The two are told apart now
+  (`tests/test-submit-reasons.mjs`, which is the first thing to exercise that seam at all - the mocks stand in
+  for the whole `functions.invoke` layer, so `error.context.json()` had never been run by a test).
+  v2.18.1's: client only. v2.18.0's (the pending-daily outbox): **deploy the Edge Functions**, then the
+  client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
+  the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
+  functions never send.
+  v2.17.0's (the bug pass): re-run **`migration-wallet.sql`**, then **`migration-runs-log.sql`**, then
+  **`migration-moderation.sql`**, then **deploy the Edge Functions**, then the client. Wallet binds each
+  `claim_minigame` arm to one day (one run used to pay all three permitted dates); runs-log adds the username
+  tiebreak `best_gm` and `biggest_upsets` never had; moderation gives `report_player`'s guest-target refusal a
+  code of its own. All three only replace functions, so they are safe on any shape and the site works between
+  the steps. **This line said "re-run wallet, then runs-log, then the client. No Edge Function change" until
+  v2.18.2 and was wrong twice** - it was written when the release was one commit, and the second commit gave
+  `submit-guess` and `submit-century` their `signed_out` / `no_profile` / `malformed` reasons and split
+  `report_player`'s guest codes. Production was fine, because the promotion read the diff rather than this
+  line and deployed all four; a fresh environment following it would have shipped a stale function whose
+  refusals carry no reason, which is the exact bug that release existed to fix. CHANGELOG.md has said so
+  since; this file is the one the next session is told to trust, so check them against each other.
   v2.16.0's (the plays counter and players drafted): re-run **`migration-runs-log.sql`**, then the client.
   It only replaces `site_totals()`, so it is safe on any shape and its backfill is a no-op as always. A
   client ahead of the migration reads no `plays` and falls back to the drafts count - the number the pill

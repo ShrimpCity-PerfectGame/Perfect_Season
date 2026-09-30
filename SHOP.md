@@ -10,8 +10,10 @@ GET, one owner per file, prefixed class names.
 
 **Since v1.13.0** the catalog has four more titles (two epic, two legendary, each with a mark of its own in place of
 the double stripe) and two legendary avatar packs, as longer goals for players whose badges paid out a lot at once.
-They arrived by re-running `migration-shop.sql`; [6.2](#62-shop-catalogmjs-phase-0-lead) and 7.1 describe the catalog
-as it is now.
+It has grown four more times since: win celebrations in v2.5.0, nameplates and the `supporter` rarity in v2.6.0,
+name colours in v2.7.0, and the Stargazer avatar pack in v2.8.0, which is what completes a supporter's set — every
+slot fillable from one cosmic line. All of them arrived by re-running `migration-shop.sql`;
+[6.2](#62-shop-catalogmjs-phase-0-lead) and 7.1 describe the catalog as it is now.
 
 ---
 
@@ -22,7 +24,8 @@ The owner approved all of this (2026-09-14, plan v2):
 - **Coins**, in a wallet that only goes up by playing and only goes down by spending, and never below zero. Earned
   from finished seasons ([4.1](#41-rewardsmjs)), badges (bronze 100, silver 300, gold 1,000, special 500; Stat Nerd
   and Mad Scientist pay nothing, since the browser writes those games' scores), and Over/Under and Build-a-player
-  (15 each, once a day). A DNF pays nothing and costs nothing. Unlimited, Genius and GM pay for the first 20
+  (15 each, once a day; Century and Guess the Player joined them on the same 15 in v2.9.0 and v2.13.0 — see
+  [3.1](#31-migration-walletsql)). A DNF pays nothing and costs nothing. Unlimited, Genius and GM pay for the first 20
   finished seasons each day (UTC); the Daily always pays.
 - **Starting balance.** Every account from before v1.12.0 gets its career so far, paid once: 20 per season, 2 per
   win, 10 per playoff trip, 50 per title, 150 per perfect season, never less than a new account's 250 and at most
@@ -62,7 +65,7 @@ perfect-season.jsx (M) ── the Shop view, coins on the result screen, minigam
    ├─ shop.jsx (L) ────────── ShopScreen, WalletPanel
    ├─ profile.jsx (L) ─────── the card wears its cosmetics; balance and Shop button for the owner
    │     └─ cosmetics.jsx (K) ─ FramedAvatar, CardTheme, TitleLine, Coins, ItemPreview
-   │           └─ avatars.jsx, avatar-picker.jsx (K) ─ the three avatar packs
+   │           └─ avatars.jsx, avatar-picker.jsx (K) ─ the six avatar packs
    └─ storage.js ─ re-exports storage-shop.js (J)
                       └─ database functions: migration-wallet.sql (I), migration-shop.sql (J)
 supabase/functions/submit-run (I) ── pays seasons and badges through rewards.mjs (I) + badges.mjs
@@ -71,8 +74,10 @@ shop-catalog.mjs (lead) ── item ids, names, kinds and the avatar packs, shar
 
 **Security model.** Nothing new is client-writable, and the wallet tables aren't even client-readable: a player
 reads their own wallet and shop through functions. Coins come in only three ways:
-1. the submit-run Edge Function, with its service-role key, calling `credit_coins` and `award_badges`, which no
-   client can call;
+1. an Edge Function with its service-role key, calling `credit_coins` and `award_badges`, which no client can
+   call. `credit_coins` is submit-run's alone; `award_badges` is submit-run's too, and since v2.12.0 and v2.15.0
+   also `submit-century`'s (the Century badge) and `submit-guess`'s (Bullseye), because somebody who only plays
+   those may never finish a season for submit-run to pay a badge from;
 2. `claim_minigame`, which pays a fixed 15 at most once a day per game, and only once the player has a row in that
    game's table;
 3. the migration's one-time starting balance and the signup trigger's welcome coins.
@@ -145,8 +150,8 @@ Both are security invoker, and clients can't execute them.
 | function | returns | notes / raises |
 |---|---|---|
 | `credit_coins(p_user uuid, p_amount bigint, p_kind text, p_ref text, p_daily_cap integer default null)` | jsonb `{ "credited", "balance", "capped", "duplicate" }` | security definer; **service role only** (revoked from public, anon, authenticated). Raises `no_such_player`, `bad_kind` (only `season` and `daily`), `bad_amount` (null, negative or over 10,000), `bad_ref` (null, empty or over 200 characters). Takes the wallet lock; then, when `p_daily_cap` isn't null and the player already has that many rows of `p_kind` since UTC midnight, credits nothing (`capped: true`); otherwise `wallet_apply` (`duplicate: true` when it returned 0 for an amount above 0). |
-| `award_badges(p_user uuid, p_badges jsonb)` | jsonb `{ "awarded": [ids], "credited", "balance" }` | security definer; **service role only**. `p_badges` is `[{ "id": text, "coins": integer }]`, at most 50, ids `^[a-z0-9-]{1,40}$`, coins 0–10,000, else `bad_request`; `no_such_player`. Takes the wallet lock, then for each entry in order inserts `badge_awards` (on conflict do nothing); a newly inserted one goes into `awarded` and, with coins above 0, `wallet_apply(p_user, coins, 'badge', id)`. |
-| `claim_minigame(p_game text, p_date text default null)` | jsonb `{ "credited", "balance" }` | security definer; `authenticated` only. `p_date` is the game's day in the player's calendar (Over/Under's date, or today for a build) — the app always sends it, because keyed by the UTC date two evenings' games either side of UTC midnight shared a key. Raises `not_signed_in`, `bad_game` (not `over_under` or `build`), `bad_date` (not UTC yesterday, today or tomorrow), `not_played` (over_under: no `sou_runs` row of the caller's for that date; build: no `builds` row of the caller's from the last 24 hours). Takes the wallet lock, then `wallet_apply(uid, 15, 'minigame', '<game>:<day>')`; `credited` 0 means that day's is already claimed. Without `p_date` the day is the UTC date and any row of that game from the last 24 hours counts. |
+| `award_badges(p_user uuid, p_badges jsonb)` | jsonb `{ "awarded": [ids], "credited", "balance" }` | security definer; **service role only**. `p_badges` is `[{ "id": text, "coins": integer }]`, at most 50, ids `^[a-z0-9-]{1,40}$`, coins 0–10,000, else `bad_request`; `no_such_player`. **An entry's `coins` is checked for shape and then ignored** (v2.0.0): `badge_rewards` is what prices the badge, since the database is the wallet. Takes the wallet lock, then for each entry in order looks its id up in `badge_rewards` — one with no row there is passed over whole and deliberately not recorded either, so it pays the first season after the migration that adds it — and inserts `badge_awards` (on conflict do nothing); a newly inserted one goes into `awarded` and, for a badge the table prices above 0, `wallet_apply(p_user, that price, 'badge', id)`. |
+| `claim_minigame(p_game text, p_date text default null)` | jsonb `{ "credited", "balance" }` | security definer; `authenticated` only. `p_date` is the game's day in the player's calendar (Over/Under's date, or today for a build) — the app always sends it, because keyed by the UTC date two evenings' games either side of UTC midnight shared a key. Raises `not_signed_in`, `bad_game` (not `over_under`, `build`, `century` or `guess` — Century's arm arrived in v2.9.0 and Guess the Player's in v2.13.0, and both read a table their own migration creates, so those files run first), `bad_date` (not UTC yesterday, today or tomorrow), `not_played` (over_under: no `sou_runs` row of the caller's for that date; century and guess: no `century_runs`/`guess_runs` row of the caller's whose `day` is that date, or — a practice run, which has no `day` — whose `created_at` falls on it in UTC; build: no `builds` row of the caller's made on that UTC date). **Each arm is bound to the one day being claimed** (v2.17.0): `p_date` may be UTC yesterday, today or tomorrow while the ledger key is `<game>:<p_date>`, so an arm that took any row from the last 24 hours let one honest run satisfy all three keys and pay 45 coins instead of 15. Takes the wallet lock, then `wallet_apply(uid, 15, 'minigame', '<game>:<day>')`; `credited` 0 means that day's is already claimed. Without `p_date` the day is the UTC date and any row of that game from the last 24 hours counts. |
 | `wallet_state()` | jsonb `{ "balance", "earned", "spent", "recent": [{ "amount", "kind", "ref", "created_at" }] }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. `recent`: the 20 newest ledger rows, `created_at desc, id desc`. No wallet yet: zeros and `[]`. |
 | `create_wallet()` | trigger | After insert on `profiles` (trigger `profiles_create_wallet`): `wallet_apply(new.id, 250, 'welcome', 'welcome')`. |
 
@@ -167,8 +172,8 @@ The database's own numbers (250, 15, 10,000, the starting formula, the 24-hour w
 |---|---|---|
 | `id` | text pk | `^[a-z0-9-]{1,40}$` |
 | `kind` | text not null | `frame` \| `card` \| `title` \| `nameplate` \| `namecolor` \| `celebration` \| `avatar_pack` |
-| `rarity` | text not null | `free` \| `common` \| `rare` \| `epic` \| `legendary` \| `badge` |
-| `price` | integer | null for free and badge items, otherwise 1–1,000,000 (named check `shop_items_price_fits_rarity`) |
+| `rarity` | text not null | `free` \| `common` \| `rare` \| `epic` \| `legendary` \| `badge` \| `supporter` (v2.6.0) |
+| `price` | integer | null for free, badge and supporter items, otherwise 1–1,000,000 (named check `shop_items_price_fits_rarity`) |
 | `badge` | text | the badges.mjs id that unlocks a badge item; null otherwise |
 | `active` | boolean not null default true | false takes it off sale; owners keep it and can still equip it |
 | `sort` | integer not null default 0 | order within its kind |
@@ -187,22 +192,24 @@ a re-run changes nothing.
 primary key (user_id, item_id))`. RLS on, no policies, privileges revoked from anon and authenticated. Only bought
 items get rows: free items belong to everyone, and a badge item belongs to whoever has its badge in `badge_awards`.
 
-**`avatar_presets`** gains the pack avatars, four a pack (`pack` = the pack name, `free` false): 12 at launch, 24 since
-v1.13.0.
+**`avatar_presets`** gains the pack avatars, four a pack (`pack` = the pack name, `free` false): 12 at launch, 20 since
+v1.13.0's two legendary packs, 24 since v2.8.0's supporter one.
 
 **`profile_details`** gains `frame`, `card_theme` and `title` (text → `shop_items(id)`, null = the default: the Ink
 frame, the Navy card, no title) and `showcase text[] not null default '{}'` (named check
-`profile_details_showcase_shape`: at most 3).
+`profile_details_showcase_shape`: at most 3). One column a slot, so the later slots are one line each in the same
+place: `nameplate` (v2.6.0), `namecolor` (v2.7.0) and `celebration` (v2.5.0), each with the same reference and each
+null for "nothing worn" — which for a plate or a colour is the name as it has always looked, and for a celebration
+is the free Confetti.
 
 **Agent J writes the functions:**
 
 | function | returns | notes / raises |
 |---|---|---|
-| `shop_state()` | jsonb `{ "balance", "items": [{ "id", "kind", "rarity", "price", "badge", "active", "sort", "owned" }], "equipped": { "frame", "card", "title", "nameplate", "namecolor", "celebration", "showcase" } }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. Items: every active item plus any inactive one the player owns, ordered by kind (frame, card, title, nameplate, namecolor, celebration, avatar_pack), then `sort`, then `id`. `owned`: free, or an inventory row, or a badge item whose badge is in `badge_awards`. `equipped`: the caller's profile_details columns (nulls and `[]` without a row). |
-| `shop_buy(p_item text)` | jsonb `{ "ok": true, "balance", "item" }` | security definer; `authenticated` only. Raises, checked in this order: `not_signed_in`; `unavailable` (no such item, or not active); `badge_only`; `owned` (free, or already owned); `not_enough`. Takes the wallet lock **before** reading the item, ownership or the balance, then inserts the inventory row and `wallet_apply(uid, -price, 'purchase', id)`, all in one transaction. If `wallet_apply` doesn't charge the full price (the ledger already records that purchase but the inventory row is gone — only possible after rows were edited by hand) it raises `purchase_conflict` and rolls back, rather than hand the item over free. |
-| `equip_item(p_slot text, p_item text)` | jsonb: the details row (`to_jsonb`, like `save_profile`) | security definer; `authenticated` only. Raises `not_signed_in`; `bad_slot` (not one of `frame`, `card`, `title`, `nameplate`, `namecolor`, `celebration`); `bad_item` (no such item, or its kind isn't the slot's — each slot takes its own kind); `not_owned`. Null `p_item` clears the slot. Upserts the caller's row and changes only that column (`card` → `card_theme`) plus `updated_at`. |
-| `set_showcase(p_badges text[])` | jsonb: the details row | security definer; `authenticated` only. Raises `not_signed_in`; `bad_showcase` (more than 3, a null, a duplicate, a multi-dimensional array, or an id not matching `^[a-z0-9-]{1,40}$`). Null saves `{}`; the ids are saved in order, numbered from 1. It doesn't check the badges are earned: the card shows only the earned ones, because badges are worked out in the browser and one earned since the player's last season isn't in `badge_awards` yet. |
-
+| `shop_state()` | jsonb `{ "balance", "items": [{ "id", "kind", "rarity", "price", "badge", "active", "sort", "owned" }], "supporter", "equipped": { "frame", "card", "title", "nameplate", "namecolor", "celebration", "showcase" } }` | stable, security definer; `authenticated` only. Raises `not_signed_in`. Items: every active item plus any inactive one the player owns, ordered by kind (frame, card, title, nameplate, namecolor, celebration, avatar_pack), then `sort`, then `id`. `owned`: free, or an inventory row, or a badge item whose badge is in `badge_awards`, or — since v2.6.0 — a supporter item when the caller has a `supporters` row. `supporter` is that same entitlement on its own, so the shop can say what is theirs without a second call. `equipped`: the caller's profile_details columns (nulls and `[]` without a row). |
+| `shop_buy(p_item text)` | jsonb `{ "ok": true, "balance", "item" }` | security definer; `authenticated` only. Raises, checked in this order: `not_signed_in`; `guest_not_allowed` (v2.0.0, above); `unavailable` (no such item, or not active); `badge_only`; `supporter_only` (v2.6.0 — before the balance is looked at, so nobody reads "not enough coins" for something no balance reaches); `owned` (free, or already owned); `not_enough`. Takes the wallet lock **before** reading the item, ownership or the balance, then inserts the inventory row and `wallet_apply(uid, -price, 'purchase', id)`, all in one transaction. If `wallet_apply` doesn't charge the full price (the ledger already records that purchase but the inventory row is gone — only possible after rows were edited by hand) it raises `purchase_conflict` and rolls back, rather than hand the item over free. |
+| `equip_item(p_slot text, p_item text)` | jsonb: the details row (`to_jsonb`, like `save_profile`) | security definer; `authenticated` only. Raises `not_signed_in`; `guest_not_allowed` (v2.0.0, above); `bad_slot` (not one of `frame`, `card`, `title`, `nameplate`, `namecolor`, `celebration`); `bad_item` (no such item, or its kind isn't the slot's — each slot takes its own kind); `not_owned`. Null `p_item` clears the slot. Upserts the caller's row and changes only that column (`card` → `card_theme`) plus `updated_at`. |
+| `set_showcase(p_badges text[])` | jsonb: the details row | security definer; `authenticated` only. Raises `not_signed_in`; `guest_not_allowed` (v2.0.0, above); `bad_showcase` (more than 3, a null, a duplicate, a multi-dimensional array, or an id not matching `^[a-z0-9-]{1,40}$`). Null saves `{}`; the ids are saved in order, numbered from 1. It doesn't check the badges are earned: the card shows only the earned ones, because badges are worked out in the browser and one earned since the player's last season isn't in `badge_awards` yet. |
 | `board_looks(p_limit integer default 500, p_names text[] default null)` | jsonb `[{ "username", "supporter", "namecolor" }]` | **stable, security INVOKER**, `anon` and `authenticated` - the only function in this file a signed-out caller may run, because it reads what the boards already show everybody and a visitor reads the Leaderboard too. Only accounts wearing something come back, ordered by `username collate "C"` (twice: once to pick the rows the limit keeps, once for the order they come back in). `p_names` asks about exactly those accounts and ignores the limit, capped at 100 - the duel screen's two players, who may be anywhere in the alphabet and so may sit outside the first `p_limit` wearers. It exists because the supporter flag is on `profiles` and the name colour in `profile_details`, and because a board that asked twice would show one decoration before the other. `guest` accounts can wear neither, so none appear. |
 
 **`set_avatar` in `migration-profiles.sql` (agent J):** a preset that isn't free is allowed when the caller owns
@@ -228,7 +235,7 @@ COIN_RULES = {
   season: 20, dailySeason: 40, win: 2, playoffs: 10, title: 50, perfect: 150,
   pointsPer: 10,                   // 1 coin per 10 ladder points the draft earned, when above 0
   streakPerDay: 5, streakMax: 50,  // a Daily only: 5 per day of the streak it makes, up to 50
-  minigame: 15,                    // Over/Under and Build-a-player, once each per UTC day (SQL)
+  minigame: 15,                    // a minigame, once each per game day in the player's calendar (SQL)
   paidSeasonsPerDay: 20,           // Unlimited/Genius/GM seasons paid per UTC day; Dailies don't count
   welcome: 250,                    // a new account (SQL)
   startingCap: 10000,              // the one-time starting balance's cap (SQL)
@@ -301,23 +308,26 @@ The app imports these from `./storage.js`. **Nothing throws.** Reads use `READ` 
 
 ```js
 fetchWallet()            → { balance, earned, spent, recent: [{ amount, kind, ref, createdAt }] } | null
-fetchShop()              → { balance, items: [{ id, kind, rarity, price, badge, active, sort, owned }],
+fetchShop()              → { balance, items: [{ id, kind, rarity, price, badge, active, sort, owned }], supporter,
                              equipped: { frame, card, title, nameplate, namecolor, celebration, showcase } } | null
 buyItem(id)              → { ok: true, balance } | { ok: false, reason }
-    // reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "signed_out" | "network"
+    // reason: "not_enough" | "owned" | "unavailable" | "badge_only" | "supporter_only" | "guest"
+    //       | "signed_out" | "network"
     // (purchase_conflict arrives as "network": nothing the player can do clears it)
 equipItem(slot, id)      → { ok: true, details } | { ok: false, reason }        // id null clears the slot
-    // reason: "not_owned" | "invalid" | "signed_out" | "network"
-setShowcase(badgeIds)    → { ok: true, details } | { ok: false, reason: "invalid" | "signed_out" | "network" }
+    // reason: "not_owned" | "invalid" | "guest" | "signed_out" | "network"
+setShowcase(badgeIds)    → { ok: true, details } | { ok: false, reason: "invalid" | "guest" | "signed_out" | "network" }
 claimMinigameCoins(game, date) → { ok: true, credited, balance } | { ok: false, reason }
-    // game: "over_under" | "build"; date: the game's day in the player's calendar, "2026-09-15"
+    // game: "over_under" | "build" | "century" | "guess"; date: the game's day in the player's
+    // calendar, "2026-09-15"
     // reason: "not_played" | "invalid" | "signed_out" | "network"
 ```
 
 ### 5.2 Lead-owned changes (phase 0 did these)
 
 - `storage-profile.js`'s `mapDetails` adds `frame`, `cardTheme`, `title` (null when unset) and `showcase` (an
-  array, `[]` when unset).
+  array, `[]` when unset) — and `celebration`, `nameplate` and `namecolor` the same way as v2.5.0, v2.6.0 and
+  v2.7.0 added those slots, since it is a whitelist and anything it doesn't name simply vanishes.
 - `storage.js`'s `submitRun(trace)` returns the function's answer on success; on a refusal it returns
   `{ ok: false, reason: "duplicate" }` when the answer carried that reason, otherwise `{ ok: false }`.
 - `storage-core.js` exports `callReason(error, status, table)` (moved from storage-profile.js): a rejected session is
@@ -335,9 +345,12 @@ claimMinigameCoins(game, date) → { ok: true, credited, balance } | { ok: false
 SHOP_KINDS    = ["frame", "card", "title", "nameplate", "namecolor", "celebration", "avatar_pack"]
 KIND_LABEL    = { frame: "Frames", card: "Card themes", title: "Titles", nameplate: "Nameplates", namecolor: "Name colors", celebration: "Win celebrations", avatar_pack: "Avatar packs" }
 EQUIP_SLOTS   = ["frame", "card", "title", "nameplate", "namecolor", "celebration"] // each slot takes items of its own kind
-DEFAULT_ITEM  = { frame: "frame-ink", card: "card-navy", title: null }
-RARITIES, RARITY_LABEL                           // free, common, rare, epic, legendary, badge ("Badge reward")
+DEFAULT_ITEM  = { frame: "frame-ink", card: "card-navy", title: null, nameplate: null, namecolor: null, celebration: "cel-confetti" }
+              // a null nameplate or name colour is no decoration at all, not a default one: nobody is given a
+              // banner or a colour they did not choose, which is what every account has always had
+RARITIES, RARITY_LABEL   // free, common, rare, epic, legendary, badge ("Badge reward"), supporter ("Supporter")
 SHOWCASE_MAX  = 3
+LAUNCH_PRICES = { common: 750, rare: 2000, epic: 6000, legendary: 15000 }
 SHOP_ITEMS    = [{ id, kind, name, rarity, badge }]   // the catalog; the shop shows the server's rarity and price
 SHOP_ITEM_BY_ID
 AVATAR_PACKS  = [{ pack, item, name, rarity, presets: [{ key, name }] }]   // rarity: the pack's launch rarity
@@ -414,9 +427,14 @@ Seed `sort` is 10, 20, 30… in this order within each kind. The packs' avatars:
 `medal` Medal, `banner` Banner, `game-ball` Game ball; **Night game** — `floodlights` Floodlights, `scoreboard`
 Scoreboard, `fireworks` Fireworks, `blimp` Blimp; **Draft day** (on broadcast blue) — `podium` Podium, `draft-card`
 Draft card, `the-call` The call, `draft-cap` Draft cap; **Hall of Fame** (gold on black) — `gold-jacket` Gold jacket,
-`bust` Bust, `laurels` Laurels, `the-hall` The Hall.
+`bust` Bust, `laurels` Laurels, `the-hall` The Hall; **Stargazer** (v2.8.0, football seen from a long way off, so it
+joins the supporter items' cosmic line without becoming space stickers in a football game) — `comet` Comet,
+`moonlight` Moonlight, `constellation` Constellation, `satellite` Satellite.
 
-### 6.3 `badges.mjs` — unchanged. submit-run imports it; `BADGE_BY_ID[id].coins` is what a badge pays.
+### 6.3 `badges.mjs` — unchanged by v1.12.0. submit-run imports it; `BADGE_BY_ID[id].coins` is what a badge pays,
+and since v2.0.0 what `migration-wallet.sql` seeds `badge_rewards` from, because the database is the wallet and
+answers for the amount itself — the two are held equal by `tests/test-wallet-sql.mjs`, which is what keeps the
+number credited and the number the browser prints the same one.
 
 ---
 
@@ -438,8 +456,9 @@ rules before media queries, hover inside `(hover:hover)`, every animation stoppe
 <Coin size />                        // decorative
 <Coins amount size className />     // coin + "1,240"; its accessible text reads "1,240 coins"
 <ItemPreview id team username photoUrl preset />   // the thumbnail a shop tile shows; decorative
-<NamePlate plate className>{username}</NamePlate>   // the banner behind a name on the player card
+<NamePlate plate look scope className>{username}</NamePlate>   // the banner behind a name on the player card
 <NameInk look scope>{username}</NameInk>            // the name itself, coloured, on the boards
+<WinCelebration celebration className />             // the overlay over a title-winning result screen
 COSMETICS_CSS
 CARD_THEME_SCOPE                    // { [card id]: "dark" | "night" | "light" }
 ```
@@ -506,25 +525,28 @@ Self-contained: it loads `fetchShop()`, `fetchWallet()` and `fetchPlayerProfile(
 your badges) itself.
 
 **Layout:** a preview of your own player card (CardTheme + FramedAvatar + name + TitleLine, wearing the selected
-item over what's equipped) → your balance → tabs Frames, Card themes, Titles, Avatar packs, Showcase → the items →
-WalletPanel.
+item over what's equipped) → your balance → one tab per `SHOP_KINDS` entry, named by `KIND_LABEL` (Frames, Card
+themes, Titles, Nameplates, Name colors, Win celebrations, Avatar packs), then Showcase → the items → WalletPanel.
 
 **Item states:** `equipped`, `owned`, `buy` (affordable), `short` (shows "750 more coins"), `locked` (a badge item
 not owned: "Earn the Undefeated badge", or "Unlocks after your next finished season" when `badgeProgress` says the
-badge is earned).
+badge is earned; since v2.6.0 a supporter item too: "Comes with the one-off Supporter unlock", locked rather than
+buyable because a Buy button that could only ever answer `supporter_only` is worse than no button).
 
 **Flow:** tap an item → your card preview wears it and its actions show. **Buy** → "Confirm purchase" / "Cancel" →
 on success a frame, card theme or title is equipped straight away ("Bought and equipped."), and an avatar pack says
 "Bought. Choose one in Edit profile." **Equip** for an owned item; **Take off** for the equipped title (a frame or
 card theme goes back by equipping the free one). Refusals in words: not_enough "You don't have enough coins for
-that."; network "That didn't go through. Try again."; owned or unavailable reloads the shop.
+that."; network "That didn't go through. Try again."; owned, unavailable, badge_only or supporter_only reloads the
+shop instead, since each of those means the shop on screen is out of date and the refresh is what shows why.
 
 **Showcase tab:** every earned badge as a checkbox (at most 3; the rest disable at 3), **Save showcase**. With
 nothing chosen, the card shows its top three (`topBadges`).
 
 **WalletPanel:** the balance, earned and spent, and recent coins — "+186 · Season", "−750 · Lime", with labels from
-kind and ref: Starting balance, Welcome coins, Daily, Season, "<Name> badge", Over/Under, Build-a-player, the item's
-name.
+kind and ref: Starting balance, Welcome coins, Daily, Season, "<Name> badge", Over/Under, Build-a-player, Century,
+Guess the Player, the item's name. A `minigame` ref names its game, all four of them — unnamed, a Century or Guess
+claim read in the wallet as a bare "Minigame".
 
 **Test hooks (must keep):** root `<section class="shop" data-balance="<n>">` (`data-balance` absent until loaded);
 tabs are buttons named by `KIND_LABEL` plus "Showcase"; each item is `<article class="sh-item" data-item="<id>"
@@ -563,8 +585,10 @@ New props: `wallet` (`{ balance }` or null — the owner's) and `onOpenShop()`.
 - **Header picture**: `FramedAvatar` with `myDetails.frame` and the favorite team. `myDetails` also updates from
   ShopScreen's `onDetailsSaved`.
 - **Minigames**, signed in: once Over/Under's run is saved (await `upsertSouRun`), `claimMinigameCoins("over_under",
-  date)` with the game's date; once a build is logged (await `logBuild`), `claimMinigameCoins("build", todayKey())`.
-  Show "+15 coins" on that end screen when
+  date)` with the game's date; once a build is logged (await `logBuild`), `claimMinigameCoins("build", todayKey())`;
+  and since v2.9.0 and v2.13.0 the same for `"century"` and `"guess"`, which the Century and Guess screens ask for
+  through an `onClaimCoins(date, onCredited)` prop once their own Edge Function has recorded the run — every coin
+  still moves in one place, so neither function pays any itself. Show "+15 coins" on that end screen when
   `credited` is above 0.
 - **Styles**: phase 0 appended `COSMETICS_CSS + SHOP_CSS` to `APP_CSS` and added `.cs-dark` to the dark scope list,
   `.cs-night` to the night list and a `.cs-light` light scope after both.
@@ -581,16 +605,21 @@ New props: `wallet` (`{ balance }` or null — the owner's) and `onOpenShop()`.
     holds `credit_coins` and `award_badges`, which `invokeSubmitRun` calls and `rpc()` can't reach (like the
     service role). `welcome(uid)` is the signup trigger.
   - `tests/mock-shop.mjs` (J): `makeShop(state, { wallet, profileData })` → `{ tables, rpcs, ownsAvatarPack }`.
-    Tables `shop_items`, `inventory`; rpcs `shop_state`, `shop_buy`, `equip_item`, `set_showcase`.
+    Tables `shop_items`, `inventory`; rpcs `shop_state`, `shop_buy`, `equip_item`, `set_showcase`, and since
+    v2.7.0 `board_looks`, which the boards read for who is wearing a name colour.
   - A client's direct read of `wallets`, `wallet_ledger`, `badge_awards`, `finished_codes` or `inventory` is refused
     (privileges revoked); a direct write to any new table gets the RLS error. `state` gains
     `ownsAvatarPack(uid, pack)`. Escape hatches: `_wallets`, `_ledger`, `_badgeAwards`, `_finishedCodes`,
     `_shopItems`, `_inventory`, `_wallet` (the wallet module itself: `server`, `apply`, `balanceOf`, for setting
     up a test), and `_failWrites` (a Set of table names — `profiles`, `finished_codes`, `daily_runs` — whose writes
     inside the mock submit-run fail like a database error, to reach its 500 branches).
-- **Real Postgres.** `tests/pg-fixture.mjs`'s `MIGRATIONS` now ends with `migration-wallet.sql`,
-  `migration-shop.sql`. `tests/test-profile-security.mjs` stays pinned to v1.11.0's three migrations (its
-  every-function check is about those); N's `tests/test-economy-security.mjs` does the same checks for the new ones.
+- **Real Postgres.** `tests/pg-fixture.mjs`'s `MIGRATIONS` gains `migration-wallet.sql` and `migration-shop.sql`
+  (v1.19.0's `migration-versus.sql` now follows them, and the list runs in the runbook's own order).
+  `tests/test-profile-security.mjs` stays pinned to v1.11.0's migrations through `PROFILE_MIGRATIONS` /
+  `RENAME_MIGRATIONS` — its every-function check is about those — which since v2.9.0 and v2.13.0 carry
+  `migration-century.sql` and `migration-guess.sql` ahead of them, because `player_stats` names those tables and a
+  `language sql` body is validated when it is created. N's `tests/test-economy-security.mjs` does the same checks
+  for the new ones.
   PGlite is one connection, so "two purchases at once" is tested as the lock plus the constraints, and N reviews the
   locking by reading it.
 - **Per agent:**

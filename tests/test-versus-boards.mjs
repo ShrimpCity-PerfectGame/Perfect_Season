@@ -3,7 +3,7 @@
 // Function run, tested once, here.
 //
 // The centre of it is the case the owner asked about: both players still need a quarterback and the board has
-// one. That is not hypothetical - 33 of the 160 boards are one deep at a position.
+// one. That is not hypothetical - 31 of the 160 boards are one deep at a position.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -578,12 +578,12 @@ await runTest("a re-spin is judged on what the board still owes, not on pick-num
   // it assumed the asker takes ONE pick off the board it deals. A dip adds a turn, its forfeit removes one, and
   // a steal rewrites who leads, so after any of those the arithmetic disagrees with the replay: the serve-both
   // rule was skipped for a board's real leader, and a player who had already declared a double dip was dealt a
-  // board holding one quarterback or one tight end. 33 of the 160 boards are like that.
+  // board holding one quarterback or one tight end. 31 of the 160 boards are like that.
   // What that costs is the worst outcome in the game: autoPick returns null, the clock answers 500 forever,
   // replayMatch never reports done, so match-pick never reaches finish() and never abandons it. Both screens
   // sit on "Working out the result..." and create_match hands both players back into the dead match.
   // Swept over many codes rather than one, because whether the boundary is reached depends on which board the
-  // seed deals: 33 of the 160 hold a single quarterback or a single tight end, and those are the ones that
+  // seed deals: 31 of the 160 hold a single quarterback or a single tight end, and those are the ones that
   // brick. A roster needing exactly QB and TE is the shape that finds them.
   const scarce = () => ({ QB: null, TE: null, RB: {}, WR: {}, FLEX1: {}, FLEX2: {}, DST: {}, K: {} });
   let dipChecked = 0, privateChecked = 0;
