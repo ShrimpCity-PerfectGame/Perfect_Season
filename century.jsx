@@ -17,7 +17,8 @@ import {
   centuryTeamName, centuryReservedSeed, centuryOutcome,
 } from "./century-logic.mjs";
 import { teamVars, POS_NAME, Confetti, reducedMotion, dailyNumber } from "./ui-common.jsx";
-import { submitCentury, fetchCenturyTop, fetchCenturyBest, fetchMyCentury, sget, sset, clearDraft } from "./storage.js";
+import { submitCentury, fetchCenturyTop, fetchCenturyBest, fetchMyCentury, sget, sset, clearDraft, CENTURY_RETRY } from "./storage.js";
+import { sendOnce } from "./pending-daily.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 
 // What a slot is called on screen. The numbers exist so a roster can be keyed by slot (CENTURY_SLOTS' own
@@ -175,6 +176,12 @@ export function CenturyScreen({
       // A run was started while this read was in flight - a shared link being taken, or the player pressing a
       // variant. Whatever it found is older than that, and must not replace it.
       if (!alive || started.current) return;
+      // A daily already played on this device is spent, whatever is left in the WIP slot - sset/sdel give
+      // no ordering guarantee and clearDraft can fail, and with a drain behind it a resumed replay would be
+      // POSTED. The stored record is the only thing true across a remount.
+      if (saved && saved.variant === "daily" && saved.day === day && userId
+          && (await sget(CENTURY_DONE(userId, day), false))) { saveWip(null); return; }
+      if (!alive || started.current) return;
       // A daily snapshot from a day that has passed is not resumable: its seven teams were yesterday's.
       const usable = saved && typeof saved.seed === "string" && Array.isArray(saved.picks)
         && saved.picks.length < CENTURY_SLOTS.length
@@ -183,7 +190,7 @@ export function CenturyScreen({
       else if (saved) saveWip(null);
     })();
     return () => { alive = false; };
-  }, [day, saveWip]);
+  }, [day, saveWip, userId]);
 
   // A link somebody sent: its code IS the seed, so the seven teams come up in the order they came up for
   // them. It replaces whatever was in progress, the way taking a season challenge abandons a draft - a run
@@ -357,21 +364,28 @@ export function CenturyScreen({
     saveWip(null);
     // Written BEFORE the submission and never conditioned on it; the server's numbers replace them below.
     if (finished.variant === "daily" && finished.day) {
+      // `picks` is what gets re-sent - submitCentury replays picks in pick order, and `roster` is the
+      // display shape, which comes back not_on_board if you hand it to the function. `roster` stays
+      // because the tile renders it. `saved: false` is the outbox flag (pending-daily.mjs).
       const rec = { day: finished.day, score, hit: centuryHit(score), outcome: centuryOutcome(score),
-                    roster: rosterRows(local), local: true };
+                    roster: rosterRows(local), picks: finished.picks, saved: false };
       await sset(CENTURY_DONE(userId, finished.day), rec, false);
       setDailyDone(rec);
     }
     const mine = acct.current;
-    const answer = await submitCentury({
-      variant: finished.variant, seed: finished.seed, day: finished.day, picks: finished.picks,
-    });
+    const answer = await sendOnce(finished.variant === "daily" && finished.day ? CENTURY_DONE(userId, finished.day) : "century:practice",
+      () => submitCentury({ variant: finished.variant, seed: finished.seed, day: finished.day, picks: finished.picks }));
     if (mine !== acct.current) return;
     setSaving(false);
     if (answer.ok) {
       setResult({ ...answer, local: false });
       if (finished.variant === "daily") {
-        setDailyDone({ score: answer.score, hit: answer.hit, ceiling: answer.ceiling, outcome: answer.outcome, roster: answer.roster });
+        // Settle the stored record as well, or every one of them says the save failed and a remount
+        // re-sends a run that is already on the board.
+        const done = { day: finished.day, score: answer.score, hit: answer.hit, ceiling: answer.ceiling,
+                       outcome: answer.outcome, roster: answer.roster, picks: finished.picks, saved: true };
+        if (finished.day) await sset(CENTURY_DONE(userId, finished.day), done, false);
+        setDailyDone(done);
         // The day the RUN was for, which is what the function answered with - not today. A run handed in as UTC
         // midnight passes belongs to the day whose teams it was played from.
         if (onDailySaved) onDailySaved({ day: answer.day, score: answer.score, hit: answer.hit });
@@ -698,6 +712,9 @@ function refusalLine(reason, variant) {
     case "bad_code": return "That isn't a code this mode can play.";
     case "signed_out": return "You were signed out while playing, so this run wasn't recorded. Sign in and the next one will be.";
     case "no_profile": return "This account hasn't picked a username yet, so there was nowhere to record the run.";
+    // Distinct from "network" on purpose. Telling somebody to check a connection that was working
+    // is worse than saying nothing, and it sent us looking in the wrong place for a whole evening.
+    case "server": return "This run didn't save — that one is on us, not your connection.";
     case "network": return "Couldn't save this run — check your connection.";
     default:
       // A replay reason means the screen and the server disagreed about the rules, which is a bug rather than a

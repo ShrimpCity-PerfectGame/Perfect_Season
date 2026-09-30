@@ -484,7 +484,10 @@ await runTest("12. a second daily is reported as already recorded, not shown as 
   const after = window.__ps_supabase__._century.runs().filter((r) => r.day === today() && r.username === "twice");
   assert(after.length === 1, `one row exists: ${after.length}`);
 
-  // Now the stale tab: a fresh snapshot for the same day, resumed.
+  // Now the stale tab: a fresh snapshot for the same day, resumed. The done record this device wrote a
+  // moment ago goes with it - since v2.18.0 the resume path consults it, and a tab stale because the day
+  // was finished ELSEWHERE is by definition a device that never wrote one.
+  for (const k of (await window.storage.list("ps-century-done", false)).keys) await window.storage.delete(k, false);
   await window.storage.set("ps-century-wip", JSON.stringify({
     variant: "daily", day: today(), seed: centuryDailySeed(today()), picks: [],
   }));

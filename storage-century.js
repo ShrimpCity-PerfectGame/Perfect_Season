@@ -16,6 +16,11 @@ const num = (v) => {
 };
 
 // Everything submit-century answers with instead of saving. Anything not here is a fault, not a rule.
+// The refusals a held run may be re-sent after. Each is "not your fault, and it may not be true in a
+// minute": the radio was off, the function fell over, the session had lapsed, the name was not claimed
+// yet. Every OTHER reason is the server's verdict on the run itself and re-sending cannot change it.
+export const CENTURY_RETRY = ["offline", "server", "signed_out", "no_profile"];
+
 export const CENTURY_REFUSALS = [
   "duplicate",      // today's daily is already recorded for this account
   "guest_daily",    // a guest may not play the daily
@@ -25,6 +30,8 @@ export const CENTURY_REFUSALS = [
   "malformed",      // no picks at all, or a body the function could not read
   "signed_out",     // the session expired while the run was being played
   "no_profile",     // signed in, but the account has never claimed a name
+  "server",
+  "offline",         // the function reached the database and something there went wrong
   // replayCentury's own reasons, which mean the run as submitted was not legal. A player should never see one:
   // the screen enforces the same rules from the same module. If one appears, the two have drifted.
   "bad_seed", "bad_picks", "wrong_length", "bad_pick", "two_respins", "bad_slot", "slot_taken",
@@ -47,14 +54,18 @@ export async function submitCentury({ variant, seed, day, picks }) {
     const { data, error } = await getClient().functions.invoke("submit-century", { body });
     if (error) {
       let answer = null;
-      try { answer = await error.context?.json?.(); } catch (e) { /* no readable body */ }
+      let readable = true;
+      try { answer = await error.context?.json?.(); } catch (e) { readable = false; }
       const reason = answer?.reason;
-      return failed(CENTURY_REFUSALS.includes(reason) ? reason : "network");
+      if (CENTURY_REFUSALS.includes(reason)) return failed(reason);
+      // No body at all is the shape of a request that never arrived or never came back.
+      return failed(readable && answer ? "network" : "offline");
     }
     if (!data?.ok) return failed("network");
     return { ok: true, ...data };
   } catch (e) {
-    return failed("network");
+    // invoke() threw: DNS, TLS, CORS, a dead radio. Nothing reached the function.
+    return failed("offline");
   }
 }
 

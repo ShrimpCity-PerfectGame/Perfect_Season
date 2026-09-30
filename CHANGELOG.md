@@ -10,14 +10,72 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.0] — 2026-09-30
+
+A daily that was played but never recorded now gets a second chance at the board.
+
+**Deploy order: deploy the Edge Functions, then the client.** No migration.
+
+- **On production a solved Guess the Player daily was lost.** The end screen showed the answer and then
+  "Couldn't save this game - check your connection", and no row reached `guess_runs`. The day was gone
+  and so was the run.
+- **The reason the day was gone is v2.17.0's doing.** That release made both mini-games write a
+  per-account record to the device the moment a daily finishes, whatever the submission answered, so a
+  refused save could not be turned into a fresh attempt with the answer already on screen. It closed a
+  real hole by making a genuine failure cost the player their daily. That trade was wrong.
+- **The record the device already writes is now the outbox.** It carries `saved`, and while that is false
+  the run is still owed to the board. `pending-daily.mjs` re-sends it — verbatim, never rebuilt and never
+  merged, so a re-send can only ever post the game that was actually played.
+- **The re-send lives in the app, not on the mini-game screen.** The end screen's Done button goes to Mini
+  games, so a drain that only ran where the player had just been told "it didn't save" would never run
+  again. It rides the focus/visibility path the day-rollover check already uses.
+- **The resume path now consults the stored record.** This is the finding that would have made the whole
+  change worse than doing nothing: `dailyDone` is in-memory and starts null on every mount, so a WIP that
+  outlived a finish - `sset`/`sdel` guarantee nothing and `clearDraft` can fail - was a way back onto a
+  board whose answer was on the previous screen. With a re-send behind it, that replay would have been
+  POSTED and the player would have ended the day with a better result than they played.
+- **`offline` is minted as the client's own transport reason.** `network` was doing four jobs, one of
+  which is "a reason this client does not recognise" - so retrying `network` would have meant re-sending
+  a server RULE for ever. Only `offline`, `server`, `signed_out` and `no_profile` are re-sent; every other
+  answer is the server's verdict on the run and settles it.
+- **A held run is bound to its own day** and is dropped once that day has passed, so a device shut for a
+  week cannot wake up and post a stale board.
+- **Century's record carries `picks`, not the display `roster`.** `submitCentury` replays picks in pick
+  order; handing it the roster shape comes back `not_on_board`.
+- **The three 500s in `submit-guess` and `submit-century` now answer `reason: "server"`** and log first,
+  and the copy says "that one is on us, not your connection" rather than blaming a connection that was
+  working. The profile-read path was not even logging.
+- **`CHANGELOG.md`'s v2.17.0 deploy line said "No Edge Function change" and was wrong** — written when
+  that release was one commit, never updated when the second commit changed both functions. Production
+  was fine because the promotion checked the diff rather than the changelog, but a fresh environment
+  following it would have shipped a stale function whose refusals carry no reason.
+- The Guess end screen's buttons were `flex-start` under a centred hero, so a fourth button wrapped and
+  left Done alone against the left edge. Centred.
+- `tests/test-pending-daily.mjs` is new: the whole re-send matrix, including that two drains cannot put
+  the same run on the wire twice. `tests/test-guess-screen.mjs` 18 is the one that matters — it plays a
+  daily in THREE guesses, drops the save, restores a WIP by hand and remounts, and fails if the day is
+  dealt again or if the recorded row says anything but three.
+
+**Still open, deliberately.** The re-send is one browser profile: a run lost on a phone will not appear
+because a laptop opened the game. Closing that needs the server to know a daily is in flight, which means
+a round trip on every daily, and that is not proportionate to one mini-game. And the season path's
+`saveError` panel still promises "It will be included the next time a save goes through" — there is no
+queue behind that sentence, and it predates this one.
 ## [2.17.0] — 2026-09-29
 
 A bug pass: two ways to cheat the daily, a coin over-payment, three client races, and the tests and
 documents that let them through.
 
-**Deploy order: re-run `migration-wallet.sql`, then `migration-runs-log.sql`, then the client.** No Edge
-Function change. Both files only replace functions, so they are safe on any shape and the site keeps working
-between the steps.
+**Deploy order: re-run `migration-wallet.sql`, then `migration-runs-log.sql`, then
+`migration-moderation.sql`, then DEPLOY THE EDGE FUNCTIONS, then the client.** All three migrations only
+replace functions, so they are safe on any shape and the site keeps working between the steps.
+
+This paragraph said "No Edge Function change" until v2.17.1, and was wrong: it was written when the release
+was one commit and never updated when the second commit gave `submit-guess` and `submit-century` their
+`signed_out` / `no_profile` / `malformed` reasons and split `report_player`'s guest codes. Production was
+fine - the promotion checked the diff rather than the changelog and deployed all four - but a fresh
+environment following this line would have shipped a stale function whose refusals carry no reason, which
+is the exact bug this release existed to fix.
 
 **Two doors the daily could be got at through**
 
