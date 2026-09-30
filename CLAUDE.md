@@ -19,7 +19,13 @@ drafts). Descriptive uses of the phrase stay ("a perfect 20–0 season"), and so
 strings like "Perfect season. 20–0.".
 
 **Brand assets:** the mark (the re-spin ↻ arrow around a football) is `static/icon.svg`, drawn again
-as `GridspinMark` in `perfect-season.jsx`; change both together. `node tools/brand/render.mjs`
+as `GridspinMark` in `perfect-season.jsx`. **It is six hand copies across five tracked files, not two**
+(counted in v2.18.3, and they all agree today): `static/icon.svg`, `GridspinMark`, `tools/brand/avatar.mjs`
+twice - `MARK` and `avatarDark` spell the paths out separately - and both films, `tools/film/spin-an-era.html`
+and `tools/film/tiktok-ad.html`, which inline them because a film loads from a `file://` URL with no server.
+Change every one together; `git ls-files -z | xargs -0 grep -l "M43.57 18.21"` lists them. Only
+`tools/brand/render.mjs` and `tools/app/icons.mjs` genuinely cannot drift, because those two `readFileSync`
+the SVG. `node tools/brand/render.mjs`
 rebuilds every PNG in `static/` from the SVG (favicon, home-screen icons, the 1200x630 `og.png` link
 preview). `build.mjs` copies `static/` to the site root and fills the page's link-preview tags and the
 share text's link: `SITE_URL` if set, else `https://gridspin.app` for production and Vercel's
@@ -153,8 +159,15 @@ each Supabase project before this is busy, and remember anonymous users count to
 the same `use_account_username` trigger that stamps the name and cleared wherever the name is rewritten
 (`claim_username`'s trade-up, `mod_act`'s rename). Every board renders names through one `NameLink`, so a
 board that drops the flag silently turns a throwaway account into a clickable, reportable one - which eight
-of them did. The guest-name shape is reserved broadly (`^guest_[a-z0-9]{1,10}$`), because the rule is that
-nobody else may LOOK like a guest, not just that nobody may take a generated name.
+of them did. **`NameLink` lives in `cosmetics.jsx`** (moved there in v2.18.3, from module scope in this file):
+it needs `NameInk`, which is wired into that file's palettes, and cosmetics.jsx already imports
+`ui-common.jsx`, so that is the one home where the arrow still points one way. `OpenProfile` went to
+ui-common.jsx beside `BoardWear`, for the reason BoardWear is there. That move is what finally made this
+paragraph true of **Century's and Guess's boards**, which rendered bare text from v2.9.0 and v2.13.0 - no
+link, no chip, no star, no colour - because a screen file may not import this one back and so could not
+reach the component at all. Both screen tests had a comment claiming the rule held and nothing under it
+checking; they check now. The guest-name shape is reserved broadly (`^guest_[a-z0-9]{1,10}$`), because the
+rule is that nobody else may LOOK like a guest, not just that nobody may take a generated name.
 
 **Duels (v1.19.0).** Two players draft against each other from the same boards and the better roster wins.
 Players see **Duel**; everything internal stays `versus` / `vs-` / `/vs/`, the same split the Gridspin rename
@@ -758,7 +771,7 @@ overwrite each other.
   are the client's choice, so searching codes offline for 20-0 seasons tops out around 7,000 coins a day. Closed in
   v1.12.0: submit-run refuses a GM season over the cap, ignores GM/Genius flags on a Daily, and `replayDraft`
   refuses a trace that walks past a board it could pick from without re-spinning (cherry-picking the best six of
-  eighteen boards - on a Daily, better than any draft the app allows).
+  ten boards - on a Daily, better than any draft the app allows).
 - **Badge items** (Undefeated frame and title, Dynasty card, Daily Winner and Cinderella titles) belong to whoever
   has the badge in `badge_awards`, which submit-run fills as it pays - so an item unlocks with the first finished
   season after its badge is earned.

@@ -138,7 +138,7 @@ check("rejects a roster whose boards belong to a different seed entirely", !r.ok
 
 // The app leaves a board with a legal pick only by picking from it or by re-spinning it (which puts the new board
 // straight after it). A trace that walks past such a board to draft from later ones - the best six of the
-// sequence's eighteen - was accepted until v1.12.0, and on a Daily it beats any draft the app allows.
+// sequence's ten - was accepted until v1.12.0, and on a Daily it beats any draft the app allows.
 t = (() => {
   const seed = "verify-seed-skip";
   const seq = gl.seededSequence(seed);

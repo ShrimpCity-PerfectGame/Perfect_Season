@@ -252,7 +252,12 @@ grant execute on function public.create_match(text) to authenticated;
 
 -- Taking someone's invite. The first person through the link is the opponent; everyone after is told it's full.
 -- Returns the match, or { error: <code> }:
---   not_signed_in | guest_not_allowed | not_found | own_match | already_full | already_started
+--   not_signed_in | guest_not_allowed | not_found | own_match | already_finished | match_abandoned |
+--   already_full | already_started
+-- All eight, and the list is worth keeping honest: a code this comment doesn't name is a code nobody thinks to
+-- map, and versus.jsx's errorText falls through to a flat "That didn't work." for anything it doesn't hold -
+-- which tells a player nothing about a rule they just met. `not_signed_in` reaches the screen as `signed_out`,
+-- storage-versus.js's joinMatch having translated it. VERSUS.md's table is the same eight; keep all three in step.
 create or replace function public.join_match(p_code text)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare

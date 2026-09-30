@@ -6,6 +6,13 @@
 // bars GROW, so a frame that is clean at 6s is not the frame that is wrong: this samples the whole clip.
 //
 //   node tools/film/overlap.mjs [--film FILE] [--seconds 15] [--step 0.1]
+//
+// The defaults are the TikTok ad's: 15 seconds, and a 1080x1920 stage. The title sequence is the other
+// way up and twice as long, so it wants `--film tools/film/spin-an-era.html --seconds 30`. Read the
+// answer on that one as weaker, though, and not because of the viewport: FILLED below is the ad's own
+// vocabulary of painted blocks, and of it only `.g` exists in the title sequence, whose roster and reel
+// are `.slot` and `.reel-item`. "Text over text" and the scene walk still apply and are worth having;
+// "text over block" has almost nothing to measure there. Add the names before trusting a clean run.
 
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -75,6 +82,10 @@ for (let i = 0; i <= Math.round(SECONDS / STEP); i++) {
     const out = [];
     for (const scene of document.querySelectorAll(".scene")) {
       if (parseFloat(getComputedStyle(scene).opacity || "1") < 0.5) continue;   // not the frame on screen
+      // The title sequence has no .safe: it is a 16:9 film for a player that covers none of it, so the
+      // readable box the ad is built around does not exist there. Absent means "no such rule to check",
+      // not zero-sized - measuring a null crashed the whole run on that film, which is how a tool whose
+      // usage says [--film FILE] came to work on exactly one of the two.
       const safe = scene.querySelector(".safe");
       const filled = [...scene.querySelectorAll(FILLED)].filter(vis);
       // Text = an element carrying its own words, not a wrapper around more elements.
@@ -88,7 +99,7 @@ for (let i = 0; i <= Math.round(SECONDS / STEP); i++) {
         // outer edges are flush with the box, so any entrance at all crosses it: measuring that reports
         // the motion as if it were the composition, and there is no offset that would satisfy it. A
         // non-identity transform is the signal that an element is still moving.
-        if (!moving(tx)) {
+        if (!moving(tx) && safe) {
           const sb = box(safe);
           if (tb.left < sb.left - 0.5 || tb.right > sb.right + 0.5 || tb.top < sb.top - 0.5 || tb.bottom > sb.bottom + 0.5)
             out.push({ kind: "settles outside .safe", a: name(tx), b: scene.id });

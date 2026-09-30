@@ -177,8 +177,14 @@ const fitsAny = (o, open) => open.some((s) => optionFits(o, s));
 // exactly one option, so two that fit the second picker is always enough. One is enough only when the first
 // picker could not have taken it anyway.
 //
-// This is the whole reason the rule exists: 33 of the 160 boards hold a single quarterback or a single tight
+// This is the whole reason the rule exists: 31 of the 160 boards hold a single quarterback or a single tight
 // end, and two players who both still need one cannot both be served from it.
+//
+// Thirty-one and not thirty-three, which this said from v1.19.0 until it was counted: 31 boards hold exactly
+// one quarterback and 2 hold exactly one tight end, but both of those two are PIT|1 and PIT|2, which are
+// already in the first set - so the two shapes OVERLAP rather than add, and adding them counts the Steelers
+// twice. VERSUS.md 8 has always said 31. Counted over BOARDS after initGameData(), so don't "correct" it back
+// to 33 without re-counting.
 export function boardServesBoth(key, taken, openFirst, openSecond) {
   return boardServes(key, taken, openFirst, openSecond, 1);
 }
@@ -255,9 +261,13 @@ export function boardCompletable(key, taken, left, open) {
 // single player. `used` is every board already dealt or spun in, so nothing repeats. `openSecond` is null on a
 // board the other player has forfeited to a double dip - then it only has to serve the one.
 //
-// The sequence holds eighteen entries for eight boards. If they were somehow all unusable it widens to the rest
-// of the boards in the same seeded order rather than leaving a player with nothing - a case that should never
-// happen, and must not be a crash if it does.
+// The sequence holds TEN entries for eight boards - ten, not the eighteen this said before, and not the 18 that
+// seededSequence's own unreachable break implies: its rule is no team twice and no era more than twice over five
+// eras, so 5 x 2 = 10 is the ceiling and every seed reaches it (see the comment on seededSequence in
+// game-logic.mjs). Eight boards out of ten is the whole of the margin, so if all ten were somehow unusable it
+// widens to the rest of the boards in its own seeded order rather than leaving a player with nothing - a case
+// that should never happen, and must not be a crash if it does. That widening is what actually guarantees a
+// board is always available here; the length of the list never did.
 export function nextBoard(seed, seq, used, taken, openFirst, openSecond) {
   for (const key of seq) {
     if (used.has(key)) continue;
@@ -531,7 +541,8 @@ export function matchResult({ code, format, host, guest }) {
 //     match), or demanded against an opponent who never drafts that board, refusing a legal private re-spin.
 //   - How many picks the asker is about to take off this board was assumed to be one. A player who has already
 //     declared a double dip takes TWO, and nothing told respinBoard, so it dealt boards holding one
-//     quarterback or one tight end - 33 of the 160 are like that - and the match could not be finished.
+//     quarterback or one tight end - 31 of the 160 are like that, see boardServesBoth for why it is 31
+//     and not the 33 those two shapes add up to - and the match could not be finished.
 //
 // A bricked match is the worst outcome in the game: autoPick returns null, the clock answers 500 forever,
 // replayMatch never reports done, so match-pick never reaches finish() and never abandons it. Both screens sit

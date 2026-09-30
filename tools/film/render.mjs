@@ -10,8 +10,30 @@
 // dot-matrix field is the better part of a gigabyte, and none of it is wanted afterwards.
 //
 //   node tools/film/render.mjs [--out FILE] [--fps 60] [--width 1920] [--height 1080] [--seconds 30]
+//                              [--film FILE] [--audio FILE] [--stills 1.5,7,22]
 //
 // Needs: puppeteer-core (already a devDependency), Chrome, and ffmpeg on PATH or at FFMPEG_PATH.
+//
+// --audio is what makes the DELIVERED film rather than a silent one. The cue is synthesized by
+// tools/film/score.mjs, so the whole scored file comes out of this repo and nothing else:
+//
+//   node tools/film/score.mjs
+//   node tools/film/render.mjs --audio build/film/score.wav \
+//                              --out build/film/gridspin-spin-an-era-1080p60.mp4
+//
+// The flag lives here rather than in a separate mux script because this file is already the one
+// place that knows how to talk to ffmpeg, and a second script would be a second copy of the encoder
+// settings to keep in step. If a silent render is ALREADY in hand, though, don't re-render 1800
+// frames just to attach sound - that is half an hour for something that takes two seconds. Copy the
+// picture through untouched and encode only the audio. The h264 stream is byte for byte the one the
+// silent render already produced, so this and the --audio flag above end at the same file:
+//
+//   ffmpeg -y -i build/film/silent.mp4 -i build/film/score.wav \
+//          -c:v copy -c:a aac -b:a 256k -shortest -movflags +faststart \
+//          build/film/gridspin-spin-an-era-1080p60.mp4
+//
+// -shortest is not decoration: without it the output runs as long as the LONGEST input, so a cue that
+// overshoots the picture leaves an mp4 whose audio plays on over nothing.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -31,6 +53,7 @@ const SECONDS = Number(arg("seconds", 30));
 const FRAMES = Math.round(FPS * SECONDS);
 const OUT = resolve(arg("out", "build/film/gridspin-30s-1080p60.mp4"));
 const FILM = resolve(arg("film", "tools/film/spin-an-era.html"));
+const AUDIO = arg("audio", null) ? resolve(arg("audio", null)) : null;
 
 // The same list the UI harness uses, plus the winget install path - winget adds its shim to PATH but
 // only for shells started afterwards, so a session that predates the install can't see it.
@@ -64,11 +87,19 @@ const pad = (n, w = 6) => String(n).padStart(w, " ");
 
 async function main() {
   mkdirSync(dirname(OUT), { recursive: true });
+  // Before Chrome, before a single frame. ffmpeg opens all its inputs at startup, so a missing cue
+  // does fail on its own - but it fails as a broken pipe on the first frame written, which reads like
+  // an encoder crash rather than a typo in a path. Half an hour of rendering is too expensive to risk
+  // on a filename, so say it plainly while nothing has been spent yet.
+  if (AUDIO && !existsSync(AUDIO)) {
+    throw new Error(`no audio at ${AUDIO} - run \`node tools/film/score.mjs\` first, or drop --audio`);
+  }
   const chrome = findChrome();
   const ffmpeg = findFfmpeg();
   console.log(`film    ${FILM}`);
   console.log(`chrome  ${chrome}`);
   console.log(`ffmpeg  ${ffmpeg}`);
+  console.log(`audio   ${AUDIO || "(silent)"}`);
   console.log(`out     ${OUT}`);
   console.log(`${WIDTH}x${HEIGHT} @ ${FPS}fps, ${SECONDS}s = ${FRAMES} frames\n`);
 
@@ -117,11 +148,15 @@ async function main() {
       return;
     }
 
+    // One stdin pipe for the picture and, optionally, the cue as a second input off disk. ffmpeg's
+    // default stream selection takes the video from input 0 and the audio from input 1, so no -map is
+    // needed; adding one would only be a thing to get wrong when a flag moves.
     const args = [
       "-y",
       "-f", "image2pipe",
       "-framerate", String(FPS),
       "-i", "-",
+      ...(AUDIO ? ["-i", AUDIO] : []),
       "-c:v", "libx264",
       "-preset", "slow",
       "-crf", "16",              // visually lossless for flat colour and type
@@ -129,6 +164,15 @@ async function main() {
       "-level", "4.2",
       "-pix_fmt", "yuv420p",     // the one chroma format every player and phone will open
       "-r", String(FPS),
+      // AAC-LC at 256k, which is what the delivered film carries. The cue is synthesized rather than
+      // recorded, so it is full of pure tones and sharp transients - the two things a mean encoder
+      // smears - and the whole file is 30 seconds, so there is nothing to save by going lower.
+      // -shortest bounds the output by the picture: without it a cue longer than the film leaves audio
+      // playing over an mp4 that has run out of frames. It is exact at the length this is actually used
+      // at - 30s of picture against the 30s cue comes out 30.000000s - but it cannot cut below what the
+      // AAC encoder has already buffered, so a two-frame test render with --audio still lands near a
+      // second. That is the test being shorter than the encoder's own latency, not a broken flag.
+      ...(AUDIO ? ["-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-shortest"] : []),
       "-movflags", "+faststart", // moov atom first, so it starts playing before it has downloaded
       OUT,
     ];

@@ -26,7 +26,7 @@ import {
 import {
   SLOT_LABEL, FORMAT_LABEL, LADDER_LABEL, teamVars, gradeTier, grade, cityFor, teamLabel, shortYr,
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
-  POS_NAME, cityRange, statCells, Confetti, BoardWear, reducedMotion, GRIDSPIN_DAY_ONE, dailyNumber,
+  POS_NAME, cityRange, statCells, Confetti, BoardWear, OpenProfile, reducedMotion, GRIDSPIN_DAY_ONE, dailyNumber,
 } from "./ui-common.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
@@ -34,7 +34,7 @@ import { PICKER_CSS } from "./avatar-picker.jsx";
 import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
 // The one definition of the event the Android shell asks Back with; the website never sends it.
 import { BACK_EVENT } from "./app-shell.mjs";
-import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk } from "./cosmetics.jsx";
+import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk, NameLink } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
@@ -1465,33 +1465,12 @@ function PlayerIndex() {
 }
 
 // ---------- Profile links and addresses (PROFILES.md 7) ----------
-// Every username shown for an account opens that player's profile. The boards that show them are
-// module-scope components (PlayerName, RankRows, ...) with no route to the app's navigation, so the
-// app hands its openProfile down through this context instead of threading a prop through each board.
-const OpenProfile = createContext(null);
-// BoardWear - who is wearing what, and the scope being drawn - lives in ui-common.jsx, because the duel screen
-// reads it too and a screen file never imports this module back. NameLink below is the one place a board name
-// is rendered, which is why neither the star nor the colour needed threading through a single board function.
-function NameLink({ name, guest }) {
-  const openProfile = useContext(OpenProfile);
-  const wear = useContext(BoardWear);
-  // A guest has no profile screen to open - no picture, no bio, nothing it could set - so its name is
-  // shown as what it is instead of offering an empty page. A guest is never a supporter: the shop refuses
-  // one, so there is no star to show either.
-  if (guest) return <><span className="bname">{name}</span><span className="guestchip">guest</span></>;
-  const look = wear?.looks?.get(name) || null;
-  // The colour goes on the name and nothing else. The star and the guest chip stay outside it, in their own
-  // tokens, or a drifting gradient would take the chip with it and the one thing it has to stay is legible.
-  const inked = <span className="bname"><NameInk look={look} scope={wear?.scope || "light"}>{name}</NameInk></span>;
-  if (!name || !openProfile) return name ? inked : null;
-  const star = wear?.supporters?.has(name)
-    ? <span className="supchip" role="img" aria-label="Supporter">{"★"}</span>
-    : null;
-  return <>
-    <button type="button" className="namelink" onClick={() => openProfile(name)}>{inked}</button>
-    {star}
-  </>;
-}
+// `OpenProfile` and `NameLink` both moved out in v2.18.3 and are imported above. OpenProfile went to
+// ui-common.jsx beside BoardWear, and NameLink to cosmetics.jsx beside NameInk, which it needs - the reasons
+// are written where each one now lives. What matters here is why they left at all: Century's and Guess's
+// boards are screen files, a screen file never imports this module back, and so those two boards had no way
+// to render a name the way every other board does. They rendered bare text instead, with no link, no guest
+// chip, no supporter star and no name colour, which made PROFILES.md 7 untrue of them for two releases.
 
 // Coming back from Google with no session: the player changed their mind at Google's screen, or the
 // provider answered with an error. Supabase puts it in the address - in the query for the code flow, in

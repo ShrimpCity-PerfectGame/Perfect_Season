@@ -381,6 +381,16 @@ await runTest("7. a half-finished practice game resumes, and a stale daily is th
 });
 
 await runTest("8. the boards render, today's and all time, with a guest chipped rather than linked", async () => {
+  // A guest's run on the same board, so the two halves of the rule can be told apart. Until v2.18.3 this
+  // test's own title was the only thing checking either of them: the board rendered every name as bare
+  // text, so nothing here linked and nothing here was chipped, and the assertions below were about table
+  // headings. NameLink was module-scope in perfect-season.jsx, which a screen file may not import, so this
+  // screen had no way to render a name the way the rest of the game does.
+  window.__ps_supabase__._guess.add({
+    id: 9001, user_id: "guest-on-the-board", username: "Guest_AB12C", guest: true,
+    day: new Date().toISOString().slice(0, 10), seed: null, solved: true, tries: 3,
+    guesses: [], answer: null, outcome: "Got it in 3.", created_at: new Date().toISOString(),
+  });
   await openGuess();
   const tabs = [...gp().querySelectorAll('[role="tab"]')];
   assert(tabs.length === 2, `two boards: ${tabs.length}`);
@@ -389,6 +399,16 @@ await runTest("8. the boards render, today's and all time, with a guest chipped 
   assert(open(), "one panel is open and the other hidden, so neither tab points at nothing");
   assert(open().querySelector(".gp-lb"), "today's board is a table");
   assert(open().textContent.includes("guesser"), `and this account is on it: ${open().textContent.slice(0, 120)}`);
+
+  // An account's name is a link to its profile, the way it is on every other board in the game.
+  const linked = [...open().querySelectorAll(".gp-lb tbody .namelink")].map((b) => b.textContent);
+  assert(linked.includes("guesser"), `expected guesser to be a profile link, got: ${JSON.stringify(linked)}`);
+  // A guest's is not: it carries the chip and is not a button, because there is no profile behind it and a
+  // throwaway account must not be clickable or reportable.
+  const guestCell = [...open().querySelectorAll(".gp-lb tbody tr")].find((r) => r.textContent.includes("Guest_AB12C"));
+  assert(guestCell, `the guest's row is on the board: ${open().textContent.slice(0, 200)}`);
+  assert(guestCell.querySelector(".guestchip"), `the guest's name carries a chip: ${guestCell.innerHTML.slice(0, 200)}`);
+  assert(!guestCell.querySelector(".namelink"), `and is not a link: ${guestCell.innerHTML.slice(0, 200)}`);
   await click(tabs[1]);
   await flush();
   assert(tabs[1].getAttribute("aria-selected") === "true", "All time opens");

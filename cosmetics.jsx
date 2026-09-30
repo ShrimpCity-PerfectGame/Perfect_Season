@@ -8,7 +8,8 @@
 import { Avatar, SPACE } from "./avatars.jsx";
 import { PALETTE, THEME, TEXT_TOKENS } from "./theme.mjs";
 import { TEAMS } from "./game-logic.mjs";
-import { teamVars } from "./ui-common.jsx";
+import { useContext } from "react";
+import { teamVars, BoardWear, OpenProfile } from "./ui-common.jsx";
 import { SHOP_ITEM_BY_ID, DEFAULT_ITEM, PACK_BY_ITEM } from "./shop-catalog.mjs";
 
 // Which theme.mjs scope each card theme's text uses. perfect-season.jsx maps the cs-dark, cs-night and cs-light
@@ -776,6 +777,43 @@ export function NameInk({ look = null, scope = "light", children }) {
       {children}
     </span>
   );
+}
+
+// ONE NAME ON ONE BOARD, everywhere a board shows one. The guest chip, the supporter star, the name colour
+// and the link to the profile are all decided here and nowhere else, because a board that renders its own
+// name is a board that will eventually drop one of the four - which is not a hypothesis: eight boards
+// silently dropped the guest chip before v2.0.0, turning throwaway accounts into clickable, reportable
+// ones, and Century's and Guess's boards rendered bare text until v2.18.3 and so showed no chip, no star,
+// no colour and no link at all.
+//
+// It lives in cosmetics.jsx rather than in ui-common.jsx, which is where a shared display helper would
+// normally go, for one reason: it needs NameInk, NameInk is wired into this file's palettes, and
+// cosmetics.jsx already imports ui-common.jsx - so putting it the other way round would make the two
+// modules import each other. Here the arrow still points one way. The CSS it emits stays in
+// perfect-season.jsx's own stylesheet with the rest of the board styles; this file's rule about only
+// styling `cs-` is about what COSMETICS_CSS contains, and it still contains only that.
+//
+// The duel screen deliberately does NOT use this: DuelName paints a name and never links one, because a
+// profile link would push a history entry and take a player off a match on a clock (VERSUS.md).
+export function NameLink({ name, guest }) {
+  const openProfile = useContext(OpenProfile);
+  const wear = useContext(BoardWear);
+  // A guest has no profile screen to open - no picture, no bio, nothing it could set - so its name is
+  // shown as what it is instead of offering an empty page. A guest is never a supporter: the shop refuses
+  // one, so there is no star to show either.
+  if (guest) return <><span className="bname">{name}</span><span className="guestchip">guest</span></>;
+  const look = wear?.looks?.get(name) || null;
+  // The colour goes on the name and nothing else. The star and the guest chip stay outside it, in their own
+  // tokens, or a drifting gradient would take the chip with it and the one thing it has to stay is legible.
+  const inked = <span className="bname"><NameInk look={look} scope={wear?.scope || "light"}>{name}</NameInk></span>;
+  if (!name || !openProfile) return name ? inked : null;
+  const star = wear?.supporters?.has(name)
+    ? <span className="supchip" role="img" aria-label="Supporter">{"★"}</span>
+    : null;
+  return <>
+    <button type="button" className="namelink" onClick={() => openProfile(name)}>{inked}</button>
+    {star}
+  </>;
 }
 
 // The name on the player card: its plate if it wears one, otherwise its colour.
