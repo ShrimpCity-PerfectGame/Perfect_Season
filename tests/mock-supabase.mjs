@@ -22,6 +22,7 @@ import { mapPlayerStats } from "../profile-rules.mjs";
 // picks it up instead of a real network client.
 export function makeMockAuth() {
   const authUsers = new Map(); // email -> {id, email, password}
+  const resetRequests = []; // every resetPasswordForEmail, so a test can see what was asked for
   const profiles = new Map(); // id -> row (snake_case, matches the real schema)
   const dailyRuns = new Map(); // "date:userId" -> row
   const souRuns = new Map(); // "date:userId" -> row
@@ -60,6 +61,18 @@ export function makeMockAuth() {
   // What Google's return leaves behind: a session for that address, on the account that already holds it
   // if there is one - which is what Supabase does with a provider's verified email - and otherwise a new
   // account with no profile row until claim_username makes it.
+  // Following the one-time link from a reset email. In a browser supabase-js reads the recovery token out
+  // of the address and announces PASSWORD_RECOVERY, with a session that is real in every other way - that
+  // event is the ONLY thing telling a reset apart from an ordinary sign-in, which is why a test needs to be
+  // able to fire it. Returns false for an address nobody holds, the way a dead link does nothing.
+  const followRecoveryLink = (email) => {
+    const u = authUsers.get(email);
+    if (!u) return false;
+    session = { user: { id: u.id, email } };
+    notify("PASSWORD_RECOVERY");
+    return true;
+  };
+
   const googleSignIn = (email) => {
     const existing = authUsers.get(email);
     const id = existing?.id ?? `user-${authUsers.size + 1}`;
@@ -699,6 +712,8 @@ export function makeMockAuth() {
       },
     },
     removeChannel() {},
+    _resetRequests: resetRequests,
+    _followRecoveryLink: followRecoveryLink,
     rpc: (name, args) => {
       if (!rpcs[name]) return Promise.resolve({ data: null, error: { message: `unknown function ${name}` } });
       try {
@@ -797,10 +812,25 @@ export function makeMockAuth() {
         if (email && authUsers.has(email) && authUsers.get(email).id !== id) {
           return { data: null, error: { message: "A user with this email address has already been registered" } };
         }
+        // The address they already have, when only a password is being set - which is exactly what a
+        // password reset does (authSetPassword calls this with no email). Keyed by `email ||` alone, a
+        // reset re-filed the account under `anon-<id>` and threw its address away, so signing in with it
+        // afterwards failed - in the MOCK only, which is the dangerous direction: real Supabase keeps the
+        // address, so a test written against this would have disagreed with production either way round.
+        const had = [...authUsers.values()].find((u) => u.id === id);
+        const keepEmail = email || (had ? had.email : null);
+        const keepPassword = password || (had ? had.password : null);
         for (const [key, u] of [...authUsers]) if (u.id === id) authUsers.delete(key);
-        authUsers.set(email || `anon-${id}`, { id, email, password });
-        session = { user: { id, email } };
-        return { data: { user: { id, email } }, error: null };
+        authUsers.set(keepEmail || `anon-${id}`, { id, email: keepEmail, password: keepPassword });
+        session = { user: { id, email: keepEmail } };
+        return { data: { user: { id, email: keepEmail } }, error: null };
+      },
+      // Asking for a reset link. Supabase answers the same whether or not the address has an account - and
+      // so does this, because the panel's promise not to confirm who is registered is only as good as the
+      // thing underneath it. The call is recorded so a test can check what was asked for.
+      async resetPasswordForEmail(email, options = {}) {
+        resetRequests.push({ email, redirectTo: options.redirectTo || null });
+        return { data: {}, error: null };
       },
       async signOut() {
         session = null;

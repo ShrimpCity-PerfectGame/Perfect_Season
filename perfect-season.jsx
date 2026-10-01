@@ -5,6 +5,7 @@ import {
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
+  authResetPassword, authSetPassword,
   fetchProfile, submitRun, submitDnf,
   fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
@@ -1621,6 +1622,73 @@ function PickName({ email, onClaimed, onSignOut }) {
   );
 }
 
+// The second half of a password reset. The player followed the one-time link, supabase-js put the recovery
+// session in place and announced PASSWORD_RECOVERY, and this is where the new password is actually set.
+//
+// It can be dismissed, and that is deliberate: the session is a real one, so closing this leaves them signed
+// in with their OLD password still working - nothing is broken and nothing is half-done. Refusing to close
+// would be a trap, because a player who followed the link out of curiosity would have no way off the screen.
+function SetPassword({ onDone, onClose }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const dialog = useRef(null);
+  const field = useRef(null);
+  useCloseOnBack(onClose);
+  useEffect(() => { field.current?.focus(); }, []);
+
+  async function submit(e) {
+    e.preventDefault();
+    setErr("");
+    // The same floor signing up uses, so the two forms cannot disagree about what a password is.
+    if (pw.length < 6) return setErr("Passwords need at least 6 characters.");
+    if (pw !== pw2) return setErr("The two passwords don't match.");
+    setBusy(true);
+    try {
+      const { error } = await authSetPassword(pw);
+      setBusy(false);
+      // A recovery link works once and not for long, and an expired one fails HERE rather than on the way
+      // in - so this message has to say what to do rather than just that something went wrong.
+      if (error) return setErr(/expired|invalid|token/i.test(error.message || "")
+        ? "That link has already been used or has expired. Ask for a new one from the log in screen."
+        : mapAuthError(error));
+      onDone();
+    } catch (e) {
+      setBusy(false);
+      setErr("Couldn't reach the server. Try again.");
+    }
+  }
+
+  return (
+    <div className="modal-bg">
+      <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="setpw-title" tabIndex={-1}
+        onKeyDown={(e) => keepFocusInside(e, dialog.current)}>
+        <h2 id="setpw-title">Set a new password</h2>
+        <p>You're signed in. Choose a password and you'll use it next time.</p>
+        <form onSubmit={submit} noValidate>
+          <div className="fields">
+            <label>New password
+              <input ref={field} className="inp" type="password" value={pw} autoComplete="new-password"
+                onChange={(e) => setPw(e.target.value)} />
+            </label>
+            <label>Confirm password
+              <input className="inp" type="password" value={pw2} autoComplete="new-password"
+                onChange={(e) => setPw2(e.target.value)} />
+            </label>
+          </div>
+          {err && <p className="err" role="alert">{err}</p>}
+          <div className="frow" style={{ marginTop: 10 }}>
+            <button type="submit" className="btn solid" disabled={busy}>{busy ? "Saving…" : "Save password"}</button>
+            <button type="button" className="btn" onClick={onClose}>Not now</button>
+          </div>
+        </form>
+        <p className="fine">Until you save one, your old password still works.</p>
+      </div>
+    </div>
+  );
+}
+
 // A guest turning into an account of its own. It is the same account throughout - every season, coin and
 // streak stays where it is - so this is an email going onto it and then the one name change a guest is
 // allowed (migration-profiles.sql's claim_username). The email goes first: if that address is taken,
@@ -1720,7 +1788,11 @@ function KeepSeasons({ name, onKept, onUseAnother }) {
 }
 
 function AuthPanel({ onAuthed, title, blurb }) {
+  // "login" | "signup" | "reset". Reset is a mode of this form rather than a dialog of its own, because it
+  // is the same fields minus two and the player who needs it is already looking at this panel having just
+  // failed to log in.
   const [mode, setMode] = useState("login");
+  const [sent, setSent] = useState(false);
   const [email, setEmail] = useState("");
   const [u, setU] = useState("");
   const [pw, setPw] = useState("");
@@ -1733,6 +1805,27 @@ function AuthPanel({ onAuthed, title, blurb }) {
     const emailTrim = email.trim();
     const username = u.trim();
     if (!emailTrim || !emailTrim.includes("@")) return setErr("Enter a valid email address.");
+    if (mode === "reset") {
+      setBusy(true);
+      // The answer is the same whether or not that address has an account. "No account with that email"
+      // would turn this form into a way to ask the site who is registered, which a game with a public
+      // leaderboard of usernames should not answer - and Supabase deliberately does not tell us either.
+      //
+      // But a REFUSAL is not an answer about the address: Supabase returns 200 for a registered address and
+      // an unregistered one alike, and errors only on things that are about the REQUEST - a redirect that is
+      // not on the project's allowlist, a rate limit, a malformed address, the server being unreachable. So
+      // saying "couldn't send" leaks nothing and is the difference between a player trying again and a
+      // player waiting for an email that is never coming. The first version of this swallowed everything,
+      // which would have made a misconfigured environment look exactly like a working one.
+      let failed = false;
+      try {
+        const { error } = await authResetPassword(emailTrim, `${window.location.origin}/`);
+        failed = !!error;
+      } catch (e) { failed = true; }
+      setBusy(false);
+      if (failed) return setErr("Couldn't send that just now. Check your connection and try again.");
+      return setSent(true);
+    }
     if (mode === "signup" && !USERNAME_RE.test(username)) return setErr(USERNAME_RULE);
     if (pw.length < 6) return setErr("Passwords need at least 6 characters.");
     if (mode === "signup" && pw !== pw2) return setErr("The two passwords don't match.");
@@ -1794,6 +1887,23 @@ function AuthPanel({ onAuthed, title, blurb }) {
     }
   }
 
+  // Sent. Deliberately not "we emailed you": this screen must not confirm whether an address is registered.
+  if (mode === "reset" && sent) {
+    return (
+      <div className="panel">
+        <h3>Check your email</h3>
+        <p>
+          If there is a Gridspin account for <b>{email.trim()}</b>, a link to set a new password is on its way.
+          It works once, and not for long.
+        </p>
+        <p className="fine">Nothing has changed yet - your old password still works until you set a new one.</p>
+        <div className="frow" style={{ marginTop: 10 }}>
+          <button type="button" className="btn solid" onClick={() => { setMode("login"); setSent(false); setPw(""); }}>Back to log in</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="panel">
       {title && <h3>{title}</h3>}
@@ -1810,14 +1920,27 @@ function AuthPanel({ onAuthed, title, blurb }) {
         <div className="fields">
           <label>Email<input className="inp" type="email" value={email} autoComplete="email" autoCapitalize="none" spellCheck={false} onChange={(e) => setEmail(e.target.value)} /></label>
           {mode === "signup" && <label>Username<input className="inp" value={u} maxLength={16} autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(e) => setU(e.target.value)} /></label>}
-          <label>Password<input className="inp" type="password" value={pw} autoComplete={mode === "signup" ? "new-password" : "current-password"} onChange={(e) => setPw(e.target.value)} /></label>
+          {/* Not in reset mode: not having it is the entire situation they are in. */}
+          {mode !== "reset" && <label>Password<input className="inp" type="password" value={pw} autoComplete={mode === "signup" ? "new-password" : "current-password"} onChange={(e) => setPw(e.target.value)} /></label>}
           {mode === "signup" && <label>Confirm password<input className="inp" type="password" value={pw2} autoComplete="new-password" onChange={(e) => setPw2(e.target.value)} /></label>}
         </div>
         {err && <p className="err" role="alert">{err}</p>}
         <div className="frow" style={{ marginTop: 10 }}>
-          <button type="submit" className="btn solid" disabled={busy}>{busy ? "Checking…" : mode === "login" ? "Log in" : "Create account"}</button>
+          <button type="submit" className="btn solid" disabled={busy}>
+            {busy ? "Checking…" : mode === "login" ? "Log in" : mode === "reset" ? "Email me a link" : "Create account"}
+          </button>
+          {mode === "reset" && <button type="button" className="btn" onClick={() => { setMode("login"); setErr(""); }}>Back to log in</button>}
         </div>
       </form>
+      {/* The way back in. Without it an email signup that lost its password lost the account outright, and
+          with it every season, badge, coin and streak on it - there is no other copy of any of that. */}
+      {mode === "login" && (
+        <p className="fine" style={{ marginTop: 8 }}>
+          <button type="button" className="linkbtn" onClick={() => { setMode("reset"); setErr(""); setSent(false); }}>
+            Forgotten your password?
+          </button>
+        </p>
+      )}
       {mode === "signup" && <p className="fine">Your username, best score, and best lineup appear on the leaderboard. Your email is never shown publicly.</p>}
     </div>
   );
@@ -2232,6 +2355,9 @@ export default function PerfectSeason() {
   const [authReady, setAuthReady] = useState(false);
   // { id, email } while an account that signed in with Google still has no name, and so no profile.
   const [needsName, setNeedsName] = useState(null);
+  // Set by the PASSWORD_RECOVERY event, which is the only thing that tells a reset apart from an ordinary
+  // sign-in - the session is real either way.
+  const [resetting, setResetting] = useState(false);
   const [myDetails, setMyDetails] = useState(null); // your own bio/team/picture (fetchProfileDetails), for the header picture
   const [wallet, setWallet] = useState(null); // your coins (fetchWallet), for your own profile card
   const [isMod, setIsMod] = useState(false); // a moderator, as isModerator() answered at sign-in
@@ -2552,6 +2678,14 @@ export default function PerfectSeason() {
           setMode(null); setSpin(null); setHistory([]); setUsed([]); setSeq([]); setSeqIdx(0);
           setRoster({}); setSelected(null);
         }
+      }
+      // Following a password-reset link lands here. supabase-js reads the recovery session out of the
+      // address and announces it as its own event, which is the only signal that this sign-in is a reset
+      // rather than an ordinary one - the session is real either way, so without this branch the player is
+      // silently signed in and never asked for the new password they came here to set.
+      else if (event === "PASSWORD_RECOVERY") {
+        adoptSession.current(session);
+        setResetting(true);
       }
       // Coming back from Google lands here, not in the read above: supabase-js takes the session out of
       // the address after the page has already mounted.
@@ -4654,6 +4788,14 @@ export default function PerfectSeason() {
         {notice && <div className="panel"><p style={{ margin: 0 }}>{notice}</p></div>}
         {howTo && <HowTo onClose={closeHowTo} />}
         {needsName && <PickName email={needsName.email} onClaimed={onNameClaimed} onSignOut={logOut} />}
+        {/* After PickName, so an account arriving with no profile is asked its name first - a reset cannot
+            happen to such an account anyway (it has no password), but two dialogs at once would be a trap. */}
+        {resetting && !needsName && (
+          <SetPassword
+            onDone={() => { setResetting(false); setNotice("Password saved. You'll use the new one next time."); }}
+            onClose={() => setResetting(false)}
+          />
+        )}
         {resumed && view === "play" && !result && (
           <div className="notice"><span>Picked up your draft where you left off.</span></div>
         )}

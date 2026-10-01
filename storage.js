@@ -54,6 +54,24 @@ export async function authSignInWithGoogle(redirectTo) {
 export async function authAddEmail(email, password) {
   return getClient().auth.updateUser({ email, password });
 }
+// Forgetting a password. Until v2.19.1 there was no way back at all: the auth surface was signUp,
+// signInWithPassword, the two providers, updateUser and signOut, and an email signup that lost its password
+// lost the account - with it every season, badge, coin and streak on it, none of which the player can see
+// anywhere else. Supabase emails a one-time link; following it brings the page back to `redirectTo` with a
+// recovery session in the address, which supabase-js reads and announces as PASSWORD_RECOVERY.
+//
+// `redirectTo` has to be on the project's Redirect URLs allowlist, which is a per-environment dashboard
+// setting this repo does not hold - the same drift CLAUDE.md warns about under Releasing. It is the site's
+// own origin, which is already allowed in both projects because Google sign-in has used it since v1.16.0.
+export async function authResetPassword(email, redirectTo) {
+  return getClient().auth.resetPasswordForEmail(email, { redirectTo });
+}
+// The second half, called while that recovery session is live. It is the same updateUser authAddEmail uses,
+// with only the password - a guest trading up sets both at once, and this sets one on an account that
+// already has the address.
+export async function authSetPassword(password) {
+  return getClient().auth.updateUser({ password });
+}
 export async function authSignOut() {
   return getClient().auth.signOut();
 }
