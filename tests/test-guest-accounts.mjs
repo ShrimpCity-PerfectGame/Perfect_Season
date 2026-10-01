@@ -149,6 +149,47 @@ await runTest("the server refuses a guest's daily even when the app doesn't ask"
   assert(auth._dailyRuns.size === 1, "the day's board still has only the account's own entry");
 });
 
+// A visitor may finish the DAILY before they have any account at all. It cannot be posted as a guest -
+// submit-run refuses one (guest_daily) - so finish() holds the trace and waits for a real account. Until
+// v2.18.9 it waited in the same single slot as every other season, and the next season the visitor
+// finished both overwrote it AND took a guest account on the way past (postAsGuest does setPending(null)),
+// so playing on destroyed the daily. The day was already spent on the device, nothing was shown, and no
+// later action could recover it: a guest may not hand one in, and nothing flushed the slot on the way out
+// of being a guest. Two taps of buttons the app offers.
+await runTest("a daily played signed out survives playing on, and lands when a real account arrives", async () => {
+  const c = await open();
+  await click(tab(c, "Modes"));
+  await flush();
+  await until(() => findButtonByText(c, "Fantasy daily"), () => `the daily on Modes, got: ${text(c).slice(0, 200)}`);
+  await click(findButtonByText(c, "Fantasy daily"));
+  await flush(3);
+  await playSeason(c);
+  assert(!signedInAs(c), "still nobody signed in - a daily is never posted as a guest");
+  assert(auth._dailyRuns.size === 0, "and nothing recorded yet");
+
+  // Play on. This is the step that used to destroy it.
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest the Unlimited season takes");
+  const guest = theGuest();
+  assert(guest && guest.guest === true, "the second season is posted as a guest, as it always was");
+  assert(auth._dailyRuns.size === 0, "the daily still is not on the board - a guest may not hand one in");
+
+  // Trade up. The account stops being a guest, which is the moment the held daily can go.
+  await click(accountTab(c));
+  await until(() => findButtonByText(c, "Keep my seasons"), () => `the keep panel, got: ${text(c).slice(0, 200)}`);
+  const [email, pw, username] = [...c.querySelectorAll(".panel input")];
+  await type(email, "dailyholder@example.com");
+  await type(pw, "Password1");
+  await type(username, "DailyHolder");
+  await click(findButtonByText(c, "Keep my seasons"));
+  await flush(10);
+  await until(() => auth._dailyRuns.size === 1,
+    () => `the held daily on the board after the trade-up, got ${auth._dailyRuns.size} rows`);
+  const row = [...auth._dailyRuns.values()][0];
+  assert(row.user_id === guest.id, `recorded against the same account, got ${row.user_id} vs ${guest.id}`);
+  assert(row.username === "DailyHolder", `under its real name, got ${row.username}`);
+});
+
 await runTest("a guest keeps its seasons: same account, own name, everything carried over", async () => {
   const c = await open();
   await playUnlimited(c);

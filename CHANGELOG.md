@@ -19,6 +19,34 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.9] - 2026-09-30
+
+A daily finished before signing up was destroyed by the next season the visitor played.
+
+**Client only.** No migration, no Edge Function change.
+
+- **A signed-out visitor's finished daily was silently thrown away, and the day was already spent.**
+  A daily cannot be posted as a guest — `submit-run` answers `guest_daily`, deliberately, because a
+  guest account costs nothing to make — so `finish()` holds the trace and waits for a real account.
+  It waited in the SAME single slot as every other season. Playing on then did two things at once:
+  `setPending(trace)` overwrote the daily's trace, and `postAsGuest` ran `setPending(null)` and took a
+  guest account. After that nothing could recover it — a guest may never hand a daily in, and no path
+  flushed the slot on the way OUT of being a guest. The device record had already marked the day as
+  played, and the player was shown nothing at all. Two taps of buttons the app offers.
+- **A daily held from a signed-out visit now has a slot of its own**, flushed by the only two events
+  that produce a non-guest account: a signup, and a guest trading up through Keep my seasons.
+  `postAsGuest` clears only its own slot. The guest flow is untouched: an Unlimited season still posts
+  as a guest the moment it finishes, which is what v1.17.0 is for.
+  The alternative — suppressing the guest account while a daily is held — was rejected because it
+  trades one loss for another: a visitor who never signs up would lose the Unlimited season that would
+  otherwise have counted.
+- **Two things the suite caught, and both corrections improved the fix.** The "Save this season" panel
+  is gated on `pending`, so moving the daily out of that slot made the panel vanish from under the one
+  season with nowhere else to go (`tests/test-shop-flow.mjs`). And the flush pushed a new sentence,
+  which the same test rejected: a daily IS a season, "Your last season was saved." is the wording this
+  screen has always used, and the assertion exists to stop a refactor quietly rewording what a player
+  reads. Both slots push that one sentence now, deduped.
+
 ## [2.18.8] - 2026-09-30
 
 One character walked 14 of the 27 blocked words straight past the filter.

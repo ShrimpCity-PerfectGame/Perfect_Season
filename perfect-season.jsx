@@ -2235,6 +2235,16 @@ export default function PerfectSeason() {
   const [scrollBack, setScrollBack] = useState(null); // { y } - where Back or Forward returns a screen to
   const [pending, setPending] = useState(null);
   const pendingRun = useRef(null); // the runId of the season `pending` saves, so its answer can show on that result
+  // A DAILY finished while signed out, held separately from `pending` since v2.18.9 - and it has to be
+  // separate, because the two are owed to different kinds of account. A guest may not play the daily
+  // (submit-run answers guest_daily), so finish() deliberately does not post one as a guest; it waits here
+  // for a real account instead. With one shared slot, the next season the visitor finished overwrote the
+  // daily's trace AND took a guest account on the way past - `postAsGuest` does `setPending(null)` - so the
+  // daily was destroyed by the ordinary act of playing on, with the day already spent on the device and no
+  // message of any kind. It is flushed by whichever path produces a non-guest account: a signup, or a
+  // guest trading up through Keep my seasons.
+  const [pendingDaily, setPendingDaily] = useState(null);
+  const pendingDailyRun = useRef(null);
   const [notice, setNotice] = useState("");
   const [saveError, setSaveError] = useState(false);
   // `format` records which scoring format `top`/`myRank` were actually fetched for. The board is
@@ -3156,11 +3166,16 @@ export default function PerfectSeason() {
     // synchronous pass (setUserId above is async). Use the fresh `uid` directly throughout.
     setStats(s);
     loadAccountExtras(uid);
+    // Both slots, and ONE sentence between them: a daily is a season, and "Your last season was saved." is
+    // the wording this screen has always used - tests/test-shop-flow.mjs holds it, rightly, because it is
+    // what the player reads. Saying it twice for a visitor holding both would be worse than saying it once.
+    const dailyRes = await flushPendingDaily(uid, !!s?.guest);
+    if (dailyRes?.ok) notes.push("Your last season was saved.");
     if (pending) {
       const trace = pending;
       setPending(null);
       const res = await submitAndSync(uid, trace);
-      if (res.ok) notes.push("Your last season was saved.");
+      if (res.ok && !notes.includes("Your last season was saved.")) notes.push("Your last season was saved.");
       // Still on screen, that season now shows what it paid.
       showSaveAnswer(pendingRun.current, res);
     }
@@ -3191,7 +3206,13 @@ export default function PerfectSeason() {
     // Duel on exactly that: all three kept refusing, and pressing Keep my seasons again could only ever
     // answer `already_named`, which that form has no message for.
     setStats((s) => fresh || (s ? { ...s, username, guest: false } : s));
-    setNotice(`Your seasons are yours, ${fresh?.username || username}.`);
+    // The account has just stopped being a guest, which is the one event that can rescue a daily held from
+    // before any of this - a visitor who played the daily, played on, got a guest account for the second
+    // season, and is only now a real one. `guest` is false by definition here: claim_username answered ok.
+    const dailyRes = await flushPendingDaily(userId, false);
+    setNotice(dailyRes?.ok
+      ? `Your seasons are yours, ${fresh?.username || username} - and the daily you were holding is on the board.`
+      : `Your seasons are yours, ${fresh?.username || username}.`);
     loadLeaderboard();
     // ...and the Stats boards, which load once and then cache. Without this they kept showing the retired
     // Guest_XXXXX name, chip and all, under an account that no longer exists - until the player happened
@@ -3211,6 +3232,19 @@ export default function PerfectSeason() {
   // takes one for them - Supabase's anonymous sign-in - and posts it under the name the database gives
   // them. They can keep it later (KeepSeasons), and nothing about how the season is verified changes. Not
   // the daily: a guest can be made again and again, so it would be as many goes at the day as you like.
+  // A daily held from a signed-out visit, handed in the moment a REAL account exists. Never for a guest:
+  // submit-run refuses one (guest_daily), so posting it there would spend the attempt on a refusal and
+  // lose the trace. Called from the signup path and from the guest trade-up, which are the only two ways
+  // a non-guest account appears under a visitor who was holding one.
+  async function flushPendingDaily(uid, isGuestAccount) {
+    if (!pendingDaily || !uid || isGuestAccount) return null;
+    const trace = pendingDaily;
+    setPendingDaily(null);
+    const res = await submitAndSync(uid, trace);
+    showSaveAnswer(pendingDailyRun.current, res);
+    return res;
+  }
+
   async function postAsGuest(trace, runId) {
     const { data, error } = await authSignInAsGuest();
     const uid = data?.user?.id;
@@ -3222,6 +3256,8 @@ export default function PerfectSeason() {
       setNotice("That season couldn't be posted. Make an account and it'll be saved.");
       return;
     }
+    // Only this slot. `pendingDaily` stays where it is - a guest can never hand one in, and the player may
+    // still make a real account later, which is the one thing that can save it.
     setPending(null);
     setUserId(uid);
     setUser(prof.username);
@@ -3576,8 +3612,10 @@ export default function PerfectSeason() {
       // The trace is handed over rather than read back from state: it was only just set, and this runs in
       // the same pass.
       if (!user) {
-        setPending(trace);
-        pendingRun.current = sim.runId;
+        // A daily goes to its own slot: it can only ever be submitted by a real account, so it must not be
+        // evicted by the next season, which can be posted as a guest the moment it finishes.
+        if (mode.kind === "daily") { setPendingDaily(trace); pendingDailyRun.current = sim.runId; }
+        else { setPending(trace); pendingRun.current = sim.runId; }
         // Not if somebody is already signed in and we simply couldn't read them: taking a guest account
         // here would sign the real one out. The season waits in `pending` instead, which is what it is
         // for - the next successful read posts it under the account it belongs to.
@@ -5046,7 +5084,11 @@ export default function PerfectSeason() {
                       : <button className="btn solid" onClick={() => setPo({ idx: po.idx, stage: "done" })}>See your season</button>} />
                 )}
 
-                {finished && !user && pending && (
+                {/* Either slot. A DAILY finished while signed out waits in `pendingDaily` rather than `pending`
+                    (see the note where both are declared), and this panel is the only way a visitor is offered
+                    the account that can save it - gated on `pending` alone it vanished from under the one
+                    season that has nowhere else to go. tests/test-shop-flow.mjs caught that. */}
+                {finished && !user && (pending || pendingDaily) && (
                   <AuthPanel onAuthed={onAuthed} title="Save this season"
                     blurb="Log in or create an account to keep this season in your stats and put your score on the leaderboard." />
                 )}
