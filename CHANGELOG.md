@@ -19,6 +19,35 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.19.5] - 2026-10-01
+
+**Team colors is free.** Both club-colour cosmetics — `frame-team` and `card-team` — were 2,000 coins each;
+they now cost nothing and everyone has them.
+
+**Run the SQL below first, then ship the client.** Re-running `migration-shop.sql` is NOT enough: its seed
+only adds missing rows, so an existing database keeps the old price. The runbook line at the top of that
+file is exactly this case:
+
+```sql
+update shop_items set rarity = 'free', price = null where id in ('frame-team', 'card-team');
+```
+
+- **Why.** The item paints your card in *your own favourite team's* two colours. It names no club, and with
+  no favourite team set it falls back to the default item entirely. Charging for it was never a sale for
+  real money — coins cannot be bought — but the day coin packs ship it would have become one, and a paid
+  cosmetic in club colours is a worse thing to have to explain than a free personalisation. Free removes the
+  question rather than managing it, and costs nothing, because nobody was paying real money for it.
+- **It also fixes a real wart.** HANDOFF's open list has had "Team colors costs 2,000 coins and does nothing
+  for a player with no favourite team" on it for a while. Spending 2,000 coins and getting the default item
+  back is a bad trade; getting it free and seeing nothing is merely a prompt to pick a team.
+- **No backfill needed.** `shop_state` and `equip_item` both compute ownership as `rarity = 'free' OR` an
+  inventory row, so the moment the row changes, everyone owns it. The one player who had bought `frame-team`
+  keeps their inventory row and notices nothing.
+
+Four tests used `frame-team` as their stand-in for a *paid* item and now use one that still costs something.
+That is the kind of edit worth reading rather than rubber-stamping: the shop tests are about buying, and an
+item that cannot be bought cannot test it.
+
 ## [2.19.4] - 2026-10-01
 
 **The game's data had a licence and the repo recorded none of it.** Every statistic in Gridspin is nflverse

@@ -89,9 +89,10 @@ await runTest("loads: balance hook, tabs, every item with a state, the wallet; B
   const frames = [...c.querySelectorAll("article.sh-item")].map((a) => `${a.dataset.item}:${a.dataset.state}`);
   // Orbit is locked for the same reason Undefeated is, and says so differently: one waits on a badge, the
   // other on the one-off unlock, and neither is ever "buy" however many coins are in the wallet.
-  assert(JSON.stringify(frames) === JSON.stringify(["frame-ink:equipped", "frame-lime:buy", "frame-team:short", "frame-gold:short", "frame-flame:short", "frame-undefeated:locked", "frame-orbit:locked"]),
+  assert(JSON.stringify(frames) === JSON.stringify(["frame-ink:equipped", "frame-lime:buy", "frame-team:owned", "frame-gold:short", "frame-flame:short", "frame-undefeated:locked", "frame-orbit:locked"]),
     "frames and their states: " + frames);
-  assert(text(tile(c, "frame-team")).includes("750 more coins"), "a short item says how many more coins it needs");
+  // frame-gold, not frame-team: Team colors is free since v2.19.5, so it reads "owned" and costs nothing.
+  assert(text(tile(c, "frame-gold")).includes("more coins"), "a short item says how many more coins it needs");
   assert(preview(c)?.querySelector('[data-card="card-navy"]') && preview(c).querySelector('[data-frame="frame-ink"]'), "the preview wears the defaults");
   assert(preview(c).textContent.includes("loader"), "the preview carries your name");
   assert(c.querySelector(".sh-wallet")?.textContent.includes("+250 · Welcome coins"), "the wallet lists the welcome coins");

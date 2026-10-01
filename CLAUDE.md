@@ -1267,6 +1267,12 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.19.5's (Team colors is free): **run the SQL, then the client.** Re-running `migration-shop.sql` is NOT
+  enough - its seed only adds missing rows, so an existing database keeps the old price. It is the runbook
+  line that file already documents:
+  `update shop_items set rarity = 'free', price = null where id in ('frame-team', 'card-team');`
+  The seed in the file is edited too, for new environments. No backfill: `shop_state` and `equip_item` both
+  read ownership as `rarity = 'free' OR` an inventory row, so everyone owns it the moment the row changes.
   v2.19.4's (the data credit): client only. No migration, no Edge Function change. It adds the CC BY 4.0
   attribution nflverse's licence asks for, from one constant rendered in both the app footer and every
   standalone page - see DATA.md.
