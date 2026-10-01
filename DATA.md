@@ -70,6 +70,19 @@ about *marks*. Do not add a logo without asking someone qualified first.
 ## When to re-read this
 
 Before taking money. A free game using public statistics with a disclaimer and no logos is a different
-conversation from a paid one — and two shop items, `frame-team` and `card-team`, are built from the club
-colour palettes. Today they cost coins, and coins cannot be bought; the day coin packs ship, that stops
-being true and those two become goods bought with real money in club colours. See SHOP.md.
+conversation from a paid one.
+
+**The club-colour cosmetics are free as of v2.19.5**, and that was deliberate. `frame-team` and `card-team`
+paint a card in *your own favourite team's* two colours — they name no club, and with no favourite team set
+they fall back to the default item entirely. They used to cost 2,000 coins. That was never a sale for money,
+since coins cannot be bought — but the day coin packs ship it would have become one, and "goods bought with
+real money in club colours" is a worse sentence to have to explain than "a free personalisation". Making
+them free removes the question instead of managing it, and costs nothing: nobody was being charged real
+money for them and now nobody can be.
+
+An earlier version of this page overstated that, calling the two items "goods bought with real money in club
+colours". They were not, and now they cannot become it.
+
+What would still change the question is a shop that presented *club-identified* goods — a browsable list of
+thirty-two "Cardinals frame", "Ravens frame" entries bought with purchased currency. That is a different
+product from the one that exists, and nothing on the roadmap asks for it.

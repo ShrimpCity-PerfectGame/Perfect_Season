@@ -51,7 +51,7 @@ alter table public.shop_items add constraint shop_items_kind_check check (kind i
 insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('frame-ink', 'frame', 'free', null, null, 10),
   ('frame-lime', 'frame', 'common', 750, null, 20),
-  ('frame-team', 'frame', 'rare', 2000, null, 30),
+  ('frame-team', 'frame', 'free', null, null, 30),
   ('frame-gold', 'frame', 'epic', 6000, null, 40),
   ('frame-flame', 'frame', 'legendary', 15000, null, 50),
   ('frame-undefeated', 'frame', 'badge', null, 'undefeated', 60),
@@ -59,7 +59,7 @@ insert into public.shop_items (id, kind, rarity, price, badge, sort) values
   ('card-navy', 'card', 'free', null, null, 10),
   ('card-night', 'card', 'common', 750, null, 20),
   ('card-turf', 'card', 'rare', 2000, null, 30),
-  ('card-team', 'card', 'rare', 2000, null, 40),
+  ('card-team', 'card', 'free', null, null, 40),
   ('card-ticket', 'card', 'epic', 6000, null, 50),
   ('card-gold-foil', 'card', 'legendary', 15000, null, 60),
   ('card-dynasty', 'card', 'badge', null, 'dynasty', 70),

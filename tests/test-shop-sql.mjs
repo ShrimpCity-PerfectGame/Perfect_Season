@@ -297,10 +297,12 @@ await runTest("shop_state: your balance, every item on sale in shop order with w
   assert(same(s.equipped, NOTHING_WORN) && (await detailsOf(P)) === null, `nothing worn without a details row, got ${show(s.equipped)}`);
 
   const start = await balanceOf(P);
-  await give(P, priceOf("frame-team"));
-  assert(!(await call(P, "shop_buy", { p_item: "frame-team" })).error, "P buys frame-team");
+  // card-turf, not frame-team: Team colors became FREE in v2.19.5, so buying it now raises 'owned'. This
+  // step needs an item somebody actually has to pay for.
+  await give(P, priceOf("card-turf"));
+  assert(!(await call(P, "shop_buy", { p_item: "card-turf" })).error, "P buys card-turf");
   await owner("insert into badge_awards (user_id, badge) values ($1, 'undefeated')", [P]);
-  for (const [slot, item] of [["frame", "frame-team"], ["card", "card-navy"], ["title", "title-undefeated"]]) {
+  for (const [slot, item] of [["frame", "frame-team"], ["card", "card-turf"], ["title", "title-undefeated"]]) {
     assert(!(await call(P, "equip_item", { p_slot: slot, p_item: item })).error, `P wears ${item}`);
   }
   assert(!(await call(P, "set_showcase", { p_badges: ["undefeated", "ring-bearer"] })).error, "P picks a showcase");
@@ -311,25 +313,27 @@ await runTest("shop_state: your balance, every item on sale in shop order with w
   // Undefeated name colour. A badge unlocking more than one item is the point of a badge item, so this list is
   // deliberate, not a count.
   const wantOwned = seeds.filter((i) => i.rarity === "free"
-    || ["frame-team", "frame-undefeated", "title-undefeated", "cel-champion", "name-trophy"].includes(i.id)).map((i) => i.id);
+    || ["card-turf", "frame-undefeated", "title-undefeated", "cel-champion", "name-trophy"].includes(i.id)).map((i) => i.id);
   assert(same(owned, wantOwned), `owned: the free items, the one bought and the undefeated badge's four, got ${show(owned)}`);
-  assert(same(s.equipped, { frame: "frame-team", card: "card-navy", title: "title-undefeated", nameplate: null, namecolor: null, celebration: null, showcase: ["undefeated", "ring-bearer"] }), `equipped, got ${show(s.equipped)}`);
+  assert(same(s.equipped, { frame: "frame-team", card: "card-turf", title: "title-undefeated", nameplate: null, namecolor: null, celebration: null, showcase: ["undefeated", "ring-bearer"] }), `equipped, got ${show(s.equipped)}`);
   const q = (await call(Q, "shop_state")).data;
   assert(same(q.items.filter((i) => i.owned).map((i) => i.id), seeds.filter((i) => i.rarity === "free").map((i) => i.id)) && same(q.equipped, NOTHING_WORN), `another player's purchases and badges aren't Q's, got ${show(q)}`);
 
   // Off sale: gone from the shop, except for the players who own it. A tie in sort falls back to the id.
-  await owner("update shop_items set active = false where id = 'frame-team'");
+  // A PAID item the player actually owns - that is the case being tested, and a free one is owned by
+  // everyone so taking it off sale would hide it from nobody.
+  await owner("update shop_items set active = false where id = 'card-turf'");
   await owner("update shop_items set sort = $1 where id = 'frame-gold'", [seedOf("frame-lime").sort]);
   try {
     s = (await call(P, "shop_state")).data;
     const catalog = await owner("select id, kind, rarity, price, badge, active, sort from shop_items");
     const wantIds = catalog.filter((i) => i.active || wantOwned.includes(i.id)).sort(shopOrder).map((i) => i.id);
     assert(same(s.items.map((i) => i.id), wantIds), `P's list in shop order, the off-sale frame kept:\n sql  ${show(s.items.map((i) => i.id))}\n want ${show(wantIds)}`);
-    assert(same(itemOf(s, "frame-team"), { ...seedOf("frame-team"), active: false, owned: true }), `the owner sees it off sale and owned, got ${show(itemOf(s, "frame-team"))}`);
+    assert(same(itemOf(s, "card-turf"), { ...seedOf("card-turf"), active: false, owned: true }), `the owner sees it off sale and owned, got ${show(itemOf(s, "card-turf"))}`);
     assert(s.items.findIndex((i) => i.id === "frame-gold") < s.items.findIndex((i) => i.id === "frame-lime"), "frame-gold and frame-lime share a sort, so the id decides");
-    assert(!itemOf((await call(Q, "shop_state")).data, "frame-team"), "a player who doesn't own it no longer sees it");
+    assert(!itemOf((await call(Q, "shop_state")).data, "card-turf"), "a player who doesn't own it no longer sees it");
   } finally {
-    await owner("update shop_items set active = true where id = 'frame-team'");
+    await owner("update shop_items set active = true where id = 'card-turf'");
     await owner("update shop_items set sort = $1 where id = 'frame-gold'", [seedOf("frame-gold").sort]);
   }
   // PGlite's database collates "C" anyway, so the id tiebreak's collation can't show a difference here, but a
@@ -686,7 +690,8 @@ await runTest("shop_buy takes the wallet lock after checking who's asking and be
 
 await runTest("behind the lock: a second copy, an overdraft or a repeated purchase row can't be written, and a purchase the ledger already records is refused, never given free", async () => {
   const P = await newPlayer("backstop");
-  const item = "frame-team", price = priceOf(item);
+  // A PAID item: Team colors is free since v2.19.5, and shop_buy answers 'owned' for a free one.
+  const item = "frame-lime", price = priceOf(item);
   await give(P, 3000);
   assert(!(await call(P, "shop_buy", { p_item: item })).error, `P buys ${item}`);
   const before = await holdings(P);
@@ -772,7 +777,7 @@ await runTest("the mock returns what the SQL returns for one list of calls, and 
   // purchase row edited in by hand.
   await give(RICH, 50000);
   assert(!(await call(RICH, "save_profile", { p_bio: "Hello there", p_favorite_team: "KC" })).error, "rich saves a bio");
-  for (const item of ["frame-team", "card-ticket"]) assert(!(await call(RICH, "shop_buy", { p_item: item })).error, `rich buys ${item}`);
+  for (const item of ["frame-gold", "card-ticket"]) assert(!(await call(RICH, "shop_buy", { p_item: item })).error, `rich buys ${item}`);
   await owner("insert into badge_awards (user_id, badge) values ($1, 'undefeated')", [RICH]);
   await owner("insert into badge_awards (user_id, badge) values ($1, 'dynasty'), ($1, 'cinderella')", [BADGE]);
   await owner("insert into inventory (user_id, item_id) values ($1, 'title-daily-winner')", [BADGE]); // by hand: owned, still badge_only
