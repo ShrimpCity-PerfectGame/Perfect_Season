@@ -149,6 +149,47 @@ await runTest("the server refuses a guest's daily even when the app doesn't ask"
   assert(auth._dailyRuns.size === 1, "the day's board still has only the account's own entry");
 });
 
+// A visitor may finish the DAILY before they have any account at all. It cannot be posted as a guest -
+// submit-run refuses one (guest_daily) - so finish() holds the trace and waits for a real account. Until
+// v2.18.9 it waited in the same single slot as every other season, and the next season the visitor
+// finished both overwrote it AND took a guest account on the way past (postAsGuest does setPending(null)),
+// so playing on destroyed the daily. The day was already spent on the device, nothing was shown, and no
+// later action could recover it: a guest may not hand one in, and nothing flushed the slot on the way out
+// of being a guest. Two taps of buttons the app offers.
+await runTest("a daily played signed out survives playing on, and lands when a real account arrives", async () => {
+  const c = await open();
+  await click(tab(c, "Modes"));
+  await flush();
+  await until(() => findButtonByText(c, "Fantasy daily"), () => `the daily on Modes, got: ${text(c).slice(0, 200)}`);
+  await click(findButtonByText(c, "Fantasy daily"));
+  await flush(3);
+  await playSeason(c);
+  assert(!signedInAs(c), "still nobody signed in - a daily is never posted as a guest");
+  assert(auth._dailyRuns.size === 0, "and nothing recorded yet");
+
+  // Play on. This is the step that used to destroy it.
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest the Unlimited season takes");
+  const guest = theGuest();
+  assert(guest && guest.guest === true, "the second season is posted as a guest, as it always was");
+  assert(auth._dailyRuns.size === 0, "the daily still is not on the board - a guest may not hand one in");
+
+  // Trade up. The account stops being a guest, which is the moment the held daily can go.
+  await click(accountTab(c));
+  await until(() => findButtonByText(c, "Keep my seasons"), () => `the keep panel, got: ${text(c).slice(0, 200)}`);
+  const [email, pw, username] = [...c.querySelectorAll(".panel input")];
+  await type(email, "dailyholder@example.com");
+  await type(pw, "Password1");
+  await type(username, "DailyHolder");
+  await click(findButtonByText(c, "Keep my seasons"));
+  await flush(10);
+  await until(() => auth._dailyRuns.size === 1,
+    () => `the held daily on the board after the trade-up, got ${auth._dailyRuns.size} rows`);
+  const row = [...auth._dailyRuns.values()][0];
+  assert(row.user_id === guest.id, `recorded against the same account, got ${row.user_id} vs ${guest.id}`);
+  assert(row.username === "DailyHolder", `under its real name, got ${row.username}`);
+});
+
 await runTest("a guest keeps its seasons: same account, own name, everything carried over", async () => {
   const c = await open();
   await playUnlimited(c);
@@ -270,6 +311,64 @@ await runTest("a draft does not follow the device to the next account", async ()
   const after = await window.storage.get("ps-free-wip", false);
   const picks = after && JSON.parse(after.value)?.history?.length;
   assert(!picks, `it leaves with them rather than waiting for the next account, got ${picks} picks`);
+});
+
+// The device's own record of a finished daily is keyed by neither account nor anything else, so on a
+// shared browser it answered for whoever played last: the second account was told the day was spent,
+// shown the first account's lineup, and locked out of a daily it had never touched. `daily_runs` is
+// keyed (date, format, user_id) and has public select, so the server can simply be asked - which is what
+// v2.18.10 does, keeping the device record as the fallback for a signed-out visitor.
+await runTest("a finished daily belongs to the account that played it, not to the browser", async () => {
+  const mock = makeMockAuth();
+  await mock.auth.signUp({ email: "first@example.com", password: "Password1", options: { data: { username: "First_One" } } });
+  const c = await open(mock);
+  await click(tab(c, "Modes"));
+  await until(() => findButtonByText(c, "Fantasy daily"), () => `the daily, got: ${text(c).slice(0, 160)}`);
+  await click(findButtonByText(c, "Fantasy daily"));
+  await flush(4);
+  await playSeason(c);
+  await until(() => auth._dailyRuns.size === 1, "the first account's daily on the board");
+
+  // Same browser, same storage - a second account signs in. The device still holds First_One's record.
+  await auth.auth.signOut();
+  await flush(6);
+  await auth.auth.signUp({ email: "second@example.com", password: "Password1", options: { data: { username: "Second_One" } } });
+  await flush(10);
+  await click(tab(c, "Modes"));
+  await flush(6);
+
+  assert(signedInAs(c) === "Second_One", `the app sees the second account, got ${signedInAs(c)}`);
+  // The tile, which is what the player actually meets.
+  const tile = findButtonByText(c, "Fantasy daily");
+  assert(tile, () => `the daily tile for the second account, got: ${text(c).slice(0, 200)}`);
+  const said = tile.textContent;
+  assert(!/See how it went|Relive it/.test(said),
+    `the second account has not played today and must be offered it, got: ${said.slice(0, 160)}`);
+  assert(!said.includes("First_One"), `and is not shown the first account's run: ${said.slice(0, 160)}`);
+});
+
+// The Unlimited slot has left with its account since v2.0; the DAILY slots beside it did not, until
+// v2.18.10. A daily is the worse one to inherit: it is one per account per day and cannot be played
+// again, so playing out a stranger's half-finished board hands in THEIR picks as YOUR daily and spends
+// the day doing it.
+await runTest("a daily draft in progress does not follow the device to the next account either", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+  const today = new Date();
+  const key = `ps-daily-wip:${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  // A daily with picks in it, the way walking away from one leaves it.
+  await window.storage.set(key, JSON.stringify({
+    mode: { kind: "daily", date: key.slice("ps-daily-wip:".length), format: "fantasy", owner: "someone-else" },
+    spin: { team: "KC", w: 2 }, history: [{ key: "KC|2", id: 1, season: 2018, slot: "QB" }], seq: [],
+  }), false);
+
+  await auth.auth.signOut();
+  await flush(8);
+
+  const after = await window.storage.get(key, false);
+  const picks = after && JSON.parse(after.value)?.history?.length;
+  assert(!picks, `the daily leaves with the account that was playing it, got ${picks} picks`);
 });
 
 await close();

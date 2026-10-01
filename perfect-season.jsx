@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest, fetchBoardLooks,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchMyDailyRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest, fetchBoardLooks,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
@@ -2235,6 +2235,16 @@ export default function PerfectSeason() {
   const [scrollBack, setScrollBack] = useState(null); // { y } - where Back or Forward returns a screen to
   const [pending, setPending] = useState(null);
   const pendingRun = useRef(null); // the runId of the season `pending` saves, so its answer can show on that result
+  // A DAILY finished while signed out, held separately from `pending` since v2.18.9 - and it has to be
+  // separate, because the two are owed to different kinds of account. A guest may not play the daily
+  // (submit-run answers guest_daily), so finish() deliberately does not post one as a guest; it waits here
+  // for a real account instead. With one shared slot, the next season the visitor finished overwrote the
+  // daily's trace AND took a guest account on the way past - `postAsGuest` does `setPending(null)` - so the
+  // daily was destroyed by the ordinary act of playing on, with the day already spent on the device and no
+  // message of any kind. It is flushed by whichever path produces a non-guest account: a signup, or a
+  // guest trading up through Keep my seasons.
+  const [pendingDaily, setPendingDaily] = useState(null);
+  const pendingDailyRun = useRef(null);
   const [notice, setNotice] = useState("");
   const [saveError, setSaveError] = useState(false);
   // `format` records which scoring format `top`/`myRank` were actually fetched for. The board is
@@ -2282,6 +2292,11 @@ export default function PerfectSeason() {
   function showBoardFormat(f) { boardFormatRef.current = f; setBoardFormat(f); }
   const statsRef = useRef(null);
   statsRef.current = stats;
+  // The signed-in account, readable from a continuation that started before the account changed. Assigned
+  // during render like statsRef above, so anything that awaits can tell "who I asked for" from "who is here
+  // now" and throw away an answer that arrived for somebody else - the same guard loadAccountExtras uses.
+  const userIdRef = useRef(null);
+  userIdRef.current = userId;
   const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
   // Why a code was turned away before any boards were dealt - today, only a code that is a daily's own seed.
@@ -2509,7 +2524,15 @@ export default function PerfectSeason() {
         // reload put the departing account's draft back - and the snapshot effect wrote it straight
         // into the slot again, still stamped with their owner, for the next person to be charged.
         clearDraft(DRAFT_KEY);
-        setWip((w) => ({ ...w, free: null }));
+        // ...and BOTH daily slots, which this handler missed until v2.18.10 while clearing the Unlimited one
+        // beside them. A daily in progress is the worse one to leave behind: Alice makes three picks of
+        // today's Fantasy daily and logs out, Bob signs up on the same device and taps the daily, and he is
+        // dropped into "Pick 4 of 6" of Alice's draft with her players already on his roster - and if he
+        // plays it out, those picks are handed in as BOB's daily for the day, which is the one thing per
+        // account per day that cannot be played again. The reasoning is identical to the Unlimited slot's
+        // above; only the slot ids differ.
+        for (const f of FORMATS) clearDraftTracked(slotId({ kind: "daily", format: f }), DAILY_PROGRESS(todayKey(), f));
+        setWip((w) => ({ ...w, free: null, ...Object.fromEntries(FORMATS.map((f) => [slotId({ kind: "daily", format: f }), null])) }));
         // And the one on screen, if a draft is actually in progress. Clearing only the stored copy left it
         // live in React state, where playUnlimited short-circuits on it before it ever reads storage - so
         // Bob was handed Alice's board anyway, and the snapshot effect (which stops at `!mode`) wrote it
@@ -2563,6 +2586,7 @@ export default function PerfectSeason() {
   const readDay = useRef(null);
   readDay.current = async () => {
     const today = todayKey();
+    const who = userIdRef.current;
     const [fanDone, stdDone, sou, century, guessed] = await Promise.all([
       sget(DAILY_KEY(today, "fantasy"), false), sget(DAILY_KEY(today, "standard"), false), sget(SOU_DONE_KEY(today), false),
       // By the UTC day, because that is the day the run itself is filed under. Keyed by todayKey it was
@@ -2572,8 +2596,32 @@ export default function PerfectSeason() {
       sget(GUESS_DONE_KEY(utcDayKey()), false),
     ]);
     // Both days, so a re-read is triggered by whichever rolls over first - they are up to a day apart.
-    dayRead.current = `${today}|${utcDayKey()}`;
-    setDailyDone({ fantasy: fanDone, standard: stdDone });
+    // The ACCOUNT is part of this marker, not just the two dates. What has been read is "this day, for this
+    // player", and the answers below are now per-account - so a sign-in has to force a re-read exactly as a
+    // rollover does. Keyed on the dates alone, the second account on a device kept the first one's daily
+    // on screen, because the day had not changed and nothing else asked again.
+    dayRead.current = `${today}|${utcDayKey()}|${who || ""}`;
+    // The SERVER decides for a signed-in account, with the device's own record as the fallback. `daily_runs`
+    // is keyed (date, format, user_id) and the device record is keyed by neither account nor anything else,
+    // so reading it alone answered for whoever used this browser last: a second account on a shared phone was
+    // told the day was spent, shown a stranger's lineup, and locked out of a daily it had never played. The
+    // same shape Over/Under has had since fetchMySouRun, and Guess and Century since they shipped.
+    // A failed read answers null and leaves the device's record standing - better to think you have played
+    // than to be dealt the day twice.
+    let fan = fanDone, std = stdDone;
+    if (who) {
+      const [fanRow, stdRow] = await Promise.all([
+        fetchMyDailyRun(today, "fantasy", who).catch(() => null),
+        fetchMyDailyRun(today, "standard", who).catch(() => null),
+      ]);
+      if (who !== userIdRef.current) return;   // the account changed while we were asking
+      // `undefined` means the read failed, and only then does the device get to answer. A `null` is the
+      // server saying this account has not played today, and it outranks anything on the device - which
+      // belongs to no account and so belongs to whoever used the browser last.
+      fan = fanRow === undefined ? fanDone : fanRow;
+      std = stdRow === undefined ? stdDone : stdRow;
+    }
+    setDailyDone({ fantasy: fan, standard: std });
     setSouDone(sou);
     setCenturyDone(century);
     setGuessDone(guessed);
@@ -2622,7 +2670,7 @@ export default function PerfectSeason() {
   // sleeping tab fires no timers, so the moment that matters is the one where somebody looks at it again.
   useEffect(() => {
     const check = () => {
-      if (dayRead.current && dayRead.current !== `${todayKey()}|${utcDayKey()}`) readDay.current();
+      if (dayRead.current && dayRead.current !== `${todayKey()}|${utcDayKey()}|${userIdRef.current || ""}`) readDay.current();
       drainMinigames();
     };
     check();
@@ -3156,11 +3204,16 @@ export default function PerfectSeason() {
     // synchronous pass (setUserId above is async). Use the fresh `uid` directly throughout.
     setStats(s);
     loadAccountExtras(uid);
+    // Both slots, and ONE sentence between them: a daily is a season, and "Your last season was saved." is
+    // the wording this screen has always used - tests/test-shop-flow.mjs holds it, rightly, because it is
+    // what the player reads. Saying it twice for a visitor holding both would be worse than saying it once.
+    const dailyRes = await flushPendingDaily(uid, !!s?.guest);
+    if (dailyRes?.ok) notes.push("Your last season was saved.");
     if (pending) {
       const trace = pending;
       setPending(null);
       const res = await submitAndSync(uid, trace);
-      if (res.ok) notes.push("Your last season was saved.");
+      if (res.ok && !notes.includes("Your last season was saved.")) notes.push("Your last season was saved.");
       // Still on screen, that season now shows what it paid.
       showSaveAnswer(pendingRun.current, res);
     }
@@ -3191,7 +3244,13 @@ export default function PerfectSeason() {
     // Duel on exactly that: all three kept refusing, and pressing Keep my seasons again could only ever
     // answer `already_named`, which that form has no message for.
     setStats((s) => fresh || (s ? { ...s, username, guest: false } : s));
-    setNotice(`Your seasons are yours, ${fresh?.username || username}.`);
+    // The account has just stopped being a guest, which is the one event that can rescue a daily held from
+    // before any of this - a visitor who played the daily, played on, got a guest account for the second
+    // season, and is only now a real one. `guest` is false by definition here: claim_username answered ok.
+    const dailyRes = await flushPendingDaily(userId, false);
+    setNotice(dailyRes?.ok
+      ? `Your seasons are yours, ${fresh?.username || username} - and the daily you were holding is on the board.`
+      : `Your seasons are yours, ${fresh?.username || username}.`);
     loadLeaderboard();
     // ...and the Stats boards, which load once and then cache. Without this they kept showing the retired
     // Guest_XXXXX name, chip and all, under an account that no longer exists - until the player happened
@@ -3211,6 +3270,19 @@ export default function PerfectSeason() {
   // takes one for them - Supabase's anonymous sign-in - and posts it under the name the database gives
   // them. They can keep it later (KeepSeasons), and nothing about how the season is verified changes. Not
   // the daily: a guest can be made again and again, so it would be as many goes at the day as you like.
+  // A daily held from a signed-out visit, handed in the moment a REAL account exists. Never for a guest:
+  // submit-run refuses one (guest_daily), so posting it there would spend the attempt on a refusal and
+  // lose the trace. Called from the signup path and from the guest trade-up, which are the only two ways
+  // a non-guest account appears under a visitor who was holding one.
+  async function flushPendingDaily(uid, isGuestAccount) {
+    if (!pendingDaily || !uid || isGuestAccount) return null;
+    const trace = pendingDaily;
+    setPendingDaily(null);
+    const res = await submitAndSync(uid, trace);
+    showSaveAnswer(pendingDailyRun.current, res);
+    return res;
+  }
+
   async function postAsGuest(trace, runId) {
     const { data, error } = await authSignInAsGuest();
     const uid = data?.user?.id;
@@ -3222,6 +3294,8 @@ export default function PerfectSeason() {
       setNotice("That season couldn't be posted. Make an account and it'll be saved.");
       return;
     }
+    // Only this slot. `pendingDaily` stays where it is - a guest can never hand one in, and the player may
+    // still make a real account later, which is the one thing that can save it.
     setPending(null);
     setUserId(uid);
     setUser(prof.username);
@@ -3576,8 +3650,10 @@ export default function PerfectSeason() {
       // The trace is handed over rather than read back from state: it was only just set, and this runs in
       // the same pass.
       if (!user) {
-        setPending(trace);
-        pendingRun.current = sim.runId;
+        // A daily goes to its own slot: it can only ever be submitted by a real account, so it must not be
+        // evicted by the next season, which can be posted as a guest the moment it finishes.
+        if (mode.kind === "daily") { setPendingDaily(trace); pendingDailyRun.current = sim.runId; }
+        else { setPending(trace); pendingRun.current = sim.runId; }
         // Not if somebody is already signed in and we simply couldn't read them: taking a guest account
         // here would sign the real one out. The season waits in `pending` instead, which is what it is
         // for - the next successful read posts it under the account it belongs to.
@@ -5046,7 +5122,11 @@ export default function PerfectSeason() {
                       : <button className="btn solid" onClick={() => setPo({ idx: po.idx, stage: "done" })}>See your season</button>} />
                 )}
 
-                {finished && !user && pending && (
+                {/* Either slot. A DAILY finished while signed out waits in `pendingDaily` rather than `pending`
+                    (see the note where both are declared), and this panel is the only way a visitor is offered
+                    the account that can save it - gated on `pending` alone it vanished from under the one
+                    season that has nowhere else to go. tests/test-shop-flow.mjs caught that. */}
+                {finished && !user && (pending || pendingDaily) && (
                   <AuthPanel onAuthed={onAuthed} title="Save this season"
                     blurb="Log in or create an account to keep this season in your stats and put your score on the leaderboard." />
                 )}

@@ -275,6 +275,32 @@ export async function fetchSouTop(date, limit = 10) {
   if (error || !data) return [];
   return data.map((r) => ({ username: r.username, score: r.score, guest: !!r.guest }));
 }
+// Whether this ACCOUNT has already played a given day's season daily, and how it went. The device keeps its
+// own record (DAILY_KEY) and that is all the app read until v2.18.10 - which made the record the truth rather
+// than a hint, and it is per-DEVICE while `daily_runs`' primary key is (date, format, user_id). So the device
+// answered for whoever used it last: a second account on the same phone was told the day was already played,
+// shown the first account's lineup, and locked out of a daily it had never touched. The same gap the other
+// way round is why Over/Under has fetchMySouRun above, and why Guess and Century ask their own tables first.
+// A read that fails answers null, which leaves the device's own record standing - the same fallback the rest
+// of this file uses, and the right one: it is better to think you have played than to be dealt a day twice.
+// THREE answers, not two, and the difference decides whether the device's record is trusted:
+//   an object  - this account played it, and here is how it went
+//   null       - this account definitively has NOT played it
+//   undefined  - the question could not be asked (no account, or the read failed)
+// Two answers is what the first version of this had, and it did not work: "no row" fell back to the
+// device's record, which belongs to whoever used the browser last - so the second account was still
+// shown the first one's daily and still locked out. A signed-in account has to trust the server's "no",
+// because that is the only thing that knows which account is asking. `undefined` is the only case where
+// the device still gets to answer, and it means the network failed, not that the day is free.
+export async function fetchMyDailyRun(date, format, userId) {
+  if (!userId) return undefined;
+  const { data, error } = await getClient().from("daily_runs").select("*")
+    .eq("date", date).eq("format", format).eq("user_id", userId).maybeSingle();
+  if (error) return undefined;
+  if (!data) return null;
+  return { w: data.w, l: data.l, score: data.score, outcome: data.outcome, champ: !!data.champ };
+}
+
 // Whether this account has already played a given day. The primary key (date, user_id) is what really
 // enforces "one run a day"; the app's own flag is in PERSONAL, per-device storage, so a phone after a
 // laptop knew nothing about it - and dealt a whole second run, showed the score, and dropped it with no

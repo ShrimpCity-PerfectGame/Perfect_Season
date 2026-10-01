@@ -19,6 +19,69 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.10] - 2026-09-30
+
+The daily stops answering for whoever used the browser last.
+
+**Client only.** No migration, no Edge Function change.
+
+- **A second account on a shared device was locked out of the day's daily and shown a stranger's
+  lineup.** `daily_runs` is keyed `(date, format, user_id)`, but the app read only its own per-device
+  record — which is keyed by neither — so the device answered for whoever played on it last. It now
+  reads the server for a signed-in account (`fetchMyDailyRun`), with the device record as the
+  fallback, which is the shape Over/Under has had since `fetchMySouRun` and Guess and Century since
+  they shipped.
+  **This is why the device record could not simply be cleared on sign-out**, which is where this fix
+  started: it was the app's only source, so clearing it would have sent a returning player back into a
+  daily they had already played, to be refused as a duplicate at the end with the day spent for
+  nothing. A failed read still falls back to the device, deliberately — better to think you have played
+  than to be dealt the day twice.
+- **A daily draft in progress now leaves with the account that was playing it.** The sign-out handler
+  has cleared the Unlimited slot since v2.0 and missed the two daily slots beside it, so Alice could
+  make three picks of today's daily, log out, and Bob — signing up on the same device — would be
+  dropped into "Pick 4 of 6" with her players on his roster. Playing it out hands in HER picks as HIS
+  daily and spends the one thing that is one per account per day. The reasoning is the Unlimited
+  slot's, verbatim; only the slot ids differ.
+- `userIdRef` is assigned during render, the way `statsRef` beside it already is, so the new read can
+  tell "who I asked for" from "who is here now" and discard an answer that arrives after the account
+  has changed. The cached-day marker carries the account too, because `readDay` only re-ran when the
+  DAY changed — so a sign-in never refreshed it, and the first account's daily stayed on screen.
+- **`fetchMyDailyRun` gives three answers, and the difference is the whole fix.** An object means this
+  account played it; `null` means it definitively has not; `undefined` means the question could not be
+  asked. Only `undefined` lets the device record answer. The first version of this returned two
+  answers and fell back on `row || deviceRecord` — so the server saying "this account has no row" was
+  falsy and fell straight back to the device's, which belongs to whoever used the browser last. It
+  read the server and then ignored it, and the second account was still locked out. The test caught
+  that; the compiled-in query had not.
+
+## [2.18.9] - 2026-09-30
+
+A daily finished before signing up was destroyed by the next season the visitor played.
+
+**Client only.** No migration, no Edge Function change.
+
+- **A signed-out visitor's finished daily was silently thrown away, and the day was already spent.**
+  A daily cannot be posted as a guest — `submit-run` answers `guest_daily`, deliberately, because a
+  guest account costs nothing to make — so `finish()` holds the trace and waits for a real account.
+  It waited in the SAME single slot as every other season. Playing on then did two things at once:
+  `setPending(trace)` overwrote the daily's trace, and `postAsGuest` ran `setPending(null)` and took a
+  guest account. After that nothing could recover it — a guest may never hand a daily in, and no path
+  flushed the slot on the way OUT of being a guest. The device record had already marked the day as
+  played, and the player was shown nothing at all. Two taps of buttons the app offers.
+- **A daily held from a signed-out visit now has a slot of its own**, flushed by the only two events
+  that produce a non-guest account: a signup, and a guest trading up through Keep my seasons.
+  `postAsGuest` clears only its own slot. The guest flow is untouched: an Unlimited season still posts
+  as a guest the moment it finishes, which is what v1.17.0 is for.
+  The alternative — suppressing the guest account while a daily is held — was rejected because it
+  trades one loss for another: a visitor who never signs up would lose the Unlimited season that would
+  otherwise have counted.
+- **Two things the suite caught, and both corrections improved the fix.** The "Save this season" panel
+  is gated on `pending`, so moving the daily out of that slot made the panel vanish from under the one
+  season with nowhere else to go (`tests/test-shop-flow.mjs`). And the flush pushed a new sentence,
+  which the same test rejected: a daily IS a season, "Your last season was saved." is the wording this
+  screen has always used, and the assertion exists to stop a refactor quietly rewording what a player
+  reads. Both slots push that one sentence now, deduped.
+
 ## [2.18.8] - 2026-09-30
 
 One character walked 14 of the 27 blocked words straight past the filter.

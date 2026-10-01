@@ -1120,6 +1120,17 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+  v2.18.10's (the daily and the device): client only. No migration, no Edge Function change. The season
+  daily now reads `daily_runs` for a signed-in account (`fetchMyDailyRun`) instead of trusting the device's
+  own record, which is keyed by neither account nor format and so answered for whoever used the browser
+  last - a second account was locked out of the day and shown a stranger's lineup. The device record stays
+  as the FALLBACK and must: it is all a signed-out visitor has, and a failed read that reported "not played"
+  would deal the day twice. The two daily draft slots are also cleared on sign-out now, which the handler
+  had done for the Unlimited slot since v2.0 and missed for these.
+  v2.18.9's (the held daily): client only. No migration, no Edge Function change. A daily finished while
+  signed OUT is held in `pendingDaily`, its own slot, because it can only ever be handed in by a real
+  account - a guest is refused one. Sharing `pending` with every other season meant the next season both
+  overwrote it and took a guest account on the way past, destroying it with the day already spent.
   v2.18.8's (the word filter): run **`migration-profiles.sql`**, then the client. No Edge Function change.
   It replaces `text_is_clean` and the client half is a test-only mirror, so the two are independent - but
   the filter that matters is the SQL one, so run the migration. **One character defeated 14 of the 27
