@@ -19,6 +19,32 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.19.1] - 2026-10-01
+
+The second of the release-readiness work: **a forgotten password had no way back.**
+
+**Client only.** No migration, no Edge Function change. A new environment needs the site's own origin on
+its Supabase Redirect URLs allowlist; staging and production already have it from Google sign-in.
+
+- **There was no password reset of any kind.** The whole auth surface was `signUp`,
+  `signInWithPassword`, the two providers, `updateUser` and `signOut` - `resetPasswordForEmail` appeared
+  nowhere in the repo. So an email signup that lost its password lost the account outright, and with it
+  every season, badge, coin and daily streak on it. None of that exists anywhere else the player can reach,
+  which makes it the most player-hostile gap the readiness audit found. There is now a "Forgotten your
+  password?" link on the log in form, and following the emailed link asks for a new one.
+- **The form never says whether an address is registered.** "No account with that email" would turn it into
+  a way to ask a game with a public leaderboard of usernames who is signed up. Supabase deliberately answers
+  the same either way, and so does the screen - the test compares the two answers word for word with the
+  address masked out, which is the only way to hold a promise like that honestly.
+- **The dialog that sets the new password can be dismissed**, deliberately. The recovery session is real, so
+  closing it leaves the player signed in with their old password still working - nothing is half-done.
+  Refusing to close would trap anyone who followed the link out of curiosity.
+
+Writing the test found a bug in `tests/mock-supabase.mjs` worth recording, because it was the dangerous
+direction: `updateUser` re-keyed an account under `anon-<id>` when given a password and no email - exactly
+what a reset does - and threw the address away. Real Supabase keeps it, so a test written against the old
+mock would have disagreed with production whichever way it was written.
+
 ## [2.19.0] - 2026-10-01
 
 The first of the release-readiness work. A four-lens audit of whether the game is ready to ship as a

@@ -452,6 +452,30 @@ Providers > Google, with a Google Cloud OAuth client), so staging and production
 the kind of drift the note under Releasing warns about. In the Android app OAuth would leave the web view for a
 browser and need a deep link back; that isn't wired, so the app keeps the email form.
 
+**Forgetting a password (v2.19.1).** Until this, there was no way back at all: the auth surface was
+`signUp`, `signInWithPassword`, the two providers, `updateUser` and `signOut`, and `resetPasswordForEmail`
+appeared nowhere in the repo - so an email signup that lost its password lost the account, and with it every
+season, badge, coin and daily streak on it. None of that exists anywhere the player can reach. Three things
+to know:
+
+- **The form must never say whether an address is registered.** "No account with that email" turns it into a
+  way to ask a game with a public leaderboard of usernames who is signed up. Supabase deliberately answers
+  the same either way and so does the screen - `tests/test-password-reset.mjs` compares the two answers word
+  for word with the address itself masked out, which is the only way to hold a promise like that.
+- **`PASSWORD_RECOVERY` is the whole of the second half.** Following the emailed link brings the page back
+  with a recovery session that is real in every other way, so without that branch the player is silently
+  signed in and never asked for the password they came to set. `SetPassword` is deliberately **dismissable**:
+  the session is real, so closing it leaves them signed in with their old password still working, and
+  refusing to close would trap anyone who followed the link out of curiosity.
+- **`redirectTo` is a per-environment dashboard setting**, the same drift this file warns about under
+  Releasing. It is the site's own origin, which is already on both projects' Redirect URLs allowlist because
+  Google sign-in has used it since v1.16.0 - so this needed no dashboard change, but a NEW environment does.
+
+One mock bug was found writing the test and is worth knowing, because it was the dangerous direction:
+`tests/mock-supabase.mjs`'s `updateUser` re-keyed the account under `anon-<id>` when given a password and
+no email, throwing the address away - which is exactly what a reset does. Real Supabase keeps the address, so
+a test written against the old mock would have disagreed with production either way round.
+
 **Coins and the shop (v1.12.0).** Finished seasons, badges and the two minigames pay coins into a wallet
 that never goes below zero, spent in a cosmetic-only shop: frames, card themes, titles and avatar packs
 (some unlocked only by a badge), plus a free three-badge showcase. There's no real money, and nothing
@@ -598,6 +622,7 @@ node tests/test-site-pages.mjs     # /how-to-play and /leaderboard: the addresse
 node tests/test-app-shell.mjs      # the Android app: Back closes a dialog, then leaves a screen, then the app; the share sheet's AbortError
 node tests/test-pwa.mjs            # installable and offline: what the service worker stores and never stores, the build's stamp, the install offer
 node tests/test-error-boundary.mjs # the crash net: a crash shows a screen rather than a blank page, with no stylesheet and no personal data in the report
+node tests/test-password-reset.mjs # forgetting a password: the way back in, that it never says who is registered, and that the NEW password is what works after
 
 # Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
 # Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.
@@ -1226,6 +1251,13 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.19.1's (forgetting a password): client only. No migration, no Edge Function change. A NEW environment
+  needs the site's own origin on its Supabase **Redirect URLs** allowlist for the emailed link to come back
+  anywhere; staging and production already have it, because Google sign-in has used the same address since
+  v1.16.0. Nothing else is per-environment - the email itself is Supabase's own.
+  v2.19.0's (the crash net): client only. No migration, no Edge Function change. `error-boundary.jsx` is new
+  and `entry.jsx` wraps the app in it, so the Android shell gets it too - re-run `npm run app:sync` when the
+  app is next built. Nothing to deploy beyond the client.
   v2.18.13's (finishing v2.18.12): re-run **`migration-versus.sql`**, then **deploy the Edge Functions**, then
   the client - the same three steps as v2.18.12 and for the same two reasons, `join_match` and
   `versus-logic.mjs`. It closes the half of v2.18.12 that did not ship: the person rule guarded `decideMove`'s
