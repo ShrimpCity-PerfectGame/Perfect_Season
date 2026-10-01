@@ -168,8 +168,24 @@ compute from the same place. It returns either `{ ok: false, reason, status }` o
 3. `boardIdx` isn't the current board → `wrong_board`;
 4. the option isn't on that board → `not_on_board`;
 5. it is already taken in this match, by either side → `already_taken`;
-6. the slot is filled, or the option doesn't fit it (`DST` and `K` take only their own kind, and neither fits a
+6. he is already on the caller's own roster, in any season → `already_on_your_roster` (v2.18.12);
+7. the slot is filled, or the option doesn't fit it (`DST` and `K` take only their own kind, and neither fits a
    Flex) → `bad_slot`.
+
+Step 6 is about the **man**, where every other availability test in the mode is about the **row**. `optionId`
+is `player|id|season`, which is what `match_picks` needs, so a player whose best season for one team and best
+season for another both land on a match's boards is two different options to `taken`, `already_taken`,
+`boardServes`, `boardCompletable` and `autoPick` alike. A match deals about 218 options across its eight
+boards and roughly 3.7 of them are men who appear on more than one; across all 160 boards it is 821 of 4,346.
+Keep the two checks separate rather than changing what `optionId` means.
+
+**The clock is the other door onto the same roster**, and it was left open for one release: `autoPick` runs
+inside the `claim: "clock"` branch, which returns before step 6 is ever reached. Measured, 0.5% of matches
+played entirely by clock claims ended with one man in two slots. Since v2.18.13 `autoPick` **prefers** an
+option that is not already on that roster - it does not refuse one. Returning null there is the worst outcome
+in the mode (section 4), and serve-ability is still keyed on `optionId`, so a board can legitimately be dealt
+whose only fitting option is a man you hold; in that case it takes him, because a repeated name beats a match
+nobody can finish. It therefore never returns null where it used to return an option.
 
 `POST { code, claim: "clock" }` is how a client says the clock has run out, and is the one move **either**
 player may make — that is how a match survives an opponent who has closed the tab. The deadline on the row

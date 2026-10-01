@@ -19,6 +19,60 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.13] - 2026-10-01
+
+Finishing 2.18.12. An adversarial review of that release's own diff, run before promoting it, found that
+its headline rule guarded one of the two doors onto a roster, that it had no test at all, and that one of
+its fixes introduced a deadlock. All three are closed here, and a number it put in CLAUDE.md is corrected.
+
+**Run `migration-versus.sql`, then deploy the Edge Functions, then the client** — the same three steps as
+2.18.12, for the same two reasons. Safe on any shape, nothing in flight is affected, and no match needs
+abandoning: `replayMatch` is untouched again.
+
+- **The expired clock still drafted a man you already held.** `already_on_your_roster` lives in
+  `decideMove`'s pick branch, and the `claim: "clock"` branch returns from `autoPick` before it — so the
+  exact roster 2.18.12 was written to forbid was still produced by any turn that timed out, which is not an
+  edge case in a mode with a 45-second turn either player may claim. Measured: **2 of 400 matches played
+  entirely by clock claims (0.5%) ended with one man in two slots** — Saquon Barkley at RB and Flex, DeAndre
+  Hopkins at WR and Flex — and because `autoPick` maximises value, the duplicate is specifically the
+  player's own best man. That roster is then graded and written to `matches.result` and `pvp_wins`.
+  `autoPick` now **prefers** an option that is not already on the roster. It deliberately does not refuse
+  one: returning null there is the worst outcome in the mode — the clock answers 500 for ever and nothing
+  can finish, grade or leave the match — and `boardServes`/`boardCompletable` still key serve-ability on
+  `optionId`, so a board can legitimately be dealt whose only fitting option is a man you hold. In that one
+  case it still takes him, because a repeated name beats a match nobody can end. It therefore can never
+  return null where it used to return an option, which is why the serve-ability functions need no matching
+  change. After the fix: **0 duplicates in 600 matches, 0 bricked, and the fallback never fired in 9,600
+  turns.** The same run shows a human is never refused every option either, which is what the 2.18.12 rule
+  rests on.
+- **Nothing tested `already_on_your_roster`.** 2.18.12 added tests for the dip rule and both `join_match`
+  changes and none for the bug it is named after, in a file titled "every refusal `decideMove` makes". Two
+  tests now: `T00034`, where Shawn Bryson is on board 0 and board 1 and the hand is refused while the clock
+  takes somebody else; and `CK0466`, played entirely by the clock, where at pick 6 the old `autoPick`'s
+  best option *is* the Davante Adams the guest already holds. Both go red when their half is reverted.
+  `tests/test-versus-boards.mjs` drives every pick through `autoPick` and asserted legality with
+  `new Set(ids).size === 16` built from `optionId` — the exact man-versus-man-and-season confusion — so the
+  one test placed to catch this could not. It now asks the person's question too.
+- **Two crossing invites deadlocked.** 2.18.12's abandon-your-own-lobby step is a **second** row lock taken
+  in an order the caller chooses. Ann and Bob each open a lobby and send each other the link; both follow it
+  at once; Ann holds Bob's row and wants her own while Bob holds Ann's and wants his. Postgres kills one, the
+  RPC throws, and that player reads "Couldn't reach the server" for a duel that was fine. The subquery is
+  `for update skip locked` now, which is also the right answer rather than merely a safe one: a lobby of
+  theirs that another transaction is holding is one somebody is joining this instant, so it must not be
+  called off underneath them. **A regression 2.18.12 introduced**, found before anyone hit it.
+- **Over/Under's Modes tile still answered for whoever used the browser last.** 2.18.11 gave the *screen*
+  the server read and left the *tile* on `ps-sou:<date>`, which is keyed by neither account nor anything
+  else — so a second account on a shared phone read "Over/Under · Done · 14" with a stranger's score and the
+  Mini games "N done today" pill counted it. Nothing stopped them playing, because tapping through asks the
+  server, but a tile that says the day is spent is a tile nobody taps. It asks the account's own row now,
+  with the same three answers the daily uses. 2.18.11's claim to have completed that cluster was premature.
+- **A number in CLAUDE.md was wrong by about 200x.** 2.18.12 wrote "821 of the 1,639 options a match deals
+  are men who appear on more than one of its eight boards". 821 is the **pool-wide** count across all 160
+  boards and 4,346 options; a match deals about **218** options, of which about **3.7** are such men. The
+  claim it was supporting — that this is ordinary rather than exotic — still holds, and the 0.5% of
+  clock-played matches above is the honest evidence for it. The changelog entry above is corrected in place
+  rather than rewritten, and `VERSUS.md` section 4 now carries the refusal, which it never gained.
+
 ## [2.18.12] - 2026-10-01
 
 Five duel bugs. The mode where the rules have two homes is the mode where they drift, and four of these
@@ -35,8 +89,9 @@ move rather than replaying old rows differently.
 
 - **The same man could fill two slots of one duel roster.** `optionId` is `player|id|season`, which is
   the row identity the database needs and not a person: a player whose best season for one team and
-  best season for another both land on a match's eight boards could be drafted twice. 821 of the 1,639
-  options a match deals are men who appear on more than one board, so this was not rare. Match code
+  best season for another both land on a match's eight boards could be drafted twice. ~~821 of the 1,639
+  options a match deals are men who appear on more than one board~~ — **that figure is wrong; see 2.18.13.**
+  A match deals about 218 options and roughly 3.7 of them are such men. It was still not rare. Match code
   AAAHZU: Laveranues Coles 2003 into WR at pick 1 and Coles 2006 into Flex at pick 8, both `ok`. Single
   player has refused this from the start; `decideMove` now refuses it too, as
   `already_on_your_roster`.

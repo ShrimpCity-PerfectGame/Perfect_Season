@@ -180,11 +180,17 @@ parts that are unlike every other mode:
   select, **no client write policy at all**) and only the `match-pick` Edge Function's service role writes them.
 - **`optionId` is a row's identity, not a person's.** It is `player|id|season`, which is what `match_picks`
   needs - and `taken`, `already_taken`, `boardServes`, `boardCompletable` and `autoPick` all read it, so for
-  one release the same man could fill two slots of one roster off two different boards. 821 of the 1,639
-  options a match deals are men who appear on more than one of its eight boards, so it was ordinary rather
-  than exotic. Single player has no such gap: one board per pick, one era at a time. A person check lives in
-  `decideMove` beside the `optionId` one (`already_on_your_roster`); keep the two separate rather than
-  changing what `optionId` means.
+  one release the same man could fill two slots of one roster off two different boards. A match deals about
+  **218 options across its eight boards, of which roughly 3.7 are men who appear on more than one** of them
+  (max 11 measured over 200 codes); across all 160 boards it is 821 of 4,346. **v2.18.12 shipped that as "821
+  of the 1,639 options a match deals", which is the pool-wide count wearing a per-match sentence** - wrong by
+  about 200x and corrected in v2.18.13. It is still ordinary rather than exotic: 0.5% of matches played
+  entirely by clock claims ended with one man in two slots. Single player has no such gap - one board per
+  pick, one era at a time. The person check lives in `decideMove` beside the `optionId` one
+  (`already_on_your_roster`), and **the clock is a second door onto the same roster**: `autoPick` returns
+  before that check, so since v2.18.13 it PREFERS an option not already on the roster rather than refusing
+  one - returning null there bricks the match, and serve-ability is still keyed on `optionId`. Keep the two
+  checks separate rather than changing what `optionId` means.
 - **`versus-logic.mjs` owns every rule**, and `supabase/functions/match-pick/index.ts` owns none of them: it says
   who is asking, calls `decideMove`, and writes down what comes back. Same reasoning as game-logic.mjs - a rule
   enforced on one side and not the other will drift. It also means the rules are tested with no Deno runtime and
@@ -1189,6 +1195,17 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.18.13's (finishing v2.18.12): re-run **`migration-versus.sql`**, then **deploy the Edge Functions**, then
+  the client - the same three steps as v2.18.12 and for the same two reasons, `join_match` and
+  `versus-logic.mjs`. It closes the half of v2.18.12 that did not ship: the person rule guarded `decideMove`'s
+  pick branch and the CLOCK returns before it, so an expired turn still drafted a man you already held
+  (`autoPick` now prefers, never refuses - see the `optionId` bullet under Duels). The migration gives the
+  abandon in `join_match` a `for update skip locked` subquery: it is a second row lock taken in an order the
+  caller chooses, and two players who each hold a lobby and each follow the other's link deadlock on it -
+  **a regression v2.18.12 introduced**, one of the pair losing their transaction and reading "Couldn't reach
+  the server". Client-side, Over/Under's Modes TILE now asks the account's own row: v2.18.11 gave the screen
+  that read and left the tile on `ps-sou:<date>`, which is keyed by neither account nor anything else, so the
+  tile still answered for whoever used the browser last. Safe in any order and nothing in flight is affected.
   v2.18.12's (the duel cluster): re-run **`migration-versus.sql`**, then **deploy the Edge Functions**, then
   the client. It only replaces `join_match`, so it is safe on any shape - and unlike v1.19.0's version of this
   file it drops nothing, since those drops have long since run. The functions are not optional: **`versus-logic.mjs`**

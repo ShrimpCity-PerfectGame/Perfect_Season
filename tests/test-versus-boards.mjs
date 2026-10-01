@@ -437,6 +437,17 @@ await runTest("a double dip takes two off one board and gives up the next", asyn
       }
       const ids = ["host", "guest"].flatMap((side) => VERSUS_SLOTS.map((sl) => optionId(state.roster[side][sl])));
       assert(new Set(ids).size === 16, `${code}: nothing was drafted twice`);
+      // ...and not the same MAN twice on one roster, which the line above cannot see: optionId is
+      // `player|id|season`, so one player in two seasons is two ids and passes it. Every pick in this file
+      // goes through autoPick, so this is where that question belongs - but be honest about what it buys:
+      // the codes driven here do not happen to deal a board whose best option is a man already held, so
+      // reverting autoPick's preference does NOT turn this red. The seed that does is CK0466 in
+      // tests/test-versus-rules.mjs, which is mutation-checked. This is the net underneath it.
+      for (const side of ["host", "guest"]) {
+        const men = VERSUS_SLOTS.map((sl) => state.roster[side][sl]).filter((o) => o && o.kind === "player");
+        assert(new Set(men.map((o) => o.id)).size === men.length,
+          `${code}: ${side} has no man twice: ${JSON.stringify(men.map((o) => `${o.name} ${o.season}`))}`);
+      }
       assert(dipsLeft(dips, by) === MATCH_DIPS - 1 && dipsLeft(dips, other) === MATCH_DIPS, `${code}: one dip spent, by one player`);
     }
   }

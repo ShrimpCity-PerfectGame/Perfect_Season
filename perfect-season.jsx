@@ -2628,8 +2628,22 @@ export default function PerfectSeason() {
       fan = fanRow === undefined ? fanDone : fanRow;
       std = stdRow === undefined ? stdDone : stdRow;
     }
+    // Over/Under's own record is the one key in here that is NOT per account - Century's and Guess's carry a
+    // user id, the daily asks the server two lines up, and `ps-sou:<date>` is keyed by the date alone. v2.18.11
+    // gave the SCREEN the server read (openSou asks fetchMySouRun first) and left the TILE on the device, so
+    // the gate was right and the sign over it still answered for whoever used the browser last: a second
+    // account on a shared phone read "Over/Under · Done · 14" with a stranger's score, and the Mini games
+    // "N done today" pill counted it. Nothing stopped them playing - tapping through asks the server - but a
+    // tile that says the day is spent is a tile nobody taps. Same three answers as the daily above: undefined
+    // is "could not ask" and is the only one the device gets to answer.
+    let souRec = sou;
+    if (who) {
+      const souRow = await fetchMySouRun(today, who).catch(() => undefined);
+      if (who !== userIdRef.current) return;   // the account changed while we were asking
+      souRec = souRow === undefined ? sou : souRow;
+    }
     setDailyDone({ fantasy: fan, standard: std });
-    setSouDone(sou);
+    setSouDone(souRec);
     setCenturyDone(century);
     setGuessDone(guessed);
   };
