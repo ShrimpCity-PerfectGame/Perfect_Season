@@ -108,6 +108,36 @@ file edited there is gone before it is served. This said `public/sw.js` until v2
 discover during the emergency it exists for. A bad deploy needs no such thing - pages and the bundle are network-first, so
 the next load has the fix.
 
+**The crash net (v2.19.0).** `error-boundary.jsx` wraps the app in `entry.jsx`, so the website and the
+Android shell share it. Before it, `root.render(<PerfectSeason />)` had nothing around it and React 18
+unmounts the whole tree on an uncaught render error - the player got a **blank cream page**, and because
+pages are network-first in the service worker a reload re-served the same code and blanked again. That is
+not hypothetical: versus.jsx records it happening on a real duel, "with no error boundary anywhere, that
+took the whole app down, and it landed on whoever didn't make the last pick." That one site was fixed and
+the net never got built. Three rules hold it up, and all three are what make it a crash net rather than a
+component:
+
+- **It imports nothing but React, and it never will.** It is the thing that has to work when something else
+  did not, so it cannot share a dependency with whatever broke. Every colour is a literal and every style is
+  inline, because the stylesheet is injected by perfect-season.jsx as it renders and a crash during that
+  render means there may be none. A crash screen that needs the crashed app's CSS is not a crash screen.
+  Those literals therefore sit outside theme.mjs, so `tests/test-error-boundary.mjs` computes their contrast
+  itself - nothing else can hold them to AA.
+- **No third party.** The privacy policy promises "no adverts, no analytics and no trackers", and crash
+  reporting that posts to somebody else's servers is the kind of thing a player would reasonably call a
+  tracker. So the report is a **Copy error details** button: version, time, browser, the error once (V8
+  begins a stack with the message, so printing both says it twice), where in the component tree, and the
+  last few failures that led up to it. **No personal data ever** - no username, no email, no account id -
+  and the test asserts that, because a report carrying it is one the player should have been asked about.
+- **The global handlers are half of it.** A boundary catches rendering and nothing else, so
+  `installGlobalErrorHandlers` keeps the last 20 `error` and `unhandledrejection` events in a bounded ring.
+  Those are the silent failures this repo keeps shipping - they do not blank the page, so they are kept for
+  the NEXT report rather than shown. The lost Guess daily on 2026-09-30 was diagnosed by inference precisely
+  because nothing recorded the first failure.
+
+A first-party sink (a bounded `client_errors` table, insert-only) is the obvious next step and would need a
+line in the privacy policy; the copy button is what makes the next bug reportable at all without one.
+
 **Sharing (v1.10.0).** `shareText` builds a Wordle-style card and must never name the players (that
 would spoil the daily): a title (`Gridspin Daily N`, numbered from `GRIDSPIN_DAY_ONE` = launch day
 2026-09-14, or the Unlimited variant), the record, the 17 regular-season games as squares in rows of
@@ -567,6 +597,7 @@ node tests/test-share.mjs          # the spoiler-free share card, challenge link
 node tests/test-site-pages.mjs     # /how-to-play and /leaderboard: the addresses, the footer links, and the rules matching site-pages.mjs
 node tests/test-app-shell.mjs      # the Android app: Back closes a dialog, then leaves a screen, then the app; the share sheet's AbortError
 node tests/test-pwa.mjs            # installable and offline: what the service worker stores and never stores, the build's stamp, the install offer
+node tests/test-error-boundary.mjs # the crash net: a crash shows a screen rather than a blank page, with no stylesheet and no personal data in the report
 
 # Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
 # Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.
