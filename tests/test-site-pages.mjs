@@ -6,7 +6,7 @@
 import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 import {
   HOWTO_STEPS, HOWTO_NOTE, SITE_PAGES, parseSitePath, HOWTO_PATH, BOARD_PATH, PRIVACY_CONTACT,
-  TERMS_PATH, TERMS_STATE, TERMS_AGE, TERMS_LAW_UNSET, SITE_PAGE_BY_ID,
+  TERMS_PATH, TERMS_STATE, TERMS_AGE, TERMS_LAW_UNSET, SITE_PAGE_BY_ID, DATA_CREDIT, sitePageBody,
 } from "../site-pages.mjs";
 import { readFileSync as readSrc } from "node:fs";
 
@@ -112,7 +112,10 @@ await runTest("Modes ends with the brand and real links to both pages, which ope
   const c = await open("http://localhost/");
   await until(() => footer(c), () => `the footer, got: ${text(c).slice(-150)}`);
   assert(/Gridspin is a free football draft game/.test(flat(footer(c).textContent)), `the brand in plain words, got: ${flat(footer(c).textContent)}`);
-  const links = [...footer(c).querySelectorAll("a")];
+  // Scoped to .sitelinks rather than every anchor in the footer: the data credit beside them carries two of
+  // its own (nflverse and the licence), which the CC BY 4.0 test below holds. The rule here is unchanged -
+  // one real <a href> per site page, so a crawler can walk between them.
+  const links = [...footer(c).querySelectorAll(".sitelinks a")];
   assert(links.length === SITE_PAGES.length && SITE_PAGES.every((p) => links.some((a) => a.getAttribute("href") === p.path && a.textContent === p.nav)),
     `an <a href> per page, got ${links.map((a) => `${a.getAttribute("href")}:${a.textContent}`).join(", ")}`);
 
@@ -212,6 +215,37 @@ await runTest("the terms address is routed, and its .html redirects to it", asyn
   const redirect = vercel.redirects.find((r) => r.source === "/terms.html");
   assert(redirect && redirect.destination === "/terms" && redirect.permanent === true,
     `/terms.html redirects permanently to /terms: ${JSON.stringify(redirect)}`);
+});
+
+
+// The attribution nflverse's licence asks for. nflverse-data is CC BY 4.0, which wants the creator named,
+// the material linked, the licence linked, and changes indicated - and we changed a great deal, since
+// nothing nflverse publishes is a 0-130 rating or a five-year era board. DATA.md is the full account.
+await runTest("the data credit is on every page of words, with both links", async () => {
+  assert(DATA_CREDIT.source.href.includes("nflverse"), `it links the material: ${DATA_CREDIT.source.href}`);
+  assert(DATA_CREDIT.licence.href.includes("creativecommons.org/licenses/by/4.0"),
+    `and the licence itself: ${DATA_CREDIT.licence.href}`);
+  const whole = [DATA_CREDIT.before, DATA_CREDIT.source.text, DATA_CREDIT.middle, DATA_CREDIT.licence.text, DATA_CREDIT.after].join("");
+  assert(/modified|changed/i.test(whole), `it says changes were made, which CC BY asks for: ${whole}`);
+
+  // On every built page, not one of them: the licence asks for it wherever the material is used, and these
+  // pages carry no bundle, so the HTML is the whole thing.
+  for (const page of SITE_PAGES) {
+    const html = sitePageBody(page);
+    assert(html.includes(DATA_CREDIT.source.href), `${page.id} links nflverse`);
+    assert(html.includes(DATA_CREDIT.licence.href), `${page.id} links the licence`);
+  }
+});
+
+// The single highest-value thing in DATA.md: no club imagery anywhere. nflverse player rows carry a headshot
+// URL on the NFL's own image CDN, and the builders deliberately drop it - which keeps the whole question
+// about facts rather than about marks.
+await runTest("no shipped data file carries an image URL, or any URL at all", async () => {
+  for (const file of ["players.json", "versus-pool.json", "season-2025.json", "guess-pool.json"]) {
+    const raw = readSrc(new URL(`../data/${file}`, import.meta.url), "utf8");
+    const urls = raw.match(/https?:\/\//g) || [];
+    assert(urls.length === 0, `data/${file} carries ${urls.length} URL(s) - a headshot link would be NFL imagery`);
+  }
 });
 
 await close();

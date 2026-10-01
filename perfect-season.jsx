@@ -47,7 +47,7 @@ import { GUESS_TRIES } from "./guess-logic.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
-import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, parseSitePath } from "./site-pages.mjs";
+import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, DATA_CREDIT, parseSitePath } from "./site-pages.mjs";
 initGameData(gameData.players, gameData.opponents);
 // 1v1's defenses and kickers (VERSUS.md 6). Only versus.jsx reads them; single player never does.
 initVersusData(versusPool);
@@ -6102,6 +6102,15 @@ export default function PerfectSeason() {
                     if (openSitePage(p.id)) e.preventDefault();
                   }}>{p.nav}</a>
               ))}
+            </p>
+            {/* CC BY 4.0 asks to be told where the material came from wherever it is used, so this is on the
+                app as well as on the pages of words - same constant, so the two can never drift. */}
+            <p className="fine datacredit">
+              {DATA_CREDIT.before}
+              <a href={DATA_CREDIT.source.href} target="_blank" rel="noopener noreferrer">{DATA_CREDIT.source.text}</a>
+              {DATA_CREDIT.middle}
+              <a href={DATA_CREDIT.licence.href} target="_blank" rel="license noopener noreferrer">{DATA_CREDIT.licence.text}</a>
+              {DATA_CREDIT.after}
             </p>
           </footer>
         )}

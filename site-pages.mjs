@@ -62,6 +62,21 @@ export const PRIVACY_UPDATED = "1 October 2026";
 // disagreeing about it is worse than either alone.
 export const TERMS_AGE = 16;
 
+// Where the numbers come from, and the licence that asks to be told so.
+//
+// Every statistic in the game is nflverse data, and nflverse-data is **CC BY 4.0** - which requires naming
+// the creator, linking the material, linking the licence, and saying that changes were made. We made plenty:
+// nothing nflverse publishes is a 0-130 rating or a five-year era board. DATA.md is the full account; this
+// is the part a player sees, and it is on every page because the licence asks for it wherever the material
+// is used.
+export const DATA_CREDIT = {
+  before: "Player and team statistics from ",
+  source: { text: "nflverse", href: "https://github.com/nflverse/nflverse-data" },
+  middle: ", used under ",
+  licence: { text: "CC BY 4.0", href: "https://creativecommons.org/licenses/by/4.0/" },
+  after: " and modified: the ratings, boards and eras are this game's own. Not affiliated with the NFL.",
+};
+
 // What Gridspin keeps, said plainly and accurately - every line below is something the code actually does.
 // If the code changes, this changes with it.
 const PRIVACY_SECTIONS = [
@@ -297,7 +312,10 @@ export function sitePageBody(page) {
   }
   const others = SITE_PAGES.filter((p) => p.id !== page.id)
     .map((p) => `<a class="spg-btn" href="${p.path}">${esc(p.h1)}</a>`);
-  parts.push(`<p class="spg-cta"><a class="spg-btn spg-solid" href="/">Play Gridspin</a>${others.join("")}</p>`, "</div>");
+  parts.push(`<p class="spg-cta"><a class="spg-btn spg-solid" href="/">Play Gridspin</a>${others.join("")}</p>`);
+  // CC BY 4.0 asks for the credit wherever the material is used, so it is on every page rather than one.
+  parts.push(`<p class="spg-credit">${esc(DATA_CREDIT.before)}<a href="${DATA_CREDIT.source.href}" rel="noopener">${esc(DATA_CREDIT.source.text)}</a>${esc(DATA_CREDIT.middle)}<a href="${DATA_CREDIT.licence.href}" rel="license noopener">${esc(DATA_CREDIT.licence.text)}</a>${esc(DATA_CREDIT.after)}</p>`);
+  parts.push("</div>");
   return parts.join("\n");
 }
 
@@ -306,7 +324,9 @@ export function sitePageBody(page) {
 // shadow - from the same theme.mjs tokens the app uses, so the two can't drift apart. Class names are prefixed
 // spg-: this <style> stays in the head after React replaces the content, and must never style the app (the app
 // already owns .sp, on the draft screen's sticky bar).
-export const SITE_PAGE_CSS = `.spg{max-width:46rem;margin:0 auto;padding:26px 20px 52px;background:${T.bg};color:${T.ink};font:400 16px/1.65 Inter,system-ui,sans-serif}
+export const SITE_PAGE_CSS = `.spg-credit{margin:18px 0 0;font-size:13px;color:${T.muted}}
+.spg-credit a{color:inherit}
+.spg{max-width:46rem;margin:0 auto;padding:26px 20px 52px;background:${T.bg};color:${T.ink};font:400 16px/1.65 Inter,system-ui,sans-serif}
 .spg-brand{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px;text-decoration:none;color:${T.ink}}
 .spg-word{font-family:Anton,Impact,sans-serif;font-size:24px;line-height:1;text-transform:uppercase;letter-spacing:.02em}
 .spg-kicker{font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;background:${T.surface};border:2px solid ${T.ink};border-radius:999px;padding:4px 10px}
