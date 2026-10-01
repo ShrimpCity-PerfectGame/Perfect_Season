@@ -164,6 +164,40 @@ await runTest("whole-word entries don't match inside other words; anywhere entri
 
 // The character tables: probe words that only match when a character maps to exactly the right letter,
 // added to the SQL table and to a copy of the mock's list.
+await runTest("the two fold tables hold exactly the same characters, read from both files", async () => {
+  // Read the SQL's OWN table rather than probing it with the mock's characters. Everything below this
+  // drives its probes from FILTER_FOLD_FROM - the mock's table - so a character the SQL folds and the
+  // mock does not was never asked about, in either direction that matters:
+  //   mock ahead of SQL -> caught (standIns expects a fold the SQL will not make)
+  //   SQL ahead of mock -> INVISIBLE, and that is the hole this closes.
+  // It went unnoticed because for a long time neither side folded Cyrillic small te, so there was
+  // nothing to disagree about. When v2.18.8 added it to the SQL alone, this file still passed.
+  const src = readFileSync(new URL("../supabase/migration-profiles.sql", import.meta.url), "utf8");
+  const block = src.slice(src.indexOf("fold(src, dst) as (values"), src.indexOf("prepared as ("));
+  const sqlPairs = new Map();
+  for (const part of block.split("(U&'").slice(1)) {
+    const chars = part.split("'")[0];
+    const letter = part.split("'").slice(1).join("'").split("'")[1];
+    if (!letter || letter.length !== 1) continue;
+    // U&'..' escapes a codepoint as a backslash and four hex digits; everything else is literal.
+    let i = 0;
+    while (i < chars.length) {
+      if (chars[i] === String.fromCharCode(92) && /^[0-9A-Fa-f]{4}$/.test(chars.slice(i + 1, i + 5))) {
+        sqlPairs.set(String.fromCodePoint(parseInt(chars.slice(i + 1, i + 5), 16)), letter); i += 5;
+      } else { sqlPairs.set(chars[i], letter); i += 1; }
+    }
+  }
+  assert(sqlPairs.size > 40, `the SQL fold table parsed: ${sqlPairs.size} characters`);
+  const mockPairs = new Map([...FILTER_FOLD_FROM].map((c, i) => [c, [...FILTER_FOLD_TO][i]]));
+  const show = (set) => [...set].map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`).join(" ");
+  const onlySql = [...sqlPairs.keys()].filter((c) => !mockPairs.has(c));
+  const onlyMock = [...mockPairs.keys()].filter((c) => !sqlPairs.has(c));
+  assert(onlySql.length === 0, `the SQL folds characters the mock does not: ${show(onlySql)}`);
+  assert(onlyMock.length === 0, `the mock folds characters the SQL does not: ${show(onlyMock)}`);
+  const differ = [...sqlPairs.keys()].filter((c) => mockPairs.get(c) !== sqlPairs.get(c));
+  assert(differ.length === 0, `folded to different letters: ${differ.map((c) => `${show([c])} sql=${sqlPairs.get(c)} mock=${mockPairs.get(c)}`).join(", ")}`);
+});
+
 await runTest("the SQL and the mock normalize, fold, drop and map exactly the same characters", async () => {
   const from = [...FILTER_FOLD_FROM], to = [...FILTER_FOLD_TO];
   assert(from.length === to.length && new Set(from).size === from.length, "the fold table pairs each character once");

@@ -71,27 +71,35 @@ export const FILTER_EXPANSIONS = [[cp(0xDF), "ss"], [cp(0x1E9E), "ss"], [cp(0xE6
 //    Cyrillic and Greek letters that look like Latin ones (a pasted Cyrillic "c" in a word otherwise hides
 //    it). Lowercasing only through this table, never toLowerCase()/lower(), keeps the result the same in
 //    every browser and database locale.
+// Every entry here has to exist in text_is_clean's own fold table in migration-profiles.sql, and the
+// other way round - tests/test-word-filter.mjs holds the two together. Six of these were added in
+// v2.18.8: the Cyrillic LOWERCASE counterparts of characters whose uppercase was already folded, plus
+// Greek beta and epsilon. Only Cyrillic small te was doing real damage - 14 of the 27 blocked words
+// contain a `t`, so one substitution walked all of them past the filter - but the shape of the mistake
+// was the same in all six: the uppercase was folded and its lowercase, which looks just as much like
+// the Latin letter, was not. Greek nu and upsilon are deliberately NOT paired: their two cases look
+// like different Latin letters, so the capital goes to one group and the small to another.
 const FOLD_GROUPS = {
   a: "A" + cp(0x251) + cp(0x410) + cp(0x430) + cp(0x391) + cp(0x3B1),
-  b: "B" + cp(0x412) + cp(0x392),
+  b: "B" + cp(0x412) + cp(0x432) + cp(0x392) + cp(0x3B2),
   c: "C" + cp(0x421) + cp(0x441),
   d: "D" + cp(0xD0) + cp(0xF0) + cp(0x110, 0x111) + cp(0x501),
-  e: "E" + cp(0x415) + cp(0x435) + cp(0x395),
+  e: "E" + cp(0x415) + cp(0x435) + cp(0x395) + cp(0x3B5),
   f: "F",
   g: "G" + cp(0x261),
-  h: "H" + cp(0x126, 0x127) + cp(0x41D) + cp(0x4BB) + cp(0x397),
+  h: "H" + cp(0x126, 0x127) + cp(0x41D) + cp(0x43D) + cp(0x4BA) + cp(0x4BB) + cp(0x397),
   i: "I" + cp(0x131) + cp(0x406) + cp(0x456) + cp(0x399) + cp(0x3B9),
   j: "J" + cp(0x408) + cp(0x458),
   k: "K" + cp(0x138) + cp(0x41A) + cp(0x43A) + cp(0x39A) + cp(0x3BA),
-  l: "L" + cp(0x141, 0x142) + cp(0x4CF),
-  m: "M" + cp(0x41C) + cp(0x39C),
+  l: "L" + cp(0x141, 0x142) + cp(0x4C0) + cp(0x4CF),
+  m: "M" + cp(0x41C) + cp(0x43C) + cp(0x39C),
   n: "N" + cp(0x39D),
   o: "O" + cp(0xD8) + cp(0xF8) + cp(0x41E) + cp(0x43E) + cp(0x39F) + cp(0x3BF),
   p: "P" + cp(0x420) + cp(0x440) + cp(0x3A1) + cp(0x3C1),
   q: "Q",
   r: "R",
   s: "S" + cp(0x405) + cp(0x455),
-  t: "T" + cp(0x166, 0x167) + cp(0x422) + cp(0x3A4) + cp(0x3C4),
+  t: "T" + cp(0x166, 0x167) + cp(0x422) + cp(0x442) + cp(0x3A4) + cp(0x3C4),
   u: "U" + cp(0x3C5),
   v: "V" + cp(0x3BD),
   w: "W",
