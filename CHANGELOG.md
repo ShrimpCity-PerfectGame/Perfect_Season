@@ -19,6 +19,44 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.19.0] - 2026-10-01
+
+The first of the release-readiness work. A four-lens audit of whether the game is ready to ship as a
+finished product found that the single most-likely-to-matter gap was not a bug but the absence of a net
+under all of them: **a crash left the player on a blank page, and nothing anywhere recorded it.**
+
+**Client only.** No migration, no Edge Function change.
+
+- **A crash showed a blank page.** `entry.jsx` was `root.render(<PerfectSeason />)` with nothing around it,
+  and React 18 unmounts the whole tree on an uncaught render error - so `<div id="root">` emptied and the
+  player was left on blank cream with no text, no retry and no hint that reloading might help. Because pages
+  and the bundle are network-first in the service worker, a reload re-served the same code and blanked
+  again. **This already happened in production**: versus.jsx has recorded it since the duel release - "with
+  no error boundary anywhere, that took the whole app down, and it landed on whoever didn't make the last
+  pick." That one site was fixed; the net was never built. There is now a crash screen that says what
+  happened in plain words, offers the reload that actually works, says their seasons are safe (they are on
+  the server, not in the page), names the build, and shows what broke.
+- **It imports nothing but React, and every style is inline.** The thing that has to work when something
+  else did not cannot share a dependency with whatever broke - and the stylesheet is injected by the
+  component that just crashed, so a crash screen that needs it is not a crash screen. Its colours are
+  therefore literals outside `theme.mjs`, which means nothing else holds them to AA, so the test computes
+  their contrast itself (17.49:1, 6.75:1, 15.96:1, 16.28:1 - all comfortably over 4.5).
+- **The report is a Copy button, not a vendor.** The privacy policy promises "no adverts, no analytics and
+  no trackers", and crash reporting posted to somebody else's servers is the kind of thing a player would
+  reasonably call a tracker. So there is no third party, no account to create and no policy change: the
+  player copies version, time, browser, the error, where in the component tree, and the last few failures
+  before it, and sends it on. **No personal data is in it** - no username, email or account id - and the
+  test asserts that rather than trusting it.
+- **The half a boundary cannot catch.** `installGlobalErrorHandlers` keeps the last 20 `error` and
+  `unhandledrejection` events in a bounded ring. Those do not blank the page, which is exactly why they go
+  unnoticed - they are the silent failures this repo keeps shipping, and they are kept so the next crash
+  report can say what led up to it. The daily lost on 2026-09-30 was diagnosed by inference because nothing
+  recorded the first failure.
+
+Two things were found by looking at the rendered screen rather than at the code, which is the point of
+doing both: the report printed the error twice (V8 begins a stack with its own message), and a contrast
+figure written into a comment by hand was wrong. Both are now asserted.
+
 ## [2.18.13] - 2026-10-01
 
 Finishing 2.18.12. An adversarial review of that release's own diff, run before promoting it, found that

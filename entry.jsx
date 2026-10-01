@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import PerfectSeason from "./perfect-season.jsx";
+import { ErrorBoundary, installGlobalErrorHandlers } from "./error-boundary.jsx";
 
 // Mimics the artifact host's window.storage: a per-key store with a "shared" namespace
 // (visible to every player, e.g. leaderboard/account rows) and a "personal" namespace
@@ -55,8 +56,20 @@ window.storage = makeStorageShim();
 // (e.g. the old ad hoc `npx esbuild entry.jsx ...` from CLAUDE.md) leaves those identifiers
 // undefined and auth calls will fail - use `node build.mjs` instead.
 
+// Before the app, so a throw while the module graph is still waking up is caught rather than lost. These
+// handlers catch what an error boundary cannot - a rejected promise, a handler that throws - and keep the
+// last few so a crash report can say what led up to it.
+installGlobalErrorHandlers();
+
+// The boundary goes OUTSIDE the root render, not inside the app: React unmounts the whole tree on an
+// uncaught render error, so anything inside PerfectSeason goes down with it. entry-app.jsx imports this
+// file, so the Android shell is wrapped by the same net.
 const root = createRoot(document.getElementById("root"));
-root.render(<PerfectSeason />);
+root.render(
+  <ErrorBoundary>
+    <PerfectSeason />
+  </ErrorBoundary>,
+);
 
 // The site is installable - a home-screen icon that opens the game full screen - and keeps working without a
 // signal, both of which come from the service worker (service-worker.js, built into /sw.js by build.mjs).
