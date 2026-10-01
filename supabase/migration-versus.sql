@@ -252,8 +252,8 @@ grant execute on function public.create_match(text) to authenticated;
 
 -- Taking someone's invite. The first person through the link is the opponent; everyone after is told it's full.
 -- Returns the match, or { error: <code> }:
---   not_signed_in | guest_not_allowed | not_found | own_match | already_finished | match_abandoned |
---   already_full | already_started
+--   not_signed_in | guest_not_allowed | not_found | already_finished | match_abandoned |
+--   already_full | already_started | already_in_a_match
 -- All eight, and the list is worth keeping honest: a code this comment doesn't name is a code nobody thinks to
 -- map, and versus.jsx's errorText falls through to a flat "That didn't work." for anything it doesn't hold -
 -- which tells a player nothing about a rule they just met. `not_signed_in` reaches the screen as `signed_out`,
@@ -271,8 +271,14 @@ begin
   select * into m from public.matches where code = upper(coalesce(p_code, '')) for update;
   if m.id is null then return jsonb_build_object('error', 'not_found'); end if;
   if m.host_id = v_uid then
-    -- The host opening their own link is not an error; they get their lobby back.
-    return case when m.status = 'open' then public.match_state(m.code) else jsonb_build_object('error', 'own_match') end;
+    -- The host opening their own link is not an error, in any state: they get the match, which is word for
+    -- word what match_state answers, because the client treats the two as interchangeable - VersusScreen reads
+    -- match_state first and falls through to here only when that read comes back null, which a dropped GET
+    -- does. Only 'open' was answered, so every other state was told `own_match` and the player who OWNS the
+    -- match was shown the no-match lobby under "That's your own link." - worst while it is 'drafting', where
+    -- the clock is running and their roster is being auto-picked behind the empty screen. Nothing returns
+    -- `own_match` any more; versus.jsx keeps the words, since a database yet to run this still answers it.
+    return public.match_state(m.code);
   end if;
   if m.guest_id is not null then
     -- Either player reopening their own match gets it back, in whatever state it is in - including one that
@@ -284,9 +290,29 @@ begin
     if m.status = 'abandoned' then return jsonb_build_object('error', 'match_abandoned'); end if;
     return jsonb_build_object('error', 'already_full');
   end if;
+  -- One live duel at a time, which create_match has enforced since it found a player waiting in a fresh lobby
+  -- while the duel they had walked away from auto-picked their whole roster. This was the door that never
+  -- asked: accepted, the match they were in keeps its turn_deadline, so their opponent claims every expired
+  -- clock, the absent player's roster is filled in for them, and the duel is graded and recorded as a loss
+  -- against somebody sitting on another screen - while create_match, the way back to a match, can only answer
+  -- with one of the two. Both of the caller's own matches are already returned above, so this only ever sees a
+  -- stranger's invite.
+  if exists (select 1 from public.matches
+             where status = 'drafting' and id <> m.id and (host_id = v_uid or guest_id = v_uid))
+  then return jsonb_build_object('error', 'already_in_a_match'); end if;
   -- No opponent ever arrived, so nothing started: a lobby the host called off must not say that it did.
   if m.status = 'abandoned' then return jsonb_build_object('error', 'match_abandoned'); end if;
   if m.status <> 'open' then return jsonb_build_object('error', 'already_started'); end if;
+
+  -- An untaken lobby of their own is called off rather than standing in the way: nobody is in it to orphan,
+  -- and taking somebody else's invite says plainly that they are not waiting in it any more. Counted as a live
+  -- duel above it would be a trap instead of a rule - an open lobby nobody joins never expires and no client
+  -- can end one, so a player who ever opened one would be refused every invite they were sent from then on.
+  -- Only ever the host's, since guest_id and 'drafting' are written in the same statement. It goes after every
+  -- refusal above and not with its own rule, or a player who followed a dead link would have their own lobby
+  -- called off and be told the other one is over - a lobby spent on nothing.
+  update public.matches set status = 'abandoned', ended_at = now(), turn_deadline = null
+   where status = 'open' and host_id = v_uid and id <> m.id;
 
   update public.matches
      set guest_id = v_uid, status = 'drafting', turn_deadline = now() + interval '45 seconds'

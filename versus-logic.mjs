@@ -731,6 +731,17 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     // One dip a board. replayMatch applies only the first entry it finds for a board, so a second was accepted,
     // written, counted against the player's one dip, and then ignored entirely - no extra pick, no forfeit.
     if (dips.some((d) => d.boardIdx === state.boardIdx)) return refuse("already_dipped");
+    // And not on a turn a steal has already been spent on - the mirror of the steal branch's own two guards,
+    // and the one that silently destroys a powerup. A steal converts a turn IN PLACE: replayMatch keys it by
+    // the turn number and applies it only while the side sitting at that index is still the thief. A dip then
+    // splices an extra turn in after the dipper's first, which moves every later index on the board along one
+    // - so the thief is no longer at the stolen turn, the steal is dropped without a word, the man goes back
+    // to the victim, and the row stays in the match counting against the thief's one steal. The victim
+    // declaring it is the natural case rather than an exotic one: a steal hands them that same turn, so the
+    // Double dip button is live in front of the player who has just been robbed. The other order stays
+    // allowed - a dip already in the order, then a steal on the dipper's own turn - because the splice is
+    // already in the index the steal is keyed on, and both powerups replay honoured.
+    if ((steals || []).some((x) => x.at === state.pickNo)) return refuse("stolen_this_turn");
     const order = state.boards[state.boardIdx].order;
     const picksAfter = order.slice(order.indexOf(side) + 1).some((s) => s !== side);
     if (!canDoubleDip({ key, taken: state.taken, boardIdx: state.boardIdx, dipperRoster: mine, otherRoster: theirs, picksAfter })) {
@@ -797,6 +808,22 @@ export function decideMove({ code, format, picks = [], respins = [], dips = [], 
     : o.kind === move.kind && o.team === move.team && o.season === Number(move.season)));
   if (!wanted) return refuse("not_on_board");
   if (state.taken.has(optionId(wanted))) return refuse("already_taken");
+  // ...and not the same MAN twice on one roster. `optionId` is `player|id|season`, because that is the
+  // identity match_picks is keyed by and the two have to agree - but it means Drew Bledsoe's 1999 Patriots
+  // season and his 2002 Bills season are two different options, and `taken` above never saw a duplicate.
+  // 821 of the 1,639 options in the pool are a man who appears on more than one board, so this was ordinary
+  // rather than exotic: eight boards, and a roster could come out with one player in two slots. Single
+  // player has always refused it - replayDraft tracks `drafted` by person id - and a duel grading a man
+  // twice is worse there than here, because the two slots score separately.
+  // The check is against the PICKER'S OWN roster, not the board: the opponent drafting another era of the
+  // same man is the premise of these boards, and taking that away would be a different game.
+  if (wanted.kind === "player") {
+    const already = VERSUS_SLOTS.some((sl) => {
+      const held = state.roster[side][sl];
+      return held && held.kind === "player" && held.id === wanted.id;
+    });
+    if (already) return refuse("already_on_your_roster");
+  }
   // The slot has to be one of the eight. game-logic's `fits` answers "does this player fit" for anything
   // beginning with FLEX, and `mine[move.slot]` is undefined for a slot that does not exist, so "FLEXX" and
   // "FLEX99" got through both guards. match_picks' CHECK constraint refused the insert, so the player saw

@@ -1089,7 +1089,12 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
               const from = (match.picks || []).find((pk) => pickId(pk) === optionId(option));
               if (from && (match.steals || []).some((x) => x.pickNo === from.pickNo)) return false;
               // And it has to fit somewhere you still have open: stealableSlots is what decideMove asks.
-              return !stealableSlots({ option, stealerRoster: mine }).reason;
+              // `mine` is the POWERUP COUNTS, not a roster - it was passed here until v2.18.12, and
+              // openSlots({team,era,dip,steal}) matches none of the eight slot names, so it answered
+              // "all eight are open" however full the roster really was. The strip therefore offered a
+              // steal of a receiver into a board with only QB left, and decideMove - which asks the same
+              // function with the real roster - refused it, on a clock, after the tap.
+              return !stealableSlots({ option, stealerRoster: state.roster[side] }).reason;
             }) : null} />
           {theirs ? <PowerupTrack left={theirs} label={name(match, side === "host" ? "guest" : "host")} /> : null}
           {arming ? (
@@ -1121,16 +1126,25 @@ export function VersusScreen({ userId, username, code: codeFromAddress, format =
                 // up on this board". Same shape as the GM cap being enforced on one of two doors.
                 const theirSide = side === "host" ? "guest" : "host";
                 const order = state.boards[state.boardIdx]?.order || [];
+                // A steal spent on THIS turn closes both of the other two: it hands the same turn to the
+                // player it robbed, so the buttons in front of them are the victim's and the turn is already
+                // spoken for. Neither was disabled, and the victim's own two obvious responses were the ones
+                // lit up - Steal, to take the man straight back (`stolen_this_turn`), and Double dip, which
+                // the server used to ACCEPT and which quietly voided the steal it was answering.
+                const spentThisTurn = (match.steals || []).some((x) => x.at === state.pickNo);
                 const illegal = (pu.id === "dip" && (
                   state.boardIdx >= MATCH_BOARDS - 1
                   || (match.dips || []).some((d) => d.boardIdx === state.boardIdx)
+                  || spentThisTurn
                   || !canDoubleDip({
                     key: state.boardKey, taken: state.taken, boardIdx: state.boardIdx,
-                    dipperRoster: mine, otherRoster: theirs,
+                    // The rosters, not the powerup counts - see the note on stealableSlots above.
+                    dipperRoster: state.roster[side], otherRoster: state.roster[theirSide],
                     picksAfter: order.slice(order.indexOf(side) + 1).some((sl) => sl !== side),
                   })))
                   || (pu.id === "steal" && (
                     !VERSUS_SLOTS.some((sl) => state.roster[theirSide][sl])
+                    || spentThisTurn
                     || (match.respins || []).some((r) => r.pickNo === state.pickNo)))
                   || ((pu.id === "team" || pu.id === "era") && !state.turn.ownFirst);
                 return (
@@ -1253,12 +1267,16 @@ const ERRORS = {
   // players" is true of a draft in progress and simply misleading about a match that is over or was called
   // off - and a lobby the host closed without anybody taking it never started at all.
   match_abandoned: "That duel was called off.",
-  own_match: "That's your own link.",
+  already_in_a_match: "You're already in a duel — tap Duel to go back to it.",
   already_started: "That match has already started.",
   not_your_turn: "It's not your turn.",
   wrong_board: "That board has moved on.",
   not_on_board: "That isn't on this board.",
   already_taken: "Somebody already took that one.",
+  // The same MAN in a different year. He is a separate option on a separate board - that is what these
+  // boards are for - but he may not fill two of your own slots, which is the rule single player has always
+  // had. Worth saying WHY, because the board will still be showing him as pickable.
+  already_on_your_roster: "He's already on your roster, in another year. One slot each.",
   bad_slot: "That doesn't fit a slot you have open.",
   no_respins_left: "No re-spins left.",
   no_dips_left: "You've used your double dip.",

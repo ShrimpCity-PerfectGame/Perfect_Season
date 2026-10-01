@@ -133,7 +133,7 @@ await runTest("taking an invite: the first one through the link is the opponent"
 
   assert((await call(GUEST, "join_match", { p_code: code })).data?.code === code, "the opponent reopening the link gets the match back");
   assert((await call(OTHER, "join_match", { p_code: code })).data?.error === "already_full", "a third person is told it's full");
-  assert((await call(HOST, "join_match", { p_code: code })).data?.error === "own_match", "and the host can't join their own started match");
+  assert((await call(HOST, "join_match", { p_code: code })).data?.code === code, "and the host reopening their started match gets it back");
 
   // A link outlives the duel, so the three ways of being too late have to read differently. "Already has two
   // players" is true while it is being drafted and misleading once it is over - and a lobby the host closed
@@ -153,6 +153,57 @@ await runTest("taking an invite: the first one through the link is the opponent"
   await owner("update matches set status = 'abandoned' where code = $1", [dead]);
   assert((await call(OTHER, "join_match", { p_code: dead })).data?.error === "match_abandoned",
     "a lobby the host called off was never a match that started");
+});
+
+await runTest("your own link always answers with your match, and one live duel at a time", async () => {
+  await noMatches();
+  // The host reopening their own link gets the match back in whatever state it is in - the same answer
+  // match_state gives, because the client treats the two as interchangeable: VersusScreen reads match_state
+  // first and only falls through to join_match when that read comes back null, which a dropped GET does. Told
+  // `own_match` there, the player who OWNS the match was shown the no-match lobby and "That's your own link."
+  // Only an `open` lobby was answered, so every other state hit it - including `drafting`, where the match is
+  // on the clock and the host is the one being auto-picked while they look at an empty screen.
+  const code = (await call(HOST, "create_match", {})).data.code;
+  assert((await call(HOST, "join_match", { p_code: code })).data?.code === code, "an open lobby of their own");
+  assert((await call(GUEST, "join_match", { p_code: code })).data?.status === "drafting", "the opponent joins");
+  for (const status of ["drafting", "done", "abandoned"]) {
+    await owner("update matches set status = $2 where code = $1", [code, status]);
+    const back = (await call(HOST, "join_match", { p_code: code })).data;
+    assert(back?.code === code, `and one that is ${status}: ${JSON.stringify(back)}`);
+    const read = (await call(HOST, "match_state", { p_code: code })).data;
+    assert(JSON.stringify(back) === JSON.stringify(read), `word for word what match_state answers (${status})`);
+  }
+
+  // And a player already drafting cannot take somebody else's invite. create_match has refused to open a
+  // second match since the release that found a player waiting in a fresh lobby while the duel they had walked
+  // away from auto-picked their whole roster; join_match was the door that never asked. Accepted, the first
+  // match keeps its turn_deadline, so the opponent claims every expired clock, the absent player's roster is
+  // filled in for them, and the duel is graded and recorded as a loss against somebody on another screen -
+  // while create_match, the way back, can only answer with one of the two.
+  await noMatches();
+  const live = (await call(HOST, "create_match", {})).data.code;
+  assert((await call(GUEST, "join_match", { p_code: live })).data?.status === "drafting", "a duel under way");
+  const sent = (await call(OTHER, "create_match", {})).data.code;
+  for (const who of [["the host", HOST], ["its opponent", GUEST]]) {
+    assert((await call(who[1], "join_match", { p_code: sent })).data?.error === "already_in_a_match",
+      `${who[0]} of a live duel cannot take a second invite`);
+  }
+  assert((await owner("select status, guest_id from matches where code = $1", [sent]))[0].status === "open",
+    "and the invite they were refused is left exactly as it was, for whoever it was meant for");
+  assert((await call(OTHER, "join_match", { p_code: live })).data?.error === "already_full",
+    "the third player is still told the truth about the one they tried");
+
+  // An untaken lobby of the caller's OWN is called off instead of standing in the way: nobody is in it to
+  // orphan, and taking somebody else's invite says plainly they are not waiting in it any more. Counted as a
+  // live duel it would be a trap - an open lobby nobody joins never expires and no client can end one, so a
+  // player who ever opened one would be refused every invite they were sent from then on.
+  await noMatches();
+  const idle = (await call(HOST, "create_match", {})).data.code;
+  const theirs = (await call(OTHER, "create_match", {})).data.code;
+  const took = (await call(HOST, "join_match", { p_code: theirs })).data;
+  assert(took?.status === "drafting", `an untaken lobby of their own is no obstacle: ${JSON.stringify(took)}`);
+  assert((await owner("select status from matches where code = $1", [idle]))[0].status === "abandoned",
+    "and it is called off as they walk away from it, not left open for a stranger to walk into");
 });
 
 await runTest("anything taken in a match is gone, for both sides", async () => {

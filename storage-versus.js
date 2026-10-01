@@ -48,8 +48,11 @@ export async function createMatch(format) {
 
 // Takes someone's invite. The host opening their own link gets their lobby back rather than an error.
 //   { ok: true, match } | { ok: false, reason: "not_found" | "already_full" | "already_finished"
-//                                             | "match_abandoned" | "own_match" | "already_started"
+//                                             | "match_abandoned" | "already_started" | "already_in_a_match"
 //                                             | "guest_not_allowed" | "signed_out" | "network" }
+// `own_match` is gone: the host now gets their match back in any state, which is what match_state already
+// answered them, so there is nothing left for those words to say. Its one state, an open lobby of their own,
+// was already answered with the lobby.
 export async function joinMatch(code) {
   if (typeof code !== "string" || !code) return failed("not_found");
   try {
