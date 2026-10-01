@@ -69,6 +69,22 @@ standings. `tests/test-site-pages.mjs` covers the app's side. **Brand search:** 
 name "Gridspin", so brand queries need off-site mentions (social profiles and community posts linking here) more
 than markup - that part is the owner's to do.
 
+**Terms of use (v2.19.3).** A fourth page of words, `/terms`, built exactly as `/privacy` is - `standalone`,
+so it carries no bundle and reads with JavaScript off. It exists because the site already enforced rules it
+had never written down: the word filter, the Reports queue, and a moderator who can rename, clear and
+remove. **It is also what lets moderation ban at all** - there was no document to ban anyone under, which is
+why `mod_act` can rename and clear but has no suspend. Three things in it are load-bearing rather than
+boilerplate: **coins have no cash value** and are not transferable (the sentence that has to exist before
+coin packs do), the **NFL disclaimer** (not affiliated, endorsed or sponsored; names and statistics are
+facts about games really played), and the reservation of the right to **close an account**.
+
+Two constants are shared with the privacy policy on purpose: `TERMS_AGE`, because two live pages disagreeing
+about who may play is worse than either alone (the privacy page said under-13 and the terms say 16), and
+`PRIVACY_CONTACT`. `TERMS_STATE` names the law that governs the terms, and **tests/test-site-pages.mjs fails
+while it is empty** - the page prints a plain not-set sentence rather than a half-finished one. None of this
+is legal advice and all of it wants a professional read before the game takes money, which is also when the
+privacy policy can no longer say there is no real money anywhere in Gridspin.
+
 **One address per page, and the headers (v2.0.0).** `vercel.json` sends every response
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,
 `Content-Security-Policy: frame-ancestors 'none'` with `X-Frame-Options: DENY` behind it, and a
@@ -1251,6 +1267,11 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.19.3's (the terms of use): client only. No migration, no Edge Function change - but `vercel.json` gains
+  the `/terms` route and the `/terms.html` redirect, so the deploy carries it. The page is built from
+  site-pages.mjs like the privacy policy and reaches the sitemap and the Modes footer by itself, since both
+  loop SITE_PAGES. **The law that governs the terms is `TERMS_STATE` and the suite fails while it is empty**
+  - a terms page is the one page where a placeholder is worse than a delay. It is Tennessee.
   v2.19.1's (forgetting a password): client only. No migration, no Edge Function change. A NEW environment
   needs the site's own origin on its Supabase **Redirect URLs** allowlist for the emailed link to come back
   anywhere; staging and production already have it, because Google sign-in has used the same address since

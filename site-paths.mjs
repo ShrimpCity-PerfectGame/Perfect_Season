@@ -9,7 +9,8 @@
 export const HOWTO_PATH = "/how-to-play";
 export const BOARD_PATH = "/leaderboard";
 export const PRIVACY_PATH = "/privacy";
+export const TERMS_PATH = "/terms";
 
 // In the order SITE_PAGES lists them. tests/test-pwa.mjs holds the two lists to each other, because a page
 // missing from here is stored under the shell's key and served in place of the game offline.
-export const SITE_PAGE_PATHS = [HOWTO_PATH, BOARD_PATH, PRIVACY_PATH];
+export const SITE_PAGE_PATHS = [HOWTO_PATH, BOARD_PATH, PRIVACY_PATH, TERMS_PATH];

@@ -4,7 +4,11 @@
 // crawler can follow; and the rules the dialog shows are word for word the rules the built page carries, so the
 // two can never drift apart. tests/test-build-seo.mjs checks the built HTML itself.
 import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { HOWTO_STEPS, HOWTO_NOTE, SITE_PAGES, parseSitePath, HOWTO_PATH, BOARD_PATH, PRIVACY_CONTACT } from "../site-pages.mjs";
+import {
+  HOWTO_STEPS, HOWTO_NOTE, SITE_PAGES, parseSitePath, HOWTO_PATH, BOARD_PATH, PRIVACY_CONTACT,
+  TERMS_PATH, TERMS_STATE, TERMS_AGE, TERMS_LAW_UNSET, SITE_PAGE_BY_ID,
+} from "../site-pages.mjs";
+import { readFileSync as readSrc } from "node:fs";
 
 let app = null;
 async function close() {
@@ -142,6 +146,72 @@ await runTest("the privacy page is a page, not a screen: the app lets the browse
   assert(page.standalone === true, "which is why it is built without the bundle");
   // The one thing on the page that has to be true of the site itself: somewhere to write to.
   assert(page.sections.some(([, ps]) => ps.some((t) => t.includes(PRIVACY_CONTACT))), "it says where to write about your data");
+});
+
+
+// The terms of use (v2.19.3). Until then /terms was a live 404: nothing stated the rules the word filter
+// and the Reports queue enforce, nothing said coins have no cash value, and nothing reserved the right to
+// close an account - which is why moderation could rename and clear but not ban. There was no document to
+// ban anyone under.
+await runTest("the terms page exists, says the things it has to, and is built to be read without the game", async () => {
+  const page = SITE_PAGE_BY_ID.terms;
+  assert(page, "there is a terms page at all");
+  assert(page.path === TERMS_PATH && TERMS_PATH === "/terms", `at /terms: ${TERMS_PATH}`);
+  // Words only, like the privacy policy: a page of rules has to read with JavaScript off.
+  assert(page.standalone === true, "built without the bundle");
+  assert(parseSitePath(TERMS_PATH) === null, "and no screen in the app claims the address");
+
+  const said = page.sections.flatMap(([heading, ps]) => [heading, ...ps]).join(" ");
+  // Each of these is a promise the site actually makes, and the reason the page exists at all.
+  const mustSay = [
+    [`aged ${TERMS_AGE} and over`, "who may play"],
+    ["have no cash value", "that coins are a score and not money"],
+    ["not affiliated with, endorsed by, or sponsored by the National Football League", "that the NFL has nothing to do with it"],
+    ["close an account", "that an account can be closed - the thing moderation had no document for"],
+    [PRIVACY_CONTACT, "somewhere to write"],
+  ];
+  for (const [needle, why] of mustSay) {
+    assert(said.includes(needle), `it says ${why}: looked for ${JSON.stringify(needle)}`);
+  }
+});
+
+// The gate. A terms page is the one page where shipping a placeholder is worse than shipping a day late, so
+// the suite stays red until the owner names the law that governs it.
+await runTest("the terms name the law that governs them", async () => {
+  assert(typeof TERMS_STATE === "string" && TERMS_STATE.trim().length > 0,
+    "TERMS_STATE in site-pages.mjs is still empty - the owner has to name the US state before this ships");
+  const said = SITE_PAGE_BY_ID.terms.sections.flatMap(([, ps]) => ps).join(" ");
+  assert(!said.includes(TERMS_LAW_UNSET), "and the page no longer carries the not-set sentence");
+  assert(said.includes(`State of ${TERMS_STATE}`), `it names the state: ${TERMS_STATE}`);
+});
+
+// Two live pages that disagree about who may play are worse than either alone.
+await runTest("the privacy policy and the terms agree about age", async () => {
+  const inPage = (id) => SITE_PAGE_BY_ID[id].sections.flatMap(([, ps]) => ps).join(" ");
+  for (const id of ["privacy", "terms"]) {
+    assert(inPage(id).includes(`aged ${TERMS_AGE} and over`), `${id} states the same age`);
+  }
+  // ...and no older number is left lying around in either of them from a previous draft.
+  for (const id of ["privacy", "terms"]) {
+    const stale = inPage(id).match(/under (\d+)|aged (\d+)/g) || [];
+    for (const hit of stale) {
+      const n = Number(hit.replace(/\D/g, ""));
+      assert(n === TERMS_AGE, `${id} mentions age ${n}, which is not ${TERMS_AGE}: ${hit}`);
+    }
+  }
+});
+
+// Vercel is what actually serves the address. The page can be perfect and still 404 without these.
+await runTest("the terms address is routed, and its .html redirects to it", async () => {
+  const vercel = JSON.parse(readSrc(new URL("../vercel.json", import.meta.url), "utf8"));
+  const rewrites = vercel.rewrites.map((r) => r.source);
+  for (const src of ["/terms", "/terms/"]) {
+    assert(rewrites.includes(src), `${src} is rewritten to the built file: ${JSON.stringify(rewrites)}`);
+  }
+  // One address per page: the .html 308s to the pretty one, the way the other three do.
+  const redirect = vercel.redirects.find((r) => r.source === "/terms.html");
+  assert(redirect && redirect.destination === "/terms" && redirect.permanent === true,
+    `/terms.html redirects permanently to /terms: ${JSON.stringify(redirect)}`);
 });
 
 await close();

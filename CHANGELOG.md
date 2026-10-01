@@ -19,6 +19,43 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.19.3] - 2026-10-01
+
+The third of the release-readiness work: **there were no terms of use.** `/terms` was a live 404.
+
+**Client only.** No migration, no Edge Function change. `vercel.json` gains the route; the page itself is
+built from `site-pages.mjs` like the privacy policy, and appears in the sitemap and the Modes footer on its
+own because both loop `SITE_PAGES`.
+
+- **Nothing stated the rules the site already enforces.** The word filter checks names and bios, the Reports
+  queue takes complaints, and moderators can rename, clear and remove - and none of it was written down
+  anywhere a player could read it. This is also why moderation could rename and clear but not **ban**: there
+  was no document to ban anyone under. The terms reserve that now, and name the abuse it is for - extra
+  accounts to stack a board, duel yourself, or get round a moderator.
+- **Coins are a score, not money**, said plainly: no cash value, not transferable, not exchangeable for
+  anything outside the game. That is the sentence that has to exist before coin packs do. It also says that
+  nothing costs real money today, and that these terms will change before that does.
+- **The NFL disclaimer.** Not affiliated with, endorsed by or sponsored by the League, any club or any
+  player; names and statistics are used as facts about football that was really played; trademarks belong to
+  whoever owns them. Cheap, and the most useful paragraph on the page given that this repo already renamed
+  itself once over a trademark.
+- **Words only, like the privacy policy** (`standalone`), so it carries no bundle and reads with JavaScript
+  off - which is what a page of rules should do.
+
+**The privacy policy said children under 13 and the terms say 16**, which would have left two live pages
+contradicting each other about who may play. Both read one shared `TERMS_AGE` now, and a test fails if either
+mentions a different number. The privacy page's own last-updated date and its sitemap `lastmod` move with it,
+since its words changed.
+
+The law that governs the terms is a single constant, and `tests/test-site-pages.mjs` **fails while it is
+empty**. A terms page is the one page where shipping a placeholder is worse than shipping a day late, so the
+page prints a plain not-set sentence rather than a half-finished one, and the suite stays red until it is
+named. It is Tennessee.
+
+Worth repeating in the record: this is a plain-language description of how the game actually works, not a
+lawyer's document, and it wants a professional read before Gridspin takes its first payment - which is also
+the moment the privacy policy stops being able to say there is no real money anywhere in it.
+
 ## [2.19.2] - 2026-10-01
 
 **A reset that could not be sent said it had been.** Found by driving 2.19.1 on staging rather than by
