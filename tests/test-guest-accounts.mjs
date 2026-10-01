@@ -313,6 +313,40 @@ await runTest("a draft does not follow the device to the next account", async ()
   assert(!picks, `it leaves with them rather than waiting for the next account, got ${picks} picks`);
 });
 
+// The device's own record of a finished daily is keyed by neither account nor anything else, so on a
+// shared browser it answered for whoever played last: the second account was told the day was spent,
+// shown the first account's lineup, and locked out of a daily it had never touched. `daily_runs` is
+// keyed (date, format, user_id) and has public select, so the server can simply be asked - which is what
+// v2.18.10 does, keeping the device record as the fallback for a signed-out visitor.
+await runTest("a finished daily belongs to the account that played it, not to the browser", async () => {
+  const mock = makeMockAuth();
+  await mock.auth.signUp({ email: "first@example.com", password: "Password1", options: { data: { username: "First_One" } } });
+  const c = await open(mock);
+  await click(tab(c, "Modes"));
+  await until(() => findButtonByText(c, "Fantasy daily"), () => `the daily, got: ${text(c).slice(0, 160)}`);
+  await click(findButtonByText(c, "Fantasy daily"));
+  await flush(4);
+  await playSeason(c);
+  await until(() => auth._dailyRuns.size === 1, "the first account's daily on the board");
+
+  // Same browser, same storage - a second account signs in. The device still holds First_One's record.
+  await auth.auth.signOut();
+  await flush(6);
+  await auth.auth.signUp({ email: "second@example.com", password: "Password1", options: { data: { username: "Second_One" } } });
+  await flush(10);
+  await click(tab(c, "Modes"));
+  await flush(6);
+
+  assert(signedInAs(c) === "Second_One", `the app sees the second account, got ${signedInAs(c)}`);
+  // The tile, which is what the player actually meets.
+  const tile = findButtonByText(c, "Fantasy daily");
+  assert(tile, () => `the daily tile for the second account, got: ${text(c).slice(0, 200)}`);
+  const said = tile.textContent;
+  assert(!/See how it went|Relive it/.test(said),
+    `the second account has not played today and must be offered it, got: ${said.slice(0, 160)}`);
+  assert(!said.includes("First_One"), `and is not shown the first account's run: ${said.slice(0, 160)}`);
+});
+
 // The Unlimited slot has left with its account since v2.0; the DAILY slots beside it did not, until
 // v2.18.10. A daily is the worse one to inherit: it is one per account per day and cannot be played
 // again, so playing out a stranger's half-finished board hands in THEIR picks as YOUR daily and spends

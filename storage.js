@@ -283,11 +283,21 @@ export async function fetchSouTop(date, limit = 10) {
 // way round is why Over/Under has fetchMySouRun above, and why Guess and Century ask their own tables first.
 // A read that fails answers null, which leaves the device's own record standing - the same fallback the rest
 // of this file uses, and the right one: it is better to think you have played than to be dealt a day twice.
+// THREE answers, not two, and the difference decides whether the device's record is trusted:
+//   an object  - this account played it, and here is how it went
+//   null       - this account definitively has NOT played it
+//   undefined  - the question could not be asked (no account, or the read failed)
+// Two answers is what the first version of this had, and it did not work: "no row" fell back to the
+// device's record, which belongs to whoever used the browser last - so the second account was still
+// shown the first one's daily and still locked out. A signed-in account has to trust the server's "no",
+// because that is the only thing that knows which account is asking. `undefined` is the only case where
+// the device still gets to answer, and it means the network failed, not that the day is free.
 export async function fetchMyDailyRun(date, format, userId) {
-  if (!userId) return null;
+  if (!userId) return undefined;
   const { data, error } = await getClient().from("daily_runs").select("*")
     .eq("date", date).eq("format", format).eq("user_id", userId).maybeSingle();
-  if (error || !data) return null;
+  if (error) return undefined;
+  if (!data) return null;
   return { w: data.w, l: data.l, score: data.score, outcome: data.outcome, champ: !!data.champ };
 }
 

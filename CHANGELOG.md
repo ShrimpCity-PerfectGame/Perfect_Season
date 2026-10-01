@@ -44,7 +44,15 @@ The daily stops answering for whoever used the browser last.
   slot's, verbatim; only the slot ids differ.
 - `userIdRef` is assigned during render, the way `statsRef` beside it already is, so the new read can
   tell "who I asked for" from "who is here now" and discard an answer that arrives after the account
-  has changed.
+  has changed. The cached-day marker carries the account too, because `readDay` only re-ran when the
+  DAY changed — so a sign-in never refreshed it, and the first account's daily stayed on screen.
+- **`fetchMyDailyRun` gives three answers, and the difference is the whole fix.** An object means this
+  account played it; `null` means it definitively has not; `undefined` means the question could not be
+  asked. Only `undefined` lets the device record answer. The first version of this returned two
+  answers and fell back on `row || deviceRecord` — so the server saying "this account has no row" was
+  falsy and fell straight back to the device's, which belongs to whoever used the browser last. It
+  read the server and then ignored it, and the second account was still locked out. The test caught
+  that; the compiled-in query had not.
 
 ## [2.18.9] - 2026-09-30
 

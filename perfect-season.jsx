@@ -2596,7 +2596,11 @@ export default function PerfectSeason() {
       sget(GUESS_DONE_KEY(utcDayKey()), false),
     ]);
     // Both days, so a re-read is triggered by whichever rolls over first - they are up to a day apart.
-    dayRead.current = `${today}|${utcDayKey()}`;
+    // The ACCOUNT is part of this marker, not just the two dates. What has been read is "this day, for this
+    // player", and the answers below are now per-account - so a sign-in has to force a re-read exactly as a
+    // rollover does. Keyed on the dates alone, the second account on a device kept the first one's daily
+    // on screen, because the day had not changed and nothing else asked again.
+    dayRead.current = `${today}|${utcDayKey()}|${who || ""}`;
     // The SERVER decides for a signed-in account, with the device's own record as the fallback. `daily_runs`
     // is keyed (date, format, user_id) and the device record is keyed by neither account nor anything else,
     // so reading it alone answered for whoever used this browser last: a second account on a shared phone was
@@ -2611,8 +2615,11 @@ export default function PerfectSeason() {
         fetchMyDailyRun(today, "standard", who).catch(() => null),
       ]);
       if (who !== userIdRef.current) return;   // the account changed while we were asking
-      fan = fanRow || fanDone;
-      std = stdRow || stdDone;
+      // `undefined` means the read failed, and only then does the device get to answer. A `null` is the
+      // server saying this account has not played today, and it outranks anything on the device - which
+      // belongs to no account and so belongs to whoever used the browser last.
+      fan = fanRow === undefined ? fanDone : fanRow;
+      std = stdRow === undefined ? stdDone : stdRow;
     }
     setDailyDone({ fantasy: fan, standard: std });
     setSouDone(sou);
@@ -2663,7 +2670,7 @@ export default function PerfectSeason() {
   // sleeping tab fires no timers, so the moment that matters is the one where somebody looks at it again.
   useEffect(() => {
     const check = () => {
-      if (dayRead.current && dayRead.current !== `${todayKey()}|${utcDayKey()}`) readDay.current();
+      if (dayRead.current && dayRead.current !== `${todayKey()}|${utcDayKey()}|${userIdRef.current || ""}`) readDay.current();
       drainMinigames();
     };
     check();
