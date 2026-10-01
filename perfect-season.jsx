@@ -1810,8 +1810,20 @@ function AuthPanel({ onAuthed, title, blurb }) {
       // The answer is the same whether or not that address has an account. "No account with that email"
       // would turn this form into a way to ask the site who is registered, which a game with a public
       // leaderboard of usernames should not answer - and Supabase deliberately does not tell us either.
-      try { await authResetPassword(emailTrim, `${window.location.origin}/`); } catch (e) { /* same answer */ }
+      //
+      // But a REFUSAL is not an answer about the address: Supabase returns 200 for a registered address and
+      // an unregistered one alike, and errors only on things that are about the REQUEST - a redirect that is
+      // not on the project's allowlist, a rate limit, a malformed address, the server being unreachable. So
+      // saying "couldn't send" leaks nothing and is the difference between a player trying again and a
+      // player waiting for an email that is never coming. The first version of this swallowed everything,
+      // which would have made a misconfigured environment look exactly like a working one.
+      let failed = false;
+      try {
+        const { error } = await authResetPassword(emailTrim, `${window.location.origin}/`);
+        failed = !!error;
+      } catch (e) { failed = true; }
       setBusy(false);
+      if (failed) return setErr("Couldn't send that just now. Check your connection and try again.");
       return setSent(true);
     }
     if (mode === "signup" && !USERNAME_RE.test(username)) return setErr(USERNAME_RULE);

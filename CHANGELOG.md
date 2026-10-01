@@ -19,6 +19,23 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.19.2] - 2026-10-01
+
+**A reset that could not be sent said it had been.** Found by driving 2.19.1 on staging rather than by
+reading it: the screen answers the same whether or not an address is registered, which is right - and the
+first version got there by swallowing the error too, which meant a project whose Redirect URLs allowlist did
+not hold the site's origin would look exactly like one that worked, while the player waited for an email
+that was never coming. **2.19.1 itself never reached production and ships inside this one.**
+
+A refusal is not an answer about the address. Supabase returns 200 for a registered address and an
+unregistered one alike, and errors only on things that are about the request - a redirect that is not
+allowlisted, a rate limit, a malformed address, the server being unreachable. So the screen reports a
+refusal now ("Couldn't send that just now"), which leaks nothing and is the difference between a player
+trying again and a player giving up. The live check that found this could not tell the two apart either,
+which is the point: a success path and a silent-failure path that look identical are one path.
+
+**Client only.** No migration, no Edge Function change.
+
 ## [2.19.1] - 2026-10-01
 
 The second of the release-readiness work: **a forgotten password had no way back.**

@@ -75,6 +75,33 @@ await runTest("a forgotten password has a way back at all", async () => {
   assert(findButtonByText(container, "Back to log in"), "with a way out that is not the browser's Back");
 });
 
+await runTest("a refusal is reported, because a refusal is not an answer about the address", async () => {
+  // Supabase answers 200 for a registered address and an unregistered one alike, and errors only on things
+  // about the REQUEST - a redirect that is not on the project's allowlist, a rate limit, the server being
+  // unreachable. So reporting a refusal leaks nothing, and it is the difference between a player trying
+  // again and a player waiting for an email that is never coming. The first version of this screen swallowed
+  // everything, which would have made a misconfigured environment look exactly like a working one - and the
+  // live check on staging could not tell the two apart either, which is how this was noticed.
+  const real = sb.auth.resetPasswordForEmail;
+  sb.auth.resetPasswordForEmail = async () => ({ data: null, error: { message: "redirect_to not allowed" } });
+  try {
+    // The form is already in reset mode from the test above - that is the state a player is in when the
+    // send fails, so this starts exactly where they would be.
+    await type(field("Email"), "someone@x.test");
+    await click(submitButton("Email me a link"));
+    await flush();
+    assert(!/Check your email/i.test(container.textContent),
+      "a refused request does NOT claim an email is on its way");
+    assert(/Couldn't send that just now/i.test(container.textContent),
+      `it says so instead: ${(panel() || container).textContent.replace(/s+/g, " ").slice(0, 200)}`);
+    // ...and still says nothing about whether that address has an account.
+    assert(!/no account|not found|doesn't exist|isn't registered/i.test(container.textContent),
+      "and still nothing about who is registered");
+  } finally {
+    sb.auth.resetPasswordForEmail = real;
+  }
+});
+
 await runTest("it never says whether an address is registered", async () => {
   // This form must not become a way to ask a game with a public leaderboard of usernames who is signed up.
   // Supabase deliberately answers the same either way; so must the screen in front of it.
