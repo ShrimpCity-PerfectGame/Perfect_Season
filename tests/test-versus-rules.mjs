@@ -12,7 +12,7 @@ import { initGameData, SLOTS, BOARDS, seededSequence } from "../game-logic.mjs";
 import {
   initVersusData, decideMove, replayMatch, optionsOn, optionId, optionFits, openSlots,
   VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, matchResult, pickId, optionValue,
-  respinBoard, boardServes, dipsLeft,
+  respinBoard, boardServes, dipsLeft, autoPick,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -266,6 +266,99 @@ await runTest("a steal takes any one of their players, from any board", async ()
   }
   assert(asked && asked.reason === "already_stolen",
     `a turn later, he has already changed hands: ${asked && asked.reason}`);
+});
+
+// One man, one duel roster - through BOTH doors onto it. 2.18.12 added the rule and guarded only the door the
+// player chooses; the clock is the other one, and it is not an edge case in a mode with a 45-second turn that
+// either player may claim. `optionId` is `player|id|season`, the row identity match_picks needs, so a man
+// whose best season for one team and best season for another both land on a match's boards was two different
+// options to everything that keys on it - `taken`, `already_taken` and `autoPick`'s own availability.
+//
+// T00034 is searched for rather than magic: BUF|0 is its board 0 and DET|0 its board 1, and Shawn Bryson
+// (id 153) is on both - 2000 for Buffalo, 2003 for Detroit - fitting RB and both Flex slots on each, so the
+// second attempt has a slot open and the person rule is the only thing that can refuse it.
+await runTest("the same man cannot fill two slots of one roster, by hand or by the clock", async () => {
+  const m = newMatch("T00034");
+  const mine = m.state().turn.side;
+  assert(m.state().boardKey === "BUF|0", `board 0 is Buffalo: ${m.state().boardKey}`);
+  assert(m.move(mine, { boardIdx: 0, kind: "player", playerId: 153, season: 2000, slot: "RB" }).ok,
+    "his 2000 Buffalo season goes in at RB");
+
+  for (let guard = 0; guard < 6; guard++) {
+    const now = m.state();
+    if (now.boardIdx === 1 && now.turn.side === mine) break;
+    assert(m.takeSomething().ok, "playing on to their next turn, on the board he is also on");
+  }
+  const st = m.state();
+  assert(st.boardIdx === 1 && st.boardKey === "DET|0" && st.turn.side === mine,
+    `they are on the clock on Detroit: ${JSON.stringify([st.boardIdx, st.boardKey, st.turn.side])}`);
+  assert(VERSUS_SLOTS.some((sl) => st.roster[mine][sl] && st.roster[mine][sl].id === 153), "and still hold him");
+  assert(openSlots(st.roster[mine]).includes("FLEX1"), "with a Flex open, so only the person rule can refuse");
+
+  // The door the player chooses.
+  const byHand = m.move(mine, { boardIdx: 1, kind: "player", playerId: 153, season: 2003, slot: "FLEX1" });
+  assert(byHand.reason === "already_on_your_roster",
+    `a second season of the same man is refused: ${JSON.stringify(byHand.reason)}`);
+
+  // ...and the door they do not. autoPick keys availability on optionId like everything else, so it took him
+  // happily: 2 of 400 matches played out entirely by clock claims ended with one man in two slots before this.
+  const auto = autoPick(st.boardKey, st.taken, st.roster[mine], "fantasy");
+  assert(auto, "the clock always has something to take - returning null is what bricks a match for good");
+  assert(!(auto.option.kind === "player" && auto.option.id === 153),
+    `and it is not the man they already hold: ${auto.option.name} ${auto.option.season}`);
+  assert(m.move(mine, { claim: "clock" }, m.deadline + 2000).ok, "the expired clock still resolves the turn");
+  const after = m.state();
+  const held = VERSUS_SLOTS.map((sl) => after.roster[mine][sl]).filter((o) => o && o.kind === "player");
+  assert(new Set(held.map((o) => o.id)).size === held.length,
+    `no man twice after the clock took one: ${JSON.stringify(held.map((o) => o.name))}`);
+
+  // He is on YOUR roster, not gone from the world: the other player may still take him off that board. Keying
+  // the rule on `taken` instead of on the roster would have quietly removed him from the match for both.
+  assert(optionsOn("DET|0").some((o) => o.kind === "player" && o.id === 153),
+    "he is still on the board for the other player");
+});
+
+// The clock half again, on the seed where it actually bit. The test above proves the rule is asked on an
+// expired turn; this proves it CHANGES what that turn takes, which the Detroit board could not - the man
+// they held was not the best thing on it, so both versions of autoPick walked past him anyway.
+//
+// CK0466, played entirely by clock claims: at pick 6, on board 2 (LV|4), the guest already holds Davante
+// Adams and the old autoPick's highest-value fitting option IS Davante Adams, 2022, at WR. It takes him. The
+// duplicate is specifically the player's own best man, because autoPick maximises value and a man good
+// enough to be on two of a match's boards is good enough to win both. Measured across 400 all-clock matches,
+// 0.5% of them ended with one man in two slots.
+await runTest("the clock takes somebody else rather than the man already on your roster", async () => {
+  const m = newMatch("CK0466");
+  let hitPickSix = false;
+  for (let guard = 0; guard < 40; guard++) {
+    const st = m.state();
+    if (st.done) break;
+    const mine = st.roster[st.turn.side];
+    const held = new Set(VERSUS_SLOTS.map((sl) => mine[sl]).filter((o) => o && o.kind === "player").map((o) => o.id));
+    if (st.pickNo === 6) {
+      hitPickSix = true;
+      assert(st.boardKey === "LV|4" && st.turn.side === "guest",
+        `pick 6 is the guest on Las Vegas: ${JSON.stringify([st.boardKey, st.turn.side])}`);
+      assert(held.has(799), "and they are already holding Davante Adams from an earlier board");
+      assert(optionsOn(st.boardKey).some((o) => o.kind === "player" && o.id === 799 && o.season === 2022),
+        "whose 2022 season is sitting right there on this one");
+    }
+    const auto = autoPick(st.boardKey, st.taken, mine, "fantasy");
+    assert(auto, `the clock always has something to take at pick ${st.pickNo}`);
+    assert(!(auto.option.kind === "player" && held.has(auto.option.id)),
+      `pick ${st.pickNo}: the clock took a man they already hold - ${auto.option.name}`);
+    assert(m.move(st.turn.side, { claim: "clock" }, m.deadline + 2000).ok, `the clock resolves pick ${st.pickNo}`);
+  }
+  assert(hitPickSix, "the match reached pick 6, which is the one that used to duplicate");
+
+  const end = m.state();
+  assert(end.done, "a match played entirely by the clock still finishes");
+  for (const side of ["host", "guest"]) {
+    const men = VERSUS_SLOTS.map((sl) => end.roster[side][sl]).filter((o) => o && o.kind === "player");
+    assert(new Set(men.map((o) => o.id)).size === men.length,
+      `${side} has no man twice: ${JSON.stringify(men.map((o) => `${o.name} ${o.season}`))}`);
+  }
+  assert(matchResult(end.roster, "fantasy"), "and it grades, which a roster with an empty slot would not");
 });
 
 // The steal rewrites the order a board was cleared for, and for one release nothing re-asked whether the board

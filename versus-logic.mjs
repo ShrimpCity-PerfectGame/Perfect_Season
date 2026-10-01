@@ -406,21 +406,40 @@ export const pickId = (p) =>
 
 // What the clock owes when someone runs out of time: the most valuable option on the board that fits a slot they
 // still have open. Never nothing - VERSUS.md 8 guarantees the board can serve them.
+// The clock is the THIRD door onto a roster, and for one release it was the only one left open: decideMove's
+// pick branch refuses a man already on your roster (already_on_your_roster, v2.18.12) and this returns before
+// that check ever runs, so an expired turn drafted the duplicate by hand's own rule. Measured on 400 matches
+// played entirely by clock claims, 0.5% of them ended with one man in two slots - Saquon Barkley in RB and
+// FLEX2 - which is then graded, written to matches.result and counted into pvp_wins.
+//
+// It PREFERS rather than refuses, and that is the whole of the design. Returning null here is the worst
+// outcome in the game - the clock answers 500 for ever and nothing can finish, grade or leave the match
+// (see the note above boardCompletable) - and boardServes/boardCompletable still key serve-ability on
+// optionId, so a board can legitimately be dealt whose only fitting option is a man you hold. In that one
+// case the duplicate is still taken, because a roster with a repeated name beats a match nobody can end.
+// So this can never return null where it used to return an option, which is why the serve-ability functions
+// need no matching change and no match already in flight can be affected.
 export function autoPick(key, taken, roster, format) {
   const open = openSlots(roster);
-  let best = null;
+  const held = new Set();
+  for (const sl of VERSUS_SLOTS) {
+    const o = roster[sl];
+    if (o && o.kind === "player") held.add(o.id);
+  }
+  let best = null, dup = null;
   for (const o of optionsOn(key)) {
     if (taken.has(optionId(o))) continue;
+    const repeat = o.kind === "player" && held.has(o.id);
     for (const slot of open) {
       if (!optionFits(o, slot)) continue;
       const value = optionValue(o, slot, format);
       // Tie-broken by identity so two engines can never disagree about which of two equal options it took.
-      if (!best || value > best.value || (value === best.value && optionId(o) < optionId(best.option))) {
-        best = { option: o, slot, value };
-      }
+      const beats = (b) => !b || value > b.value || (value === b.value && optionId(o) < optionId(b.option));
+      if (repeat) { if (beats(dup)) dup = { option: o, slot, value }; }
+      else if (beats(best)) best = { option: o, slot, value };
     }
   }
-  return best;
+  return best || dup;
 }
 
 // ---------- The result ----------

@@ -277,7 +277,9 @@ begin
     -- does. Only 'open' was answered, so every other state was told `own_match` and the player who OWNS the
     -- match was shown the no-match lobby under "That's your own link." - worst while it is 'drafting', where
     -- the clock is running and their roster is being auto-picked behind the empty screen. Nothing returns
-    -- `own_match` any more; versus.jsx keeps the words, since a database yet to run this still answers it.
+    -- `own_match` any more, and versus.jsx no longer carries its words either: a set of copy for a refusal
+    -- nothing can raise is what tests/test-versus-screen.mjs calls an orphan, and it fails on one. Deploy
+    -- order is migration then client, so no client ever meets a database that still answers it.
     return public.match_state(m.code);
   end if;
   if m.guest_id is not null then
@@ -311,8 +313,18 @@ begin
   -- Only ever the host's, since guest_id and 'drafting' are written in the same statement. It goes after every
   -- refusal above and not with its own rule, or a player who followed a dead link would have their own lobby
   -- called off and be told the other one is over - a lobby spent on nothing.
+  --
+  -- SKIP LOCKED, because this is a SECOND row lock taken in an order the caller chooses, and two of them can
+  -- cross: Ann and Bob each open a lobby and send each other the link, then both follow it at once. Ann holds
+  -- Bob's row from the `for update` at the top and wants her own; Bob holds Ann's and wants his. That is a
+  -- deadlock, and Postgres resolves it by killing one of them - the RPC throws, and the player who lost reads
+  -- "Couldn't reach the server" for a duel that was fine. Skipping a locked row is also the RIGHT answer and
+  -- not just a safe one: a lobby of theirs that another transaction is holding is a lobby somebody is joining
+  -- this instant, so it is about to stop being idle and must not be called off underneath them.
   update public.matches set status = 'abandoned', ended_at = now(), turn_deadline = null
-   where status = 'open' and host_id = v_uid and id <> m.id;
+   where id in (select id from public.matches
+                 where status = 'open' and host_id = v_uid and id <> m.id
+                 for update skip locked);
 
   update public.matches
      set guest_id = v_uid, status = 'drafting', turn_deadline = now() + interval '45 seconds'
