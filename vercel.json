@@ -5,7 +5,8 @@
     { "source": "/page.html", "destination": "/", "permanent": true },
     { "source": "/how-to-play.html", "destination": "/how-to-play", "permanent": true },
     { "source": "/leaderboard.html", "destination": "/leaderboard", "permanent": true },
-    { "source": "/privacy.html", "destination": "/privacy", "permanent": true }
+    { "source": "/privacy.html", "destination": "/privacy", "permanent": true },
+    { "source": "/terms.html", "destination": "/terms", "permanent": true }
   ],
   "rewrites": [
     { "source": "/", "destination": "/page.html" },
@@ -15,6 +16,8 @@
     { "source": "/leaderboard/", "destination": "/leaderboard.html" },
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/privacy/", "destination": "/privacy.html" },
+    { "source": "/terms", "destination": "/terms.html" },
+    { "source": "/terms/", "destination": "/terms.html" },
     { "source": "/c/:code", "destination": "/page.html" },
     { "source": "/c/:code/", "destination": "/page.html" },
     { "source": "/u/:name", "destination": "/page.html" },

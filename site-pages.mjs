@@ -14,9 +14,9 @@ import { THEME } from "./theme.mjs";
 // The light scope's tokens, so the pages are painted in the same colors as the app.
 const T = THEME.light;
 
-import { HOWTO_PATH, BOARD_PATH, PRIVACY_PATH } from "./site-paths.mjs";
+import { HOWTO_PATH, BOARD_PATH, PRIVACY_PATH, TERMS_PATH } from "./site-paths.mjs";
 // The addresses live in site-paths.mjs, which the service worker also reads - see the note there.
-export { HOWTO_PATH, BOARD_PATH, PRIVACY_PATH } from "./site-paths.mjs";
+export { HOWTO_PATH, BOARD_PATH, PRIVACY_PATH, TERMS_PATH } from "./site-paths.mjs";
 
 // Which site page an address names, or null for every other address (a profile, a challenge link, Modes).
 // A trailing slash is the same page: Vercel serves both, so both must open the same screen.
@@ -56,7 +56,11 @@ const BOARDS = [
 // than a person's mailbox: it can be forwarded anywhere, and it doesn't put a personal address in front of
 // every crawler that reads this page.
 export const PRIVACY_CONTACT = "privacy@gridspin.app";
-export const PRIVACY_UPDATED = "21 September 2026";
+export const PRIVACY_UPDATED = "1 October 2026";
+
+// Who may play. Shared, because the privacy policy and the terms both state it and two live pages
+// disagreeing about it is worse than either alone.
+export const TERMS_AGE = 16;
 
 // What Gridspin keeps, said plainly and accurately - every line below is something the code actually does.
 // If the code changes, this changes with it.
@@ -95,10 +99,80 @@ const PRIVACY_SECTIONS = [
     "A guest account identifies nobody, so there is nothing to delete - stopping playing is enough. If you would rather its scores came off the leaderboard, write in and say which name it was.",
   ]],
   ["Children", [
-    "Gridspin is not aimed at children under 13, and no data is knowingly kept from them. If you believe a child has made an account, write in and it will be removed.",
+    // Must match TERMS_AGE. Two live pages disagreeing about who may play is worse than either alone.
+    `Gridspin is for people aged ${TERMS_AGE} and over, and no data is knowingly kept from anyone younger. If you believe someone under ${TERMS_AGE} has made an account, write in and it will be removed.`,
   ]],
   ["Changes to this page", [
     `This page says what the site does today, and it is updated when the site changes. It was last updated on ${PRIVACY_UPDATED}.`,
+  ]],
+];
+
+// ---------- Terms of use (v2.19.3) ----------
+//
+// **A plain-language statement of how Gridspin actually works, not a lawyer's document.** Every line below
+// describes something the code really does or a rule the site really enforces, which is the only kind of
+// terms worth having - one that promises what the software does not do is worse than none. It wants a
+// professional read before Gridspin ever takes money.
+//
+// Until v2.19.3 there was no such page: /terms was a live 404. Nothing stated the rules the word filter and
+// the Reports queue enforce, nothing said coins have no cash value, and nothing reserved the right to close
+// an account - which is also why moderation could rename and clear but not BAN. There was no document to
+// ban anyone under.
+
+export const TERMS_UPDATED = "1 October 2026";
+// The US state whose law governs these terms. **Deliberately empty until the owner names it**, and
+// tests/test-site-pages.mjs is red while it is: a terms page that ships with a placeholder sentence in it
+// is worse than one that ships a day later.
+export const TERMS_STATE = "Tennessee";
+// One string, so the test has something exact to look for rather than a regex over prose.
+export const TERMS_LAW_UNSET = "The law that governs these terms has not been set for this build.";
+
+const TERMS_SECTIONS = [
+  ["Who can play", [
+    `Gridspin is for people aged ${TERMS_AGE} and over. If you are younger than that, please do not make an account.`,
+    "You can play without an account at all. When you finish a season the site makes a guest account so the score can go on the leaderboard, and that guest holds nothing about you - no address, no name you gave it. You can turn it into a real account later, and everything you have played carries over.",
+  ]],
+  ["Your account", [
+    "One person, one account. Making extra accounts to put more scores on a board, to play a duel against yourself, or to get round something a moderator has done is the kind of cheating that costs other players something, and accounts used that way can be closed.",
+    "Your password is yours to look after, and nobody from Gridspin will ever ask you for it. If you lose it, use the \"Forgotten your password?\" link on the log in screen.",
+  ]],
+  ["How to behave", [
+    "Your username, your bio and your picture are public, and they are held to one rule: nothing hateful, sexual, threatening, or pretending to be somebody else. A blocked-word list checks names and bios automatically, and anything it misses can be reported by any player from the profile it is on.",
+    "Do not try to break the game for other people: no automating play, no picking at the site looking for holes, no flooding it with requests, and nothing that gets in the way of somebody else's draft or duel.",
+  ]],
+  ["What a moderator can do", [
+    "If something breaks the rules above, a moderator can clear a bio, remove a picture, change a username, take a score off a board, or close an account. The usual answer is the smallest of those, and a name or a bio is normally just cleared.",
+    `If you think a decision was wrong, write to ${PRIVACY_CONTACT} and say which account it was. There is a person at the other end.`,
+  ]],
+  ["Coins, badges and the shop", [
+    "Coins are a score, not money. They cannot be bought, sold, exchanged for anything outside the game, or moved between accounts, and they have no cash value. The same goes for badges, frames, titles and everything else the shop holds.",
+    "Nothing in Gridspin costs real money today. If that ever changes, these terms will say so before it does, and anything with a price will show it before you buy.",
+    "Prices, what is on sale and what an item looks like can change, and an item can be withdrawn. What you already own stays yours for as long as your account does, and goes with it if the account is closed.",
+  ]],
+  ["What you write and upload", [
+    "Your bio and your picture stay yours. Putting them on Gridspin gives the site permission to show them to other players, which is the point of a profile, and nothing more. Do not upload a picture you do not have the right to use.",
+  ]],
+  ["The scores", [
+    "Every finished season is checked on the server before it is recorded: the site replays your draft from its own copy of the boards and works the result out itself, so what reaches a leaderboard is what actually happened. A result that was not come by honestly can be removed, and the account that posted it can be closed.",
+  ]],
+  ["The NFL, the teams and the players", [
+    "Gridspin is not affiliated with, endorsed by, or sponsored by the National Football League, any of its clubs, or any player. No such connection is claimed or implied.",
+    "The game is built on statistics from publicly available records of games that were really played. Team and player names are used to say which team and which player a statistic belongs to - they are facts about real football. All trademarks belong to whoever owns them.",
+  ]],
+  ["The game can change, and it can stop", [
+    "Gridspin is run by one person and is free to play. It is offered as it is: no promise that it will be available, that it will not change, or that a score or a season will survive a problem with it. Modes can be added, changed or taken away, and the site can be stopped altogether.",
+    "As far as the law allows, Gridspin is not liable for anything lost by using it - a score, a streak, an account, or the time spent earning them.",
+  ]],
+  ["Which law applies", [
+    TERMS_STATE
+      ? `These terms are governed by the laws of the State of ${TERMS_STATE}, in the United States, without regard to its conflict-of-law rules.`
+      : TERMS_LAW_UNSET,
+  ]],
+  ["Changes to these terms", [
+    `These terms say how the site works today, and they are updated when the site changes. They were last updated on ${TERMS_UPDATED}. Carrying on playing after a change means the new ones apply.`,
+  ]],
+  ["Getting in touch", [
+    `Questions, reports, appeals, or to have an account closed: ${PRIVACY_CONTACT}. Write from the address the account uses.`,
   ]],
 ];
 
@@ -145,7 +219,7 @@ export const SITE_PAGES = [
     path: PRIVACY_PATH,
     file: "privacy.html",
     // PRIVACY_UPDATED in words, and this in the sitemap: change both together.
-    updated: "2026-09-21",
+    updated: "2026-10-01",
     nav: "Privacy",
     title: "Gridspin privacy policy - what the game keeps",
     description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no analytics, nothing sold.",
@@ -159,6 +233,26 @@ export const SITE_PAGES = [
       `Anything below can be undone by writing to ${PRIVACY_CONTACT}.`,
     ],
     sections: PRIVACY_SECTIONS,
+    contact: PRIVACY_CONTACT,
+  },
+  {
+    id: "terms",
+    path: TERMS_PATH,
+    file: "terms.html",
+    // TERMS_UPDATED in words, and this in the sitemap: change both together.
+    updated: "2026-10-01",
+    nav: "Terms",
+    title: "Gridspin terms of use",
+    description: "The rules for playing Gridspin: who can play, how to behave, what a moderator can do, and that coins are a score rather than money. Not affiliated with the NFL.",
+    h1: "Terms of use",
+    // Words only, like the privacy policy: no screen in the app answers this address, so the built page is
+    // the whole thing and it reads with JavaScript off - which is what a page of rules should do.
+    standalone: true,
+    intro: [
+      `Gridspin is a free football game. These are the rules for using it, said as plainly as they can be: who can play, how to behave, what happens if you do not, and what the game does and does not promise. They apply from the moment you play, with or without an account.`,
+      `Anything here can be asked about at ${PRIVACY_CONTACT}. What the game KEEPS about you is a separate page: the privacy policy.`,
+    ],
+    sections: TERMS_SECTIONS,
     contact: PRIVACY_CONTACT,
   },
 ];
