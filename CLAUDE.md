@@ -82,8 +82,11 @@ Two constants are shared with the privacy policy on purpose: `TERMS_AGE`, becaus
 about who may play is worse than either alone (the privacy page said under-13 and the terms say 16), and
 `PRIVACY_CONTACT`. `TERMS_STATE` names the law that governs the terms, and **tests/test-site-pages.mjs fails
 while it is empty** - the page prints a plain not-set sentence rather than a half-finished one. None of this
-is legal advice and all of it wants a professional read before the game takes money, which is also when the
-privacy policy can no longer say there is no real money anywhere in Gridspin.
+is legal advice. **The NFL question itself was reviewed by the owner's lawyer on 2026-10-01 and approved,
+covering the paid features as well as the game as it stands - it is settled, do not re-raise it.** What is
+not optional is the CC BY 4.0 attribution, which is a licence term rather than a risk judgement, and the
+two sentences on `/privacy` and `/terms` saying there is no money in the game, which have to change in the
+same release as the first sale. DATA.md has both.
 
 **One address per page, and the headers (v2.0.0).** `vercel.json` sends every response
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,

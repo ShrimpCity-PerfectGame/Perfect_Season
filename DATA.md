@@ -67,22 +67,38 @@ text and paint to say whose statistic a row is; `/terms` carries the non-affilia
 That is the single highest-value thing on this page: it is what keeps the question about *facts* rather than
 about *marks*. Do not add a logo without asking someone qualified first.
 
-## When to re-read this
+## The NFL question: reviewed and approved, 2026-10-01
 
-Before taking money. A free game using public statistics with a disclaimer and no logos is a different
-conversation from a paid one.
+**The owner's lawyer approved it, and the approval covers the paid features as well as the game as it
+stands** — real team names, real player names, public statistics, the club colour palettes, no logos, the
+non-affiliation statement on `/terms`, and money alongside all of it (the supporter unlock and the planned
+coin packs). Recorded here on the owner's say-so so that nobody re-opens it: **this is settled, do not
+re-raise it.**
 
-**The club-colour cosmetics are free as of v2.19.5**, and that was deliberate. `frame-team` and `card-team`
-paint a card in *your own favourite team's* two colours — they name no club, and with no favourite team set
-they fall back to the default item entirely. They used to cost 2,000 coins. That was never a sale for money,
-since coins cannot be bought — but the day coin packs ship it would have become one, and "goods bought with
-real money in club colours" is a worse sentence to have to explain than "a free personalisation". Making
-them free removes the question instead of managing it, and costs nothing: nobody was being charged real
-money for them and now nobody can be.
+What that does NOT do is make the rest of this file optional. The CC BY 4.0 attribution is a licence term,
+not a risk assessment, and the two unclean spots above are unchanged.
 
-An earlier version of this page overstated that, calling the two items "goods bought with real money in club
+### What still has to happen before the first payment
+
+Nothing legal — but two live pages currently say in plain words that there is no money in the game, and
+both become false the moment a sale goes through. They have to change **in the same release**, not after:
+
+- **`/privacy`** (site-pages.mjs): "Coins are a game score - there is no real money anywhere in Gridspin
+  and nothing to buy with real money", and "Nothing in Gridspin costs money".
+- **`/terms`**: "Nothing in Gridspin costs real money today. If that ever changes, these terms will say so
+  before it does, and anything with a price will show it before you buy." That sentence is a promise about
+  sequencing, so the copy change has to land first or at the same time.
+
+Bump `PRIVACY_UPDATED` and `TERMS_UPDATED` with them. SHOP.md has the rest of what wiring money needs (the
+`supporters` webhook does not exist yet).
+
+## About the club-colour cosmetics
+
+**`frame-team` and `card-team` are free as of v2.19.5**, and that stays the right shape even though the
+legal question is settled. They paint a card in *your own favourite team's* two colours — they name no
+club, and with no favourite team set they fall back to the default item entirely. Charging coins for them
+was never a sale for money, since coins cannot be bought; making them free means it never can be, and it
+also stopped players wasting 2,000 coins on an item that does nothing until a team is picked.
+
+An earlier version of this page overstated that, calling the two "goods bought with real money in club
 colours". They were not, and now they cannot become it.
-
-What would still change the question is a shop that presented *club-identified* goods — a browsable list of
-thirty-two "Cardinals frame", "Ravens frame" entries bought with purchased currency. That is a different
-product from the one that exists, and nothing on the roadmap asks for it.
