@@ -1267,6 +1267,9 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.19.4's (the data credit): client only. No migration, no Edge Function change. It adds the CC BY 4.0
+  attribution nflverse's licence asks for, from one constant rendered in both the app footer and every
+  standalone page - see DATA.md.
   v2.19.3's (the terms of use): client only. No migration, no Edge Function change - but `vercel.json` gains
   the `/terms` route and the `/terms.html` redirect, so the deploy carries it. The page is built from
   site-pages.mjs like the privacy policy and reaches the sitemap and the Modes footer by itself, since both
@@ -1530,6 +1533,15 @@ spinning first, or the other draft's interval would overwrite the restored board
 
 **Stat columns follow one shape at every position:** main-role yards, TDs, per-attempt average,
 volume, secondary role, fumbles.
+
+**Data provenance matters, and it has a licence - `DATA.md` is the reference.** Every statistic is nflverse
+data; `nflverse-data` is **CC BY 4.0**, which wants the creator named, the material and the licence linked,
+and changes indicated. That credit is `DATA_CREDIT` in site-pages.mjs, rendered from one definition in the
+app's Modes footer and on every standalone page, and `tests/test-site-pages.mjs` holds both to it. Two
+things in DATA.md matter more than the line itself: **`nflverse/nfldata` states no licence at all** (the
+duel builder's `games.csv`, and the same scores are derivable from CC BY 4.0 files it already fetches), and
+**no club imagery ships anywhere** - nflverse rows carry an NFL-CDN headshot URL and the builders drop it,
+which a test now asserts by requiring zero URLs in every shipped data file. Do not add a logo.
 
 **Data provenance matters.** Player stats come from nflverse play-by-play (1999-2025), corrected
 against Pro Football Reference season totals for 1999-2020 (~1,100 seasons fixed, including the

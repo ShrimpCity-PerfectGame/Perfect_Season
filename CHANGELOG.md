@@ -19,6 +19,39 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.19.4] - 2026-10-01
+
+**The game's data had a licence and the repo recorded none of it.** Every statistic in Gridspin is nflverse
+data, `nflverse-data` is **CC BY 4.0**, and CC BY asks to be told so: name the creator, link the material,
+link the licence, say that changes were made. Nothing anywhere did any of that. An attribution requirement
+is cheap to satisfy and impossible to satisfy retroactively if nobody has written down what it is.
+
+**Client only.** No migration, no Edge Function change.
+
+- **`DATA.md`** is the new reference: every source, its licence, what it feeds, and the two places the
+  picture is not clean. Checked against the GitHub API rather than assumed -
+  `repos/nflverse/nflverse-data/license` answers `CC-BY-4.0`.
+- **The credit itself** is one constant, `DATA_CREDIT` in `site-pages.mjs`, rendered from that single
+  definition in the app's Modes footer as JSX **and** on every standalone page as HTML - so it is there with
+  JavaScript off too, and the two cannot drift. It names nflverse, links the data, links the licence with
+  `rel="license"`, and says the ratings, boards and eras are the game's own, because they are: nothing
+  nflverse publishes is a 0-130 rating or a five-year era board.
+
+Two things found on the way that are worth more than the credit line:
+
+- **`nflverse/nfldata` states no licence at all** - `repos/nflverse/nfldata/license` is a 404. The duel
+  builder takes `games.csv` from it for final scores. It is the nflverse organisation's own repo and is
+  published for community use, but that is a norm and not a term. DATA.md records that the same scores are
+  derivable from the CC BY 4.0 team-stats files the same builder already fetches, so the dependency is
+  removable rather than load-bearing - worth knowing before anyone asks rather than after.
+- **No club imagery ships, and now a test says so.** nflverse player rows carry a headshot URL on the NFL's
+  own image CDN; the builders drop it, and `data/players.json`, `versus-pool.json`, `season-2025.json` and
+  `guess-pool.json` contain zero URLs of any kind. That is the single highest-value fact about this whole
+  question - it keeps it about facts rather than about marks - so it is asserted rather than assumed.
+
+The footer test that asserted one `<a href>` per site page is scoped to `.sitelinks` now; its rule is
+unchanged, and the credit's two links are held by the new test instead.
+
 ## [2.19.3] - 2026-10-01
 
 The third of the release-readiness work: **there were no terms of use.** `/terms` was a live 404.
