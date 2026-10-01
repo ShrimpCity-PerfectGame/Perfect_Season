@@ -305,10 +305,15 @@ export async function fetchMyDailyRun(date, format, userId) {
 // enforces "one run a day"; the app's own flag is in PERSONAL, per-device storage, so a phone after a
 // laptop knew nothing about it - and dealt a whole second run, showed the score, and dropped it with no
 // error and no coins, because upsertSouRun is a plain insert whose answer nobody read.
+// Three answers, for the reason fetchMyDailyRun gives above: an object means this account played that day,
+// `null` means it definitively did not, and `undefined` means the question could not be asked. Only the last
+// lets the device's own record answer - it is keyed by the date and by nothing else, so on a shared browser
+// it belongs to whoever played last, and treating its "done" as the truth locked the next account out.
 export async function fetchMySouRun(date, userId) {
-  if (!userId) return null;
+  if (!userId) return undefined;
   const { data, error } = await getClient().from("sou_runs").select("*").eq("date", date).eq("user_id", userId).maybeSingle();
-  if (error || !data) return null;
+  if (error) return undefined;
+  if (!data) return null;
   return { score: data.score };
 }
 // "saved" | "already" | "failed". Three answers, not two, because the caller says something factual about the

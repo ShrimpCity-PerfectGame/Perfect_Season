@@ -347,6 +347,46 @@ await runTest("a finished daily belongs to the account that played it, not to th
   assert(!said.includes("First_One"), `and is not shown the first account's run: ${said.slice(0, 160)}`);
 });
 
+// A trade-up whose reply never arrived leaves the player looking at a form that has already worked.
+// Pressing it again asks claim_username a second time, which answers `already_named` - and until
+// v2.18.11 that fell through to "Something went wrong. Try again.", which is a dead end by construction:
+// every further press can only answer the same thing. The account HAS its name by then, so the only
+// honest reply is to carry on.
+await runTest("a trade-up whose reply was lost completes on the second press, instead of wedging", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+  const uid = theGuest().id;
+
+  await click(accountTab(c));
+  await until(() => findButtonByText(c, "Keep my seasons"), () => `the keep panel, got: ${text(c).slice(0, 200)}`);
+  const [email, pw, username] = [...c.querySelectorAll(".panel input")];
+  await type(email, "lostreply@example.com");
+  await type(pw, "Password1");
+  await type(username, "Lost_Reply");
+
+  // The first press lands on the server and the reply is dropped on the way back, so the form stays put.
+  const realRpc = auth.rpc.bind(auth);
+  let swallowed = false;
+  auth.rpc = async (name, args, opts) => {
+    const out = await realRpc(name, args, opts);
+    if (name === "claim_username" && !swallowed) { swallowed = true; throw new TypeError("Failed to fetch"); }
+    return out;
+  };
+  await click(findButtonByText(c, "Keep my seasons"));
+  await flush(8);
+  assert(swallowed, "the first claim reached the server and its reply was lost");
+  assert(profileOf(uid).guest === false, "so the trade-up really did happen");
+
+  // The player presses again. claim_username now answers already_named.
+  const keep = findButtonByText(c, "Keep my seasons");
+  assert(keep, () => `the form is still there to press, got: ${text(c).slice(0, 200)}`);
+  await click(keep);
+  await flush(10);
+  assert(!/Something went wrong/i.test(text(c)), `it must not dead-end: ${text(c).slice(0, 220)}`);
+  await until(() => signedInAs(c) === "Lost_Reply", () => `the game shows the kept name, got ${signedInAs(c)}`);
+});
+
 // The Unlimited slot has left with its account since v2.0; the DAILY slots beside it did not, until
 // v2.18.10. A daily is the worse one to inherit: it is one per account per day and cannot be played
 // again, so playing out a stranger's half-finished board hands in THEIR picks as YOUR daily and spends

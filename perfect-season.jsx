@@ -1669,7 +1669,14 @@ function KeepSeasons({ name, onKept, onUseAnother }) {
     }
     const answer = await claimUsername(username);
     setBusy(false);
-    if (answer === "ok") return onKept(username);
+    // `already_named` is not a failure here, it is the answer arriving twice. The trade-up has HAPPENED -
+    // the account has a name and `guest` is clear - so the only honest thing to do is carry on as if the
+    // first reply had landed. Treated as an error (which it was until v2.18.11, falling through to
+    // "Something went wrong. Try again.") it wedged the player for good: pressing again can only ever
+    // answer `already_named`, so the form could never let them out of a trade-up that had already worked.
+    // onSeasonsKept re-reads the profile and prefers what it finds, so a name typed on the second press
+    // that differs from the one that landed corrects itself rather than being shown back.
+    if (answer === "ok" || answer === "already_named") return onKept(username);
     // still_anonymous means the email never landed on the account, so the database refused to clear `guest`
     // - it is the gate, not this form. It should be unreachable from here (the email step above has to
     // succeed first), but a rule that reaches a player as "something went wrong" is the failure this app
@@ -3902,21 +3909,29 @@ export default function PerfectSeason() {
     // Re-reading the day here instead would not do: `souDone` is state, so it still holds the old value for
     // the rest of this call whatever the effect does. Asking storage for today's key is the answer that
     // cannot be stale.
-    const doneToday = await sget(SOU_DONE_KEY(date), false);
-    if (doneToday) { setSouDone(doneToday); loadSouBoard(date); return; }
-    // The day's own row is what really decides whether you have played: the flag above lives in
-    // personal, per-device storage, so a phone after a laptop knew nothing about it and dealt a whole
-    // second run - which was then dropped on the way out, because the table's (date, user_id) key
-    // refuses it and nobody read the answer. Asked before anything is dealt, so nobody plays a round
-    // that cannot count. A read that fails just leaves the device's own answer standing.
-    if (userId) {
-      const already = await fetchMySouRun(date, userId);
-      if (already) {
-        await sset(SOU_DONE_KEY(date), { score: already.score }, false);
-        setSouDone({ score: already.score });
-        loadSouBoard(date);
-        return;
-      }
+    // The day's own row is what really decides whether you have played, and it is asked FIRST since
+    // v2.18.11. `sou_runs` is keyed (date, user_id); the device record is keyed by the date alone, so on a
+    // shared browser it belongs to whoever played last - and taking its "done" as the answer before asking
+    // sent the next account straight to a board it had never played. The same leak the season daily had.
+    // The record still answers when the server cannot: signed out, or a read that failed. That is what
+    // `undefined` means, as against a `null` that says this account has definitively not played today.
+    // (A phone after a laptop is the case the server read was added for: the device knew nothing, dealt a
+    // whole second run, and the (date, user_id) key then refused it on the way out with nobody reading the
+    // answer. Asked before anything is dealt, so nobody plays a round that cannot count.)
+    const mine = userId ? await fetchMySouRun(date, userId) : undefined;
+    if (mine) {
+      await sset(SOU_DONE_KEY(date), { score: mine.score }, false);
+      setSouDone({ score: mine.score });
+      loadSouBoard(date);
+      return;
+    }
+    if (mine === undefined) {
+      const doneToday = await sget(SOU_DONE_KEY(date), false);
+      if (doneToday) { setSouDone(doneToday); loadSouBoard(date); return; }
+    } else {
+      // The server says this account has not played today. Anything on the device belongs to somebody
+      // else, and leaving it would send the next tap back down the branch above.
+      setSouDone(null);
     }
     const wip = await sget(SOU_PROGRESS(date), false);
     setSou(null);
@@ -4333,7 +4348,14 @@ export default function PerfectSeason() {
     }
     setConfirmReset(false);
     // restart() -> abandonCurrent() charges the DNF. Charging one here too double-counted it.
-    restart();
+    // The draft's OWN variant, the way runItBack beside it has always passed them. `restart()` with no
+    // argument takes `format` from the app's selected-format state and drops gm and genius entirely, so
+    // Reset turned a GM draft into a plain Unlimited one - cap row gone, chip gone - and a Genius one into
+    // a draft with every stat cell showing, which is the single thing that mode exists to hide. Tapping the
+    // mode again to get back then cost a SECOND DNF, because openFree sees a different variant in the slot
+    // and abandons it: -100 ladder points and two DNFs for one Reset the player did not know they had
+    // mis-pressed. Until v2.18.11.
+    restart({ format: mode.format, gm: !!mode.gm, genius: !!mode.genius });
   }
 
   function closeHowTo() {

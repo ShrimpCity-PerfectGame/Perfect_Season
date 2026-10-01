@@ -19,6 +19,97 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.12] - 2026-10-01
+
+Five duel bugs. The mode where the rules have two homes is the mode where they drift, and four of these
+are that: a rule the client never asked, a rule neither side had, two powerups that cancelled each
+other, and the one door into a match that never checked whether the player was already in one.
+
+**Run `migration-versus.sql`, then deploy the Edge Functions, then the client.** The migration only
+replaces `join_match`, so it is safe on any shape and the site works between the steps — the old
+function simply keeps answering `own_match` and letting a second match be joined, which is what it has
+always done. The functions have to go because **`versus-logic.mjs` changed**, and it is the one module
+both sides run: the client would offer a pick the deployed function refuses, and refuse a dip the
+deployed function still accepts. Any match in flight is unaffected — every change here refuses a new
+move rather than replaying old rows differently.
+
+- **The same man could fill two slots of one duel roster.** `optionId` is `player|id|season`, which is
+  the row identity the database needs and not a person: a player whose best season for one team and
+  best season for another both land on a match's eight boards could be drafted twice. 821 of the 1,639
+  options a match deals are men who appear on more than one board, so this was not rare. Match code
+  AAAHZU: Laveranues Coles 2003 into WR at pick 1 and Coles 2006 into Flex at pick 8, both `ok`. Single
+  player has refused this from the start; `decideMove` now refuses it too, as
+  `already_on_your_roster`.
+- **The screen passed the powerup COUNTS where `versus-logic` expected a roster**, so two rules were
+  enforced on the server alone. `openSlots({ team: 1, era: 1, dip: 1, steal: 1 })` matches none of the
+  eight slot names and therefore answers **all eight of them**, whatever the roster actually holds — so
+  Steal offered a man there was no room for and Double dip lit up on a board that could not serve two
+  more picks, each landing as a refusal from the server after the press. The same shape as the GM cap
+  being enforced on one of its two doors.
+- **A double dip on the turn a steal was spent destroyed the steal, silently.** A steal converts a turn
+  **in place**, and `replayMatch` applies it only while the side at that index is still the thief; a dip
+  splices an extra turn in after the dipper's first, moving every later index on the board along one. So
+  the thief was no longer at the stolen turn, the steal was dropped without a word, the man went back to
+  the victim, and the row stayed on the match counting against the thief's one steal. Reproduced on five
+  match codes. The victim pressing it is the natural case, not an exotic one — being robbed hands them
+  that same turn with Double dip lit in front of them — so the opponent's button took the thief's
+  powerup away. Refused now, on the turn only; the next turn is theirs to spend. The other order stays
+  allowed, and so does a victim re-spinning the board they were robbed on: measured, both of those
+  replay with everything honoured. It is only a change to the turn ORDER that a steal cannot survive.
+- **`join_match` let a player take an invite while already drafting**, orphaning the match they were
+  in. `create_match` has refused to open a second one since it found a player waiting in a fresh lobby
+  while the duel they had walked away from auto-picked their whole roster; this was the door that never
+  asked. Accepted, the first match keeps its `turn_deadline`, so their opponent claims every expired
+  clock, the absent player's roster is filled in for them, and the duel is graded and **recorded as a
+  loss** against somebody sitting on another screen — while `create_match`, the way back, can only
+  answer with one of the two. Now `already_in_a_match`. An untaken lobby of their own is called off as
+  they accept the invite instead of standing in the way: nobody is in it to orphan, and an open lobby
+  nobody joins never expires and no client can end one, so counting it would have refused that player
+  every invite they were ever sent again.
+- **The host reopening their own live link was told it was their own link.** Only an `open` lobby was
+  answered with the lobby; every other state got `own_match`, so the player who OWNS the match was
+  shown the no-match screen under "That's your own link." — worst while it is `drafting`, where the
+  clock is running and their roster is being auto-picked behind an empty screen. Reached whenever their
+  `match_state` read dropped, since `VersusScreen` falls through to `join_match` only then. The host
+  now gets the match in any state, word for word what `match_state` answers, and `own_match` is gone
+  from the function and from the screen's words with it.
+
+Two tests changed rather than being added to, both because they asserted less than their titles claimed.
+"Robbed, then doubling up on the same board, still finishes a match" was written for an earlier version
+of this same pair — the steal used to write the victim's replacement turn at `order[i + 1]`, which on a
+dipped board is the dip's extra turn, and the match finished fourteen picks short with no result. That
+fix made it finishable and the test checked exactly that; it never checked that the man had changed
+hands, which is how the steal went on quietly vanishing for a release. It does now.
+
+## [2.18.11] - 2026-09-30
+
+Three from the bug hunt: a Reset that changed the game, a trade-up that could not be completed, and
+the last of the per-device leaks.
+
+**Client only.** No migration, no Edge Function change.
+
+- **Reset draft dealt a different KIND of draft.** `restart()` with no argument takes `format` from the
+  app's selected-format state and drops `gm` and `genius` entirely, so Reset from GM handed back a plain
+  Unlimited board with no salary cap, and from Genius a board with every stat cell showing — the one
+  thing that mode exists to hide. Tapping the mode again to get back then cost a **second DNF**, because
+  `openFree` sees a different variant in the slot and abandons it: two DNFs and −100 ladder points for
+  one Reset. `runItBack` beside it has always passed all three explicitly, which is what makes this a
+  slip rather than a decision.
+- **A guest trade-up whose reply was lost could never be completed.** `claim_username` answers
+  `already_named` on a second press, and that fell through to "Something went wrong. Try again." — a
+  dead end by construction, since every further press can only answer the same thing. But
+  `already_named` means the trade-up HAPPENED: the account has its name and `guest` is clear. It now
+  carries on, and `onSeasonsKept` re-reads the profile, so a different name typed on the second press
+  corrects itself rather than being shown back. The comment at the top of `onSeasonsKept` has named
+  this gap since v2.8.1; this closes it.
+- **Over/Under had the season daily's leak, one step further along.** It DID ask the server — but only
+  after the device's own record had already short-circuited and returned, so account A's record still
+  blocked account B on a shared browser. The server is asked first now, and `fetchMySouRun` gained the
+  same three answers `fetchMyDailyRun` did: an object, `null` for a definite no, `undefined` for could
+  not ask. Only the last lets the device answer. That completes the per-device cluster that v2.18.9 and
+  v2.18.10 began — and it is the one a code read alone would have missed, because the server call was
+  already there.
+
 ## [2.18.10] - 2026-09-30
 
 The daily stops answering for whoever used the browser last.

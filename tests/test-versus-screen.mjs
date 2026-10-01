@@ -473,6 +473,26 @@ await runTest("a steal through the buttons moves the player on both screens", as
   assert(!text(theirs).includes(theirName), `and off theirs: ${text(theirs).slice(0, 200)}`);
   assert(after.turn.side === victimSide, `the robbed player is on the clock: ${after.turn.side}`);
   assert(text(container).includes("is picking"), `so the thief's screen says it is not their turn: ${text(container).slice(0, 120)}`);
+
+  // And on the ROBBED player's screen, the two buttons the turn has already been spent on are dead before
+  // they can be pressed - this file's own promise. They are also exactly the two a robbed player reaches for:
+  // Steal, to take him straight back, which the rules refuse; and Double dip, which the rules used to ACCEPT
+  // and which quietly voided the steal being answered - the man went back, the row stayed on the match, and
+  // the thief's one steal was spent on nothing. A re-spin is deliberately NOT among them: measured on seven
+  // match codes, a victim re-spinning the board on the turn they were robbed replays with the re-spin
+  // honoured, the steal standing and each counter spent once - it is only the dip's splice that moves the
+  // thief out from under the turn the steal is keyed on. Where a powerup composes, the button stays live.
+  const victimEmail = victimSide === "host" ? "zeta@x.test" : "eta@x.test";
+  await openMatch(victimEmail, code);
+  assert(versus().dataset.view === "draft", `the robbed player is on the draft screen: ${versus().dataset.view}`);
+  assert(!text(container).includes("is picking"), "and it is their turn");
+  const pu = (label) => [...container.querySelectorAll(".vs-pu")]
+    .find((b) => (b.getAttribute("aria-label") || "").startsWith(label));
+  for (const label of ["Double dip", "Steal"]) {
+    const b = pu(label);
+    assert(b, `the ${label} button is on the victim's screen`);
+    assert(b.disabled, `${label} is disabled on the turn the steal was spent on`);
+  }
 });
 
 // The draft keeps a clock ticking and a Realtime channel open, both of which would hold the process open

@@ -12,7 +12,7 @@ import { initGameData, SLOTS, BOARDS, seededSequence } from "../game-logic.mjs";
 import {
   initVersusData, decideMove, replayMatch, optionsOn, optionId, optionFits, openSlots,
   VERSUS_SLOTS, MATCH_PICKS, TURN_SECONDS, matchResult, pickId, optionValue,
-  respinBoard, boardServes,
+  respinBoard, boardServes, dipsLeft,
 } from "../versus-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -244,6 +244,16 @@ await runTest("a steal takes any one of their players, from any board", async ()
   // replayMatch keys them by it, so the second overwrote the first and both powerups bought nothing at all.
   assert(m.move(victim, { steal: true, pickNo: oldest.pickNo }).reason === "stolen_this_turn",
     "the robbed player cannot steal back on the same turn");
+
+  // Nor a double dip, which is the one that destroyed a powerup outright rather than wasting two. A dip
+  // splices an extra turn in after the dipper's first, moving every later index on the board along one, and
+  // replayMatch applies a steal only while the thief is still the side sitting at the turn it was keyed on.
+  // So the dip dropped the steal without a word: the man went back to the victim - who has just been handed
+  // this very turn, with the Double dip button live in front of them - while the row stayed in the match,
+  // counting against the thief's one steal. Reproduced on five match codes before the guard was written.
+  assert(dipsLeft(m.dips, victim) === 1, "the robbed player still has their double dip");
+  assert(m.move(victim, { dip: true }).reason === "stolen_this_turn",
+    "and cannot spend it on the turn the steal was spent on");
   assert(m.takeSomething(victim).ok, "they take something else instead");
 
   // And never the same player twice, on any later turn - otherwise the steal is a tug of war and two powerups

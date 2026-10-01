@@ -136,8 +136,15 @@ async function playOut(sb, as, A, B, code, spend = () => null) {
       // A powerup may say whose turn it belongs to; everything else is the current player's.
       const asSide = powerup.as === "other" ? (side === "host" ? "guest" : "host") : side;
       await as(sides[asSide]);
-      const res = await move(sb, { code, ...powerup, as: undefined });
+      const res = await move(sb, { code, ...powerup, as: undefined, expect: undefined });
       await as(sides[side]);
+      // ...or the refusal the caller named, which is how a rule is driven through the real function instead of
+      // asserted against decideMove on its own.
+      if (powerup.expect) {
+        assert((res.reason || res.error) === powerup.expect,
+          `powerup ${JSON.stringify(powerup)} at pick ${state.pickNo}: wanted ${powerup.expect}, got ${JSON.stringify(res.reason || res.error)}`);
+        continue;
+      }
       // A powerup the caller asked for has to land. Falling through to an ordinary pick instead turned a
       // refusal into a baffling failure much later - the flag said "spent" while the match said otherwise.
       assert(!res.error && !res.reason,
@@ -348,16 +355,18 @@ await runTest("powerups spent through the client land in the match", async () =>
   await as(B);
   await call(sb, "join_match", { p_code: code });
 
-  const spent = { respin: false, dip: false, steal: false };
+  const spent = { respin: false, dip: false, steal: false, stealAt: 0 };
   const end = await playOut(sb, as, A, B, code, (state, rows) => {
     if (!spent.respin) { spent.respin = true; return { respin: "team" }; }
     // The steal before the dip, and the dip waits for it: a dip gives the dipper two turns back to back, and on
     // the second of them the pick just made is their own, which is not a thing anyone may steal.
     if (!spent.steal) {
       const t = theirPick(state, rows.picks || rows, state.turn.side);
-      if (t) { spent.steal = true; return { steal: true, pickNo: t.pickNo }; }
+      if (t) { spent.steal = true; spent.stealAt = state.pickNo; return { steal: true, pickNo: t.pickNo }; }
     }
-    if (spent.steal && !spent.dip) { spent.dip = true; return { dip: true }; }
+    // And not on the steal's own turn, which is refused: a dip splices an extra turn in and would move the
+    // thief out from under the turn the steal is keyed on. A turn later costs the dipper nothing.
+    if (spent.steal && !spent.dip && state.pickNo > spent.stealAt) { spent.dip = true; return { dip: true }; }
     return null;
   });
 
@@ -372,38 +381,56 @@ await runTest("powerups spent through the client land in the match", async () =>
   assert(m.status === "done" && m.result, "and the match still finished with a result");
 });
 
-// The exact three moves that used to end a match at fourteen picks with no result, in the order two people
-// would actually make them: somebody takes the board's first pick, the other player steals it, and the robbed
-// player - back on the clock with a board they now have nothing on - doubles up on it.
+// The three moves two people really make at the start of a board - somebody takes its first pick, the other
+// steals it, and the robbed player is handed that same turn back with Double dip live in front of them - and
+// the two things that went wrong there, one after the other.
 //
-// The steal wrote the victim's replacement turn at order[i + 1] without looking at what was there, and on a
-// dipped board that index is the dip's extra turn. So the dip was swallowed: the victim picked once where they
-// had paid for two AND still forfeited the next board, both rosters finished short, matchResult returned null,
-// and the match could not be finished, graded or left. Seven of four hundred fuzzed matches broke this way.
-await runTest("robbed, then doubling up on the same board, still finishes a match", async () => {
+// First the match could not be finished at all: the steal wrote the victim's replacement turn at order[i + 1]
+// without looking at what was there, and on a dipped board that index is the dip's extra turn. The dip was
+// swallowed, the victim picked once where they had paid for two AND still forfeited the next board, both
+// rosters finished short, matchResult returned null, and the match could not be finished, graded or left.
+// Seven of four hundred fuzzed matches broke this way. The steal converts the turn in PLACE now, so the match
+// finishes - which is what this test was written for, and all it ever checked.
+//
+// What it did not check is the thing that was still wrong: the steal silently stopped happening. A dip splices
+// an extra turn in after the dipper's first, which moves every later index on the board along one, and
+// replayMatch applies a steal only while the thief is still the side sitting at the turn it was keyed on. So
+// the man went back to the victim and the row stayed in the match, counting against the thief's one steal:
+// the opponent's button destroyed a powerup that had already been announced as spent. The dip is refused on
+// that turn now and welcome on the next, which costs the victim a turn's wait and the thief nothing.
+await runTest("robbed, then doubling up: the dip waits a turn, and the steal stands", async () => {
   const { sb, as, A, B } = await twoPlayers();
   await as(A);
   const code = (await call(sb, "create_match", {})).code;
   await as(B);
   await call(sb, "join_match", { p_code: code });
 
-  const seq = { stolen: false, dipped: false };
+  const seq = { stolen: false, refused: false, dipped: false, at: 0, by: null, took: null };
   const end = await playOut(sb, as, A, B, code, (state, rows) => {
     // The follower is on the clock the moment the board's first pick has landed.
     if (!seq.stolen) {
       const t = theirPick(state, rows.picks || rows, state.turn.side);
-      if (t) { seq.stolen = true; return { steal: true, pickNo: t.pickNo }; }
+      if (t) {
+        seq.stolen = true; seq.at = state.pickNo; seq.by = state.turn.side; seq.took = t;
+        return { steal: true, pickNo: t.pickNo };
+      }
     }
-    // ...which sends the robbed player straight back to the same board. That is where they double up.
-    if (seq.stolen && !seq.dipped) { seq.dipped = true; return { dip: true }; }
+    // ...which sends the robbed player straight back to the same board, where the button is waiting for them.
+    if (seq.stolen && !seq.refused) { seq.refused = true; return { dip: true, expect: "stolen_this_turn" }; }
+    // One turn on, it is theirs to spend and nothing is taken from anybody.
+    if (seq.refused && !seq.dipped && state.pickNo > seq.at) { seq.dipped = true; return { dip: true }; }
     return null;
   });
-  assert(seq.stolen && seq.dipped, "both moves were actually made");
+  assert(seq.stolen && seq.refused && seq.dipped, "all three moves were actually made");
 
   const m = await call(sb, "match_state", { p_code: code });
   assert(m.picks.length === MATCH_PICKS, `sixteen picks, not fourteen: got ${m.picks.length}`);
   assert(m.steals.length === 1, `with a player that changed hands: ${JSON.stringify(m.steals)}`);
   assert(m.dips.length === 1, "and the dip on the match");
+  // The assertion the old version of this test was missing, and the whole of what was wrong: a steal that is
+  // recorded but not applied is a powerup spent on nothing.
+  assert(VERSUS_SLOTS.some((sl) => end.roster[seq.by][sl] && optionId(end.roster[seq.by][sl]) === pickId(seq.took)),
+    "and the man they took is still on the thief's roster at the end of it");
   for (const side of ["host", "guest"]) {
     for (const slot of VERSUS_SLOTS) assert(end.roster[side][slot], `${side} filled ${slot}`);
   }

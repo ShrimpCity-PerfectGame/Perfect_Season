@@ -98,8 +98,9 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
     if (!canPlay(uid)) return { error: "guest_not_allowed" };
     const m = matches.get(String(p_code || "").toUpperCase());
     if (!m) return { error: "not_found" };
-    // The host opening their own link is not an error; they get their lobby back.
-    if (m.host_id === uid) return m.status === "open" ? matchState({ p_code: m.code }) : { error: "own_match" };
+    // The host opening their own link is not an error, in any state: they get the match, which is exactly what
+    // match_state answers, because the client falls through to here only when that read came back null.
+    if (m.host_id === uid) return matchState({ p_code: m.code });
     if (m.guest_id) {
       // Either player reopening gets it back in whatever state it is in; a stranger is told which state that
       // is, because "already has two players" is misleading about a duel that has ended.
@@ -108,9 +109,25 @@ export function makeVersus(state, { onMatchChange = () => {} } = {}) {
       if (m.status === "abandoned") return { error: "match_abandoned" };
       return { error: "already_full" };
     }
+    // One live duel at a time, the rule create_match has always had. Both of the caller's own matches are
+    // returned above, so this only ever sees a stranger's invite.
+    for (const other of matches.values()) {
+      if (other.id !== m.id && other.status === "drafting" && (other.host_id === uid || other.guest_id === uid)) {
+        return { error: "already_in_a_match" };
+      }
+    }
     // No opponent ever arrived, so nothing started.
     if (m.status === "abandoned") return { error: "match_abandoned" };
     if (m.status !== "open") return { error: "already_started" };
+    // An untaken lobby of their own is called off instead of standing in the way - after the refusals above,
+    // so a dead link never costs them one.
+    for (const other of matches.values()) {
+      if (other.id !== m.id && other.status === "open" && other.host_id === uid) {
+        other.status = "abandoned";
+        other.ended_at = new Date().toISOString();
+        other.turn_deadline = null;
+      }
+    }
     m.guest_id = uid;
     m.status = "drafting";
     m.turn_deadline = new Date(Date.now() + V.TURN_SECONDS * 1000).toISOString();

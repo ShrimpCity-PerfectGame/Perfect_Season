@@ -115,3 +115,26 @@ await runTest("the roster tile enforces the salary cap, not just the Lock in but
 });
 
 console.log("test-gm-mode.mjs done");
+
+// Reset deals a NEW draft, and until v2.18.11 it dealt a different KIND of draft: restart() with no
+// argument takes `format` from the app's selected-format state and drops gm and genius, so Reset from GM
+// handed back a plain Unlimited board with no cap. Tapping GM mode again to get back then cost a second
+// DNF, because openFree sees a different variant in the slot and abandons it - two DNFs and -100 ladder
+// points for one Reset. runItBack beside it has always passed all three, which is what makes this a slip.
+await runTest("Reset deals another GM draft, not a plain one", async () => {
+  const capRow = () => [...container.querySelectorAll(".sticky *, .reel *")].some((e) => /\$\d/.test(e.textContent || ""));
+  assert(container.querySelector(".card .pill"), "a GM board to start from");
+  const before = capRow();
+  assert(before, "the GM draft shows money before the reset");
+
+  const reset = findButtonByText(container, "Reset");
+  assert(reset, "a Reset control on the draft screen");
+  await click(reset);          // first tap arms it
+  await flush();
+  await click(findButtonByText(container, "Reset") || reset);   // second tap does it
+  await flush(8);
+
+  assert(container.querySelector(".card"), "a fresh board was dealt");
+  assert(container.querySelector(".card .pill"),
+    "and it is still a GM board - every card carries a salary, which only GM draws");
+});

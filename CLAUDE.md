@@ -178,6 +178,13 @@ parts that are unlike every other mode:
   player's draft can be replayed from its seed. A 1v1 cannot: the second picker's legal choices depend on the
   first picker's pick, so no browser can hold the truth. The picks live in `matches` / `match_picks` (public
   select, **no client write policy at all**) and only the `match-pick` Edge Function's service role writes them.
+- **`optionId` is a row's identity, not a person's.** It is `player|id|season`, which is what `match_picks`
+  needs - and `taken`, `already_taken`, `boardServes`, `boardCompletable` and `autoPick` all read it, so for
+  one release the same man could fill two slots of one roster off two different boards. 821 of the 1,639
+  options a match deals are men who appear on more than one of its eight boards, so it was ordinary rather
+  than exotic. Single player has no such gap: one board per pick, one era at a time. A person check lives in
+  `decideMove` beside the `optionId` one (`already_on_your_roster`); keep the two separate rather than
+  changing what `optionId` means.
 - **`versus-logic.mjs` owns every rule**, and `supabase/functions/match-pick/index.ts` owns none of them: it says
   who is asking, calls `decideMove`, and writes down what comes back. Same reasoning as game-logic.mjs - a rule
   enforced on one side and not the other will drift. It also means the rules are tested with no Deno runtime and
@@ -219,6 +226,13 @@ parts that are unlike every other mode:
   once) and a double dip. A fourth, Steal the
   pick, was cut after playtesting along with the ten-second window that existed to make it spendable - see
   VERSUS.md 7 for what went with them and what it cost. A board opens the moment it is dealt.
+  **One powerup a turn**, and it is a rule rather than tidiness: a steal converts a turn IN PLACE and
+  `replayMatch` keys it on that turn, so a second powerup that moves the board's turn order out from under it
+  makes the steal vanish without a word - spent, announced, and undone. Three refusals hold that line
+  (VERSUS.md 7), and the one added in v2.18.12 is refused on the VICTIM, who did nothing wrong: being robbed
+  hands them the turn, with the buttons live in front of them. A powerup that composes is left alone - a
+  victim re-spinning the board they were just robbed on replays with everything honoured, and that was
+  measured before the rule was written rather than reasoned about.
 - **The football final is a table of real scorelines**, not a loser's total plus a margin drawn separately -
   that produced finals like 31-23, which is real but has happened 22 times in 7,307 games. game-logic.mjs's
   `LOSER_PTS` and `MARGINS` are untouched, because the season sim is seeded and its outcomes are stored.
@@ -1120,6 +1134,17 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+  v2.18.11's (three from the bug hunt): client only. No migration, no Edge Function change. Reset draft
+  passes the draft's OWN variant now (`restart()` with no argument dropped gm/genius and took the app's
+  selected format, so Reset changed the game and getting back cost a second DNF); `already_named` from
+  claim_username is treated as success in KeepSeasons, because it means the trade-up already happened and
+  showing it as an error wedged the player for good; and Over/Under asks `sou_runs` BEFORE its own device
+  record, which is the last of the per-device leaks v2.18.9 and v2.18.10 began on.
+  **The pattern these three share is worth the name:** a per-device key answers for the DEVICE, so on a
+  shared browser it answers for whoever used it last. Where an account's own row exists - daily_runs,
+  sou_runs, guess_runs, century_runs - ask it first and let the device answer only when the server cannot
+  be asked at all. That needs THREE answers from the read, not two: collapsing "no row" into "could not
+  ask" is what made the first attempt at v2.18.10 read the server and then ignore it.
   v2.18.10's (the daily and the device): client only. No migration, no Edge Function change. The season
   daily now reads `daily_runs` for a signed-in account (`fetchMyDailyRun`) instead of trusting the device's
   own record, which is keyed by neither account nor format and so answered for whoever used the browser
@@ -1164,6 +1189,16 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.18.12's (the duel cluster): re-run **`migration-versus.sql`**, then **deploy the Edge Functions**, then
+  the client. It only replaces `join_match`, so it is safe on any shape - and unlike v1.19.0's version of this
+  file it drops nothing, since those drops have long since run. The functions are not optional: **`versus-logic.mjs`**
+  changed, which is the one module the browser and `match-pick` both run, so a client ahead of them offers a
+  pick the deployed function refuses (`already_on_your_roster`) and refuses a dip the deployed function still
+  accepts. No match in flight needs abandoning this time - every rule here refuses a NEW move, and `replayMatch`
+  is untouched, so existing rows replay exactly as they did. `join_match` stops answering `own_match` (the host
+  gets their match in any state) and starts answering `already_in_a_match`; the words moved with it in
+  versus.jsx, storage-versus.js's list and VERSUS.md's table, which `tests/test-versus-screen.mjs` holds to
+  each other.
   v2.17.0's (the bug pass): re-run **`migration-wallet.sql`**, then **`migration-runs-log.sql`**, then
   **`migration-moderation.sql`**, then **deploy the Edge Functions**, then the client. Wallet binds each
   `claim_minigame` arm to one day (one run used to pay all three permitted dates); runs-log adds the username

@@ -125,7 +125,7 @@ invite link reads the match before they have signed in (section 9) and the Leade
 | function | returns | does |
 |---|---|---|
 | `create_match(p_format text)` | jsonb: the match row | One open match per host at a time (a second call returns the existing one). Generates the code. Guests (`profiles.guest`) may not create one — see 5. |
-| `join_match(p_code text)` | jsonb: the match row, or a code | `not_found`, `already_full`, `already_finished`, `match_abandoned`, `already_started`, `own_match`, `not_signed_in`, `guest_not_allowed`. Sets `guest_id`, `status = 'drafting'` and the first `turn_deadline`. |
+| `join_match(p_code text)` | jsonb: the match row, or a code | `not_found`, `already_full`, `already_finished`, `match_abandoned`, `already_started`, `already_in_a_match`, `not_signed_in`, `guest_not_allowed`. Sets `guest_id`, `status = 'drafting'` and the first `turn_deadline`. Either player's own match comes back whatever state it is in, so `own_match` is gone (v2.18.12): only an open lobby of their own ever got the lobby, and every other state told the player who OWNS the match "That's your own link." over an empty screen - reached whenever their `match_state` read dropped, since VersusScreen falls through to this only then. `already_in_a_match` is the rule `create_match` has always had: a second live duel orphans the first, which keeps its clock and auto-picks the absent player's roster into a recorded loss. An untaken lobby of their own is called off as they accept somebody else's invite instead of standing in the way, because nothing can ever end one. |
 | `match_state(p_code text)` | jsonb | The match plus its picks, for a client that has just opened the page or reconnected. Read-only (`stable`), called as GET. |
 | `versus_top(p_limit integer)` | jsonb | The 1v1 board (section 10): ranked by wins, then by how few losses they took getting them, then by name under `collate "C"` so the order is fully tiebroken. Guests and accounts that have never played one are left off. Read-only (`stable`), called as GET. |
 
@@ -517,8 +517,11 @@ same user and the same slot, both correct.
 On the screen it is a two-step: the Steal button arms it, the other roster's filled slots become the buttons,
 and tapping one sends it. The roster has to be the target, because the roster is what you are choosing from.
 
-**One powerup a turn.** Two rules, both learned the same way — a second powerup on a turn a steal is spent on
-is thrown away, silently, and the counter still ticks down.
+**One powerup a turn.** Three rules, all learned the same way — a second powerup on a turn a steal is spent on
+is thrown away, silently, and the counter still ticks down. Not every pairing is like that, and the third one
+is where the line actually falls: a victim *re-spinning* the board they were just robbed on replays with the
+re-spin honoured, the steal standing and each counter spent once (measured on seven match codes), so that
+button stays live. What breaks is anything that moves the board's turn ORDER under a steal.
 
 - **No second steal on the turn** (`stolen_this_turn`). A steal does not advance the pick number — it hands the
   same turn to the player it robbed — so without this the victim, now on the clock at that turn, could steal
@@ -531,6 +534,20 @@ is thrown away, silently, and the counter still ticks down.
   being true, and the re-spin is never read again. The board springs back to what it was, the counter stays
   spent, and `used` loses the entry, so a later re-spin can land on that board a second time. It is the same
   shape as `respin_too_late` above, and the answer is the same: refuse, and both powerups stay yours.
+- **No double dip on a turn a steal was spent on** (`stolen_this_turn` again, whose words fit both: "a steal
+  has already been spent on this turn"). Added v2.18.12, and the only one of the three that destroyed a
+  powerup the game had already announced as spent. A steal converts a turn **in place**, and `replayMatch`
+  applies it only while the side sitting at that index is still the thief; a dip then splices an extra turn in
+  after the dipper's first, which moves every later index on the board along one. So the thief was no longer at
+  the stolen turn, the steal was dropped without a word, the man went back to the victim, and the row stayed on
+  the match counting against the thief's one steal. Reproduced on five match codes. The victim declaring it is
+  the natural case rather than an exotic one, which is what makes it worth a rule: a steal hands them that same
+  turn, so Double dip is lit in front of the player who has just been robbed, and pressing it took the
+  opponent's powerup away. **The other order stays allowed** — a dip already in the order, then a steal on the
+  dipper's own turn — because the splice is already in the index the steal is keyed on and both replay
+  honoured. A release before this one had already met the pair: the steal used to write the victim's
+  replacement turn at `order[i + 1]`, which on a dipped board is the dip's extra turn, and the match finished
+  fourteen picks short with no result at all. Fixing that made it finishable; this makes it honest.
 
 ### Double dip
 
