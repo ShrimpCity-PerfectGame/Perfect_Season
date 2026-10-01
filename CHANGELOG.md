@@ -19,6 +19,33 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.10] - 2026-09-30
+
+The daily stops answering for whoever used the browser last.
+
+**Client only.** No migration, no Edge Function change.
+
+- **A second account on a shared device was locked out of the day's daily and shown a stranger's
+  lineup.** `daily_runs` is keyed `(date, format, user_id)`, but the app read only its own per-device
+  record — which is keyed by neither — so the device answered for whoever played on it last. It now
+  reads the server for a signed-in account (`fetchMyDailyRun`), with the device record as the
+  fallback, which is the shape Over/Under has had since `fetchMySouRun` and Guess and Century since
+  they shipped.
+  **This is why the device record could not simply be cleared on sign-out**, which is where this fix
+  started: it was the app's only source, so clearing it would have sent a returning player back into a
+  daily they had already played, to be refused as a duplicate at the end with the day spent for
+  nothing. A failed read still falls back to the device, deliberately — better to think you have played
+  than to be dealt the day twice.
+- **A daily draft in progress now leaves with the account that was playing it.** The sign-out handler
+  has cleared the Unlimited slot since v2.0 and missed the two daily slots beside it, so Alice could
+  make three picks of today's daily, log out, and Bob — signing up on the same device — would be
+  dropped into "Pick 4 of 6" with her players on his roster. Playing it out hands in HER picks as HIS
+  daily and spends the one thing that is one per account per day. The reasoning is the Unlimited
+  slot's, verbatim; only the slot ids differ.
+- `userIdRef` is assigned during render, the way `statsRef` beside it already is, so the new read can
+  tell "who I asked for" from "who is here now" and discard an answer that arrives after the account
+  has changed.
+
 ## [2.18.9] - 2026-09-30
 
 A daily finished before signing up was destroyed by the next season the visitor played.

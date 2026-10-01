@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from "react";
 import {
   sget, sset, sdel, clearDraft,
-  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest, fetchBoardLooks,
+  fetchLeaderboardTop, fetchOwnRank, fetchSiteTotals, fetchDailyTop, fetchSouTop, upsertSouRun, fetchMySouRun, fetchMyDailyRun, fetchSiteStats, subscribeSiteActivity, fetchLadderTop, fetchLadderBest, fetchBoardLooks,
   fetchSeasonRank, fetchUpsetRank,
   logBuild, fetchTopBuilds, fetchBuildCount,
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
@@ -2292,6 +2292,11 @@ export default function PerfectSeason() {
   function showBoardFormat(f) { boardFormatRef.current = f; setBoardFormat(f); }
   const statsRef = useRef(null);
   statsRef.current = stats;
+  // The signed-in account, readable from a continuation that started before the account changed. Assigned
+  // during render like statsRef above, so anything that awaits can tell "who I asked for" from "who is here
+  // now" and throw away an answer that arrived for somebody else - the same guard loadAccountExtras uses.
+  const userIdRef = useRef(null);
+  userIdRef.current = userId;
   const [dailyDone, setDailyDone] = useState({});   // today's finished daily per format, if any
   const [codeInput, setCodeInput] = useState("");
   // Why a code was turned away before any boards were dealt - today, only a code that is a daily's own seed.
@@ -2519,7 +2524,15 @@ export default function PerfectSeason() {
         // reload put the departing account's draft back - and the snapshot effect wrote it straight
         // into the slot again, still stamped with their owner, for the next person to be charged.
         clearDraft(DRAFT_KEY);
-        setWip((w) => ({ ...w, free: null }));
+        // ...and BOTH daily slots, which this handler missed until v2.18.10 while clearing the Unlimited one
+        // beside them. A daily in progress is the worse one to leave behind: Alice makes three picks of
+        // today's Fantasy daily and logs out, Bob signs up on the same device and taps the daily, and he is
+        // dropped into "Pick 4 of 6" of Alice's draft with her players already on his roster - and if he
+        // plays it out, those picks are handed in as BOB's daily for the day, which is the one thing per
+        // account per day that cannot be played again. The reasoning is identical to the Unlimited slot's
+        // above; only the slot ids differ.
+        for (const f of FORMATS) clearDraftTracked(slotId({ kind: "daily", format: f }), DAILY_PROGRESS(todayKey(), f));
+        setWip((w) => ({ ...w, free: null, ...Object.fromEntries(FORMATS.map((f) => [slotId({ kind: "daily", format: f }), null])) }));
         // And the one on screen, if a draft is actually in progress. Clearing only the stored copy left it
         // live in React state, where playUnlimited short-circuits on it before it ever reads storage - so
         // Bob was handed Alice's board anyway, and the snapshot effect (which stops at `!mode`) wrote it
@@ -2573,6 +2586,7 @@ export default function PerfectSeason() {
   const readDay = useRef(null);
   readDay.current = async () => {
     const today = todayKey();
+    const who = userIdRef.current;
     const [fanDone, stdDone, sou, century, guessed] = await Promise.all([
       sget(DAILY_KEY(today, "fantasy"), false), sget(DAILY_KEY(today, "standard"), false), sget(SOU_DONE_KEY(today), false),
       // By the UTC day, because that is the day the run itself is filed under. Keyed by todayKey it was
@@ -2583,7 +2597,24 @@ export default function PerfectSeason() {
     ]);
     // Both days, so a re-read is triggered by whichever rolls over first - they are up to a day apart.
     dayRead.current = `${today}|${utcDayKey()}`;
-    setDailyDone({ fantasy: fanDone, standard: stdDone });
+    // The SERVER decides for a signed-in account, with the device's own record as the fallback. `daily_runs`
+    // is keyed (date, format, user_id) and the device record is keyed by neither account nor anything else,
+    // so reading it alone answered for whoever used this browser last: a second account on a shared phone was
+    // told the day was spent, shown a stranger's lineup, and locked out of a daily it had never played. The
+    // same shape Over/Under has had since fetchMySouRun, and Guess and Century since they shipped.
+    // A failed read answers null and leaves the device's record standing - better to think you have played
+    // than to be dealt the day twice.
+    let fan = fanDone, std = stdDone;
+    if (who) {
+      const [fanRow, stdRow] = await Promise.all([
+        fetchMyDailyRun(today, "fantasy", who).catch(() => null),
+        fetchMyDailyRun(today, "standard", who).catch(() => null),
+      ]);
+      if (who !== userIdRef.current) return;   // the account changed while we were asking
+      fan = fanRow || fanDone;
+      std = stdRow || stdDone;
+    }
+    setDailyDone({ fantasy: fan, standard: std });
     setSouDone(sou);
     setCenturyDone(century);
     setGuessDone(guessed);

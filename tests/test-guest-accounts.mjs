@@ -313,4 +313,28 @@ await runTest("a draft does not follow the device to the next account", async ()
   assert(!picks, `it leaves with them rather than waiting for the next account, got ${picks} picks`);
 });
 
+// The Unlimited slot has left with its account since v2.0; the DAILY slots beside it did not, until
+// v2.18.10. A daily is the worse one to inherit: it is one per account per day and cannot be played
+// again, so playing out a stranger's half-finished board hands in THEIR picks as YOUR daily and spends
+// the day doing it.
+await runTest("a daily draft in progress does not follow the device to the next account either", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+  const today = new Date();
+  const key = `ps-daily-wip:${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  // A daily with picks in it, the way walking away from one leaves it.
+  await window.storage.set(key, JSON.stringify({
+    mode: { kind: "daily", date: key.slice("ps-daily-wip:".length), format: "fantasy", owner: "someone-else" },
+    spin: { team: "KC", w: 2 }, history: [{ key: "KC|2", id: 1, season: 2018, slot: "QB" }], seq: [],
+  }), false);
+
+  await auth.auth.signOut();
+  await flush(8);
+
+  const after = await window.storage.get(key, false);
+  const picks = after && JSON.parse(after.value)?.history?.length;
+  assert(!picks, `the daily leaves with the account that was playing it, got ${picks} picks`);
+});
+
 await close();
