@@ -19,6 +19,35 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.18.11] - 2026-09-30
+
+Three from the bug hunt: a Reset that changed the game, a trade-up that could not be completed, and
+the last of the per-device leaks.
+
+**Client only.** No migration, no Edge Function change.
+
+- **Reset draft dealt a different KIND of draft.** `restart()` with no argument takes `format` from the
+  app's selected-format state and drops `gm` and `genius` entirely, so Reset from GM handed back a plain
+  Unlimited board with no salary cap, and from Genius a board with every stat cell showing — the one
+  thing that mode exists to hide. Tapping the mode again to get back then cost a **second DNF**, because
+  `openFree` sees a different variant in the slot and abandons it: two DNFs and −100 ladder points for
+  one Reset. `runItBack` beside it has always passed all three explicitly, which is what makes this a
+  slip rather than a decision.
+- **A guest trade-up whose reply was lost could never be completed.** `claim_username` answers
+  `already_named` on a second press, and that fell through to "Something went wrong. Try again." — a
+  dead end by construction, since every further press can only answer the same thing. But
+  `already_named` means the trade-up HAPPENED: the account has its name and `guest` is clear. It now
+  carries on, and `onSeasonsKept` re-reads the profile, so a different name typed on the second press
+  corrects itself rather than being shown back. The comment at the top of `onSeasonsKept` has named
+  this gap since v2.8.1; this closes it.
+- **Over/Under had the season daily's leak, one step further along.** It DID ask the server — but only
+  after the device's own record had already short-circuited and returned, so account A's record still
+  blocked account B on a shared browser. The server is asked first now, and `fetchMySouRun` gained the
+  same three answers `fetchMyDailyRun` did: an object, `null` for a definite no, `undefined` for could
+  not ask. Only the last lets the device answer. That completes the per-device cluster that v2.18.9 and
+  v2.18.10 began — and it is the one a code read alone would have missed, because the server call was
+  already there.
+
 ## [2.18.10] - 2026-09-30
 
 The daily stops answering for whoever used the browser last.

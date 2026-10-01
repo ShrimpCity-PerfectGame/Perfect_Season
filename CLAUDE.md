@@ -1120,6 +1120,17 @@ suite and still broke the live Leaderboard for every existing account.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
   deploy-ordering note in `supabase/migration-scoring-formats.sql` for the specific mechanism.
+  v2.18.11's (three from the bug hunt): client only. No migration, no Edge Function change. Reset draft
+  passes the draft's OWN variant now (`restart()` with no argument dropped gm/genius and took the app's
+  selected format, so Reset changed the game and getting back cost a second DNF); `already_named` from
+  claim_username is treated as success in KeepSeasons, because it means the trade-up already happened and
+  showing it as an error wedged the player for good; and Over/Under asks `sou_runs` BEFORE its own device
+  record, which is the last of the per-device leaks v2.18.9 and v2.18.10 began on.
+  **The pattern these three share is worth the name:** a per-device key answers for the DEVICE, so on a
+  shared browser it answers for whoever used it last. Where an account's own row exists - daily_runs,
+  sou_runs, guess_runs, century_runs - ask it first and let the device answer only when the server cannot
+  be asked at all. That needs THREE answers from the read, not two: collapsing "no row" into "could not
+  ask" is what made the first attempt at v2.18.10 read the server and then ignore it.
   v2.18.10's (the daily and the device): client only. No migration, no Edge Function change. The season
   daily now reads `daily_runs` for a signed-in account (`fetchMyDailyRun`) instead of trusting the device's
   own record, which is keyed by neither account nor format and so answered for whoever used the browser
