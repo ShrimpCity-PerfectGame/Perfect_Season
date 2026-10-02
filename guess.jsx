@@ -403,8 +403,19 @@ export function GuessScreen({
       <div className="gp" data-view="done">
         <div className={`result-hero gp-hero${result.solved ? " solved" : ""}`}>
           <p className="gp-eyebrow">{result.replay ? "Today's game" : result.solved ? "Got it" : "Missed"}</p>
-          <p className="rec gp-score">{result.solved ? result.tries : "—"}</p>
-          <p className="outcome">{result.solved ? `guess${result.tries === 1 ? "" : "es"}` : `not in ${result.tried || GUESS_TRIES}`}</p>
+          {/* A win has a number worth printing big - how many guesses it took. A loss has no score at all,
+              and the em dash that used to stand in for one was drawn in the hero's own 96-156px display face:
+              a 43x82px slab of accent lime floating in the middle of a 458px box, which reads as a graphic
+              rather than as a character, and reserves a line of empty space either side of itself. The
+              sentence carries the hero instead, and the lime stays where it means something. */}
+          {result.solved ? (
+            <>
+              <p className="rec gp-score">{result.tries}</p>
+              <p className="outcome">guess{result.tries === 1 ? "" : "es"}</p>
+            </>
+          ) : (
+            <p className="outcome gp-missed">not in {result.tried || GUESS_TRIES}</p>
+          )}
           {result.answer && (
             <p className="rating">
               It was <strong>{result.answer.name}</strong> — {result.answer.pos},{" "}
@@ -719,6 +730,12 @@ export const GUESS_CSS = `
 .gp-eyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; opacity: .8; margin: 0; }
 .gp-hero .gp-score { font-variant-numeric: tabular-nums; margin: 2px 0 0; }
 .gp-hero .outcome { font-size: 15px; font-weight: 600; opacity: .9; margin: 6px 0 0; }
+/* The loss headline, in the display face but nothing like the hero number's size - there is no score to
+   announce, only a fact to state. Ink rather than accent: lime is the colour of having won, and a miss
+   wearing it was the other half of what made that screen read wrongly. Placed after .outcome on purpose,
+   since the element carries both classes and they have the same specificity. */
+.gp-hero .gp-missed { font-family: var(--display); font-weight: 400; font-size: clamp(34px, 9vw, 52px);
+  line-height: 1.05; color: var(--ink); opacity: 1; margin: 4px 0 0; }
 .gp-hero .rating { margin: 8px 0 0; text-wrap: pretty; }
 .gp-difficulty { margin: 10px 0 0; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
 .gp-difficulty strong { font-variant-numeric: tabular-nums; }

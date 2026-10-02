@@ -17,6 +17,28 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
 // for a staging setup is not knowing which of the two sites you're looking at.
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 const appEnv = process.env.APP_ENV || "production";
+
+// A Turnstile SECRET key in CAPTCHA_SITE_KEY would be baked into the public bundle and served to every
+// visitor, because that is what this variable is for - the site key is public by design. The two are easy to
+// mix up: both are strings beginning `0x4AAAAA`, they sit next to each other on the same dashboard page, and
+// nothing in Vercel's form knows which is which. It happened on this project's production deploy on
+// 2026-10-02 and was caught only because the widget then answered `400020 invalid sitekey`.
+//
+// They are told apart by length, which Cloudflare's own documented test keys pin: a sitekey is 24 characters
+// (`1x00000000000000000000AA`) and a secret is 35 (`1x0000000000000000000000000000000AA`). The threshold is
+// 30, which is a wide margin either way rather than an exact match, so a future sitekey of a slightly
+// different length still builds.
+//
+// This FAILS the build rather than warning. A warning scrolls past in a Vercel log and the deploy still
+// publishes the secret, which is the whole thing being prevented.
+const captchaKey = process.env.CAPTCHA_SITE_KEY || "";
+if (captchaKey.length > 30) {
+  throw new Error(
+    `CAPTCHA_SITE_KEY looks like a Turnstile SECRET key (${captchaKey.length} characters; a sitekey is about 24` +
+    `, a secret 35). It would be published in the client bundle. Use the widget's Sitekey - and if a secret has` +
+    ` already been deployed, rotate it in the Cloudflare dashboard, because it has been served to every visitor.`,
+  );
+}
 if (appEnv !== "production" && appEnv !== "staging") {
   throw new Error(`APP_ENV must be "production" or "staging", got "${appEnv}"`);
 }
@@ -58,8 +80,8 @@ await esbuild.build({
     APP_SITE_URL: JSON.stringify(siteUrl),
     // Empty until the owner creates a Turnstile site key. Empty means captcha.mjs loads no script and
     // sends no token, which is exactly the behaviour before it existed - see the note at the top of that file
-    // about shipping the client BEFORE the project setting.
-    CAPTCHA_SITE_KEY: JSON.stringify(process.env.CAPTCHA_SITE_KEY || ""),
+    // about shipping the client BEFORE the project setting. Checked above for the secret-key shape.
+    CAPTCHA_SITE_KEY: JSON.stringify(captchaKey),
   },
 });
 

@@ -19,6 +19,53 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.20.6] - 2026-10-02
+
+Client only. No migration, no Edge Function change.
+
+**Losing Guess the Player drew a lime slab in the middle of an empty box.** The end screen's big number is
+how many guesses it took, printed in the hero's own display face - `.rec` is `clamp(96px, 24vw, 156px)` in
+Anton, coloured `--accent`. A loss has no such number, so it printed an em dash instead, and at that size an
+em dash is not a character: measured in the harness, a **43x82px bar of lime** floating in a 458px-tall hero
+with a line of empty space either side of it. It also wore the colour of having won.
+
+The sentence carries the hero now - **MISSED** over **not in 5** in the display face at `clamp(34px, 9vw,
+52px)`, in ink rather than accent - followed by who it was and how hard the day was, which are the two things
+a player actually wants off a lost game. The lime stays where it means something.
+
+Only this screen had the problem: Century's end hero prints a real score whether you reach 100 or not, so it
+never needed a placeholder.
+
+**The two tests that covered it were asserting the placeholder**, not the intent - `.gp-score` contains an em
+dash. They now assert there is no score element at all, which is the stronger form of the same sentence they
+were already commented with ("no number, because it was not got"), plus that the headline exists. Checked by
+mutation: rendering the big slot on a loss again goes red.
+
+## [2.20.5] - 2026-10-02
+
+Build script only. Nothing in the bundle changes.
+
+**`build.mjs` now FAILS the build if `CAPTCHA_SITE_KEY` looks like a Turnstile secret key.** It happened on
+this project's own production deploy: the secret went into the variable the site key belongs in, and because
+that variable is baked into the client bundle by design, the secret was served to every visitor of
+`www.gridspin.app` until it was spotted and rotated.
+
+**The mix-up is easy rather than careless.** Both keys are strings starting `0x4AAAAA`, they sit beside each
+other on the same Cloudflare page, and nothing in Vercel's form knows which is which. The only thing that
+caught it was the widget answering `400020 invalid sitekey`, which is luck - a *valid* secret pasted into a
+*different* widget's site key field would have published a live credential and still half-worked.
+
+Cloudflare's own documented test keys pin the shapes: a sitekey is 24 characters
+(`1x00000000000000000000AA`), a secret is 35 (`1x0000000000000000000000000000000AA`). The threshold is 30 -
+a wide margin either way rather than an exact match, so a future sitekey of a slightly different length still
+builds.
+
+Three deliberate choices. It **throws** rather than warning, because a warning scrolls past in a Vercel log
+while the deploy publishes the secret anyway. It runs **before anything is written**, so a bad build produces
+no output at all - the same shape as `tools/data/build-season-pool.mjs`, which refuses to write a file that
+cannot deal a legal board. And the message says to **rotate** as well as to replace, because by the time
+anyone reads it the secret may already have been served.
+
 ## [2.20.4] - 2026-10-02
 
 Client only. No migration, no Edge Function change. **Written from what turning the check on actually did**,

@@ -1337,6 +1337,21 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.6's (losing Guess the Player): client only. No migration, no Edge Function change. The end hero's
+  `.rec` slot is the display face at `clamp(96px,24vw,156px)` in `--accent`, which is right for a win's
+  number of guesses and wrong for a loss: the em dash standing in for "no score" rendered as a 43x82px lime
+  bar in a 458px box. **A placeholder in a display-size slot is a graphic, not a character.** The outcome
+  sentence is the headline on a loss now, in ink, and the lime stays where winning is. Century's hero is
+  unaffected - its score exists whether you reach 100 or not.
+
+  v2.20.5's (the build refuses a secret key): build script only, nothing in the bundle changes. `build.mjs`
+  throws if `CAPTCHA_SITE_KEY` is longer than 30 characters, because that is a Turnstile SECRET and this
+  variable is baked into the public bundle. It happened here, on production, and the secret was served to
+  every visitor until it was spotted and rotated. Cloudflare's own test keys pin the shapes - sitekey 24,
+  secret 35 - and 30 is a wide margin rather than an exact match. **A valid secret pasted into the wrong
+  widget's field would have published a live credential and still half-worked**; what caught this one was
+  the widget answering `400020 invalid sitekey`, which is luck, not a check.
+
   v2.20.4's (three ways to fail, said three ways): client only. No migration, no Edge Function change.
   `captchaToken()` answers `{ token, reason }` instead of a bare string, and the reason decides the sentence:
   **blocked** (the script never loaded - an ad blocker, and the player can act on it), **refused**
@@ -1368,9 +1383,17 @@ suite and still broke the live Leaderboard for every existing account.
     1. Ship this client. With no `CAPTCHA_SITE_KEY` it loads no script and sends no token - nothing changes.
     2. Make a **Cloudflare Turnstile** widget, **one per environment** (Cloudflare's own advice, and the
        hostname list is per widget). Mode **Invisible**, not Managed - see below, it is not a free choice.
-       Hostnames: staging `perfect-season-staging.vercel.app`; production `gridspin.app`,
-       `www.gridspin.app`, and the two original addresses that still serve production's deployment,
-       `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`. A hostname not on the list is
+       Hostnames: staging `perfect-season-staging.vercel.app` and NOTHING else; production
+       **`www.gridspin.app` first** - the apex 308s there, so that is the hostname every real player's
+       browser is on when the widget runs, and a list with `gridspin.app` alone refuses all of them with
+       110200 - plus `gridspin.app` itself as insurance against the redirect ever going away, and the two
+       original addresses that still serve production's deployment and answer 200,
+       `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`. Do not add `localhost`: no
+       local build ever has a site key, because `build.mjs` only injects one when the env var is set and the
+       tests and the UI harness never set it. **One widget must not cover both environments** even though it
+       works - it puts staging and production in one analytics pool, so the refusal rate that says whether
+       real players are being turned away cannot be read; it makes rotating either key take the other
+       environment down; and it makes the staging secret a production secret. A hostname not on the list is
        refused, so a Vercel PREVIEW build (random *.vercel.app) cannot pass the challenge - sign in on
        staging or production to test, never on a preview. Keep the site key and the secret key.
     3. Set `CAPTCHA_SITE_KEY` in that environment's Vercel project and redeploy, so the client can get a
