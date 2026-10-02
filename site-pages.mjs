@@ -103,7 +103,7 @@ const PRIVACY_SECTIONS = [
   ]],
   ["Where it all lives, and who else sees it", [
     "The database, the sign-ins and the pictures are held by Supabase. The site itself is served by Vercel. Both keep ordinary server logs to run the service, which include IP addresses and the times requests were made.",
-    "The typefaces come from Google Fonts, so Google's servers receive the request for them when a page loads. Nothing else on the site is loaded from anywhere else: there are no adverts, no analytics, no tracking pixels and no third-party scripts.",
+    "The typefaces come from Google Fonts, so Google's servers receive the request for them when a page loads. Signing in, signing up, resetting a password or having a guest account made for you also loads Cloudflare Turnstile, an anti-robot check: Cloudflare sees that request and decides whether the browser making it looks like a person. It runs on those moments only, it is not loaded while you play, and it is there because an account that costs nothing to make is an account somebody can make thousands of. Nothing else on the site is loaded from anywhere else: there are no adverts, no analytics and no tracking pixels.",
     "Nothing is sold, rented or handed to anyone else.",
   ]],
   ["What is kept on your device", [

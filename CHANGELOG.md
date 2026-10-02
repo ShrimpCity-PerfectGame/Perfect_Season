@@ -19,6 +19,37 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.20.1] - 2026-10-02
+
+**The anti-robot check, client half.** CLAUDE.md has named a CAPTCHA on anonymous sign-ins as a pre-launch
+task since v1.17.0: a guest account costs nothing to make, so anybody with a script can mint them freely,
+and every one counts toward Supabase's monthly active users as well as pushing the leaderboards about.
+
+**This release does nothing on its own, and that is the point.** Supabase's CAPTCHA setting is per PROJECT
+and covers sign-in, sign-up, password reset and the anonymous sign-in all at once - so a switch flipped
+before the client can send a token breaks every one of them at the same moment. The client ships first and
+is completely inert without a site key: no script, no request to Cloudflare, no token, byte for byte the
+behaviour before it. **Then** the key goes in and the switch is flipped. The runbook is in CLAUDE.md.
+
+- **Cloudflare Turnstile, and the provider is not a toss-up.** Supabase supports hCaptcha and Turnstile, and
+  only Turnstile has a mode that asks the player nothing. That is a requirement here rather than a
+  preference: the guest sign-in happens inside `postAsGuest`, *after* somebody has played a full
+  seventeen-game season, with no form on screen to hang a challenge off. Making them solve a puzzle to have
+  the season they just played counted would be worse than the abuse it prevents.
+- **A challenge that will not answer is a sentence, not a silent failure.** A blocked CDN, a proxy or an ad
+  blocker all look the same from the browser. Sending the call anyway earns Supabase's own captcha refusal,
+  which reaches the player as "Something went wrong" and sends them looking for a problem with their
+  password; `mapAuthError` says what actually happened and what to do about it.
+- **All four protected calls go through it** - `authSignUp`, `authSignIn`, `authSignInAsGuest`,
+  `authResetPassword` - and the test reads `storage.js` itself rather than trusting that the list was
+  remembered. `signInWithOAuth` is deliberately not among them: the page leaves for Google, which does its
+  own checking.
+
+**`/privacy` had to change again.** It promised "no third-party scripts", and a CAPTCHA is exactly that. It
+now says which moments load Cloudflare, what Cloudflare sees, that it is not loaded while you play, and why
+it is there at all. That sentence only becomes true when the key is added - but the page has to be ready
+before the key is, not after.
+
 ## [2.20.0] - 2026-10-02
 
 **You can close your account.** There was no way to do it at all, while `/privacy` and `/terms` both
