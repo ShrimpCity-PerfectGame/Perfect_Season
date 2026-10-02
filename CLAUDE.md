@@ -186,6 +186,12 @@ flipped. See the v2.20.1 entry under Releasing for the four steps and the order 
 single-use, so a fresh widget is made and removed per call, and a challenge that will not answer within
 eight seconds becomes a sentence (`mapAuthError`) rather than a hung sign-in.
 
+**The tab a guest is sent to is called "Account", not "Profile"** (v2.20.2). Seven messages written for
+guests - `save_profile`'s and `set_avatar`'s refusals, the shop's, the report sheet's, the daily's and the
+line under a posted season - all say "the Account tab", and the nav label was `user ? "Profile" : "Account"`,
+so a guest (who has `user` set) read Profile and every one of those instructions pointed at a tab that did
+not exist. It is `user && !isGuest` now. A guest has no profile screen, so the label was also simply wrong.
+
 **Guests (v1.17.0).** A visitor who finishes a season doesn't have to sign up for it to count: the site takes
 an account for them (Supabase's anonymous sign-in), the database names it `Guest_XXXXX` and marks it
 `profiles.guest`, and the season goes through `submit-run` like anyone else's - the verification path doesn't
@@ -262,9 +268,12 @@ parts that are unlike every other mode:
   needs - and `taken`, `already_taken`, `boardServes`, `boardCompletable` and `autoPick` all read it, so for
   one release the same man could fill two slots of one roster off two different boards. A match deals about
   **218 options across its eight boards, of which roughly 3.7 are men who appear on more than one** of them
-  (max 11 measured over 200 codes); across all 160 boards it is 821 of 4,346. **v2.18.12 shipped that as "821
-  of the 1,639 options a match deals", which is the pool-wide count wearing a per-match sentence** - wrong by
-  about 200x and corrected in v2.18.13. It is still ordinary rather than exotic: 0.5% of matches played
+  (max 11 measured over 200 codes); across all 160 boards it is 821 of the **1,639 men** in the pool - 4,346
+  is option ROWS, 1,222 of them defenses and kickers, so it is never 821's denominator. **v2.18.12 shipped 821
+  of 1,639 as what a MATCH deals**, which is the pool-wide count wearing a per-match sentence - wrong by about
+  200x on the numerator - and **v2.18.13's correction then put 821 over the row count instead**, which reads as
+  19% where the real pool-wide share is half the men in the game. Fixed in v2.20.2. It is ordinary rather than
+  exotic either way: 0.5% of matches played
   entirely by clock claims ended with one man in two slots. Single player has no such gap - one board per
   pick, one era at a time. The person check lives in `decideMove` beside the `optionId` one
   (`already_on_your_roster`), and **the clock is a second door onto the same roster**: `autoPick` returns
@@ -392,7 +401,7 @@ parts that are unlike everything else:
   Lock in button AND the roster tile call, because the GM cap's history is that a screen can look right and
   enforce nothing.
 - **Not built:** nothing on the profile SCREEN (`player_stats` carries a Century block since v2.12.0, but no
-  screen prints it). The share card landed in v2.11.0 and the badge in v2.12.0; CENTURY.md 9 is the current list.
+  screen prints it). The share card landed in v2.11.0 and the badge in v2.12.0; CENTURY.md 11 is the current list.
 
 **Guess the Player (v2.13.0, reshaped in v2.14.0).** A daily game of a different shape: one real player a day
 and **five guesses**, each drawing a row that compares **team, division, position, draft class and jersey
@@ -967,10 +976,17 @@ overwrite each other.
   (`NAME_SURFACES`, which includes the 30% lime wash `.lb tr.me td` paints over your own row) - a drift slides any
   stop under any letter, so measuring the first one proves nothing. The drift is `background-position` only and
   stops under reduced motion. The colour goes on the name and nothing else: the supporter star and the guest chip
-  stay outside it in their own tokens. **The player card does not wear one** - six card themes over 32 team
-  colours has no readable text colour, which is exactly what nameplates are for, so the two features split the
-  game between them rather than competing.
-  **Where a name colour shows:** every board through `NameLink`; the **duel screen** through `DuelName`
+  stay outside it in their own tokens. **The player card wears one too, since v2.8.2** - it could not when name
+  colours were built, because "no colour clears AA on cream, navy and black" was true of a single colour, and a
+  look has carried one palette per scope since v2.7.0 while the card publishes its own scope
+  (`CARD_THEME_SCOPE`). Measured across every theme and all 32 team colours: 1,073 colour-on-card pairs, none
+  below AA. **Wearing a plate as well, the plate keeps the LETTERS and the colour takes its outer ring** - a
+  ring is never behind a letter, and painting the colour onto a plate's own fill clears AA for only 50 of the
+  99 combinations even when each pair picks whichever of its three palettes suits that plate best. This
+  paragraph said "the player card does not wear one" until v2.20.2, and so did the shop's own note, which a
+  player read directly under a card that was wearing one.
+  **Where a name colour shows:** every board through `NameLink`; the **player card**, through `NamePlate`
+  (cosmetics.jsx) - with no plate it is `NameInk` on the letters; the **duel screen** through `DuelName`
   (versus.jsx), which paints the name but never links it - that screen is a draft on a clock, and a profile link
   would push a history entry and take the player off the match mid-turn; and **your own name in the header**, on
   every screen including the play screen, where it is the only name there is. Your own comes from
@@ -992,6 +1008,21 @@ overwrite each other.
   badge rather than sold, which makes three items on that badge. To see one without fighting the RNG: sign in
   as `admin`, force a 20-0, and press **Skip to the end** - the overlay shares `finished` with the `.cel`
   panel, so it plays when the animation lands, not when the result first appears.
+
+**An assertion that touches no door passes while the door is shut** (v2.20.2, and the third time). The GM
+cap's two buttons, the names on Century's and Guess's boards, and now the anti-robot sentence: v2.20.1 proved
+`mapAuthError` returns the right words by calling it directly, and three of the four screens that should have
+shown those words threw the error away before choosing a message. The test was green the whole time and could
+not have been otherwise - it never rendered a form. **Prefer a test that presses the thing a player presses.**
+Where that is genuinely too expensive (`postAsGuest` is reachable only after a full seventeen-game season), a
+source check is honest as long as it says so and says why, and holds only that the door EXISTS.
+
+**A read that failed is not a fact about the world** (v2.20.2, and the second time). The Leaderboard learned
+this and grew an error panel; the Stats screen rendered ten boards from an empty read, each stating something
+about the site - "No runs yet.", "No championships yet." - under one small line admitting the read had
+failed, so a dropped `site_stats()` was indistinguishable from a game nobody had played. Same shape as the
+per-device leaks of v2.18.9-v2.18.13: a question with three answers (yes, no, could-not-ask) collapsed into
+two. And a failed REFRESH must keep what is on screen rather than replace a correct screen with an empty one.
 
 **A failed read is not an answer.** `fetchProfile` threw its error away, so "the read failed" and "this
 account has no profile row" were the same value - `null` - and both are real states, because an account
@@ -1243,7 +1274,10 @@ suite and still broke the live Leaderboard for every existing account.
     every rule 1v1 has and the browser imports it too: change it, push the client, and forget the function, and
     the two are running different rulebooks. That exact miss cost a staging session in v1.19.0 - the client
     offered a powerup the deployed function still refused as "not your turn". `node deploy-function.mjs <env>`
-    deploys all four functions by default for this reason; there is no good argument for deploying one.
+    deploys all **five** by default for this reason (`FUNCTIONS` in that file is the list); there is no good
+    argument for deploying one. `supabase/config.toml` carries a `verify_jwt = false` block for each of the
+    five as well - the flag is the belt, the file is the braces, and a hand-run `npx supabase functions
+    deploy <name>` has only the braces.
   - A schema change → run its migration in that environment's SQL editor first.
 
   Order is always migration → Edge Function → client. Reversing it corrupts data; see the
@@ -1303,6 +1337,14 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.2's (the polish pass): **client, config and docs only** - no migration, no Edge Function change, and
+  `supabase/config.toml` is read by the Supabase CLI rather than by anything deployed. One part of it wants
+  shipping **before** the CAPTCHA is switched on, not after: v2.20.1 shipped the anti-robot sentence and only
+  signup ever showed it, so sign-in said "Incorrect email or password" for a password that was right, the
+  reset screen said "check your connection", and a guest's lost season advised making an account - which
+  carries a token through the same blocked widget. `captchaSaid` routes all four now. Everything else is
+  copy, one deleted line (the Duel tile's `if (!userId) return;`), two CSS rules and the documents.
+
   v2.20.1's (the anti-robot check): client only, and **inert until somebody turns it on**. No migration, no
   Edge Function change. THE ORDER MATTERS, because Supabase's CAPTCHA setting is per project and covers
   sign-in, sign-up, password reset and the anonymous sign-in together:

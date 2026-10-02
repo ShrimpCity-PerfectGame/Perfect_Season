@@ -285,7 +285,7 @@ export function WalletPanel({ wallet }) {
   );
 }
 
-// Your player card as it would look: `wear` is { frame, card, title }.
+// Your player card as it would look: `wear` is { frame, card, title, nameplate, namecolor }.
 function CardPreview({ username, details, team, wear, badges = [], compact = false }) {
   return (
     <CardTheme theme={wear.card} team={team} className={`${compact ? "sh-mini" : "sh-card"}${longName(username) ? " sh-long" : ""}`}>
@@ -667,12 +667,15 @@ const showDetails = (d) => setShop((s) => ({
           </div>
           <div className="sh-panel" role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-${tab}`}>
             {tab === "namecolor" && (
-              /* Said here because the card above cannot show it: a name colour is worn on the boards, and the
-                 card wears a nameplate instead (NAME_LOOKS in cosmetics.jsx has the reason). Without this line
-                 equipping one looks like it did nothing at all. */
+              /* Where else it shows - the case above previews it on the card, so this is not making up for
+                 nothing having happened. It read "not on your card" until v2.20.2: true when name colours were
+                 built, and wrong from v2.8.2, which put them on the card and measured 1,073 colour-on-card
+                 pairs across every theme and all 32 team colours to do it. A player who had just spent up to
+                 15,000 coins was told the thing in front of them had not happened. */
               <p className="note" style={{ marginTop: 0 }}>
-                Name colors show on the leaderboards and the Stats boards, not on your card. Each one is drawn
-                to read on both the cream boards and the black ones.
+                Name colors show on the leaderboards, the Stats boards and your player card. With a nameplate on
+                as well, the plate keeps the letters and the color becomes its outer ring. Each one is drawn to
+                read on every surface it can land on, from the cream boards to the black ones.
               </p>
             )}
             {tab === "showcase" ? showcasePanel() : <div className="sh-items">{items.filter((i) => i.kind === tab).map(renderItem)}</div>}

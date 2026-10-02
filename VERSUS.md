@@ -176,7 +176,9 @@ Step 6 is about the **man**, where every other availability test in the mode is 
 is `player|id|season`, which is what `match_picks` needs, so a player whose best season for one team and best
 season for another both land on a match's boards is two different options to `taken`, `already_taken`,
 `boardServes`, `boardCompletable` and `autoPick` alike. A match deals about 218 options across its eight
-boards and roughly 3.7 of them are men who appear on more than one; across all 160 boards it is 821 of 4,346.
+boards and roughly 3.7 of them are men who appear on more than one; across all 160 boards it is 821 of the
+1,639 men in the pool (4,346 is option ROWS, 1,222 of them defenses and kickers, so it is never 821's
+denominator - the figure read "821 of 4,346" from v2.18.13 to v2.20.2).
 Keep the two checks separate rather than changing what `optionId` means.
 
 **The clock is the other door onto the same roster**, and it was left open for one release: `autoPick` runs
@@ -665,7 +667,7 @@ server re-spins that board itself, charged to no one.
 
 ## 9. Screens (`versus.jsx`, prefix `vs-`)
 
-- **The Modes tile** — "1v1" beside the others: create a lobby, or the link to the one you already have open.
+- **The Modes tile** — "Duel" beside the others: create a lobby, or the link to the one you already have open.
 - **The lobby** — your link, an **Invite a friend** button, and the state of the other side ("waiting for an
   opponent" / "they're here"). The button hands the device's share sheet a written invitation
   (`versusInviteText`: who is asking, one line of what a duel is, the link last) rather than putting a bare

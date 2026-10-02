@@ -81,7 +81,7 @@ for (const [id, username, entry] of [
 auth._builds.set("build-1", { id: "build-1", username: "carol", pos: "QB", overall: 132.4, filled: {} });
 auth._builds.set("build-2", { id: "build-2", username: "alice", pos: "RB", overall: 88.0, filled: {} });
 
-const { container } = await mount();
+const { container, reactRoot } = await mount();
 await flush();
 await click(findButtonByText(container, "Stats"));
 await flush();
@@ -180,6 +180,52 @@ await runTest("created players count and the highest-OVR leaderboard come from t
   assert(section.includes("QB") && section.includes("132.4"), "expected carol's build details, got: " + section.slice(0, 300));
 });
 
+
+// ---------------------------------------------------------------------------------------------------------
+// A read that never landed is not the same thing as a site nobody has played. Rendered from an empty read,
+// every board on this screen states a FACT about the game - "No runs yet.", "No championships yet.", "No
+// daily streaks yet." - ten of them, under one small line admitting the read failed. CLAUDE.md records this
+// exact shape as a bug it fixed on the LEADERBOARD, which has had an error panel ever since; the Stats screen
+// never got one, and it is the screen a first-time visitor is most likely to open.
+
+await runTest("a failed refresh keeps the numbers it had, and says they are the old ones", async () => {
+  const real = auth.rpc;
+  auth.rpc = (name, args) => (name === "site_stats"
+    ? Promise.resolve({ data: null, error: { message: "canceling statement due to statement timeout" } })
+    : real(name, args));
+  try {
+    await click(findButtonByText(container, "Refresh"));
+    for (let i = 0; i < 6; i++) await flush();
+    const said = text(container);
+    assert(/last numbers that loaded/i.test(said), `it says which numbers these are: ${said.slice(-400)}`);
+    assert(said.includes("Sitewide"), "the real boards are still there");
+    assert(!/No runs yet/i.test(said),
+      "rather than thrown away and replaced by an empty game, which is what a failed Refresh used to do");
+  } finally { auth.rpc = real; }
+});
+
+await runTest("a FIRST read that fails says so, instead of ten sentences about an empty game", async () => {
+  // Mounted again from nothing, because this state only exists when no read ever landed: after a failure
+  // `loaded` is true, so the view effect will not ask again and "Try again" is the only way back.
+  // Through act, or the unmount lands outside React's batching and warns across the suite's output.
+  const { act } = await import("react");
+  await act(async () => { reactRoot.unmount(); });
+  const real = auth.rpc;
+  auth.rpc = (name, args) => (name === "site_stats" ? Promise.resolve({ data: null, error: { message: "down" } }) : real(name, args));
+  try {
+    const fresh = await mount();
+    for (let i = 0; i < 6; i++) await flush();
+    await click(findButtonByText(fresh.container, "Stats"));
+    for (let i = 0; i < 6; i++) await flush();
+    const said = text(fresh.container);
+    assert(/didn't load/i.test(said), `it says the read failed: ${said.slice(-400)}`);
+    for (const lie of ["No runs yet", "No championships yet", "No daily streaks yet", "No builds yet", "No playoff runs yet"]) {
+      assert(!said.includes(lie), `and states nothing about the site it could not read: found "${lie}"`);
+    }
+    // The Refresh button went with the boards, so the panel carries the only way to ask again.
+    assert(findButtonByText(fresh.container, "Try again"), `with a way back: ${said.slice(-300)}`);
+  } finally { auth.rpc = real; }
+});
 
 // The builds board took the top ten and THEN dropped the rows it can't show, so a handful of bad
 // legacy rows left it showing fewer than ten - and enough of them left it reading "No builds yet"

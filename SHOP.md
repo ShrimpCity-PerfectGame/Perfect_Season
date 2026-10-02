@@ -489,8 +489,10 @@ CARD_THEME_SCOPE                    // { [card id]: "dark" | "night" | "light" }
   per app scope and the app hands in which scope it is drawing - deep on cream, bright on black, the same look
   either way. Every stop is held to AA against every surface a board name can sit on (`NAME_SURFACES` in
   tests/test-cosmetics.mjs, the lime wash on your own leaderboard row included), because a drift puts any stop
-  under any letter. The player card does NOT wear one: six themes over 32 team colours has no readable text
-  colour, which is what nameplates are for. **Where they show:** every board, through `NameLink`; the duel
+  under any letter. The player card wears one too, since v2.8.2 - per-scope palettes made it possible and
+  1,073 colour-on-card pairs were measured, none below AA; with a plate on as well the plate keeps the letters
+  and the colour takes its outer ring. **Where they show:** every board, through `NameLink`; the player card,
+  through `NamePlate`; the duel
   screen, through `DuelName` in versus.jsx (colour only - never a profile link, because that screen is a draft
   on a clock and opening a profile would take the player off it mid-turn); and your own name in the header, on
   every screen, from `myDetails.namecolor` rather than the boards' read - it is you, and the app already holds

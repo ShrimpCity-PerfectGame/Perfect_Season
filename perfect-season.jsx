@@ -1207,7 +1207,17 @@ p.gamecoins .earned{display:flex}
   .rs-long{display:none}.rs-short{display:inline}
   .rs-short b{font-weight:800;margin-left:3px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--ink) 14%,transparent)}
   .rerolls .btn{padding:8px 6px;font-size:13.5px}
-  .slot .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* It wraps rather than ellipsising, and the breakpoint is measured rather than guessed. Injecting the
+     worst line the strip can be asked to show - the longest team name plus a Flex pick's position - into a
+     real Chrome at each phone width: "'25 Washington, RB" needs 113px against a box of 85 at 360, 90 at 375,
+     103 at 412 and 109 at 430, and only fits at 480. So this is not a 320 problem, which is where it looks
+     like one (there, even "'25 Washington" alone overflows); it clips on every phone made, and what the
+     ellipsis hid was the position - the one thing the slot's own label does not already say.
+     Hiding it instead is what versus.jsx does and cannot be copied: that screen has the board beside it with
+     taken names struck through, while here the strip is the only place a pick's team-era survives the next
+     spin. The cost is one more 15px line, and only on the slots that would have been cut: "'05 Jets" stays
+     on one line at every width. It breaks at the space, so no team name is split down the middle. */
+  .slot .sub{white-space:normal;overflow-wrap:break-word}
   .reel .pickno{padding-right:44px}
   .reel{padding:12px 14px 12px 16px}.reel .team{font-size:40px}.reel .years{font-size:26px}.reel::after{right:3%}
   .fmtpick .fmtlabel{flex-basis:100%;margin:0}
@@ -1232,6 +1242,10 @@ p.gamecoins .earned{display:flex}
 .modal-x{position:absolute;top:10px;right:10px;width:44px;height:44px;border-radius:12px;border:2px solid var(--line2);background:var(--surface);
   color:var(--ink);font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center}
 .nowrap{white-space:nowrap}
+/* The two attribution links, kept on one line so the hit area below has one box to sit on: an absolutely
+   positioned ::after is laid out against a single fragment, so a link that wraps mid-phrase puts its
+   target on whichever half came first. Measured at 375, where "CC BY 4.0" broke across two lines. */
+.datacredit a{white-space:nowrap}
 @media (max-width:359px){.modal h2{font-size:34px}.dailycta .btn{flex-direction:column;align-items:flex-start}
   .seedline{flex-basis:100%;margin-left:0;flex-wrap:wrap;justify-content:flex-start}
   .hdr-links{gap:7px}.hdrchip.help{padding-right:9px}.whoami{gap:5px}.ver{padding:2px 5px}
@@ -1288,6 +1302,15 @@ p.gamecoins .earned{display:flex}
      most room to spare. */
   .nav .tab{min-height:40px}
   .linkbtn::after{content:'';position:absolute;left:-6px;right:-6px;top:-13px;bottom:-13px}
+  /* The only links in the app with no hit area at all: measured 48x15 and 61x15 at 320, 375, 430 and
+     landscape, against 43-44px for every other text link in the game. Centred on the line like
+     .namelink's rather than a hand-picked offset, because .fine forces 12.5px with !important and an
+     offset guesses at the line box. The paragraph is loosened first: a 44px target on a 15px line
+     otherwise reaches 14px into the credit's own wrapped sentence above and below, and a thumb resting
+     on plain text would open an external page. At 2.4 the overhang lands in leading instead. */
+  .datacredit{line-height:2.4}
+  .datacredit a{position:relative}
+  .datacredit a::after{content:'';position:absolute;left:-6px;right:-6px;top:50%;transform:translateY(-50%);height:44px}
   button.pill::after{content:'';position:absolute;left:-4px;right:-4px;top:-8px;bottom:-8px}
 }
 
@@ -1622,6 +1645,41 @@ function PickName({ email, onClaimed, onSignOut }) {
   );
 }
 
+// A blocked anti-robot check is the one auth failure a player can actually do something about, and the only
+// one whose sentence they MUST read - every screen below says something confidently wrong otherwise:
+// "Incorrect email or password" for a password that is right, "check your connection" for a connection that
+// is fine, "Make an account" for the one thing that fails the same way. storage.js's withCaptcha marks its
+// own failure `__captcha`; Supabase's refusal says "captcha" in words. Answers null for everything else, so
+// each caller keeps its own wording - which for sign-in is deliberately vague and has to stay that way.
+//
+// v2.20.1 shipped the sentence and nothing that showed it: of the four calls withCaptcha wraps, only signup
+// went through mapAuthError. That is latent until a site key exists and live the moment one does.
+function captchaSaid(error) {
+  if (!error) return null;
+  if (error.__captcha) return error.message;
+  return /captcha/i.test(error.message || "") ? mapAuthError(error) : null;
+}
+
+// What went wrong while setting a new password, in words. NOT mapAuthError: that is the signup form's
+// ladder, and its last rung - "The account couldn't be created. Check your connection and try again." -
+// makes three wrong claims at once on a screen setting a password for an account that already exists.
+function setPasswordError(error) {
+  const msg = error?.message || "";
+  // Before the expired-link arm, and the order is the whole point: Supabase's own captcha refusal reads
+  // "captcha protection: request disallowed (invalid-input-response)", so /invalid/ would swallow it and send
+  // the player off to ask for a new link that was never the problem.
+  const said = captchaSaid(error);
+  if (said) return said;
+  // A recovery link works once and not for long, and an expired one fails HERE rather than on the way in -
+  // so this message has to say what to do rather than just that something went wrong.
+  if (/expired|invalid|token/i.test(msg)) return "That link has already been used or has expired. Ask for a new one from the log in screen.";
+  // Supabase carries a code as well as a sentence, and the code is the stable half of the two.
+  if (error?.code === "same_password" || /different from the old/i.test(msg)) return "That's the password you already have. Choose a different one.";
+  // The project's own strength or leaked-password rules, which this form's 6-character floor knows nothing about.
+  if (error?.code === "weak_password" || /weak|should contain|at least d+ character/i.test(msg)) return "That password was refused. Try a longer one, with a mix of letters and numbers.";
+  return "That password couldn't be saved. Try again.";
+}
+
 // The second half of a password reset. The player followed the one-time link, supabase-js put the recovery
 // session in place and announced PASSWORD_RECOVERY, and this is where the new password is actually set.
 //
@@ -1648,11 +1706,7 @@ function SetPassword({ onDone, onClose }) {
     try {
       const { error } = await authSetPassword(pw);
       setBusy(false);
-      // A recovery link works once and not for long, and an expired one fails HERE rather than on the way
-      // in - so this message has to say what to do rather than just that something went wrong.
-      if (error) return setErr(/expired|invalid|token/i.test(error.message || "")
-        ? "That link has already been used or has expired. Ask for a new one from the log in screen."
-        : mapAuthError(error));
+      if (error) return setErr(setPasswordError(error));
       onDone();
     } catch (e) {
       setBusy(false);
@@ -1760,8 +1814,13 @@ function KeepSeasons({ name, onKept, onUseAnother }) {
   return (
     <div className="panel">
       <h3>Keep your seasons</h3>
-      <p>You're playing as <b>{name}</b>, a guest. Your seasons are on the leaderboard, but they only live in
-        this browser. Add an email and pick a name and they're yours for good — the same account, nothing lost.</p>
+      {/* Not "they only live in this browser", which contradicted the clause before it and was the false half:
+          the seasons are rows in Postgres and stay on the boards whatever happens to the browser. What lives
+          here is the only KEY to them - a guest account has no email and no password, so this browser's
+          session token is the whole of it. */}
+      <p>You're playing as <b>{name}</b>, a guest. Your seasons are on the leaderboard, but the only way back
+        to them is this browser. Add an email and pick a name and they're yours for good — the same account,
+        nothing lost.</p>
       <form onSubmit={submit} noValidate>
         <div className="fields">
           <label>Email<input className="inp" type="email" value={email} autoComplete="email" autoCapitalize="none" spellCheck={false} onChange={(e) => setEmail(e.target.value)} /></label>
@@ -1818,12 +1877,17 @@ function AuthPanel({ onAuthed, title, blurb }) {
       // player waiting for an email that is never coming. The first version of this swallowed everything,
       // which would have made a misconfigured environment look exactly like a working one.
       let failed = false;
+      let failure = null;
       try {
         const { error } = await authResetPassword(emailTrim, `${window.location.origin}/`);
         failed = !!error;
+        failure = error || null;
       } catch (e) { failed = true; }
       setBusy(false);
-      if (failed) return setErr("Couldn't send that just now. Check your connection and try again.");
+      // The generic sentence survives for every other refusal, and must: it is what keeps a misconfigured
+      // environment from looking like a working one. Only a blocked challenge is named, because it is the
+      // one a player can act on and "check your connection" sends them hunting a fault that isn't there.
+      if (failed) return setErr(captchaSaid(failure) || "Couldn't send that just now. Check your connection and try again.");
       return setSent(true);
     }
     if (mode === "signup" && !USERNAME_RE.test(username)) return setErr(USERNAME_RULE);
@@ -1844,7 +1908,10 @@ function AuthPanel({ onAuthed, title, blurb }) {
         await onAuthed(data.user.id, username, true);
       } else {
         const { data, error } = await authSignIn(emailTrim, pw);
-        if (error) { setBusy(false); return setErr("Incorrect email or password."); }
+        // The vague wording stays, and deliberately (v2.19.1: a specific one would answer who is registered).
+        // A blocked anti-robot check is not an answer about the address either, and telling somebody whose
+        // password is right that it is wrong sends them to reset a password they never lost.
+        if (error) { setBusy(false); return setErr(captchaSaid(error) || "Incorrect email or password."); }
         let prof = null;
         try {
           prof = await fetchProfile(data.user.id);
@@ -3054,7 +3121,11 @@ export default function PerfectSeason() {
       openTab("profile");
       return;
     }
-    if (!userId) return; // signed out: the tile says "Sign in to play" and the Account tab is one tap away
+    // Signed out falls THROUGH to the screen, which has a sign-in panel written for exactly this person
+    // (data-view="signedout", with its own copy for the no-invite case). A bare return here was the very
+    // defect the guest arm above records fixing - a full-size, enabled tile reading "Sign in to play" that
+    // answers a tap with nothing at all - left in place one line under the comment explaining why it is
+    // wrong. Century and Guess route their signed-out players; this one dropped them.
     setVersusCode(null);
     openTab("versus");
   }
@@ -3265,9 +3336,12 @@ export default function PerfectSeason() {
     setSiteStats((s) => ({ ...s, loading: true }));
     try {
       const [data, buildCount, topBuilds] = await Promise.all([fetchSiteStats(10), fetchBuildCount(), fetchTopBuilds(10)]);
-      setSiteStats({ loading: false, loaded: true, data, error: !data, buildCount, topBuilds });
+      // `data || s.data`, not `data`: a Refresh that fails used to throw away a correct screen and replace it
+      // with a dozen sentences stating facts about the site that had never been read.
+      setSiteStats((s) => ({ loading: false, loaded: true, data: data || s.data, error: !data,
+        buildCount: buildCount ?? s.buildCount, topBuilds: topBuilds?.length ? topBuilds : s.topBuilds }));
     } catch (e) {
-      setSiteStats({ loading: false, loaded: true, data: null, error: true, buildCount: null, topBuilds: [] });
+      setSiteStats((s) => ({ ...s, loading: false, loaded: true, error: true }));
     }
   }
 
@@ -3446,7 +3520,11 @@ export default function PerfectSeason() {
     // never submitted, and nothing at all on screen. The next finished season then made a SECOND throwaway.
     const prof = uid ? await readProfileTwice(uid).catch(() => null) : null;
     if (error || !prof) {
-      setNotice("That season couldn't be posted. Make an account and it'll be saved.");
+      // "Make an account" is true and useful for every other failure - the trace really is held in `pending`
+      // and really is flushed by onAuthed. It is the one piece of advice that CANNOT work when the anti-robot
+      // check is what failed, because a signup carries a token through the same blocked widget.
+      const said = captchaSaid(error);
+      setNotice(said ? `That season couldn't be posted. ${said}` : "That season couldn't be posted. Make an account and it'll be saved.");
       return;
     }
     // Only this slot. `pendingDaily` stays where it is - a guest can never hand one in, and the player may
@@ -3470,7 +3548,17 @@ export default function PerfectSeason() {
     if (!res.ok) return res;
     // The screen says what happened; signing out is what makes it true in this tab. Deliberately after, so a
     // player who is reading the confirmation is not thrown back to Modes mid-sentence.
-    setTimeout(() => { logOut(); }, 2500);
+    //
+    // The notice is the rest of that thought, and it is awaited because logOut clears notices. Without it the
+    // confirmation for the one action in the game that cannot be undone was yanked away after 2.5 seconds and
+    // replaced by "Your account - Log in to track your seasons", with no trace of what had happened anywhere
+    // in the app - most likely while the player was still mid-sentence. It survives until they change screen
+    // (the notice effect is keyed on `view`, and signing out leaves them on the profile), which is the right
+    // lifetime: long enough to read twice, gone once they have moved on.
+    setTimeout(async () => {
+      await logOut();
+      setNotice("Your account is closed. Everything that identified you is gone; the seasons you played stay on the boards under a name that is no longer yours.");
+    }, 2500);
     return res;
   }
 
@@ -4153,7 +4241,11 @@ export default function PerfectSeason() {
       else if (saved === "already") setNotice("Today's Over/Under was already recorded on another device, so this one didn't count.");
       // A dropped request is not that, and saying so was a lie about the world: no row existed anywhere, and
       // because the coins are claimed only on a save, the day's 15 went unclaimed with no way back to them.
-      else setNotice("That score didn't reach the board. Your round still counted - check the board in a moment.");
+      // ...and the sentence has to say so. It used to promise the round had counted and point at the board:
+      // there is no row anywhere, the plays counter never ticked, the day's 15 coins were never claimed, and
+      // nothing re-sends it - so the board it sent them to watch would never show it. Deliberately no promise
+      // of an immediate replay either: the way back is openSou's server read, which needs a network.
+      else setNotice("That score didn't reach the board, so it wasn't recorded. Open Over/Under again once you're back online and the day is still yours to play.");
     }
     loadSouBoard(date);
   }
@@ -4758,8 +4850,12 @@ export default function PerfectSeason() {
       <div className="wrap">
         {/* First stop for a keyboard or a screen reader, and out of everyone else's way until it's focused. */}
         <a className="skip" href="#content">Skip to the game</a>
+        {/* A guest reads "Account" too, not "Profile": a guest has no profile screen, and seven messages
+            written specifically for guests - the shop, a bio, a picture, a report, the daily, the posted
+            season - send them to "the Account tab". With `user ? ...` that tab said Profile and every one
+            of those instructions pointed at nothing. One label, seven strings. */}
         <nav className="nav" aria-label="Sections">
-          {[["home", "Modes"], ["play", "Draft"], ["profile", user ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"], ["stats", "Stats"]].map(([k, l]) => (
+          {[["home", "Modes"], ["play", "Draft"], ["profile", user && !isGuest ? "Profile" : "Account"], ["players", "Players"], ["board", "Leaderboard"], ["stats", "Stats"]].map(([k, l]) => (
             <button key={k} className={`tab ${tabOn(k) ? "on" : ""}`} aria-current={tabOn(k) ? "page" : undefined} onClick={() => openTab(k)}>
               {l}{k === "play" && view !== "play" && mode && !result && !modeDailyDone && <span className="dot" aria-label="Draft in progress" />}
             </button>
@@ -4770,7 +4866,7 @@ export default function PerfectSeason() {
             {view !== "versus" && <button className="pill hdrchip help" onClick={() => setHowTo(true)}>How to play</button>}
             {!user && authReady && <button className="pill hdrchip login" onClick={() => openTab("profile")}>Log in</button>}
             {user && (
-              <button className="whoami" aria-label={`Your profile, ${user}`} onClick={() => openTab("profile")}>
+              <button className="whoami" aria-label={`${isGuest ? "Your account" : "Your profile"}, ${user}`} onClick={() => openTab("profile")}>
                 {/* The button is labeled, so the picture beside the name is decorative. It wears your frame. */}
                 <FramedAvatar frame={myDetails?.frame ?? null} team={TEAMS[myDetails?.favoriteTeam] ? myDetails.favoriteTeam : null}
                   username={user} photoUrl={myDetails?.avatarUrl ?? null} preset={myDetails?.avatarPreset ?? null} size={24} decorative />
@@ -5011,8 +5107,11 @@ export default function PerfectSeason() {
                 </div>
               </div>
             )}
+            {/* Not "get on the leaderboard": a guest's season is posted there (v1.17.0), and this is the first
+                thing a visitor reads. The three below are what an account really does buy - the daily and duels
+                are refused to a guest in SQL, and a guest account's only key is this browser's session token. */}
             {!user && authReady && (
-              <p className="note">Playing as a guest. <button className="linkbtn" onClick={() => openTab("profile")}>Log in or create an account</button> to save your drafts, keep a daily streak, and get on the leaderboard.</p>
+              <p className="note">Playing without an account. <button className="linkbtn" onClick={() => openTab("profile")}>Log in or create one</button> to keep your seasons for good, build a daily streak, and play duels.</p>
             )}
           </>
         )}
@@ -5411,7 +5510,7 @@ export default function PerfectSeason() {
         {/* ---------------- PROFILE / ACCOUNT ---------------- */}
         {view === "profile" && !shownProfile && authReady && (
           <AuthPanel onAuthed={onAuthed} title="Your account"
-            blurb="Log in to track your seasons, best lineup, and championships, and to appear on the leaderboard." />
+            blurb="Log in to track your seasons, best lineup and championships, play the daily and duels, and keep your name on the boards." />
         )}
 
         {/* A guest's own tab: not a profile - there's nothing on it they could set - but the way to keep
@@ -5459,9 +5558,9 @@ export default function PerfectSeason() {
                 <p className="note">
                   {versusCode
                     ? "You've been invited to a duel. Sign in here and you'll go straight into it — a match needs an account on both sides, so a result has somewhere to go."
-                    : "A 1v1 needs an account on both sides, so its result has somewhere to go. Sign in and the lobby is one tap away."}
+                    : "A duel needs an account on both sides, so its result has somewhere to go. Sign in and the lobby is one tap away."}
                 </p>
-                <AuthPanel onAuthed={onAuthed} title={versusCode ? "Sign in to take the invite" : "Sign in to play 1v1"}
+                <AuthPanel onAuthed={onAuthed} title={versusCode ? "Sign in to take the invite" : "Sign in to play a duel"}
                   blurb="Your seasons, streak and coins come with you." />
                 <button className="btn" onClick={leaveVersus}>Back</button>
               </div>
@@ -5735,6 +5834,13 @@ export default function PerfectSeason() {
             <h1 className="vh">Stats</h1>
             {!siteStats.loaded ? (
               <p className="muted">Loading stats…</p>
+            ) : siteStats.error && !siteStats.data ? (
+              /* The Leaderboard's own shape (lb.error above), and for the reason its comment gives: rendered
+                 from a read that never landed, every board below states a FACT about the site - "No runs
+                 yet.", "No championships yet.", "No daily streaks yet." - and a dropped read becomes
+                 indistinguishable from an empty game. Guarded on `data` too, so a failed refresh keeps the
+                 real boards instead and takes the note below. */
+              <div className="panel"><p>The stats didn't load.</p><button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Trying…" : "Try again"}</button></div>
             ) : (
               <>
                 <h2 className="h">Sitewide</h2>
@@ -5750,7 +5856,7 @@ export default function PerfectSeason() {
                   <div className="tile"><div className="n">{site.avgWinPct}%</div><div className="l">Average win rate</div></div>
                   <div className="tile"><div className="n">{siteStats.buildCount == null ? "–" : siteStats.buildCount}</div><div className="l">Created players</div></div>
                 </div>
-                {siteStats.error && <p className="note">Stats couldn't be loaded. Try Refresh.</p>}
+                {siteStats.error && <p className="note">These couldn't be refreshed just now, so they're the last numbers that loaded.</p>}
                 <button className="btn" onClick={loadSiteStats} disabled={siteStats.loading}>{siteStats.loading ? "Refreshing…" : "Refresh"}</button>
 
                 {/* Only the score-ranked boards split by format; the career records further down

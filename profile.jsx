@@ -173,6 +173,9 @@ export const PROFILE_CSS = `
 .pf-closebox{flex:1 1 100%;padding:12px;border:1px solid var(--line2);border-radius:10px;background:var(--surface2)}
 .pf-closebox p{margin:0 0 8px}
 .pf-closed{flex:1 1 100%;margin:0;color:var(--muted)}
+/* It holds paragraphs now, not text: the leftover sign-in sentence sits under the closed one. */
+.pf-closed p{margin:0 0 8px}
+.pf-closed p:last-child{margin-bottom:0}
 
 @media (max-width:640px){
   .pf-card{gap:12px;padding:16px 14px 14px}
@@ -316,22 +319,33 @@ function CloseAccount({ onClose }) {
     setState("busy");
     const res = await onClose?.();
     if (res?.ok) { setState("done"); return; }
+    // The database half has already run, so going back to the asking frame is a lie: it would still head
+    // itself "Close your account? This cannot be undone", still list what is about to go, and still offer
+    // the lime "Keep my account" button for an account that is already closed - which pressing "Yes, close
+    // it" again answers "This account has nothing to close." The leftover belongs inside the closed state.
+    if (res?.reason === "signin_left") {
+      setState("done");
+      setErr("The sign-in could not be removed. Write to privacy@gridspin.app and it will be finished by hand.");
+      return;
+    }
     setState("asking");
+    // Everything left here means nothing was closed, so the frame that asks again is the right one.
     setErr({
       signed_out: "You've been signed out. Sign in again and try once more.",
       no_profile: "This account has nothing to close.",
-      // The database half is done by now, so this is not "nothing happened" - say what is true.
-      signin_left: "Your account is closed and everything personal is gone, but the sign-in could not be removed. Write to privacy@gridspin.app and it will be finished by hand.",
       network: "Couldn't reach the server. Try again.",
     }[res?.reason] || "Something went wrong. Try again, or write to privacy@gridspin.app.");
   }
 
   if (state === "done") {
     return (
-      <p className="pf-closed" role="status">
-        Your account is closed. Everything that identified you is gone; the seasons you played stay on the
-        boards under a name that is no longer yours.
-      </p>
+      <div className="pf-closed" role="status">
+        <p>Your account is closed. Everything that identified you is gone; the seasons you played stay on
+          the boards under a name that is no longer yours.</p>
+        {/* Read as part of the status rather than as an alert, which is the right reading: the close
+            happened, and this is the one piece of it that has to be finished by hand. */}
+        {err && <p className="err">{err}</p>}
+      </div>
     );
   }
   if (state === "idle") {

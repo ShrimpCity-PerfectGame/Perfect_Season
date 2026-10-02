@@ -19,6 +19,118 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.20.2] - 2026-10-02
+
+**A polish pass: nineteen player-visible defects, found by looking at what the screens actually say.** Client,
+config and docs only - no migration, no Edge Function change. Six sweeps (the newest surfaces, every
+player-visible string, a measured pass in real Chrome, every refusal a player can reach, zero states, and the
+repo's own documents against the code), each finding then handed to a separate reader whose job was to refute
+it. Four did not survive that and are not here.
+
+### The one that matters before the CAPTCHA is switched on
+
+**v2.20.1 shipped the anti-robot sentence and nothing that showed it.** Of the four auth calls `withCaptcha`
+wraps, only **signup** reached `mapAuthError`. The other three threw the error away before choosing a message,
+so a player with an ad blocker, a corporate proxy or a blocked Cloudflare CDN would have been told, in order:
+
+- **signing in:** "Incorrect email or password." - for a password that is right. They retype it, then go and
+  reset a password they never lost.
+- **the reset they are then sent to:** "Couldn't send that just now. Check your connection and try again." -
+  for a connection that is fine.
+- **a season played signed out:** "That season couldn't be posted. Make an account and it'll be saved." - and
+  making an account carries a token through the same blocked widget, so it is the one piece of advice that
+  cannot work.
+
+All three now name it. `captchaSaid` answers with the sentence or with null, so each screen keeps its own
+wording for everything else - and sign-in's deliberately vague "Incorrect email or password" stays vague,
+because a specific message there would answer who is registered (v2.19.1). A blocked challenge is not an
+answer about the address, which is what makes naming it safe.
+
+**It is latent today and live the moment a site key exists**, which is why it is worth having before step 3 of
+the v2.20.1 runbook rather than after it. The reason nothing caught it is worth more than the bug:
+`tests/test-captcha.mjs` asserted the sentence by calling `mapAuthError` directly, and **an assertion that
+touches no door passes while the door is shut** - the same shape CLAUDE.md records for the GM cap's two
+buttons and for the names on Century's and Guess's boards. Three of the four doors are driven now.
+
+**And `SetPassword` stopped saying "The account couldn't be created. Check your connection and try again."**
+for anything Supabase worded unexpectedly - three wrong claims at once on a screen setting a password for an
+account that already exists. It has its own ladder now (already-your-password, refused-as-weak, and a plain
+fallback), with the captcha arm **above** the expired-link one, because Supabase's own refusal reads
+"request disallowed (invalid-input-response)" and `/invalid/` would have swallowed it.
+
+### Screens that said things that were not true
+
+- **Every "Account tab" a guest was sent to read "Profile".** Seven messages written specifically for guests -
+  the shop, a bio, a picture, a report, the daily, the posted season - name that tab, and the tab said
+  something else. One ternary: a guest has no profile screen, so a guest reads "Account" too.
+- **The Stats screen stated a dozen facts about a site it had failed to read.** A dropped `site_stats()` left
+  "No runs yet.", "No championships yet.", "No daily streaks yet." and seven more under one small line
+  admitting the read failed, so a first-time visitor could not tell a broken read from an empty game. It takes
+  the Leaderboard's error panel now - CLAUDE.md records this exact shape as a bug already fixed there once -
+  and **a failed Refresh keeps the numbers it had** instead of throwing a correct screen away.
+- **A dropped Over/Under save said "Your round still counted - check the board in a moment."** It counted
+  nowhere: no row, the plays counter never ticked, the day's 15 coins were never claimed, and nothing re-sends
+  it, so the board it sent them to watch would never show it. The comment directly above that line already
+  said so.
+- **Closing an account yanked the confirmation away after 2.5 seconds** and replaced it with "Your account -
+  Log in to track your seasons", leaving no trace anywhere in the app of the one action in the game that
+  cannot be undone - most likely while the player was still reading. The sign-out now hands over to a notice
+  that survives until they change screen.
+- **A half-failed close still offered "Keep my account".** When the database half succeeds and the sign-in
+  scrub does not (`signin_left`), the box said the account was closed while still heading itself "Close your
+  account? This cannot be undone" and offering the lime button - which could not keep anything, and whose
+  neighbour answered "This account has nothing to close." The leftover is reported inside the closed state.
+- **The shop told players name colours were "not on your card" while the card above it wore one.** True when
+  name colours were built; wrong since **v2.8.2**, which put them on the card and measured 1,073
+  colour-on-card pairs to do it. CLAUDE.md and SHOP.md had the same stale paragraph.
+- **"Get on the leaderboard" was sold as a reason to sign up**, on Modes, on the Account tab and on the
+  crawlable `/how-to-play` page - and a guest's season is posted to the leaderboard without anyone signing up
+  for anything (v1.17.0). All three now name what an account really buys: permanence, the daily, duels.
+- **"Your seasons are on the leaderboard, but they only live in this browser"** - the two halves of one
+  sentence, on the only route a guest has to a real account, said opposite things and the second was the false
+  one. The seasons are rows in Postgres; what lives in the browser is the only *key* to them.
+
+### Taps that went nowhere
+
+- **The Duel tile did nothing at all when signed out.** `if (!userId) return;` sat one line under the comment
+  explaining why the guest arm above it had stopped doing exactly that ("a full-size, enabled tile answering a
+  tap with nothing at all, which reads as broken rather than as a rule"). The screen it never reached has a
+  sign-in panel written for that person, and the only way in was somebody else's invite link. Century and
+  Guess route their signed-out players; this one dropped them.
+- **The two attribution links were the only links in the app with no hit area**: measured 48x15 and 61x15
+  against 43-44px for every other text link. The paragraph is loosened on touch screens first, so the 44px
+  target lands in leading rather than over the sentence either side of it.
+- **The roster strip clipped a pick's team and position on every phone made.** Injecting the worst line it can
+  be asked to show into a real Chrome: "'25 Washington, RB" needs 113px against a box of 85 at 360, 90 at 375,
+  103 at 412 and 109 at 430. It looks like a 320 problem and is not. It wraps now, and only the lines that
+  would have been cut grow - what the ellipsis hid was the position, the one thing the slot's own label does
+  not say.
+
+### Config and the documents
+
+- **`supabase/config.toml` carried `verify_jwt = false` for two of the five Edge Functions**, and the comment
+  beside one of them names the hazard itself: without the block, only `deploy-function.mjs`'s
+  `--no-verify-jwt` keeps the CORS preflight working, so a hand-run `npx supabase functions deploy
+  submit-guess` ships it with the platform gate on and every Guess save, Century save and account closure
+  fails from the browser with a CORS error and no reason the app can map. The flag is the belt; three of the
+  five had no braces.
+- **The duplicate-man figure is right for the first time in three releases.** v2.18.12 said "821 of the 1,639
+  options a match deals" (pool-wide numbers in a per-match sentence, wrong by ~200x); v2.18.13 corrected it to
+  "821 of 4,346", which divides a count of **people** by a count of option **rows** - 1,222 of them defenses
+  and kickers, which can never be men on two boards. It is 821 of the 1,639 men in the pool: half of them.
+- Smaller drift, each verified against the code: `deploy-function.mjs` deploys **five** functions, not four;
+  CENTURY.md's "Not built" list is section 11, not 9; VERSUS.md still called the Modes tile "1v1"; and the
+  last two "1v1"s a player could read, on the signed-out duel screen, are now "duel" like everything else
+  on the journey there.
+
+### Tests
+
+`tests/test-captcha.mjs` drives the real sign-in and reset forms with the error `storage.js` hands them, and
+checks the vague wording survives for every other refusal. `tests/test-versus-screen.mjs` taps the Duel tile
+signed out - an arm that had never been driven. `tests/test-stats.mjs` covers both halves of the failed read.
+`tests/test-profile-screen.mjs` asserts the absence that regressed: no "Keep my account" button once the
+account is closed. **Every one was checked by mutating the fix and watching it go red.**
+
 ## [2.20.1] - 2026-10-02
 
 **The anti-robot check, client half.** CLAUDE.md has named a CAPTCHA on anonymous sign-ins as a pre-launch
