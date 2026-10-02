@@ -1368,9 +1368,17 @@ suite and still broke the live Leaderboard for every existing account.
     1. Ship this client. With no `CAPTCHA_SITE_KEY` it loads no script and sends no token - nothing changes.
     2. Make a **Cloudflare Turnstile** widget, **one per environment** (Cloudflare's own advice, and the
        hostname list is per widget). Mode **Invisible**, not Managed - see below, it is not a free choice.
-       Hostnames: staging `perfect-season-staging.vercel.app`; production `gridspin.app`,
-       `www.gridspin.app`, and the two original addresses that still serve production's deployment,
-       `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`. A hostname not on the list is
+       Hostnames: staging `perfect-season-staging.vercel.app` and NOTHING else; production
+       **`www.gridspin.app` first** - the apex 308s there, so that is the hostname every real player's
+       browser is on when the widget runs, and a list with `gridspin.app` alone refuses all of them with
+       110200 - plus `gridspin.app` itself as insurance against the redirect ever going away, and the two
+       original addresses that still serve production's deployment and answer 200,
+       `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`. Do not add `localhost`: no
+       local build ever has a site key, because `build.mjs` only injects one when the env var is set and the
+       tests and the UI harness never set it. **One widget must not cover both environments** even though it
+       works - it puts staging and production in one analytics pool, so the refusal rate that says whether
+       real players are being turned away cannot be read; it makes rotating either key take the other
+       environment down; and it makes the staging secret a production secret. A hostname not on the list is
        refused, so a Vercel PREVIEW build (random *.vercel.app) cannot pass the challenge - sign in on
        staging or production to test, never on a preview. Keep the site key and the secret key.
     3. Set `CAPTCHA_SITE_KEY` in that environment's Vercel project and redeploy, so the client can get a
