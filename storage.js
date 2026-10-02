@@ -37,18 +37,28 @@ import { captchaToken, captchaConfigured } from "./captcha.mjs";
 // flipped. With no site key captcha.mjs answers null and these behave exactly as they did - see the note at
 // the top of that file about the order the two halves ship in.
 //
-// A null token when a key IS configured means the challenge could not be reached or would not answer: a
-// blocked CDN, a proxy, an ad blocker. Sending the call anyway would get Supabase's own captcha refusal,
-// which reaches the player as a bare "Something went wrong" - so it is turned into a sentence here instead,
-// in the shape every other auth call answers in.
-const CAPTCHA_FAILED = {
-  message: "The anti-robot check didn't load. Turn off any ad blocker for this site and try again.",
-  __captcha: true,
+// No token when a key IS configured, said three ways, because it happens three ways and only one of them is
+// the player's to fix. Sending the call anyway would earn Supabase's own refusal, which reaches them as a
+// bare "Something went wrong" - so it becomes a sentence here, in the shape every other auth call answers in.
+//
+// v2.20.1 shipped one sentence for all of it. Turning the check on for real produced the second case within
+// minutes (Cloudflare answered 600010, "bot behavior detected", to an automated browser), and "turn off any
+// ad blocker" is the wrong thing to tell someone it has flagged wrongly - they have no ad blocker to turn
+// off, and following that advice teaches them the site is broken.
+const CAPTCHA_SAID = {
+  blocked: "The anti-robot check didn't load. Turn off any ad blocker for this site and try again.",
+  refused: "The anti-robot check couldn't confirm this browser. If you're using a VPN or a privacy browser, try again without it.",
+  misconfigured: "The anti-robot check isn't set up right, so this can't go through. That one is on us, not you - try again later.",
 };
+// Exported so the test can ask for the real sentence instead of keeping a second copy of it. A test that
+// asserts on strings it wrote itself proves only that it can write strings - which is the shape that let
+// v2.20.1 ship a sentence no screen ever showed.
+export const captchaSentence = (reason) => CAPTCHA_SAID[reason] || CAPTCHA_SAID.refused;
+const captchaFailure = (reason) => ({ message: captchaSentence(reason), __captcha: true, __captchaReason: reason });
 async function withCaptcha(options = {}) {
   if (!captchaConfigured()) return { ok: true, options };
-  const token = await captchaToken();
-  if (!token) return { ok: false, error: CAPTCHA_FAILED };
+  const { token, reason } = await captchaToken();
+  if (!token) return { ok: false, error: captchaFailure(reason) };
   return { ok: true, options: { ...options, captchaToken: token } };
 }
 export async function authSignUp(email, password, username) {

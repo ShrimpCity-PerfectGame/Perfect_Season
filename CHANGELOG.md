@@ -19,6 +19,40 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.20.4] - 2026-10-02
+
+Client only. No migration, no Edge Function change. **Written from what turning the check on actually did**,
+not from what it was expected to do - staging's widget went live and produced the second failure within
+minutes.
+
+**Three ways to have no token, and only one of them is the player's to fix.** v2.20.1 answered all of them
+with "The anti-robot check didn't load. Turn off any ad blocker for this site and try again." That is right
+for exactly one case:
+
+- **blocked** - the script never loaded. An ad blocker or a proxy, and the player can act on it. Unchanged.
+- **refused** - the challenge ran and would not issue a token. Cloudflare judging the browser (it answered
+  `600010`, "bot behavior detected", to an automated one on the live staging site). Telling a person it has
+  flagged wrongly to turn off an ad blocker sends them to fix something that was never the problem, and
+  teaches them the site is broken. Now: "couldn't confirm this browser. If you're using a VPN or a privacy
+  browser, try again without it."
+- **misconfigured** - a bad sitekey or an unlisted domain. The OWNER's mistake, and no player can do anything
+  about it. Now says so: "That one is on us, not you."
+
+`captchaToken()` answers `{ token, reason }` rather than a bare string, and `captchaReasonForCode` maps
+Cloudflare's own codes - 110*/400* (the ones it marks "Retry: No") are ours, 200500 is a block, 300*/600* are
+"bot behavior detected". `off` is a reason too, and deliberately not a failure: it is how this ships before
+the switch is thrown, and the caller carries on without a token.
+
+**The code is printed, never shown.** A player should not read `600010`, but a report of "it says it can't
+confirm my browser" cannot be diagnosed without it, so it goes to the console and nowhere else - no third
+party, which is what `/privacy` promises.
+
+**And the test was rewritten to ask storage.js for the sentences rather than keep its own copy**, because the
+first version of it asserted on strings it had written itself - which proves only that it can write strings,
+and is the exact shape that let v2.20.1 ship a sentence no screen ever showed. Both halves were checked by
+mutation: collapsing the three sentences into one goes red, and misreading a 600* code as our own
+misconfiguration goes red.
+
 ## [2.20.3] - 2026-10-02
 
 Client only. No migration, no Edge Function change. One paragraph, shipped ahead of the Cloudflare site key.

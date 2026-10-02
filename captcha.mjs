@@ -47,13 +47,34 @@ function loadScript() {
 // takes it away afterwards rather than keeping one around - a reused token is refused, which would read to
 // the player as "that didn't work" on a second attempt.
 //
-// Answers null for every way of not having one: no key configured, no browser, the script blocked, the
-// challenge failed, or it took too long. The caller decides what that means; storage.js turns it into a
-// sentence rather than passing undefined to Supabase.
+// WHY there is no token, when there is none. Three different things wear the same shape - no token - and
+// they do not want the same sentence, which is what v2.20.4 is for:
+//
+//   blocked      - the script never loaded. The player's own ad blocker or a proxy, and they can act on it.
+//   refused      - the challenge ran and would not issue a token. Cloudflare judging the browser. Telling a
+//                  wrongly-flagged person to turn off an ad blocker sends them to fix what was never wrong.
+//   misconfigured- a bad sitekey or an unlisted domain. The OWNER's mistake; no player can do anything about
+//                  it, and they should not be asked to.
+//
+// The codes come from Cloudflare's own table (developers.cloudflare.com/turnstile/troubleshooting/
+// client-side-errors/error-codes/): 110*/400* are sitekey and domain problems, all marked "Retry: No";
+// 200500 is the iframe failing to load; 300* and 600* are "bot behavior detected". A real 600010 off the
+// staging site is what this was written from, not a guess at what the codes might be.
+export function captchaReasonForCode(code) {
+  const c = String(code == null ? "" : code);
+  if (/^(110100|110110|110200|400020|400021|400070)/.test(c)) return "misconfigured";
+  if (/^200500/.test(c)) return "blocked";
+  return "refused";
+}
+
+// Answers `{ token, reason }`, never a bare string: `token` is null for every way of not having one, and
+// `reason` says which way so the caller can say something true. `off` means no key is configured, which is
+// not a failure at all - it is how this ships before the switch is thrown, and the caller carries on.
 export async function captchaToken() {
-  if (!SITE_KEY) return null;
+  if (!SITE_KEY) return { token: null, reason: "off" };
   const turnstile = await loadScript();
-  if (!turnstile || typeof turnstile.render !== "function") return null;
+  // The script did not load, or loaded without its API. Nothing ran, so this is the blocked case.
+  if (!turnstile || typeof turnstile.render !== "function") return { token: null, reason: "blocked" };
 
   const host = document.createElement("div");
   // Off-screen rather than display:none - Turnstile declines to run in a container it cannot measure, and an
@@ -69,28 +90,39 @@ export async function captchaToken() {
 
   return new Promise((resolve) => {
     let settled = false;
-    const done = (token) => {
+    const done = (token, reason) => {
       if (settled) return;
       settled = true;
       cleanUp();
-      resolve(token);
+      resolve({ token: token || null, reason: token ? null : reason });
     };
-    const timer = setTimeout(() => done(null), TIMEOUT_MS);
-    const finish = (token) => { clearTimeout(timer); done(token); };
+    // The script loaded and the widget rendered, so a silent eight seconds is not an ad blocker: it is a
+    // challenge that never answered. "refused" is the honest reading and the honest sentence.
+    const timer = setTimeout(() => done(null, "refused"), TIMEOUT_MS);
+    const finish = (token, reason) => { clearTimeout(timer); done(token, reason); };
     try {
       widgetId = turnstile.render(host, {
         sitekey: SITE_KEY,
         // Invisible unless Turnstile decides it needs to ask. This is the whole reason for the provider.
         appearance: "interaction-only",
         execution: "execute",
-        callback: (token) => finish(token || null),
-        "error-callback": () => { finish(null); return true; },
-        "expired-callback": () => finish(null),
-        "timeout-callback": () => finish(null),
+        callback: (token) => finish(token || null, "refused"),
+        // The one place the code is readable at all. Returning true keeps Turnstile from drawing its own
+        // error state in a container nobody can see.
+        "error-callback": (code) => {
+          // Printed rather than shown: a player should never read an internal code, but a report of "it
+          // says it can't confirm my browser" is undiagnosable without one, and this goes nowhere but the
+          // console - no third party, which is what the privacy policy promises.
+          try { console.warn("[gridspin] anti-robot check failed:", code); } catch (e) { /* no console */ }
+          finish(null, captchaReasonForCode(code));
+          return true;
+        },
+        "expired-callback": () => finish(null, "refused"),
+        "timeout-callback": () => finish(null, "refused"),
       });
       turnstile.execute(widgetId);
     } catch (e) {
-      finish(null);
+      finish(null, "blocked");
     }
   });
 }

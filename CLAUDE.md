@@ -1337,6 +1337,15 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.4's (three ways to fail, said three ways): client only. No migration, no Edge Function change.
+  `captchaToken()` answers `{ token, reason }` instead of a bare string, and the reason decides the sentence:
+  **blocked** (the script never loaded - an ad blocker, and the player can act on it), **refused**
+  (Cloudflare would not confirm the browser - telling a wrongly-flagged person to turn off an ad blocker they
+  do not have is worse than saying nothing), and **misconfigured** (a bad key or an unlisted domain, which is
+  the owner's and says so). Written from the live rollout rather than from guesses: staging's widget answered
+  a real `600010` within minutes of going on. `off` is a reason too and is NOT a failure - it is how this
+  ships before the switch, and storage.js carries on without a token.
+
   v2.20.3's (the privacy line the CAPTCHA mode requires): client only. No migration, no Edge Function
   change. One paragraph on `/privacy` now names Cloudflare's Turnstile Privacy Addendum and says the check
   runs invisibly and never asks you to solve anything - **Cloudflare requires that reference of anyone using
