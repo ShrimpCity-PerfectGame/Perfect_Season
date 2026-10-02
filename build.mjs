@@ -56,6 +56,10 @@ await esbuild.build({
     APP_VERSION: JSON.stringify(version),
     APP_ENV: JSON.stringify(appEnv),
     APP_SITE_URL: JSON.stringify(siteUrl),
+    // Empty until the owner creates a Turnstile site key. Empty means captcha.mjs loads no script and
+    // sends no token, which is exactly the behaviour before it existed - see the note at the top of that file
+    // about shipping the client BEFORE the project setting.
+    CAPTCHA_SITE_KEY: JSON.stringify(process.env.CAPTCHA_SITE_KEY || ""),
   },
 });
 

@@ -176,6 +176,16 @@ on the Leaderboard and Stats screens opens its profile. **`PROFILES.md` is the r
 addresses and history) - read it before touching any of the files below. See "Profiles" under
 Architecture for the rules that matter most.
 
+**The anti-robot check (v2.20.1).** `captcha.mjs` - Cloudflare Turnstile, on sign-in, sign-up, password
+reset and the automatic guest account. **Turnstile rather than hCaptcha is a requirement, not a taste**:
+the guest sign-in happens inside `postAsGuest` after a full season has been played, with no form on screen,
+and only Turnstile has a mode (`interaction-only`) that asks a plausible browser nothing. **It is inert
+without `CAPTCHA_SITE_KEY`** - no script, no request, no token - because Supabase's setting is per project
+and covers every auth endpoint at once, so the client has to be able to send a token before the switch is
+flipped. See the v2.20.1 entry under Releasing for the four steps and the order they go in. A token is
+single-use, so a fresh widget is made and removed per call, and a challenge that will not answer within
+eight seconds becomes a sentence (`mapAuthError`) rather than a hung sign-in.
+
 **Guests (v1.17.0).** A visitor who finishes a season doesn't have to sign up for it to count: the site takes
 an account for them (Supabase's anonymous sign-in), the database names it `Guest_XXXXX` and marks it
 `profiles.guest`, and the season goes through `submit-run` like anyone else's - the verification path doesn't
@@ -663,6 +673,8 @@ node tests/test-app-shell.mjs      # the Android app: Back closes a dialog, then
 node tests/test-pwa.mjs            # installable and offline: what the service worker stores and never stores, the build's stamp, the install offer
 node tests/test-error-boundary.mjs # the crash net: a crash shows a screen rather than a blank page, with no stylesheet and no personal data in the report
 node tests/test-password-reset.mjs # forgetting a password: the way back in, that it never says who is registered, and that the NEW password is what works after
+node tests/test-captcha.mjs        # the anti-robot check: inert without a site key, every protected auth call carries a token, and a blocked challenge says so
+node tests/test-delete-account.mjs  # closing an account in real Postgres: the person erased, the games kept, the opponent untouched
 
 # Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
 # Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.
@@ -1291,6 +1303,20 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.1's (the anti-robot check): client only, and **inert until somebody turns it on**. No migration, no
+  Edge Function change. THE ORDER MATTERS, because Supabase's CAPTCHA setting is per project and covers
+  sign-in, sign-up, password reset and the anonymous sign-in together:
+
+    1. Ship this client. With no `CAPTCHA_SITE_KEY` it loads no script and sends no token - nothing changes.
+    2. Make a **Cloudflare Turnstile** widget for the site's domain. Keep the site key and the secret.
+    3. Set `CAPTCHA_SITE_KEY` in that environment's Vercel project and redeploy, so the client can get a
+       token. Still nothing is enforced - Supabase is not checking yet.
+    4. Only now: Supabase dashboard, Authentication > Settings > enable CAPTCHA protection, provider
+       Turnstile, paste the SECRET key.
+
+  Doing 4 before 3 breaks every sign-in, signup, password reset and guest account in that environment at
+  once. Each environment is separate, so do staging first and play a season signed out to check a guest
+  account is still made. To turn it off again, disable it in the dashboard first, then clear the key.
   v2.20.0's (closing an account): re-run **`migration-profiles.sql`**, then **deploy the Edge Functions**,
   then the client. `delete-account` is a NEW function, so the deploy list is **five** now. The migration
   only replaces functions (`delete_account` is new, `username_is_reserved` gains the `Deleted_` shape), so

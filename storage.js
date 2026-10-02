@@ -28,19 +28,49 @@ export async function clearDraft(key) {
 // The client, the read-retry option and the profile row mapping live in storage-core.js, shared
 // with the feature modules re-exported at the bottom of this file.
 import { getClient, READ, rowToProfile } from "./storage-core.js";
+import { captchaToken, captchaConfigured } from "./captcha.mjs";
 
 // ---------- Auth ----------
+
+// Supabase's CAPTCHA setting is per PROJECT and covers sign-in, sign-up, password reset and the anonymous
+// sign-in all at once, so every one of those calls has to be able to carry a token before the switch is
+// flipped. With no site key captcha.mjs answers null and these behave exactly as they did - see the note at
+// the top of that file about the order the two halves ship in.
+//
+// A null token when a key IS configured means the challenge could not be reached or would not answer: a
+// blocked CDN, a proxy, an ad blocker. Sending the call anyway would get Supabase's own captcha refusal,
+// which reaches the player as a bare "Something went wrong" - so it is turned into a sentence here instead,
+// in the shape every other auth call answers in.
+const CAPTCHA_FAILED = {
+  message: "The anti-robot check didn't load. Turn off any ad blocker for this site and try again.",
+  __captcha: true,
+};
+async function withCaptcha(options = {}) {
+  if (!captchaConfigured()) return { ok: true, options };
+  const token = await captchaToken();
+  if (!token) return { ok: false, error: CAPTCHA_FAILED };
+  return { ok: true, options: { ...options, captchaToken: token } };
+}
 export async function authSignUp(email, password, username) {
-  return getClient().auth.signUp({ email, password, options: { data: { username } } });
+  const cap = await withCaptcha({ data: { username } });
+  if (!cap.ok) return { data: null, error: cap.error };
+  return getClient().auth.signUp({ email, password, options: cap.options });
 }
 export async function authSignIn(email, password) {
-  return getClient().auth.signInWithPassword({ email, password });
+  const cap = await withCaptcha();
+  if (!cap.ok) return { data: null, error: cap.error };
+  return getClient().auth.signInWithPassword({ email, password, options: cap.options });
 }
 // A guest: Supabase's anonymous sign-in, taken when a visitor finishes a season so it can go on the
 // leaderboard (migration-profiles.sql gives the account its profile and its name). Nothing is asked of
 // them, and nothing is kept but the account itself - which they can turn into a real one later.
+// The one the CAPTCHA is actually for, and the awkward one: this is called from postAsGuest after somebody
+// has played a whole season, with no form on screen. Turnstile's interaction-only mode is what makes that
+// bearable - a plausible browser is never asked anything.
 export async function authSignInAsGuest() {
-  return getClient().auth.signInAnonymously();
+  const cap = await withCaptcha();
+  if (!cap.ok) return { data: null, error: cap.error };
+  return getClient().auth.signInAnonymously({ options: cap.options });
 }
 
 // Signing in with Google. The page leaves for Google and comes back to `redirectTo`, where supabase-js
@@ -64,7 +94,9 @@ export async function authAddEmail(email, password) {
 // setting this repo does not hold - the same drift CLAUDE.md warns about under Releasing. It is the site's
 // own origin, which is already allowed in both projects because Google sign-in has used it since v1.16.0.
 export async function authResetPassword(email, redirectTo) {
-  return getClient().auth.resetPasswordForEmail(email, { redirectTo });
+  const cap = await withCaptcha({ redirectTo });
+  if (!cap.ok) return { data: null, error: cap.error };
+  return getClient().auth.resetPasswordForEmail(email, cap.options);
 }
 // The second half, called while that recovery session is live. It is the same updateUser authAddEmail uses,
 // with only the password - a guest trading up sets both at once, and this sets one on an account that
@@ -84,6 +116,10 @@ export function authOnChange(cb) {
 // Maps a Supabase-shaped error to the same friendly copy the old PBKDF2 flow used to show.
 export function mapAuthError(error) {
   if (!error) return "Something went wrong. Try again.";
+  // The challenge could not be reached. Said in words, because "Something went wrong" sends a player
+  // looking for a problem with their password.
+  if (error.__captcha) return error.message;
+  if (/captcha/i.test(error.message || "")) return "The anti-robot check didn't pass. Try again.";
   if (error.code === "23505" || /username/i.test(error.message || "")) return "That username is taken. Try another one.";
   if (/already registered|already exists/i.test(error.message || "")) return "An account with that email already exists.";
   return "The account couldn't be created. Check your connection and try again.";
