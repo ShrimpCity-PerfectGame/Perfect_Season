@@ -61,8 +61,9 @@ async function openMatch(email, code) {
   await flush();
 }
 const goHome = async () => { await click(findButtonByText(container, "Modes")); await flush(); };
-// The tab is "Account" signed out and "Profile" signed in, so a test that has to get there says which it means
-// by asking for either.
+// The tab is "Account" for anyone without a full account - signed out AND a guest, since v2.20.2, because
+// seven guest-facing messages send them to "the Account tab" - and "Profile" once signed in. A test that has
+// to get there says which it means by asking for either.
 async function signIn(email) {
   await auth.auth.signOut();
   await flush();
@@ -106,6 +107,27 @@ await runTest("a guest is told to sign in rather than shown a lobby", async () =
   await click(tile);
   await flush();
   assert(!versus() || versus().dataset.view !== "draft", "and a guest never reaches a draft");
+});
+
+await runTest("signed out, the tile opens the screen that has the sign-in on it", async () => {
+  // Until v2.20.2 this tap did nothing at all: `if (!userId) return;` sat one line under the comment
+  // explaining why the guest arm above it had stopped doing exactly that. The screen it never reached has a
+  // sign-in panel written for this person, and the only way in was somebody else's invite link.
+  await auth.auth.signOut();
+  await flush();
+  await goHome();
+  const tile = [...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "Duel")?.closest("button");
+  assert(tile, "the tile is there signed out too");
+  assert(tile.textContent.includes("Sign in to play"), `and says so: ${tile.textContent.slice(0, 120)}`);
+  await click(tile);
+  await flush();
+  await flush();
+  assert(versus(), `the tap lands somewhere: ${container.textContent.replace(/\s+/g, " ").slice(0, 200)}`);
+  assert(versus().dataset.view === "signedout", `on the signed-out arm, got ${versus().dataset.view}`);
+  assert(versus().dataset.code === "", `with no invite code: ${JSON.stringify(versus().dataset.code)}`);
+  // The copy a visitor reads there, and the one word of it that was still "1v1" until v2.20.2.
+  assert(/A duel needs an account on both sides/.test(versus().textContent), `it explains why: ${versus().textContent.slice(0, 160)}`);
+  assert(!/1v1/.test(versus().textContent), `and nothing on it says "1v1": ${versus().textContent.slice(0, 200)}`);
 });
 
 await runTest("an invite taken while signed out signs you in where you stand", async () => {

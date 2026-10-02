@@ -416,5 +416,11 @@ await runTest("a sign-in that could not be removed is reported honestly", async 
   assert(/closed/i.test(said) && /sign-in could not be removed/i.test(said),
     `it says the account IS closed and what is left: ${said.slice(-300)}`);
   assert(/privacy@gridspin.app/.test(said), "and where to write to finish it");
+  // The part that regressed: it used to say all of that from inside the asking frame, which still headed
+  // itself "Close your account? This cannot be undone", still listed what was about to go, and still offered
+  // the lime "Keep my account" button for an account that was already closed. Pressing "Yes, close it" again
+  // then answered "This account has nothing to close."
+  assert(!findButtonByText(c, "Keep my account"), `and no longer offers to keep it: ${said.slice(-300)}`);
+  assert(!findButtonByText(c, "Yes, close it"), "or to close it a second time");
 });
 console.log("test-profile-screen.mjs done");

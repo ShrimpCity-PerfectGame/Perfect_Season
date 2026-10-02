@@ -204,14 +204,18 @@ export const SITE_PAGES = [
     id: "howto",
     path: HOWTO_PATH,
     file: "how-to-play.html",
-    updated: "2026-09-22",
+    updated: "2026-10-02",
     nav: "How to play",
     title: "How to play Gridspin – football draft game rules",
     description: "How Gridspin works: spin a random NFL team and a five-year era, draft six real player seasons, then play 17 games and the playoffs. The rules, the scoring and the re-spins.",
     h1: "How to play Gridspin",
     intro: [
       "Gridspin is a free football draft game. Each round spins a random NFL team and a five-year era, you draft one real player season from that board, and your six-man roster plays a full 17-game season and then the playoffs. Win all 20 and you have gone perfect.",
-      "Nothing in Gridspin costs money, and you can play without an account. Signing up saves your seasons, puts your best scores on the leaderboards and keeps your daily streak.",
+      // Not "puts your best scores on the leaderboards": a season finished without an account is posted there
+      // too (v1.17.0 - the site takes a guest account for it). What an account actually buys is permanence,
+      // the daily and duels, both of which are refused to a guest in SQL. The first sentence is one of the two
+      // DATA.md says must change in the same release as the first sale; leave it alone.
+      "Nothing in Gridspin costs money, and you can play without an account. Signing up keeps your seasons for good, unlocks the daily and duels, and builds your streak.",
     ],
     steps: HOWTO_STEPS,
     note: HOWTO_NOTE,

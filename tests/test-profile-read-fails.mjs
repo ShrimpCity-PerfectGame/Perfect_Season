@@ -89,11 +89,18 @@ await runTest("a guest that has kept its seasons stops being a guest even if the
   const c = await app(mock);
   // A guest, made the way finishing a season makes one.
   await mock.auth.signInAnonymously();
-  // Wait for the app to actually adopt it - the tab only says "Profile" once it has.
-  for (let i = 0; i < 40 && !navTab(c, "Profile"); i++) await flush(2);
+  // Wait for the app to actually adopt it. NOT the tab's label: a guest's reads "Account" since v2.20.2,
+  // the same as a signed-out visitor's, because seven guest-facing messages send them to "the Account tab".
+  // The header's identity chip is the signal that survives - it renders only once `user` is set, which is
+  // what adoption means.
+  const whoami = () => c.querySelector(".whoami");
+  for (let i = 0; i < 40 && !whoami(); i++) await flush(2);
   const uid = [...mock._profiles.keys()][0];
   assert(mock._profiles.get(uid).guest === true, "started as a guest");
-  assert(navTab(c, "Profile"), `the guest is signed in, got: ${text(c).slice(-200)}`);
+  assert(whoami(), `the guest is signed in, got: ${text(c).slice(-200)}`);
+  assert(/Guest_/.test(whoami().textContent), `as a guest: ${whoami().textContent}`);
+  // ...and the tab they are told to open is the one they can see.
+  assert(navTab(c, "Account"), `the tab says Account for a guest: ${[...c.querySelectorAll("nav .tab")].map((b) => b.textContent).join(", ")}`);
 
   await click(accountTab(c));
   for (let i = 0; i < 40 && !findButtonByText(c, "Keep my seasons"); i++) await flush(2);
