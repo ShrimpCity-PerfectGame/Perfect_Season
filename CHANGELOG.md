@@ -19,6 +19,69 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.20.0] - 2026-10-02
+
+**You can close your account.** There was no way to do it at all, while `/privacy` and `/terms` both
+promised one - so the promise existed and the mechanism did not.
+
+**Run `migration-profiles.sql`, then deploy the Edge Functions, then the client.** `delete-account` is a
+NEW function, so `node deploy-function.mjs <env>` now deploys **five**.
+
+### It anonymises, and that was a decision with measurements behind it
+
+Every foreign key from a player cascades - 22 of them, not one RESTRICT - so `delete from auth.users`
+empties all 21 public tables in a single statement. That is a real deletion, and it does three things
+nobody asked for. All three were proved in PGlite against the real migrations:
+
+- **It destroys the other player's half of every duel.** `matches.host_id` and `guest_id` both cascade, so
+  the opponent loses the match, its picks and its link - while keeping the win on their profile, because the
+  pvp counters are plain columns no foreign key moves.
+- **It pays a stranger a gold badge.** `player_stats` computes a historical daily rank live - "how many beat
+  me that day" - and `daily-winner` is `bestRank === 1`: gold, 1,000 coins, and a shop title. Deleting the
+  winner of a closed daily promotes the runner-up and flips that badge from unearned to earned, which
+  `submit-run` then pays. `badge_awards` is write-once.
+- **It shrinks every sitewide total**, so numbers a player saw yesterday mean something else today.
+
+So the person goes and the games stay. The name becomes `Deleted_<8 hex>` across `profiles` and all six
+board tables - the same set `mod_act`'s rename rewrites - and `username_is_reserved` refuses the whole
+`Deleted_` shape, exactly as it refuses `Guest_`, because those seasons are still on the boards and anyone
+who could take the name would be claiming a stranger's record.
+
+### The order matters, and one step is not SQL
+
+The picture is deleted **first**. It lives in a PUBLIC bucket, SQL cannot reach storage, and
+`delete_account` destroys `profile_details.avatar_path` - the only record of whose file it was. Deleting the
+row first orphans the photo permanently. So `delete_account` hands the path back (the same return-the-path
+contract `mod_act`'s remove_picture uses) and the Edge Function clears the whole folder before calling it.
+
+The sign-in is scrubbed and then **soft**-deleted. Soft is the whole design, not a half-measure: a hard
+delete removes the `auth.users` row, which is what every one of those cascades is anchored to.
+`shouldSoftDelete` keeps the row and disables the account, so the games survive and nobody signs in again.
+The address is replaced with a `.invalid` one rather than blanked, because an auth user needs one.
+
+### What a player is told
+
+**Close my account** on your own profile, and it is deliberately not the two-tap pattern Reset draft uses.
+A player has to understand this before agreeing to it, because it does not do what the words usually mean:
+the confirmation lists what goes (name, email, bio, picture, team, coins, items, badges) and what stays (the
+seasons, under a name that is nobody's) **and why** - they are part of other players' leaderboards and other
+players' duels. `/privacy`'s old sentence promised "your account and everything recorded under it deleted",
+which would no longer be true; it now says what actually happens. Both pages' dates move with it.
+
+Found by looking at the rendered screen rather than the markup: the lime solid button - the one the eye goes
+to - was **Yes, close it**. On something that cannot be undone that is the wrong way round, so the safe
+choice wears it now.
+
+### Never `delete from profiles`
+
+It looks like a cheaper version of this and is not one. It leaves every board row, the auth user and the
+photo standing - and it is reversible by the player: they sign in, the name dialog calls `claim_username`, a
+profile is rebuilt on the same uuid, and `player_stats` (keyed by uuid) hands back every run under the new
+name, with 250 fresh welcome coins. PROFILES.md 11 is the runbook for a request that arrives by email.
+
+`tests/test-profile-security.mjs` refused to pass until the new function had a deliberate entry in its
+inventory of every public function - which is the guard working.
+
 ## [2.19.5] - 2026-10-01
 
 **Team colors is free.** Both club-colour cosmetics — `frame-team` and `card-team` — were 2,000 coins each;

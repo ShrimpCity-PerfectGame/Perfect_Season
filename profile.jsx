@@ -14,6 +14,7 @@
 //                      link ("cancelled": the share sheet was closed, so no status is shown)
 //   onDetailsSaved(details)  after the bio, favorite team or picture is saved (mapDetails shape)
 //   onLogOut()      owner only
+//   onCloseAccount() owner only - returns { ok } | { ok: false, reason }
 //   onPlay()        owner with no drafts yet: go to the draft
 //   onOpenReports() moderator: open the Reports queue
 //   wallet          { balance } for the owner, else null (v1.12.0, SHOP.md 7.3)
@@ -167,7 +168,11 @@ export const PROFILE_CSS = `
 .pf-book dt small{display:block;margin-top:2px;font-size:13px;font-weight:500;color:var(--muted)}
 .pf-book dd{flex:none;margin:0;font-family:var(--display);font-weight:400;font-size:26px;line-height:1;white-space:nowrap;color:var(--ink)}
 .pf-sec h3.h{margin-top:20px}
-.pf-out{padding-top:14px;border-top:1px solid var(--line)}
+.pf-out{padding-top:14px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.pf-closelink{color:var(--muted)}
+.pf-closebox{flex:1 1 100%;padding:12px;border:1px solid var(--line2);border-radius:10px;background:var(--surface2)}
+.pf-closebox p{margin:0 0 8px}
+.pf-closed{flex:1 1 100%;margin:0;color:var(--muted)}
 
 @media (max-width:640px){
   .pf-card{gap:12px;padding:16px 14px 14px}
@@ -296,7 +301,71 @@ export function ProfileScreen(props) {
   return <ProfileView key={profile.id ?? profile.username} {...props} />;
 }
 
-function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDetailsSaved, onLogOut, onPlay, onOpenReports, wallet, onOpenShop }) {
+// Closing an account for good. Deliberately NOT the two-tap pattern Reset draft uses: that one costs a DNF,
+// and this one cannot be undone - but more importantly the player has to UNDERSTAND it before they agree,
+// because it does not do what the words "delete my account" usually promise. The seasons stay on the
+// leaderboards under a name that is nobody's (PROFILES.md, and migration-profiles.sql's delete_account says
+// why: a real delete would take the other player's half of every duel and pay a stranger a badge). So the
+// confirmation is a sentence telling them what goes and what stays, not a second tap.
+function CloseAccount({ onClose }) {
+  const [state, setState] = useState("idle"); // idle | asking | busy | done
+  const [err, setErr] = useState("");
+
+  async function go() {
+    setErr("");
+    setState("busy");
+    const res = await onClose?.();
+    if (res?.ok) { setState("done"); return; }
+    setState("asking");
+    setErr({
+      signed_out: "You've been signed out. Sign in again and try once more.",
+      no_profile: "This account has nothing to close.",
+      // The database half is done by now, so this is not "nothing happened" - say what is true.
+      signin_left: "Your account is closed and everything personal is gone, but the sign-in could not be removed. Write to privacy@gridspin.app and it will be finished by hand.",
+      network: "Couldn't reach the server. Try again.",
+    }[res?.reason] || "Something went wrong. Try again, or write to privacy@gridspin.app.");
+  }
+
+  if (state === "done") {
+    return (
+      <p className="pf-closed" role="status">
+        Your account is closed. Everything that identified you is gone; the seasons you played stay on the
+        boards under a name that is no longer yours.
+      </p>
+    );
+  }
+  if (state === "idle") {
+    return <button type="button" className="linkbtn pf-closelink" onClick={() => setState("asking")}>Close my account</button>;
+  }
+  return (
+    <div className="pf-closebox">
+      <p><b>Close your account?</b> This cannot be undone.</p>
+      <p className="fine">
+        Gone for good: your name, your email, your bio, your picture, your favourite team, your coins, the
+        items you own and your badges.
+      </p>
+      <p className="fine">
+        Staying: the seasons, dailies, duels and mini-games you played, under a name that is nobody's. They
+        are part of other players' leaderboards and other players' duels, so removing them would change
+        somebody else's record.
+      </p>
+      {err && <p className="err" role="alert">{err}</p>}
+      <div className="frow">
+        {/* The SAFE choice is the prominent one. The lime solid is what the eye goes to, and on a button that
+            cannot be undone that is the wrong way round - so Keep my account wears it and closing is the
+            quiet one. Noticed by looking at the rendered screen rather than the markup. */}
+        <button type="button" className="btn solid" disabled={state === "busy"} onClick={() => { setState("idle"); setErr(""); }}>
+          Keep my account
+        </button>
+        <button type="button" className="btn" disabled={state === "busy"} onClick={go}>
+          {state === "busy" ? "Closing…" : "Yes, close it"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDetailsSaved, onLogOut, onCloseAccount, onPlay, onOpenReports, wallet, onOpenShop }) {
   // A save shows on the screen straight away. The parent hears about it through onDetailsSaved and may
   // pass the new details back in; once it does, its copy is the one shown.
   const [saved, setSaved] = useState(null);
@@ -348,7 +417,12 @@ function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDet
       <Records s={s} x={x} />
       <Minigames x={x} />
       <RecentDrafts recent={s.recent} />
-      {isOwner && <div className="pf-out"><button className="btn" onClick={() => onLogOut?.()}>Log out</button></div>}
+      {isOwner && (
+        <div className="pf-out">
+          <button className="btn" onClick={() => onLogOut?.()}>Log out</button>
+          <CloseAccount onClose={onCloseAccount} />
+        </div>
+      )}
     </section>
   );
 }
