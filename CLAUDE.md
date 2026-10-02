@@ -1443,6 +1443,24 @@ suite and still broke the live Leaderboard for every existing account.
   and `/sso`). `/authorize` is NOT in that group, which is exactly why `authSignInWithGoogle` is the one
   call storage.js deliberately does not wrap - the page leaves for Google, which does its own checking.
 
+  **STAGING RUNS CLOUDFLARE'S TEST KEYS, deliberately, and production must never.** Sitekey
+  `1x00000000000000000000BB` (always passes, invisible) in staging's Vercel, secret
+  `1x0000000000000000000000000000000AA` (always passes validation) in staging's Supabase. They are published
+  in Cloudflare's own docs, so **a production project holding that secret would accept any token at all** and
+  the gate would be decorative. Check which keys an environment has before trusting a sign-in test.
+
+  Why test keys rather than turning the check OFF on staging: the setting is the sort of per-environment
+  config this file warns about drifting (it already bit once, with email confirmation on in one environment
+  and off in the other), and an auth change tested against a staging with no gate would meet a real gate on
+  production - the exact class of bug the v2.20.x releases exist to prevent. With the test pair the flow is
+  identical: a token really is minted, sent and verified, a tokenless POST is still refused, and only the
+  verdict is rigged. That is what makes staging drivable by an agent again.
+
+  **Verified with it on 2026-10-02**, and it is the first end-to-end run of the path the whole feature exists
+  for: a full season played signed OUT, `postAsGuest` taking a token through the challenge, Supabase
+  accepting it, and the season posting as `Guest_59A82`. Everything before that had been tested through
+  `/recover`, which is cheap but is not the flow that matters.
+
   **Once it is ON, an agent cannot sign in to that environment at all**, and that is the check working rather
   than failing: Turnstile answers `600010` ("bot behavior detected") to an automated browser, and in invisible
   mode there is no checkbox to fall back on. So from v2.20.x onward, **any signed-in flow on staging has to be
