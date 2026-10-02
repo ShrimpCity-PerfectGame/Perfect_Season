@@ -13,7 +13,7 @@ import {
 } from "./helpers.mjs";
 
 setupDom();
-const { captchaToken, captchaConfigured } = await loadModule("captcha.mjs");
+const { captchaToken, captchaConfigured, captchaReasonForCode } = await loadModule("captcha.mjs");
 const storage = await loadModule("storage.js");
 
 await runTest("with no site key it does nothing at all, which is how it ships first", async () => {
@@ -22,8 +22,11 @@ await runTest("with no site key it does nothing at all, which is how it ships fi
   assert(captchaConfigured() === false, "it reports itself unconfigured");
 
   const before = document.querySelectorAll("script").length;
-  const token = await captchaToken();
+  const { token, reason } = await captchaToken();
   assert(token === null, `and hands back no token: ${JSON.stringify(token)}`);
+  // "off" is not a failure and must never become one: it is how this ships before the switch is thrown, and
+  // storage.js carries on without a token rather than refusing the call.
+  assert(reason === "off", `and says why, so nobody reads it as a failure: ${JSON.stringify(reason)}`);
   // The part that makes shipping it safe: nothing is fetched, so a player's browser talks to nobody new and
   // the privacy page's "no third-party scripts" stays true until the key is added.
   assert(document.querySelectorAll("script").length === before, "no script is added to the page");
@@ -167,6 +170,52 @@ await runTest("the fourth door is a guest's season, and this one is read rather 
   assert(from > 0, "postAsGuest is still called that");
   const body = src.slice(from, src.indexOf("\n  }", from));
   assert(/captchaSaid/.test(body), "postAsGuest names a blocked challenge instead of advising an account that fails the same way");
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Three ways to have no token, and only one of them is the player's to fix (v2.20.4). Written from what the
+// live rollout actually produced rather than from what the codes might be: Cloudflare answered 600010 - "bot
+// behavior detected" - to an automated browser within minutes of staging's widget going live, and "turn off
+// any ad blocker" is the wrong thing to tell someone it has flagged wrongly. They have none to turn off.
+await runTest("a refusal, a block and a misconfiguration are told apart", async () => {
+  // Cloudflare's own error-code table, quoted in captcha.mjs. The sitekey and domain codes are the ones it
+  // marks "Retry: No", and they are the owner's mistake rather than anything the visitor did.
+  for (const code of ["110100", "110110", "110200", "400020", "400021", "400070"]) {
+    assert(captchaReasonForCode(code) === "misconfigured", `${code} is ours to fix, got ${captchaReasonForCode(code)}`);
+  }
+  assert(captchaReasonForCode("200500") === "blocked", "an iframe that could not load is a block");
+  // The ones that mean "bot behavior detected", including the real code off the live site.
+  for (const code of ["600010", "600", "300030", "110600", "110620"]) {
+    assert(captchaReasonForCode(code) === "refused", `${code} is a refusal, got ${captchaReasonForCode(code)}`);
+  }
+  // An unknown code must land somewhere honest rather than throw or blame an ad blocker.
+  assert(captchaReasonForCode(undefined) === "refused", "no code at all still answers");
+});
+
+await runTest("and each one reaches the player as different advice", async () => {
+  // storage.js's own sentences, asked for rather than copied here: a test that asserts on strings it wrote
+  // itself proves only that it can write strings, and that is the exact shape that let v2.20.1 ship a
+  // sentence no screen ever showed. This goes through mapAuthError too, which is the path a screen uses.
+  const said = (reason) => storage.mapAuthError({ __captcha: true, __captchaReason: reason,
+    message: storage.captchaSentence(reason) });
+
+  assert(/ad blocker/i.test(said("blocked")), "a blocked script names the ad blocker, which is the one the player can act on");
+  // The point of the whole release: a wrongly-flagged person must NOT be sent to turn off an ad blocker.
+  assert(!/ad blocker/i.test(said("refused")), `a refusal does not blame an ad blocker: ${said("refused")}`);
+  assert(/VPN|privacy browser/i.test(said("refused")), `it names what might actually be it: ${said("refused")}`);
+  assert(!/ad blocker/i.test(said("misconfigured")), "and neither does our own mistake");
+  assert(/on us/i.test(said("misconfigured")), `which says whose it is: ${said("misconfigured")}`);
+  // All three still read as the same feature, so a player who sees two of them knows it is one thing.
+  for (const r of ["blocked", "refused", "misconfigured"]) {
+    assert(/anti-robot check/i.test(said(r)), `${r} names the feature: ${said(r)}`);
+  }
+});
+
+await runTest("the real refusal Supabase sends is still translated", async () => {
+  // Taken verbatim from the live staging project the first time the switch was thrown, rather than invented:
+  // this is what a player gets if the client's token goes missing between here and there.
+  const theirs = storage.mapAuthError({ message: "captcha protection: request disallowed (no captcha_token found)" });
+  assert(/anti-robot/i.test(theirs) && !/Something went wrong/.test(theirs), `translated: ${theirs}`);
 });
 
 console.log("test-captcha.mjs done");

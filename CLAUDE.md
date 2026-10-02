@@ -1337,6 +1337,15 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.4's (three ways to fail, said three ways): client only. No migration, no Edge Function change.
+  `captchaToken()` answers `{ token, reason }` instead of a bare string, and the reason decides the sentence:
+  **blocked** (the script never loaded - an ad blocker, and the player can act on it), **refused**
+  (Cloudflare would not confirm the browser - telling a wrongly-flagged person to turn off an ad blocker they
+  do not have is worse than saying nothing), and **misconfigured** (a bad key or an unlisted domain, which is
+  the owner's and says so). Written from the live rollout rather than from guesses: staging's widget answered
+  a real `600010` within minutes of going on. `off` is a reason too and is NOT a failure - it is how this
+  ships before the switch, and storage.js carries on without a token.
+
   v2.20.3's (the privacy line the CAPTCHA mode requires): client only. No migration, no Edge Function
   change. One paragraph on `/privacy` now names Cloudflare's Turnstile Privacy Addendum and says the check
   runs invisibly and never asks you to solve anything - **Cloudflare requires that reference of anyone using
@@ -1374,8 +1383,17 @@ suite and still broke the live Leaderboard for every existing account.
        sign-in, signup and guest account in the app is refused by Supabase with "The anti-robot check didn't
        pass." Harmless today - the app has never run on a real phone and is on no store - and the first
        thing to check if it ever stops signing in.
-    4. Only now: Supabase dashboard, **Settings > Authentication > Bot and Abuse Protection > Enable CAPTCHA
-       protection**, provider Turnstile, paste the **SECRET** key, Save.
+    4. Only now: Supabase dashboard, **Authentication > Attack Protection** in the left sidebar (the section
+       on that page is headed *Bot and Abuse Protection*): Enable Captcha protection, Choose Captcha
+       Provider = `Turnstile by Cloudflare`, paste the **SECRET** key into Captcha secret, Save changes.
+       Direct: `https://supabase.com/dashboard/project/<ref>/auth/protection` - staging is
+       `ndelisxdxjmvcdezzecu`, production `aqbajvwwvvbrklolbcen` (both public: they ship in every bundle).
+       **Supabase's own docs still say "Settings > Authentication > Bot and Abuse Protection" and that path
+       no longer exists** - `/project/:ref/settings/auth` is 301'd to Sign In / Providers, which has no
+       CAPTCHA toggle on it, so following the documentation lands you somewhere that looks like the feature
+       is missing. There is no plan gate (free projects have it; the Pro-only row on that page is "Prevent
+       use of leaked passwords"), but there IS a permissions gate - it needs Owner or Administrator on the
+       org, or every field renders disabled.
 
   Doing 4 before 3 breaks every sign-in, signup, password reset and guest account in that environment at
   once. Each environment is separate, so do staging first and play a season signed out to check a guest
@@ -1395,6 +1413,12 @@ suite and still broke the live Leaderboard for every existing account.
   **Invisible mode has a condition**: Cloudflare requires anyone using it to reference their Turnstile
   Privacy Addendum in their own privacy policy. `/privacy` does, as of v2.20.3. Do not switch the mode to
   Invisible from somewhere else without that sentence being there first.
+
+  **It really does cover the guest accounts**, which is the only reason any of this is being done:
+  `signInAnonymously` is not an endpoint of its own, auth-js POSTs it to `/signup`, and `/signup` is inside
+  the auth server's `verifyCaptcha` route group (with `/token`, `/recover`, `/resend`, `/magiclink`, `/otp`
+  and `/sso`). `/authorize` is NOT in that group, which is exactly why `authSignInWithGoogle` is the one
+  call storage.js deliberately does not wrap - the page leaves for Google, which does its own checking.
 
   **Supabase already rate-limits anonymous sign-ins to 30 an hour per IP** (its own default, changeable in
   the dashboard), so the hole this closes is a distributed one rather than one script on one address.
