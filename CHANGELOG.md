@@ -19,6 +19,34 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.20.3] - 2026-10-02
+
+Client only. No migration, no Edge Function change. One paragraph, shipped ahead of the Cloudflare site key.
+
+**`/privacy` now names Cloudflare's Turnstile Privacy Addendum**, and says the check runs invisibly and never
+asks you to solve a puzzle. This is not a tidy-up: **Cloudflare makes that reference a condition of using the
+widget's invisible mode**, and invisible is the mode this implementation is forced into.
+
+**Why the mode is not a free choice.** `captcha.mjs` renders into a host at `left:-9999px`, because the guest
+sign-in fires inside `postAsGuest` after a full seventeen-game season with no form on screen to hang a
+challenge off. In Cloudflare's Managed mode a visitor it doubts is shown a checkbox - which would be drawn
+off-screen where nobody can see or press it, so they would wait out the 8-second timeout and read "the
+anti-robot check didn't load, turn off any ad blocker" with no ad blocker involved and no way in. Invisible
+mode never asks for interaction. The cost is real and worth stating: a browser Cloudflare doubts is refused
+rather than offered a box.
+
+The sentence is a plain address rather than a link because every paragraph on that page is escaped text - the
+page carries no bundle on purpose, so it reads with JavaScript off, which is what a policy should do.
+
+**CLAUDE.md's four-step runbook was rewritten from Cloudflare's and Supabase's own documentation** rather
+than from memory, and gained four things it did not have: the Supabase setting's real path (Settings >
+Authentication > Bot and Abuse Protection); one widget per environment with its hostnames pinned, including
+the two original vercel.app addresses that still serve production, and the note that a preview build's random
+hostname can never pass; a step for the Android app, which spreads `...process.env` so the key already passes
+through but is not in `env.local.json`, and which would be refused by Supabase after step 4 if built without
+it; and a warning never to run the anonymous-user cleanup SQL Supabase's own docs offer - every foreign key
+from a player cascades, so it would take every guest's seasons off the leaderboards rather than tidying up.
+
 ## [2.20.2] - 2026-10-02
 
 **A polish pass: nineteen player-visible defects, found by looking at what the screens actually say.** Client,

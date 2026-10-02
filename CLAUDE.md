@@ -1337,6 +1337,13 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.3's (the privacy line the CAPTCHA mode requires): client only. No migration, no Edge Function
+  change. One paragraph on `/privacy` now names Cloudflare's Turnstile Privacy Addendum and says the check
+  runs invisibly and never asks you to solve anything - **Cloudflare requires that reference of anyone using
+  the widget's invisible mode**, which is the mode this implementation is forced into (the four steps above
+  say why). It is written as a plain address rather than a link because every paragraph on that page is
+  escaped text: the page carries no bundle on purpose, so it has to read with JavaScript off.
+
   v2.20.2's (the polish pass): **client, config and docs only** - no migration, no Edge Function change, and
   `supabase/config.toml` is read by the Supabase CLI rather than by anything deployed. One part of it wants
   shipping **before** the CAPTCHA is switched on, not after: v2.20.1 shipped the anti-robot sentence and only
@@ -1350,15 +1357,52 @@ suite and still broke the live Leaderboard for every existing account.
   sign-in, sign-up, password reset and the anonymous sign-in together:
 
     1. Ship this client. With no `CAPTCHA_SITE_KEY` it loads no script and sends no token - nothing changes.
-    2. Make a **Cloudflare Turnstile** widget for the site's domain. Keep the site key and the secret.
+    2. Make a **Cloudflare Turnstile** widget, **one per environment** (Cloudflare's own advice, and the
+       hostname list is per widget). Mode **Invisible**, not Managed - see below, it is not a free choice.
+       Hostnames: staging `perfect-season-staging.vercel.app`; production `gridspin.app`,
+       `www.gridspin.app`, and the two original addresses that still serve production's deployment,
+       `perfect-season-t9sk.vercel.app` and `perfect-season-beta.vercel.app`. A hostname not on the list is
+       refused, so a Vercel PREVIEW build (random *.vercel.app) cannot pass the challenge - sign in on
+       staging or production to test, never on a preview. Keep the site key and the secret key.
     3. Set `CAPTCHA_SITE_KEY` in that environment's Vercel project and redeploy, so the client can get a
        token. Still nothing is enforced - Supabase is not checking yet.
-    4. Only now: Supabase dashboard, Authentication > Settings > enable CAPTCHA protection, provider
-       Turnstile, paste the SECRET key.
+    3b. **If the Android app is ever built against that environment**, rebuild it with the key exported:
+       `CAPTCHA_SITE_KEY=... node tools/app/build-app.mjs production`. `tools/app/build-app.mjs` spreads
+       `...process.env`, so the key already passes through and NO code change is needed - but the key is not
+       in `tools/app/env.local.json` (which holds only the Supabase pair, because that one is required and
+       the build exits without it). An app built with no key sends no token, and once step 4 is done every
+       sign-in, signup and guest account in the app is refused by Supabase with "The anti-robot check didn't
+       pass." Harmless today - the app has never run on a real phone and is on no store - and the first
+       thing to check if it ever stops signing in.
+    4. Only now: Supabase dashboard, **Settings > Authentication > Bot and Abuse Protection > Enable CAPTCHA
+       protection**, provider Turnstile, paste the **SECRET** key, Save.
 
   Doing 4 before 3 breaks every sign-in, signup, password reset and guest account in that environment at
   once. Each environment is separate, so do staging first and play a season signed out to check a guest
   account is still made. To turn it off again, disable it in the dashboard first, then clear the key.
+
+  **The widget mode is forced by this implementation, and Managed would be a bug.** `captcha.mjs` renders
+  into a host at `left:-9999px`, because the guest sign-in fires inside `postAsGuest` after a full
+  seventeen-game season with no form on screen to hang a challenge off. In Cloudflare's **Managed** mode a
+  visitor it doubts is shown a checkbox - which would be drawn off-screen where nobody can see or press it,
+  so they would wait out the 8s timeout and read "the anti-robot check didn't load, turn off any ad
+  blocker" with no ad blocker involved and no way in. **Invisible** mode never asks for interaction, so that
+  cannot happen; the cost is that a browser Cloudflare doubts is refused rather than offered a box. Moving
+  to Managed later is real client work, not a dashboard setting: `captcha.mjs` would have to bring the host
+  on screen from Turnstile's `before-interactive-callback`, and somewhere would have to be found for a
+  checkbox over a result screen.
+
+  **Invisible mode has a condition**: Cloudflare requires anyone using it to reference their Turnstile
+  Privacy Addendum in their own privacy policy. `/privacy` does, as of v2.20.3. Do not switch the mode to
+  Invisible from somewhere else without that sentence being there first.
+
+  **Supabase already rate-limits anonymous sign-ins to 30 an hour per IP** (its own default, changeable in
+  the dashboard), so the hole this closes is a distributed one rather than one script on one address.
+  **And never run the cleanup SQL Supabase's anonymous-sign-ins page offers** - `delete from auth.users
+  where is_anonymous is true and created_at < ...`. Every foreign key from a player cascades (v2.20.0
+  measured all 21 tables), so that statement does not tidy up unused accounts: it takes every guest's
+  seasons off the leaderboards, out of the runs log and out of `site_totals`, which is the exact cascade
+  `delete_account` exists to avoid. A guest's rows are somebody's game.
   v2.20.0's (closing an account): re-run **`migration-profiles.sql`**, then **deploy the Edge Functions**,
   then the client. `delete-account` is a NEW function, so the deploy list is **five** now. The migration
   only replaces functions (`delete_account` is new, `username_is_reserved` gains the `Deleted_` shape), so
