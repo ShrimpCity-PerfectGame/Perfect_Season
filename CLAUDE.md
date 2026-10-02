@@ -1443,6 +1443,14 @@ suite and still broke the live Leaderboard for every existing account.
   and `/sso`). `/authorize` is NOT in that group, which is exactly why `authSignInWithGoogle` is the one
   call storage.js deliberately does not wrap - the page leaves for Google, which does its own checking.
 
+  **Once it is ON, an agent cannot sign in to that environment at all**, and that is the check working rather
+  than failing: Turnstile answers `600010` ("bot behavior detected") to an automated browser, and in invisible
+  mode there is no checkbox to fall back on. So from v2.20.x onward, **any signed-in flow on staging has to be
+  driven by the owner or by `tools/ui-harness`**, which runs the same bundle against the in-memory mock and
+  needs no auth. The jsdom tests are unaffected - they never touch a real project. Plan a verification around
+  that: the harness and the suite for anything behind a sign-in, the live site only for what a signed-out
+  visitor can reach.
+
   **Supabase already rate-limits anonymous sign-ins to 30 an hour per IP** (its own default, changeable in
   the dashboard), so the hole this closes is a distributed one rather than one script on one address.
   **And never run the cleanup SQL Supabase's anonymous-sign-ins page offers** - `delete from auth.users
