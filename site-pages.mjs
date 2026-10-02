@@ -103,7 +103,11 @@ const PRIVACY_SECTIONS = [
   ]],
   ["Where it all lives, and who else sees it", [
     "The database, the sign-ins and the pictures are held by Supabase. The site itself is served by Vercel. Both keep ordinary server logs to run the service, which include IP addresses and the times requests were made.",
-    "The typefaces come from Google Fonts, so Google's servers receive the request for them when a page loads. Signing in, signing up, resetting a password or having a guest account made for you also loads Cloudflare Turnstile, an anti-robot check: Cloudflare sees that request and decides whether the browser making it looks like a person. It runs on those moments only, it is not loaded while you play, and it is there because an account that costs nothing to make is an account somebody can make thousands of. Nothing else on the site is loaded from anywhere else: there are no adverts, no analytics and no tracking pixels.",
+    // The Turnstile Privacy Addendum is named here because Cloudflare REQUIRES it of anyone using the widget's
+    // invisible mode, which is the mode Gridspin uses - see the v2.20.3 entry in CLAUDE.md for why the mode is
+    // not a free choice. It is written as a plain address rather than a link because every paragraph on this
+    // page is escaped text: the page carries no bundle on purpose, so it reads with JavaScript off.
+    "The typefaces come from Google Fonts, so Google's servers receive the request for them when a page loads. Signing in, signing up, resetting a password or having a guest account made for you also loads Cloudflare Turnstile, an anti-robot check: Cloudflare sees that request and decides whether the browser making it looks like a person. It runs invisibly and never asks you to solve a puzzle, and what Cloudflare collects in order to decide is covered by their Turnstile Privacy Addendum, at https://www.cloudflare.com/turnstile-privacy-policy/. It runs on those four moments only, it is not loaded while you play, and it is there because an account that costs nothing to make is an account somebody can make thousands of. Nothing else on the site is loaded from anywhere else: there are no adverts, no analytics and no tracking pixels.",
     "Nothing is sold, rented or handed to anyone else.",
   ]],
   ["What is kept on your device", [
