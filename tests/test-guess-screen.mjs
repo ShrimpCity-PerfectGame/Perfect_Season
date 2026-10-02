@@ -261,9 +261,13 @@ await runTest(`4. a game that uses all ${GUESS_TRIES} ends on the answer, not on
   const before = runs().length;
   for (let i = 0; i < GUESS_TRIES; i++) await guessPlayerByName(someoneElse(answer, used));
   assert(view() === "done", `the game ends when the guesses run out: ${view()}`);
-  assert(gp().querySelector(".gp-score").textContent === "—", "no number, because it was not got");
+  // Not a dash in the score slot: there is no score slot at all on a loss (v2.20.6). The slot is the hero's
+  // 96-156px display face, so a dash standing in for a number drew a lime slab in the middle of an empty box.
+  assert(!gp().querySelector(".gp-score"), "no number at all, because there was none to show");
   assert(/Missed/.test(gp().querySelector(".gp-eyebrow").textContent), "the hero says it was missed");
   assert(gp().textContent.includes(`not in ${GUESS_TRIES}`), "and how many it had");
+  // That line IS the hero on a loss now, so it has to be the headline rather than a caption under one.
+  assert(/not in/.test(gp().querySelector(".gp-missed")?.textContent || ""), "carried by the hero headline itself");
   // The answer is the payoff of a lost game and has to be there.
   assert(gp().textContent.includes(answer.name), `it says who it was: ${answer.name}`);
   assert(gp().textContent.includes(`#${answer.number}`), "with the number, the column nobody ever gets");
@@ -351,7 +355,7 @@ await runTest("6b. a refused game still shows the result the game actually had",
   assert(/already recorded/.test(gp().textContent), "and says so");
   assert(/Missed/.test(gp().querySelector(".gp-eyebrow").textContent),
     `a lost game is still shown as lost: ${gp().querySelector(".gp-eyebrow").textContent}`);
-  assert(gp().querySelector(".gp-score").textContent === "—", "with no number of guesses to be proud of");
+  assert(!gp().querySelector(".gp-score"), "with no number of guesses to be proud of, and no dash pretending to be one");
 });
 
 await runTest("7. a half-finished practice game resumes, and a stale daily is thrown away", async () => {

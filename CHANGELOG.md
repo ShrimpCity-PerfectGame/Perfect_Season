@@ -19,6 +19,28 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.20.6] - 2026-10-02
+
+Client only. No migration, no Edge Function change.
+
+**Losing Guess the Player drew a lime slab in the middle of an empty box.** The end screen's big number is
+how many guesses it took, printed in the hero's own display face - `.rec` is `clamp(96px, 24vw, 156px)` in
+Anton, coloured `--accent`. A loss has no such number, so it printed an em dash instead, and at that size an
+em dash is not a character: measured in the harness, a **43x82px bar of lime** floating in a 458px-tall hero
+with a line of empty space either side of it. It also wore the colour of having won.
+
+The sentence carries the hero now - **MISSED** over **not in 5** in the display face at `clamp(34px, 9vw,
+52px)`, in ink rather than accent - followed by who it was and how hard the day was, which are the two things
+a player actually wants off a lost game. The lime stays where it means something.
+
+Only this screen had the problem: Century's end hero prints a real score whether you reach 100 or not, so it
+never needed a placeholder.
+
+**The two tests that covered it were asserting the placeholder**, not the intent - `.gp-score` contains an em
+dash. They now assert there is no score element at all, which is the stronger form of the same sentence they
+were already commented with ("no number, because it was not got"), plus that the headline exists. Checked by
+mutation: rendering the big slot on a loss again goes red.
+
 ## [2.20.5] - 2026-10-02
 
 Build script only. Nothing in the bundle changes.

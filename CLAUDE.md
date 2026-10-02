@@ -1337,6 +1337,13 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.6's (losing Guess the Player): client only. No migration, no Edge Function change. The end hero's
+  `.rec` slot is the display face at `clamp(96px,24vw,156px)` in `--accent`, which is right for a win's
+  number of guesses and wrong for a loss: the em dash standing in for "no score" rendered as a 43x82px lime
+  bar in a 458px box. **A placeholder in a display-size slot is a graphic, not a character.** The outcome
+  sentence is the headline on a loss now, in ink, and the lime stays where winning is. Century's hero is
+  unaffected - its score exists whether you reach 100 or not.
+
   v2.20.5's (the build refuses a secret key): build script only, nothing in the bundle changes. `build.mjs`
   throws if `CAPTCHA_SITE_KEY` is longer than 30 characters, because that is a Turnstile SECRET and this
   variable is baked into the public bundle. It happened here, on production, and the secret was served to
