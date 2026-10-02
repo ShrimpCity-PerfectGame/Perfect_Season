@@ -1337,6 +1337,14 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.5's (the build refuses a secret key): build script only, nothing in the bundle changes. `build.mjs`
+  throws if `CAPTCHA_SITE_KEY` is longer than 30 characters, because that is a Turnstile SECRET and this
+  variable is baked into the public bundle. It happened here, on production, and the secret was served to
+  every visitor until it was spotted and rotated. Cloudflare's own test keys pin the shapes - sitekey 24,
+  secret 35 - and 30 is a wide margin rather than an exact match. **A valid secret pasted into the wrong
+  widget's field would have published a live credential and still half-worked**; what caught this one was
+  the widget answering `400020 invalid sitekey`, which is luck, not a check.
+
   v2.20.4's (three ways to fail, said three ways): client only. No migration, no Edge Function change.
   `captchaToken()` answers `{ token, reason }` instead of a bare string, and the reason decides the sentence:
   **blocked** (the script never loaded - an ad blocker, and the player can act on it), **refused**
