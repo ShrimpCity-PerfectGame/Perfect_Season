@@ -388,7 +388,11 @@ returns boolean language sql stable security invoker set search_path = public, p
   -- Any Guest_-shaped name, not only the hex ones the generator happens to produce: the point is that
   -- nobody else may look like a guest, and `Guest_zzzzz` looked exactly like one while rendering with no
   -- chip and a working profile link.
+  -- ...and any Deleted_-shaped name, for the same reason and with the same breadth: a closed account is
+  -- renamed to one of these (delete_account below), and nobody else may look like one. Somebody taking
+  -- `Deleted_player` would be claiming a stranger's seasons on every board those rows still appear on.
   select coalesce(p_username, '') ~* '^guest_[a-z0-9]{1,10}$'
+      or coalesce(p_username, '') ~* '^deleted_[a-z0-9]{1,10}$'
       or (lower(coalesce(p_username, '')) in ('admin')
           and exists (select 1 from profiles where lower(username) = lower(p_username)));
 $$;
@@ -651,6 +655,93 @@ grant execute on function public.save_profile(text, text), public.set_avatar(tex
 -- Claiming a name is for the account doing it, so anon has no business calling it at all.
 revoke execute on function public.claim_username(text) from public, anon;
 grant execute on function public.claim_username(text) to authenticated;
+
+-- ---------- Closing an account ----------
+
+-- What a player gets when they ask to be forgotten, and what /privacy and /terms promise them.
+--
+-- It ANONYMISES rather than deletes, and the reason is measured rather than aesthetic. Every foreign key
+-- from a player CASCADES - 22 of them, not one RESTRICT - so `delete from auth.users` empties all 21 public
+-- tables in a single statement. That is a real deletion, and it does three things the owner did not ask for:
+--
+--   * It destroys the OTHER player's half of every duel. matches.host_id and guest_id both cascade, so the
+--     opponent loses the match, its picks and its link, while keeping the win on their profile - their
+--     pvp counters are plain columns no FK moves.
+--   * It PAYS a third party. player_stats computes a historical daily rank live ("how many beat me that
+--     day"), and the daily-winner badge is bestRank = 1 - gold, 1,000 coins, and a shop title. Deleting the
+--     winner of a closed daily promotes the runner-up and flips that badge from unearned to earned, which
+--     submit-run then pays. Proved in PGlite against these migrations.
+--   * It shrinks every sitewide total, so numbers a player saw yesterday mean something else today.
+--
+-- Anonymising avoids all three: the rows stay exactly where they are, so nothing moves and nobody is paid.
+-- What leaves is the person - the name, the bio, the picture, the team, the wallet, the items, the badges.
+--
+-- **`delete from profiles` is not a cheaper version of this and must never be used.** It deletes only the
+-- account tier and leaves every board row, the auth user and the photo standing - and it is REVERSIBLE by
+-- the player: they sign in, the name dialog calls claim_username, a profile is rebuilt on the same uuid, and
+-- player_stats (keyed by uuid) hands back every run under the new name, with 250 fresh welcome coins.
+--
+-- Returns the avatar path so the CALLER can delete the file: SQL cannot reach storage, and this is the same
+-- return-the-path contract mod_act's remove_picture already uses. Deleting the row first would orphan the
+-- picture in a PUBLIC bucket with nothing left to say whose it was, so the caller deletes the object FIRST
+-- and calls this second - supabase/functions/delete-account does exactly that.
+--
+-- Erasing the sign-in itself is not SQL's to do: auth.users belongs to Supabase. The Edge Function scrubs
+-- the address and soft-deletes the account (which keeps the ROW, so none of those cascades fire).
+create or replace function public.delete_account(p_user uuid default null)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_uid   uuid := coalesce(p_user, auth.uid());
+  v_name  text;
+  v_path  text;
+begin
+  -- p_user is for the service role only (the Edge Function, and the by-hand route when a request arrives by
+  -- email). A signed-in player may close their own account and nobody else's.
+  if p_user is not null and auth.uid() is not null and p_user <> auth.uid() then
+    return jsonb_build_object('error', 'not_yours');
+  end if;
+  if v_uid is null then return jsonb_build_object('error', 'not_signed_in'); end if;
+  if not exists (select 1 from public.profiles where id = v_uid) then
+    return jsonb_build_object('error', 'no_profile');
+  end if;
+
+  -- A name nobody can hold or impersonate: username_is_reserved refuses the whole Deleted_ shape. Eight hex
+  -- characters of the account's own uuid, so two closed accounts never collide and the boards keep showing
+  -- one row each rather than merging into a single tombstone.
+  v_name := 'Deleted_' || substr(replace(v_uid::text, '-', ''), 1, 8);
+  select avatar_path into v_path from public.profile_details where user_id = v_uid;
+
+  -- The identity, across profiles and the six boards that carry a name snapshot. Exactly the set mod_act's
+  -- rename rewrites - if a board gains a snapshot column, it has to be added in both places.
+  update public.profiles
+     set username = v_name, guest = false, supporter = false
+   where id = v_uid;
+  update public.runs         set username = v_name where user_id = v_uid;
+  update public.daily_runs   set username = v_name where user_id = v_uid;
+  update public.sou_runs     set username = v_name, guest = false where user_id = v_uid;
+  update public.century_runs set username = v_name, guest = false where user_id = v_uid;
+  update public.guess_runs   set username = v_name, guest = false where user_id = v_uid;
+  update public.builds       set username = v_name, guest = false where user_id = v_uid;
+
+  -- Everything personal that is not a game. profile_details holds the bio, the picture, the chosen avatar
+  -- and the favourite team, and deleting the row takes the equipped cosmetics with it.
+  delete from public.profile_details where user_id = v_uid;
+  delete from public.wallets        where user_id = v_uid;
+  delete from public.wallet_ledger  where user_id = v_uid;
+  delete from public.inventory      where user_id = v_uid;
+  delete from public.badge_awards   where user_id = v_uid;
+  delete from public.finished_codes where user_id = v_uid;
+  delete from public.supporters     where user_id = v_uid;
+  delete from public.moderators     where user_id = v_uid;
+  -- Reports they filed and reports about them: both name a person, and a closed account cannot answer one.
+  delete from public.reports where reporter_id = v_uid or target_id = v_uid;
+
+  return jsonb_build_object('ok', true, 'name', v_name, 'avatar_path', v_path);
+end;
+$$;
+-- A player may close their own account; the service role may close one on request (the address on /privacy).
+revoke execute on function public.delete_account(uuid) from public, anon;
+grant execute on function public.delete_account(uuid) to authenticated, service_role;
 
 -- ---------- Pictures: the avatars bucket ----------
 -- Public, so a picture loads from its address with no signed URL. The size and type limits are the

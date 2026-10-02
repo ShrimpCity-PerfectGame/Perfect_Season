@@ -56,7 +56,7 @@ const BOARDS = [
 // than a person's mailbox: it can be forwarded anywhere, and it doesn't put a personal address in front of
 // every crawler that reads this page.
 export const PRIVACY_CONTACT = "privacy@gridspin.app";
-export const PRIVACY_UPDATED = "1 October 2026";
+export const PRIVACY_UPDATED = "2 October 2026";
 
 // Who may play. Shared, because the privacy policy and the terms both state it and two live pages
 // disagreeing about it is worse than either alone.
@@ -110,7 +110,8 @@ const PRIVACY_SECTIONS = [
     "A draft in progress, a Century or Guess the Player game in progress, which dailies you have already played, the scoring format you last chose, whether you have seen the rules, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
   ]],
   ["Your choices", [
-    `You can change or clear your bio, your picture and your favourite team whenever you like, from your profile. To have your account and everything recorded under it deleted, write to ${PRIVACY_CONTACT} from the address the account uses, and it will be removed.`,
+    `You can change or clear your bio, your picture and your favourite team whenever you like, from your profile. To close your account, use Close my account on your profile - or write to ${PRIVACY_CONTACT} from the address the account uses and it will be done for you.`,
+    "Closing it erases the person: your name, your email address, your bio, your picture, your favourite team, your coins, the items you own and your badges. The seasons, dailies, duels and mini-games you played stay on the leaderboards, under a name that is nobody's and cannot be traced back to you. They are not kept to hold on to you - they are part of other players' leaderboards and other players' duels, and taking them away would quietly change somebody else's record.",
     "A guest account identifies nobody, so there is nothing to delete - stopping playing is enough. If you would rather its scores came off the leaderboard, write in and say which name it was.",
   ]],
   ["Children", [
@@ -134,7 +135,7 @@ const PRIVACY_SECTIONS = [
 // an account - which is also why moderation could rename and clear but not BAN. There was no document to
 // ban anyone under.
 
-export const TERMS_UPDATED = "1 October 2026";
+export const TERMS_UPDATED = "2 October 2026";
 // The US state whose law governs these terms. **Deliberately empty until the owner names it**, and
 // tests/test-site-pages.mjs is red while it is: a terms page that ships with a placeholder sentence in it
 // is worse than one that ships a day later.
@@ -187,7 +188,7 @@ const TERMS_SECTIONS = [
     `These terms say how the site works today, and they are updated when the site changes. They were last updated on ${TERMS_UPDATED}. Carrying on playing after a change means the new ones apply.`,
   ]],
   ["Getting in touch", [
-    `Questions, reports, appeals, or to have an account closed: ${PRIVACY_CONTACT}. Write from the address the account uses.`,
+    `You can close your own account from your profile, with Close my account - it erases everything that identified you and leaves the seasons you played under a name that is nobody's. For anything else, or to have it done for you: ${PRIVACY_CONTACT}, from the address the account uses.`,
   ]],
 ];
 
@@ -234,7 +235,7 @@ export const SITE_PAGES = [
     path: PRIVACY_PATH,
     file: "privacy.html",
     // PRIVACY_UPDATED in words, and this in the sitemap: change both together.
-    updated: "2026-10-01",
+    updated: "2026-10-02",
     nav: "Privacy",
     title: "Gridspin privacy policy - what the game keeps",
     description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no analytics, nothing sold.",
@@ -255,7 +256,7 @@ export const SITE_PAGES = [
     path: TERMS_PATH,
     file: "terms.html",
     // TERMS_UPDATED in words, and this in the sitemap: change both together.
-    updated: "2026-10-01",
+    updated: "2026-10-02",
     nav: "Terms",
     title: "Gridspin terms of use",
     description: "The rules for playing Gridspin: who can play, how to behave, what a moderator can do, and that coins are a score rather than money. Not affiliated with the NFL.",

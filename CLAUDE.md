@@ -82,8 +82,11 @@ Two constants are shared with the privacy policy on purpose: `TERMS_AGE`, becaus
 about who may play is worse than either alone (the privacy page said under-13 and the terms say 16), and
 `PRIVACY_CONTACT`. `TERMS_STATE` names the law that governs the terms, and **tests/test-site-pages.mjs fails
 while it is empty** - the page prints a plain not-set sentence rather than a half-finished one. None of this
-is legal advice and all of it wants a professional read before the game takes money, which is also when the
-privacy policy can no longer say there is no real money anywhere in Gridspin.
+is legal advice. **The NFL question itself was reviewed by the owner's lawyer on 2026-10-01 and approved,
+covering the paid features as well as the game as it stands - it is settled, do not re-raise it.** What is
+not optional is the CC BY 4.0 attribution, which is a licence term rather than a risk judgement, and the
+two sentences on `/privacy` and `/terms` saying there is no money in the game, which have to change in the
+same release as the first sale. DATA.md has both.
 
 **One address per page, and the headers (v2.0.0).** `vercel.json` sends every response
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,
@@ -214,6 +217,27 @@ link, no chip, no star, no colour - because a screen file may not import this on
 reach the component at all. Both screen tests had a comment claiming the rule held and nothing under it
 checking; they check now. The guest-name shape is reserved broadly (`^guest_[a-z0-9]{1,10}$`), because the
 rule is that nobody else may LOOK like a guest, not just that nobody may take a generated name.
+
+**Closing an account (v2.20.0).** **Close my account** on your own profile, and `PROFILES.md` 11 is the
+runbook for a request that arrives by email instead. It **anonymises rather than deletes**, and the reason
+is measured rather than aesthetic: every foreign key from a player cascades, so `delete from auth.users`
+empties all 21 public tables in one statement and takes three things with it that nobody asked for - the
+OTHER player's half of every duel (`matches.host_id` and `guest_id` both cascade, while their pvp counters
+stay), every sitewide total, and **a gold badge paid to a stranger**, because `player_stats` computes the
+historical daily rank live and `daily-winner` is `bestRank === 1`. Deleting a daily's winner promotes the
+runner-up and `submit-run` pays them 1,000 coins. All three proved in PGlite.
+
+Three rules hold it up. **The picture goes first** - it is in a public bucket, SQL cannot reach storage, and
+`delete_account` destroys the only row that said whose file it was, so it returns the path and the Edge
+Function clears the folder before calling it. **The sign-in is SOFT-deleted** - a hard delete removes the
+`auth.users` row, which is what every cascade is anchored to, so `shouldSoftDelete` keeps the row and
+disables the account. And **`delete from profiles` is never the answer**: it leaves every board row, the
+auth user and the photo, and the player undoes it by signing in once - `claim_username` rebuilds a profile
+on the same uuid and `player_stats` hands back every run, with 250 fresh welcome coins.
+
+The tombstone is `Deleted_<8 hex>`, and `username_is_reserved` refuses the whole shape the way it refuses
+`Guest_`: those seasons are still on the boards, so anyone who could take the name would be claiming a
+stranger's record.
 
 **Duels (v1.19.0).** Two players draft against each other from the same boards and the better roster wins.
 Players see **Duel**; everything internal stays `versus` / `vs-` / `/vs/`, the same split the Gridspin rename
@@ -1267,6 +1291,11 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.20.0's (closing an account): re-run **`migration-profiles.sql`**, then **deploy the Edge Functions**,
+  then the client. `delete-account` is a NEW function, so the deploy list is **five** now. The migration
+  only replaces functions (`delete_account` is new, `username_is_reserved` gains the `Deleted_` shape), so
+  it is safe on any shape and the site works between the steps - a client ahead of it shows a Close my
+  account button whose every press fails, so do not leave this part done.
   v2.19.5's (Team colors is free): **run the SQL, then the client.** Re-running `migration-shop.sql` is NOT
   enough - its seed only adds missing rows, so an existing database keeps the old price. It is the runbook
   line that file already documents:

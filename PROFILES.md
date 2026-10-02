@@ -646,3 +646,32 @@ change; harness audit at five sizes; security and mobile checks (agents G, H) an
 CLAUDE.md (profiles section, the new files, the storage modules, the moderation runbook, the new
 writer of `profiles.username`), CHANGELOG 1.11.0, version bump; staging migrations, staging click-through
 with a real phone photo; owner's OK; production.
+
+## 11. Closing an account (v2.20.0)
+
+A player can do it themselves: **Close my account** on their own profile. It calls the `delete-account` Edge
+Function, which deletes the picture, calls `public.delete_account`, then scrubs the address and SOFT-deletes
+the sign-in.
+
+**It anonymises - it does not delete.** The person goes (name, email, bio, picture, team, coins, items,
+badges, reports); the games stay, under `Deleted_<8 hex>`, which `username_is_reserved` stops anyone else
+taking. `migration-profiles.sql`'s comment on `delete_account` has the measurements behind that choice: a
+real delete cascades through all 21 tables and takes the other player's half of every duel, shrinks every
+sitewide total, and **pays a stranger a gold badge**, because the daily rank behind `daily-winner` is
+computed live from who else played that day.
+
+**Runbook**, for a request that arrives by email at the address `/privacy` gives. Do the picture FIRST: SQL
+cannot reach storage, and `delete_account` destroys `profile_details.avatar_path`, which is the only record
+of whose file it was.
+
+1. In Storage, delete everything under `avatars/<user id>/`.
+2. In the SQL editor: `select delete_account('<user id>');`
+3. In Authentication, edit the user's email to `deleted-<user id>@gridspin.invalid`, then **soft**-delete
+   them. Not a hard delete: that removes the `auth.users` row, which is what every cascade is anchored to,
+   and the games would go with it.
+
+**Never `delete from profiles`.** It looks like a cheaper version and is not one: it leaves every board row,
+the auth user and the photo standing, and the player can undo it by signing in once - the name dialog calls
+`claim_username`, a profile is rebuilt on the same uuid, and `player_stats` hands back every run under the
+new name, with 250 fresh welcome coins. Proved in PGlite; `tests/test-delete-account.mjs` holds the
+function's real contract.

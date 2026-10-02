@@ -65,6 +65,25 @@ export function makeMockAuth() {
   // of the address and announces PASSWORD_RECOVERY, with a session that is real in every other way - that
   // event is the ONLY thing telling a reset apart from an ordinary sign-in, which is why a test needs to be
   // able to fire it. Returns false for an address nobody holds, the way a dead link does nothing.
+  // Closing an account, as the Edge Function leaves it: the person anonymised, the games kept. The real one
+  // deletes the picture, calls public.delete_account and soft-deletes the sign-in; what a SCREEN can see of
+  // that is the rename and the sign-out, so that is what this does.
+  const closeAccount = () => {
+    const id = session?.user?.id;
+    if (!id) return { data: null, error: { message: "unauthorized", context: { json: async () => ({ reason: "signed_out" }) } } };
+    const p = profiles.get(id);
+    if (!p) return { data: { reason: "no_profile" }, error: null };
+    const name = `Deleted_${String(id).replace(/-/g, "").slice(0, 8)}`;
+    p.username = name;
+    p.guest = false;
+    // The boards keep the row and take the new name, the way claim_username and mod_act rewrite snapshots.
+    for (const m of [runs, dailyRuns, souRuns, builds]) {
+      for (const row of m.values()) if (row.user_id === id) row.username = name;
+    }
+    for (const [key, u] of [...authUsers]) if (u.id === id) authUsers.delete(key);
+    return { data: { ok: true, name }, error: null };
+  };
+
   const followRecoveryLink = (email) => {
     const u = authUsers.get(email);
     if (!u) return false;
@@ -708,6 +727,7 @@ export function makeMockAuth() {
         if (name === "match-pick") return versus.invokeMatchPick(opts?.body, { now: opts?.now });
         if (name === "submit-century") return century.submitCentury(opts?.body);
         if (name === "submit-guess") return guess.submitGuessRun(opts?.body);
+        if (name === "delete-account") return Promise.resolve(closeAccount());
         return Promise.resolve({ error: { message: "unknown function" } });
       },
     },

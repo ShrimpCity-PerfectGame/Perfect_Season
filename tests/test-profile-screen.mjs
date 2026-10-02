@@ -139,7 +139,12 @@ await runTest("a veteran shows every section, in the contract's order", async ()
   const kids = [...c.querySelector("section.profile").children];
   assert(kids[0].classList.contains("pf-card"), "the player card comes first");
   assert(kids[1].classList.contains("tiles"), "headline tiles come right after the card");
-  assert(kids[kids.length - 1].textContent.trim() === "Log out", "the owner's Log out comes last");
+  // The owner's own controls come last, and there are two of them since v2.20.0: Log out, and the way to
+  // close the account for good.
+  const last = kids[kids.length - 1];
+  assert(last.classList.contains("pf-out"), "the owner's own controls come last");
+  assert(/Log out/.test(last.textContent) && /Close my account/.test(last.textContent),
+    `both of them: ${last.textContent.trim()}`);
 
   const card = c.querySelector(".pf-card");
   assert(card.textContent.includes("Kansas City Chiefs"), "the card shows the favorite team");
@@ -358,4 +363,58 @@ await runTest("editor: picture changes save through the picker's callbacks", asy
 });
 
 if (shown) await act(async () => shown.reactRoot.unmount());
+
+// Closing an account, from the screen. The control is deliberately NOT the two-tap pattern Reset draft
+// uses: this cannot be undone, and more importantly it does not do what "delete my account" usually means -
+// the seasons stay, anonymised, because removing them would change other players' leaderboards and take the
+// other half of every duel. So the confirmation has to SAY that before the player agrees to it.
+await runTest("closing an account says what goes and what stays before it happens", async () => {
+  const p = veteranProfile();
+  let asked = 0;
+  const c = await show(ProfileScreen, baseProps({
+    profile: p, isOwner: true, userId: p.id,
+    onCloseAccount: async () => { asked++; return { ok: true, name: "Deleted_abcd1234" }; },
+  }));
+
+  const open = findButtonByText(c, "Close my account");
+  assert(open, `the owner has a way to close it: ${text(c).slice(-200)}`);
+  await click(open);
+  assert(asked === 0, "one tap asks nothing of the server");
+
+  const said = text(c);
+  assert(/cannot be undone/i.test(said), `it says it is final: ${said.slice(-400)}`);
+  // The two halves a player has to understand, because the words do not mean what they usually mean.
+  for (const gone of ["name", "email", "bio", "picture", "coins", "badges"]) {
+    assert(new RegExp(gone, "i").test(said), `it names what goes: ${gone}`);
+  }
+  assert(/stay/i.test(said) && /leaderboard/i.test(said), "and that the seasons stay on the leaderboards");
+  assert(/somebody else|other players/i.test(said), "and why - they are part of somebody else's record");
+
+  // A way out that is not the browser's Back.
+  const keep = findButtonByText(c, "Keep my account");
+  assert(keep, "there is a way to change your mind");
+  await click(keep);
+  assert(!/cannot be undone/i.test(text(c)), "which closes it again");
+  assert(asked === 0, "and still asked nothing of the server");
+
+  await click(findButtonByText(c, "Close my account"));
+  await click(findButtonByText(c, "Yes, close it"));
+  assert(asked === 1, "only the second, explicit press does it");
+  assert(/closed/i.test(text(c)), `and the screen says so afterwards: ${text(c).slice(-200)}`);
+});
+
+// The database half is already done when this one fails, so the message must not say nothing happened.
+await runTest("a sign-in that could not be removed is reported honestly", async () => {
+  const p = veteranProfile();
+  const c = await show(ProfileScreen, baseProps({
+    profile: p, isOwner: true, userId: p.id,
+    onCloseAccount: async () => ({ ok: false, reason: "signin_left" }),
+  }));
+  await click(findButtonByText(c, "Close my account"));
+  await click(findButtonByText(c, "Yes, close it"));
+  const said = text(c);
+  assert(/closed/i.test(said) && /sign-in could not be removed/i.test(said),
+    `it says the account IS closed and what is left: ${said.slice(-300)}`);
+  assert(/privacy@gridspin.app/.test(said), "and where to write to finish it");
+});
 console.log("test-profile-screen.mjs done");

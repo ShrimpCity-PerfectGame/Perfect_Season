@@ -7,7 +7,7 @@ import {
   authSignUp, authSignIn, authSignInWithGoogle, authSignInAsGuest, authAddEmail, authSignOut, authGetSession, authOnChange, mapAuthError,
   authResetPassword, authSetPassword,
   fetchProfile, submitRun, submitDnf,
-  fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, isModerator, fetchModQueue,
+  fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, deleteAccount, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
   versusPath, parseVersusPath, fetchVersusTop,
   submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY,
@@ -3461,6 +3461,19 @@ export default function PerfectSeason() {
     setNotice(res.ok ? `Posted to the leaderboard as ${prof.username}. Keep it on the Account tab.` : "");
   }
 
+  // Closing the account for good. The Edge Function does the work (the picture, then the database, then the
+  // sign-in); this signs them out afterwards, because the session it just closed is no longer anybody's.
+  // It does NOT clear the device's own drafts beyond what SIGNED_OUT already clears - a draft in progress
+  // belongs to the browser, not to the account, and the sign-out handler takes the ones that do.
+  async function closeAccount() {
+    const res = await deleteAccount();
+    if (!res.ok) return res;
+    // The screen says what happened; signing out is what makes it true in this tab. Deliberately after, so a
+    // player who is reading the confirmation is not thrown back to Modes mid-sentence.
+    setTimeout(() => { logOut(); }, 2500);
+    return res;
+  }
+
   async function logOut() {
     await authSignOut();
     setUserId(null); setUser(null); setStats(null); setNotice(""); clearAccountExtras();
@@ -5422,7 +5435,8 @@ export default function PerfectSeason() {
                 rank={shownData?.rank || NO_RANK}
                 moderator={ownProfileShown && isMod && openReports != null ? { openReports } : null}
                 onRetry={() => loadProfile(shownProfile)} onShare={() => shareProfile(profile?.username || shownProfile)}
-                onDetailsSaved={onDetailsSaved} onLogOut={logOut} onPlay={() => openTab("play")} onOpenReports={() => openTab("reports")}
+                onDetailsSaved={onDetailsSaved} onLogOut={logOut} onCloseAccount={closeAccount}
+                onPlay={() => openTab("play")} onOpenReports={() => openTab("reports")}
                 wallet={ownProfileShown ? wallet : null} onOpenShop={openShop} />
             </div>
           );

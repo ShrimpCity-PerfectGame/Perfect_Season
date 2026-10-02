@@ -618,6 +618,10 @@ const EXPECTED_FUNCTIONS = {
   "check_username(p_username text)": [true, PG_TEMP_LAST, true, true],
   // The name an account picks after signing in with Google: for the account doing it, so anon can't call it.
   "claim_username(p_username text)": [true, PG_TEMP_LAST, false, true],
+  // v2.20.0: a player closes their OWN account - definer, because it rewrites six boards and empties nine
+  // tables, and no client may be given those rights directly. anon cannot reach it at all; the service role
+  // may pass an id, for a request that arrives by email. The function refuses any other id than the caller.
+  "delete_account(p_user uuid)": [true, PG_TEMP_LAST, false, true],
   // v1.17.0: only the signup trigger names a guest, running as its owner. No client may ask for a name.
   "new_guest_name()": [true, PG_TEMP_LAST, false, false],
   // Called by the avatars insert policy as the uploading player, so they need execute; anon never uploads.

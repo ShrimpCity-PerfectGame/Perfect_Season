@@ -273,6 +273,35 @@ export async function removeAvatar(previousPath) {
 // the account has none (migration-profiles.sql's handle_new_user and claim_username; PROFILES.md).
 // Returns the database's own code, or "failed" when the call didn't get through at all.
 const CLAIM_RESULTS = ["ok", "taken", "blocked", "invalid", "already_named", "not_signed_in", "still_anonymous"];
+// Closing an account for good. The Edge Function does it, not an RPC, because three things have to happen
+// in one order and only one of them is SQL: the picture comes out of the public bucket FIRST (the row that
+// names it is about to go), then public.delete_account anonymises the database, then the sign-in is scrubbed
+// and soft-deleted. See supabase/functions/delete-account/index.ts.
+//
+// It ANONYMISES: the person goes, the seasons stay under a name that is nobody's. /privacy says so in those
+// words, and it has to keep saying so - a promise of total deletion would not be true.
+//   { ok: true, name } | { ok: false, reason: "signed_out" | "no_profile" | "signin_left" | "server" | "network" }
+export async function deleteAccount() {
+  try {
+    const { data, error } = await getClient().functions.invoke("delete-account", { body: {} });
+    if (error) {
+      // The function answers with a reason in the body even on a 4xx/5xx, and supabase-js puts that body
+      // behind error.context - the same unwrapping submitGuess and submitCentury do. Without it every
+      // refusal reads as "check your connection", which is the bug v2.18.2 existed to fix.
+      let reason = "server";
+      try {
+        const body = await error.context?.json?.();
+        if (body && typeof body.reason === "string") reason = body.reason;
+      } catch (e) { /* no body to read: a genuine transport failure */ }
+      return { ok: false, reason };
+    }
+    if (data?.ok) return { ok: true, name: data.name || null };
+    return { ok: false, reason: typeof data?.reason === "string" ? data.reason : "server" };
+  } catch (e) {
+    return { ok: false, reason: "network" };
+  }
+}
+
 export async function claimUsername(name) {
   try {
     const { data, error } = await getClient().rpc("claim_username", { p_username: name });
