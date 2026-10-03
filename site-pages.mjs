@@ -107,7 +107,13 @@ const PRIVACY_SECTIONS = [
     // invisible mode, which is the mode Gridspin uses - see the v2.20.3 entry in CLAUDE.md for why the mode is
     // not a free choice. It is written as a plain address rather than a link because every paragraph on this
     // page is escaped text: the page carries no bundle on purpose, so it reads with JavaScript off.
-    "The typefaces come from Google Fonts, so Google's servers receive the request for them when a page loads. Signing in, signing up, resetting a password or having a guest account made for you also loads Cloudflare Turnstile, an anti-robot check: Cloudflare sees that request and decides whether the browser making it looks like a person. It runs invisibly and never asks you to solve a puzzle, and what Cloudflare collects in order to decide is covered by their Turnstile Privacy Addendum, at https://www.cloudflare.com/turnstile-privacy-policy/. It runs on those four moments only, it is not loaded while you play, and it is there because an account that costs nothing to make is an account somebody can make thousands of. Nothing else on the site is loaded from anywhere else: there are no adverts, no analytics and no tracking pixels.",
+    "The typefaces come from Google Fonts, so Google's servers receive the request for them when a page loads. Signing in, signing up, resetting a password or having a guest account made for you also loads Cloudflare Turnstile, an anti-robot check: Cloudflare sees that request and decides whether the browser making it looks like a person. It runs invisibly and never asks you to solve a puzzle, and what Cloudflare collects in order to decide is covered by their Turnstile Privacy Addendum, at https://www.cloudflare.com/turnstile-privacy-policy/. It runs on those four moments only, it is not loaded while you play, and it is there because an account that costs nothing to make is an account somebody can make thousands of.",
+    // This paragraph replaced one that said there were "no analytics", which stopped being true the day the
+    // counter was switched on. It is written to be checkable rather than reassuring: every clause below is
+    // something Vercel documents about how their Web Analytics works, and the last sentence is a promise
+    // build.mjs keeps mechanically - standalone pages have the tag stripped, and the build fails if they do not.
+    "There is a counter, so the site can tell whether anybody is arriving and from where. It is run by Vercel, who already serve the site, and it records that a page was opened, which page it was, and which site you came from - never who you are. It sets no cookie. The identifier it uses is a number worked out from the request itself and thrown away at the end of each day, so it cannot tell that today's visitor is yesterday's, and it cannot follow you to any other site. This page and the terms do not carry it at all: a page you came to read to find out what is collected is not a good place to collect anything.",
+    "There are no adverts, no tracking pixels and nothing from an advertising network. Nothing else on the site is loaded from anywhere else.",
     "Nothing is sold, rented or handed to anyone else.",
   ]],
   ["What is kept on your device", [
@@ -246,14 +252,14 @@ export const SITE_PAGES = [
     updated: "2026-10-02",
     nav: "Privacy",
     title: "Gridspin privacy policy - what the game keeps",
-    description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no analytics, nothing sold.",
+    description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no trackers, nothing sold.",
     h1: "Privacy policy",
     // A page of words with nothing behind it: no screen in the app answers this address, so the built page is
     // the whole thing and build.mjs leaves the game's bundle off it. That also means it reads with JavaScript
     // off, which is what a policy should do.
     standalone: true,
     intro: [
-      "Gridspin is a free football game. It keeps as little about you as it can: an email address if you want an account, the name you pick, and the seasons you play. There are no adverts, no analytics and no trackers, and nothing is sold or handed to anyone else.",
+      "Gridspin is a free football game. It keeps as little about you as it can: an email address if you want an account, the name you pick, and the seasons you play. There are no adverts and no trackers, nothing is sold or handed to anyone else, and the one thing that counts visits sets no cookie and cannot follow you off the site.",
       `Anything below can be undone by writing to ${PRIVACY_CONTACT}.`,
     ],
     sections: PRIVACY_SECTIONS,

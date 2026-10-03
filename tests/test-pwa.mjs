@@ -24,6 +24,11 @@ await runTest("the worker touches this site's own files and nothing else", async
   assert(planFor(req(`${SITE}/c/ABC123?beat=12-5`, { mode: "navigate" }), SITE) === "page", "a challenge link");
   assert(planFor(req(`${SITE}/how-to-play`, { mode: "navigate" }), SITE) === "page", "a page of its own");
   assert(planFor(req(`${SITE}${BUNDLE}`), SITE) === "bundle", "the bundle");
+  // The page counter, which is same-origin and therefore the one third-party-ish thing that could slip
+  // into the store. /privacy says its requests are not kept by the site; this is what makes that true.
+  assert(planFor(req(`${SITE}/_vercel/insights/script.js`), SITE) === null, "the counter script is never stored");
+  assert(planFor(req(`${SITE}/_vercel/insights/view`), SITE) === null, "nor is a counter beacon");
+  assert(planFor(req(`${SITE}/_vercel/insights/view`, { method: "POST" }), SITE) === null, "nor a POSTed one");
   // Guess the Player's pool is a data file the game fetches, and it takes the bundle's rule rather than an
   // asset's: a stale pool is a different daily answer from the one submit-guess checks against, which is the
   // same class of failure as a stale bundle and not the same as last week's icon.

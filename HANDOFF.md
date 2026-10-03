@@ -11,17 +11,21 @@ this, not recalled.
 
 ## 1. Where things stand
 
-**Everything is promoted. Production runs 2.20.4.**
+**Everything is promoted. Production runs 2.20.6.**
 
-**The CAPTCHA is live on STAGING and not yet on production.** Staging is proven end to end: a real person's
+**The CAPTCHA is LIVE ON BOTH.** Proven end to end on each: a real person's
 sign-in passes the challenge, and a tokenless request is refused on `/recover`, `/token` and `/signup` -
 the last being the anonymous sign-in `postAsGuest` makes, which is the whole point of the exercise.
 
-**Production still has NO site key**, so its switch must not be touched until the key is in Vercel and
-redeployed. The four steps are in CLAUDE.md's v2.20.1 Releasing entry, rewritten in v2.20.3 from the two
-vendors' own docs. Production needs its OWN Cloudflare widget (hostnames `gridspin.app`, `www.gridspin.app`
-and the two original `*.vercel.app` addresses that still serve it), and the keys must stay paired - a site
-key from one widget with a secret from the other gives "the anti-robot check didn't pass".
+**Both environments are done.** Each has its own widget, its own key pair, and its own enforcement. What is
+left: **nobody has played a signed-out season on production and watched it post as `Guest_XXXXX`** - the
+exact flow this was built to protect, and the one whose failure is silent. And Turnstile's analytics are
+worth a look in a few days: invisible mode refuses a doubted browser outright, so a steady refusal rate
+means real people are being turned away and the fix is client work in `captcha.mjs`, not a dashboard.
+
+**An agent can no longer sign in to either environment** - Turnstile answers `600010` to an automated
+browser and invisible mode offers no checkbox. Signed-in flows have to go through `tools/ui-harness` (same
+bundle, in-memory mock, no auth) or the owner. The jsdom suite is unaffected.
 
 Two things the rollout found that the docs did not say. The widget mode must be **Invisible**: in Managed
 mode a doubted visitor gets a checkbox, and `captcha.mjs` renders off-screen at `left:-9999px`, so it was
@@ -31,11 +35,11 @@ to Sign In / Providers, where there is no toggle at all.
 
 | | |
 |---|---|
-| `package.json` | `2.20.4` |
-| Production - `www.gridspin.app` | **2.20.4** |
-| Staging | **2.20.4** |
-| `master` head | `45b58ce` |
-| `staging` head | `df45e87`, tagged **`v2.20.4`** |
+| `package.json` | `2.20.6` |
+| Production - `www.gridspin.app` | **2.20.6** |
+| Staging | **2.20.6** |
+| `master` head | `35ccc00` |
+| `staging` head | `8687a3f`, tagged **`v2.20.6`** |
 
 ## The release-readiness list
 

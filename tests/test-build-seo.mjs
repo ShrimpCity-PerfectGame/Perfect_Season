@@ -45,6 +45,16 @@ check("the robots placeholder is gone from the built page", !prod.html.includes(
 check("canonical is the address Vercel serves", attr(prod.html, /<link rel="canonical" href="([^"]+)"/) === "https://www.gridspin.app/", prod.html);
 check("link previews use the same address", attr(prod.html, /property="og:image" content="([^"]+)"/) === "https://www.gridspin.app/og.png");
 check("no noindex", !/name="robots"/.test(prod.html));
+
+// The page counter (v2.21.0). /privacy ends with a sentence saying that it and the terms do not carry it;
+// build.mjs keeps that promise by stripping the tag from every standalone page, and this is the check that
+// the promise and the build still agree. A page of words that counted the person reading it would make the
+// policy false in the one place somebody goes to read what is true.
+const COUNTER = "/_vercel/insights/script.js";
+check("the app shell carries the page counter", prod.html.includes(COUNTER));
+check("so does a page that is a landing page", (prod.pages.howto || "").includes(COUNTER));
+check("the privacy policy does not count its reader", !(prod.pages.privacy || "").includes(COUNTER), prod.pages.privacy ? "tag present" : "page missing");
+check("and neither do the terms", !(prod.pages.terms || "").includes(COUNTER), prod.pages.terms ? "tag present" : "page missing");
 check("no unfilled placeholders", !/%[A-Z_]+%/.test(prod.html), prod.html.match(/%[A-Z_]+%/));
 check("robots.txt allows crawling and names the sitemap", /Allow: \//.test(prod.robots || "") && (prod.robots || "").includes("Sitemap: https://www.gridspin.app/sitemap.xml"), prod.robots);
 check("sitemap lists the home page", (prod.sitemap || "").includes("<loc>https://www.gridspin.app/</loc>"), prod.sitemap);

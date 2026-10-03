@@ -51,5 +51,12 @@
 </noscript>
 <div id="root"></div>
 <script src="build/page.js"></script>
+<!-- Vercel Web Analytics: a page counter, served from this site's own origin by the people who already
+     serve the site. No cookies, and the visitor identifier is a hash that is remade every day, so it
+     cannot join up two days or follow anyone to another site. build.mjs strips it from the two pages of
+     words (/privacy and /terms) the same way it strips the bundle - a policy page should not count the
+     person who came to read what is counted. /privacy says all of this in so many words; if this tag
+     changes, that page changes in the same commit. -->
+<script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

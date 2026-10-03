@@ -1337,6 +1337,25 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.21.0's (the page counter): client only, **plus one dashboard step per environment, which comes FIRST**:
+  enable Web Analytics in that Vercel project (Analytics in the sidebar > Enable), then deploy. Enabling is
+  what adds the `/_vercel/insights/*` routes, so deploying first only 404s the script until the toggle
+  catches up. Staging and production are separate projects.
+
+  **It changes a promise.** `/privacy` said "no adverts, no analytics and no trackers"; the counter makes the
+  middle word false, so the sentence was replaced rather than argued with. What is true and now written down:
+  no cookie, a visitor identified by a hash of the request that is discarded daily, so it cannot join two days
+  or follow anyone off the site. `tests/test-site-pages.mjs` fails if the page claims "no analytics" again.
+  **`/privacy` and `/terms` have the tag stripped** like the bundle - a page read to find out what is
+  collected should not collect - and `tests/test-build-seo.mjs` checks the built HTML of both. The service
+  worker never stores any of it: `planFor`'s allowlist already passed `/_vercel/*` through, and
+  `tests/test-pwa.mjs` pins that now rather than leaving it true by accident.
+
+  **Why it was worth a promise:** Supabase sees database and auth traffic only, and this site is fully static
+  (no `api/`, no functions block), so Vercel's runtime logs - which cover Functions, Middleware and
+  cache-serving static requests - never saw an arrival either. Every number the game kept counted FINISHERS,
+  and a video that brought 300 taps and no finished seasons read exactly like a video nobody watched.
+
   v2.20.6's (losing Guess the Player): client only. No migration, no Edge Function change. The end hero's
   `.rec` slot is the display face at `clamp(96px,24vw,156px)` in `--accent`, which is right for a win's
   number of guesses and wrong for a loss: the em dash standing in for "no score" rendered as a 43x82px lime
@@ -1442,6 +1461,32 @@ suite and still broke the live Leaderboard for every existing account.
   the auth server's `verifyCaptcha` route group (with `/token`, `/recover`, `/resend`, `/magiclink`, `/otp`
   and `/sso`). `/authorize` is NOT in that group, which is exactly why `authSignInWithGoogle` is the one
   call storage.js deliberately does not wrap - the page leaves for Google, which does its own checking.
+
+  **STAGING RUNS CLOUDFLARE'S TEST KEYS, deliberately, and production must never.** Sitekey
+  `1x00000000000000000000BB` (always passes, invisible) in staging's Vercel, secret
+  `1x0000000000000000000000000000000AA` (always passes validation) in staging's Supabase. They are published
+  in Cloudflare's own docs, so **a production project holding that secret would accept any token at all** and
+  the gate would be decorative. Check which keys an environment has before trusting a sign-in test.
+
+  Why test keys rather than turning the check OFF on staging: the setting is the sort of per-environment
+  config this file warns about drifting (it already bit once, with email confirmation on in one environment
+  and off in the other), and an auth change tested against a staging with no gate would meet a real gate on
+  production - the exact class of bug the v2.20.x releases exist to prevent. With the test pair the flow is
+  identical: a token really is minted, sent and verified, a tokenless POST is still refused, and only the
+  verdict is rigged. That is what makes staging drivable by an agent again.
+
+  **Verified with it on 2026-10-02**, and it is the first end-to-end run of the path the whole feature exists
+  for: a full season played signed OUT, `postAsGuest` taking a token through the challenge, Supabase
+  accepting it, and the season posting as `Guest_59A82`. Everything before that had been tested through
+  `/recover`, which is cheap but is not the flow that matters.
+
+  **Once it is ON, an agent cannot sign in to that environment at all**, and that is the check working rather
+  than failing: Turnstile answers `600010` ("bot behavior detected") to an automated browser, and in invisible
+  mode there is no checkbox to fall back on. So from v2.20.x onward, **any signed-in flow on staging has to be
+  driven by the owner or by `tools/ui-harness`**, which runs the same bundle against the in-memory mock and
+  needs no auth. The jsdom tests are unaffected - they never touch a real project. Plan a verification around
+  that: the harness and the suite for anything behind a sign-in, the live site only for what a signed-out
+  visitor can reach.
 
   **Supabase already rate-limits anonymous sign-ins to 30 an hour per IP** (its own default, changeable in
   the dashboard), so the hole this closes is a distributed one rather than one script on one address.
