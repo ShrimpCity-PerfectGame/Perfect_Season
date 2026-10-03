@@ -1337,6 +1337,25 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.21.0's (the page counter): client only, **plus one dashboard step per environment, which comes FIRST**:
+  enable Web Analytics in that Vercel project (Analytics in the sidebar > Enable), then deploy. Enabling is
+  what adds the `/_vercel/insights/*` routes, so deploying first only 404s the script until the toggle
+  catches up. Staging and production are separate projects.
+
+  **It changes a promise.** `/privacy` said "no adverts, no analytics and no trackers"; the counter makes the
+  middle word false, so the sentence was replaced rather than argued with. What is true and now written down:
+  no cookie, a visitor identified by a hash of the request that is discarded daily, so it cannot join two days
+  or follow anyone off the site. `tests/test-site-pages.mjs` fails if the page claims "no analytics" again.
+  **`/privacy` and `/terms` have the tag stripped** like the bundle - a page read to find out what is
+  collected should not collect - and `tests/test-build-seo.mjs` checks the built HTML of both. The service
+  worker never stores any of it: `planFor`'s allowlist already passed `/_vercel/*` through, and
+  `tests/test-pwa.mjs` pins that now rather than leaving it true by accident.
+
+  **Why it was worth a promise:** Supabase sees database and auth traffic only, and this site is fully static
+  (no `api/`, no functions block), so Vercel's runtime logs - which cover Functions, Middleware and
+  cache-serving static requests - never saw an arrival either. Every number the game kept counted FINISHERS,
+  and a video that brought 300 taps and no finished seasons read exactly like a video nobody watched.
+
   v2.20.6's (losing Guess the Player): client only. No migration, no Edge Function change. The end hero's
   `.rec` slot is the display face at `clamp(96px,24vw,156px)` in `--accent`, which is right for a win's
   number of guesses and wrong for a loss: the em dash standing in for "no score" rendered as a 43x82px lime

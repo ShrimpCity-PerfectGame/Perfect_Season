@@ -19,6 +19,41 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.21.0] - 2026-10-02
+
+Client only. No migration, no Edge Function change. **It needs one dashboard step per environment** - see
+below - and it changes a promise this site has made since the privacy policy existed.
+
+**There is a page counter now, and `/privacy` no longer says there are no analytics.** The site could not
+tell whether anybody was arriving. Supabase sees database and auth traffic, so it knows a season was
+finished and has no idea anyone looked at the page; and Vercel's runtime logs cover Functions, Middleware
+and cache-serving static requests, of which this site has only the third - it is fully static, with no
+`api/` directory and no functions block. So every number the game had counted FINISHERS. A video that
+brought three hundred curious taps and no finished seasons was byte-identical to a video nobody watched.
+
+**What was traded, stated plainly.** Vercel Web Analytics sets no cookie and identifies a visitor by a hash
+of the request that is thrown away daily, so it cannot join two days together or follow anyone to another
+site. That is a long way from a pixel - but the old sentence said "no analytics", and the honest thing is to
+replace it rather than argue the word. The new paragraph says what is collected, by whom, and what it cannot
+do, and `tests/test-site-pages.mjs` holds it to that: it fails if the page ever claims "no analytics" again,
+and if it stops naming the counter or the cookie it does not set.
+
+**The two pages of words do not carry it.** `/privacy` and `/terms` have the tag stripped the same way they
+have the bundle stripped, because a page somebody opens to find out what is collected is the one page where
+collecting is in poor taste. It costs nothing measurable - neither is a landing page - and the policy's last
+sentence promises it, so `tests/test-build-seo.mjs` checks the built HTML of both.
+
+**The service worker already did the right thing**, and now says so. `planFor` returns null for anything
+outside a tight allowlist, so `/_vercel/insights/*` is passed straight through and never stored - the
+counter's requests reach Vercel or they do not happen. That was true by design rather than by intention,
+which is exactly the kind of thing that stops being true when somebody widens a regex, so `tests/test-pwa.mjs`
+now pins it for the script, the beacon, and a POSTed beacon.
+
+**Per environment, in this order:** enable Web Analytics in that project's Vercel dashboard (Analytics in the
+sidebar, then Enable), *then* deploy - enabling adds the `/_vercel/insights/*` routes on the next deployment,
+so a deploy that goes first just 404s the script until the toggle catches up. Staging and production are
+separate projects and need it separately.
+
 ## [2.20.6] - 2026-10-02
 
 Client only. No migration, no Edge Function change.

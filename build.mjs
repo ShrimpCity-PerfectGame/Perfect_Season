@@ -158,6 +158,14 @@ for (const page of SITE_PAGES) {
   // bundle, React never mounts to replace them, and the page reads with JavaScript off - which is what a
   // policy should do. Asserted like every other swap, so renaming the script tag can't quietly strip nothing.
   if (page.standalone) out = swap(out, "app bundle", /\s*<script src="\/page\.js"><\/script>/, "");
+  // ...and the counter with it. These two pages are words a person reads to find out what the site does
+  // to them; counting that visit is the one place it would be in poor taste, and it costs almost nothing
+  // because neither page is a landing page. Asserted like every other swap, so removing the tag from
+  // page.html without removing this line fails the build rather than shipping a silent mismatch.
+  if (page.standalone) {
+    out = swap(out, "analytics",
+      /\s*<!-- Vercel Web Analytics:[\s\S]*?-->\s*<script defer src="\/_vercel\/insights\/script\.js"><\/script>/, "");
+  }
   writeFileSync(`public/${page.file}`, out);
 }
 
