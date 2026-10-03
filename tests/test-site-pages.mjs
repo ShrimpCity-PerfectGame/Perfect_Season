@@ -153,7 +153,11 @@ await runTest("the privacy page is a page, not a screen: the app lets the browse
   // v2.21.0 switched a page counter on, and this page used to say there were "no analytics". The promise
   // that replaced it is the sort a site can only keep mechanically, so it is checked mechanically: the words
   // have to describe what is actually loaded, and the page has to be one of the two that does not load it.
-  const words = page.sections.flatMap(([h, ps]) => [h, ...ps]).join(" ");
+  // Everything a reader or a search result sees, not just the body: the lede and the meta description
+  // both carried the old claim, and a test that read only `sections` passed while the top of the page
+  // said the opposite of the middle.
+  const words = [page.h1, page.description, ...(page.intro || []),
+    ...page.sections.flatMap(([h, ps]) => [h, ...ps])].join(" ");
   assert(!/no analytics/i.test(words), "it no longer claims there are no analytics, because there are");
   assert(/counter/i.test(words), "it says there is a counter");
   assert(/sets no cookie/i.test(words), "and what it does not do");

@@ -252,14 +252,14 @@ export const SITE_PAGES = [
     updated: "2026-10-02",
     nav: "Privacy",
     title: "Gridspin privacy policy - what the game keeps",
-    description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no analytics, nothing sold.",
+    description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no trackers, nothing sold.",
     h1: "Privacy policy",
     // A page of words with nothing behind it: no screen in the app answers this address, so the built page is
     // the whole thing and build.mjs leaves the game's bundle off it. That also means it reads with JavaScript
     // off, which is what a policy should do.
     standalone: true,
     intro: [
-      "Gridspin is a free football game. It keeps as little about you as it can: an email address if you want an account, the name you pick, and the seasons you play. There are no adverts, no analytics and no trackers, and nothing is sold or handed to anyone else.",
+      "Gridspin is a free football game. It keeps as little about you as it can: an email address if you want an account, the name you pick, and the seasons you play. There are no adverts and no trackers, nothing is sold or handed to anyone else, and the one thing that counts visits sets no cookie and cannot follow you off the site.",
       `Anything below can be undone by writing to ${PRIVACY_CONTACT}.`,
     ],
     sections: PRIVACY_SECTIONS,
