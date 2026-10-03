@@ -11,7 +11,12 @@ this, not recalled.
 
 ## 1. Where things stand
 
-**Everything is promoted. Production runs 2.20.6.**
+**Everything is promoted. Production runs 2.21.0.**
+
+**gridspin.app counts page views now** (v2.21.0), and `/privacy` changed in the same deployment to say so -
+the old "no analytics" promise is gone, replaced by what is true: no cookie, a visitor identified by a hash
+of the request discarded daily. `/privacy` and `/terms` carry no counter at all, and that is checked in the
+BUILT html by tests/test-build-seo.mjs. Vercel > the project > Analytics is where the numbers are.
 
 **The CAPTCHA is LIVE ON BOTH.** Proven end to end on each: a real person's
 sign-in passes the challenge, and a tokenless request is refused on `/recover`, `/token` and `/signup` -
@@ -35,11 +40,11 @@ to Sign In / Providers, where there is no toggle at all.
 
 | | |
 |---|---|
-| `package.json` | `2.20.6` |
-| Production - `www.gridspin.app` | **2.20.6** |
-| Staging | **2.20.6** |
-| `master` head | `35ccc00` |
-| `staging` head | `8687a3f`, tagged **`v2.20.6`** |
+| `package.json` | `2.21.0` |
+| Production - `www.gridspin.app` | **2.21.0** |
+| Staging | **2.21.0** |
+| `master` head | `a952cc9` |
+| `staging` head | `f0b171d`, tagged **`v2.21.0`** |
 
 ## The release-readiness list
 
