@@ -1,0 +1,405 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One or four</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<style>
+  :root {
+    --navy:#0B1020; --surface:#131A2E; --surface2:#1B2440; --line:#26304D; --line2:#36416A;
+    --cream:#F7F4EA; --muted:#A9B0C3; --lime:#B8F500; --ink:#101114;
+    --win:#6FD49B; --bad:#F2557A;
+    --qb:#F2557A;
+    --display:'Anton',Impact,'Arial Narrow',sans-serif;
+    --body:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  html, body { height:100%; }
+  body { margin:0; background:var(--navy); color:var(--cream); font-family:var(--body);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; padding-block:20px; padding-inline:16px; box-sizing:border-box; }
+  .wrap { width:100%; max-width:400px; display:flex; flex-direction:column; gap:12px; }
+
+  /* Same stage contract as tiktok-ad.html: 9:16, container-type:size so every size below is cqw and
+     the film composes identically at the 400px preview and at the 1080x1920 render. */
+  .stage { position:relative; width:100%; aspect-ratio:9/16; max-width:100%;
+    background: radial-gradient(120% 70% at 50% 20%, #16203c 0%, var(--navy) 62%), var(--navy);
+    border:1px solid var(--line); border-radius:6px; overflow:hidden;
+    container-type:size; box-shadow:0 20px 60px -30px #000; }
+  .stage::before { content:""; position:absolute; inset:0; z-index:5; pointer-events:none;
+    background-image:radial-gradient(circle at 1px 1px, rgba(247,244,234,.05) 1px, transparent 1px);
+    background-size:7px 7px; }
+
+  /* TikTok's UI sits over the video; everything readable lives in this box, and the insets are the ones
+     tiktok-ad.html worked out: SYMMETRIC left/right so a centred stack centres on the FRAME rather than
+     on the frame-minus-the-rail, and a deep bottom inset so the readable band ends above the rail, the
+     caption and the CTA button. See ?guides=1. */
+  .safe { position:absolute; z-index:4; top:7.3%; bottom:32%; left:7%; right:7%;
+    display:grid; align-content:center; justify-items:center; text-align:center; }
+  body.guides .safe { outline:2px dashed rgba(184,245,0,.45); }
+
+  .scene { position:absolute; inset:0; opacity:var(--vis,0); pointer-events:none; }
+  .col { display:grid; justify-items:center; gap:3cqw; width:100%; }
+
+  .kicker { font-family:var(--body); font-weight:800; font-size:3.4cqw; letter-spacing:.24em;
+    text-transform:uppercase; color:var(--lime); }
+  .kicker.dim { color:var(--muted); }
+
+  /* ---- the reel. The product spins 14 ticks at 65ms and settles in 910ms (animateTo in
+     perfect-season.jsx); this mirrors that exactly rather than inventing a flashier one, because the
+     thing being advertised is the real one. ---- */
+  .reel { display:grid; justify-items:center; gap:1cqw; width:100%; }
+  .reel .team { font-family:var(--display); font-size:15cqw; line-height:.84; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; }
+  .reel .team.spinning { color:var(--line2); }
+  .reel .era { font-family:var(--display); font-size:7.4cqw; letter-spacing:.02em; color:var(--lime); }
+  .reel .city { font-family:var(--body); font-weight:700; font-size:3.2cqw; letter-spacing:.2em;
+    text-transform:uppercase; color:var(--muted); }
+  .reel .count { font-family:var(--body); font-weight:700; font-size:3cqw; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--muted); opacity:var(--cnt,0); }
+
+  /* ---- the heading the game prints over a position group ---- */
+  .sec { font-family:var(--body); font-weight:900; font-size:3.4cqw; letter-spacing:.2em;
+    text-transform:uppercase; color:var(--muted); }
+
+  /* ---- a board card, laid out the way the product lays one out: position chip, name, the meta line
+     "<season> <City Team>, <N> games", then stat cells. The product shows NO rating and NO grade while
+     you are drafting - they surface afterwards - so neither appears on these cards. ---- */
+  .cards { width:100%; display:grid; gap:1.8cqw; }
+  .card { background:var(--surface); border:1px solid var(--line); border-top:1.1cqw solid var(--qb);
+    padding:2.4cqw 2.6cqw; text-align:left; display:grid; gap:.9cqw;
+    opacity:var(--s,0); transform:translateY(calc((1 - var(--s,0)) * 14%)); }
+  .card .ps { font-weight:900; font-size:2.6cqw; letter-spacing:.16em; color:var(--qb); }
+  .card .nm { font-family:var(--display); font-size:6.2cqw; line-height:.94; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; }
+  .card .mt { font-size:2.7cqw; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .card .cells { display:flex; gap:5cqw; margin-top:.4cqw; }
+  .card .cell { display:grid; justify-items:start; }
+  .card .cell .n { font-family:var(--display); font-size:6cqw; line-height:1; color:var(--cream);
+    font-variant-numeric:tabular-nums; }
+  .card .cell .l { font-size:2.4cqw; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+  /* The one number that carries the whole joke: Weeden threw more interceptions than touchdowns. */
+  .card .cell.worse .n { color:var(--bad); }
+
+  /* The four-up punchline wants smaller cards - four of them have to fit the same readable band one
+     did, and a name that wraps is a name that reads as a defect. */
+  /* The four-up stack measured 7px short of the safe band, which is inside it but not comfortably:
+     a font that falls back to Impact sets taller and would push the last card under TikTok UI. The
+     tighter gap buys about 13px at 1080 and costs nothing anyone can see. */
+  .cards.four { gap:1.4cqw; }
+  .cards.four .card { padding:1.6cqw 14cqw 1.6cqw 2.2cqw; gap:.5cqw; border-top-width:.8cqw; }
+  .cards.four .card .nm { font-size:4.6cqw; }
+  .cards.four .card .mt { font-size:2.3cqw; }
+  .cards.four .card .cells { gap:7cqw; margin-top:.2cqw; }
+  .cards.four .card .cell .n { font-size:4.4cqw; }
+  .cards.four .card .cell .l { font-size:2cqw; }
+
+  /* ---- the grade, which IS a thing the game shows, on the roster after a draft (grade() in
+     ui-common.jsx). 130.0 is A+; 43.7, 42.8, 42.0 and 41.3 all land in the 40-48 band, so the column
+     of four D's is the game's own verdict rather than a joke written over it. ---- */
+  /* Absolutely positioned, so the card reserves the gutter it sits in rather than printing over the
+     name - overlap.mjs caught exactly that on all four cards from 10.6s, which is the defect that tool
+     exists for and the reason the reserve below is a measured number rather than a guess: the chip is
+     4.6cqw of Anton plus .3em of padding each side, about 9cqw wide, 2.4cqw off the right edge. */
+  .gr { position:absolute; right:2.4cqw; top:50%; transform:translateY(-50%) scale(var(--g,0));
+    font-family:var(--display); font-size:4.6cqw; line-height:1; padding:.12em .3em .16em;
+    border-radius:1.2cqw; }
+  .card { position:relative; }
+  .gr.a { background:var(--lime); color:var(--ink); }
+  .gr.d { background:var(--bad); color:var(--cream); }
+
+  .punch { font-family:var(--display); font-size:13cqw; line-height:.86; text-transform:uppercase;
+    color:var(--cream); }
+  .punch em { font-style:normal; color:var(--lime); }
+
+  /* ---- close ---- */
+  .mark { width:17cqw; height:17cqw; }
+  .word { font-family:var(--display); font-size:12cqw; line-height:.86; text-transform:uppercase; color:var(--cream); }
+  .tag { font-family:var(--body); font-weight:800; font-size:3.6cqw; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--lime); }
+  .url { font-family:var(--display); font-size:7.6cqw; color:var(--cream); }
+  /* The licence asks for the credit wherever the material is used and every page of the site carries the
+     NFL line; the films in build/film/ carried neither until this one. Small, but present and legible. */
+  .credit { font-size:2.1cqw; line-height:1.5; color:var(--muted); max-width:86%; }
+
+  .rev { overflow:hidden; display:block; padding-top:.12em; margin-top:-.12em; }
+  .rev > span { display:block; transform:translateY(calc((1 - var(--r,0)) * 118%)); }
+
+  body.render .stage { width:100vw; height:100vh; aspect-ratio:auto; border:0; border-radius:0; box-shadow:none; }
+  body.render .wrap { max-width:none; width:100vw; gap:0; }
+  body.render .ui { display:none; }
+
+  .ui { display:grid; gap:8px; font-size:12px; color:var(--muted); }
+  .bar { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; cursor:pointer; }
+  .bar i { display:block; height:100%; width:var(--pct,0%); background:var(--lime); }
+  .ui .row { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .ui button { font:inherit; background:var(--surface); color:var(--cream); border:1px solid var(--line);
+    border-radius:4px; padding:4px 10px; cursor:pointer; }
+  .note { font-size:11px; line-height:1.5; }
+  .note code { color:var(--lime); }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin: one spin deals a board with a single quarterback on it, the next deals four, and the best of the four grades D.">
+
+    <!-- s1 - the spin, and the board it lands on -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="kicker" id="s1k">Spin a team. Spin an era.</div>
+      <div class="reel">
+        <div class="team" id="r1team">Packers</div>
+        <div class="era" id="r1era">2011–2015</div>
+        <div class="city" id="r1city">Green Bay</div>
+      </div>
+      <div class="count" id="r1count">18 players on the board</div>
+    </div></div></div>
+
+    <!-- s2 - one quarterback -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="sec">Quarterbacks</div>
+      <div class="cards">
+        <div class="card" id="c1">
+          <div class="ps">QB</div>
+          <div class="nm">Aaron Rodgers</div>
+          <div class="mt">2011 Green Bay Packers, 15 games</div>
+          <div class="cells">
+            <div class="cell"><div class="n">4,643</div><div class="l">Pass yds</div></div>
+            <div class="cell"><div class="n">45</div><div class="l">Pass TD</div></div>
+            <div class="cell"><div class="n">6</div><div class="l">INT</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="kicker" id="s2k">Lucky spin.</div>
+    </div></div></div>
+
+    <!-- s3 - it spins again -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <div class="kicker dim" id="s3k">Or the spin gives you this.</div>
+      <div class="reel">
+        <div class="team" id="r2team">Browns</div>
+        <div class="era" id="r2era">2011–2015</div>
+        <div class="city" id="r2city">Cleveland</div>
+      </div>
+    </div></div></div>
+
+    <!-- s4 - four quarterbacks -->
+    <div class="scene" id="s4"><div class="safe"><div class="col">
+      <div class="sec">Quarterbacks</div>
+      <div class="cards four" id="four">
+        <div class="card" data-i="0">
+          <div class="ps">QB</div>
+          <div class="nm">Brandon Weeden</div>
+          <div class="mt">2012 Cleveland Browns, 15 games</div>
+          <div class="cells">
+            <div class="cell"><div class="n">14</div><div class="l">Pass TD</div></div>
+            <div class="cell worse"><div class="n">17</div><div class="l">INT</div></div>
+          </div>
+          <div class="gr d">D</div>
+        </div>
+        <div class="card" data-i="1">
+          <div class="ps">QB</div>
+          <div class="nm">Colt McCoy</div>
+          <div class="mt">2011 Cleveland Browns, 13 games</div>
+          <div class="cells">
+            <div class="cell"><div class="n">14</div><div class="l">Pass TD</div></div>
+            <div class="cell"><div class="n">11</div><div class="l">INT</div></div>
+          </div>
+          <div class="gr d">D</div>
+        </div>
+        <div class="card" data-i="2">
+          <div class="ps">QB</div>
+          <div class="nm">Josh McCown</div>
+          <div class="mt">2015 Cleveland Browns, 8 games</div>
+          <div class="cells">
+            <div class="cell"><div class="n">12</div><div class="l">Pass TD</div></div>
+            <div class="cell"><div class="n">4</div><div class="l">INT</div></div>
+          </div>
+          <div class="gr d">D</div>
+        </div>
+        <div class="card" data-i="3">
+          <div class="ps">QB</div>
+          <div class="nm">Brian Hoyer</div>
+          <div class="mt">2014 Cleveland Browns, 14 games</div>
+          <div class="cells">
+            <div class="cell"><div class="n">12</div><div class="l">Pass TD</div></div>
+            <div class="cell"><div class="n">13</div><div class="l">INT</div></div>
+          </div>
+          <div class="gr d">D</div>
+        </div>
+      </div>
+    </div></div></div>
+
+    <!-- s5 - the demand -->
+    <div class="scene" id="s5"><div class="safe"><div class="col">
+      <div class="punch"><span class="rev" id="p1"><span>Pick <em>one</em>.</span></span></div>
+      <div class="kicker" id="s5k">Draft your team today</div>
+    </div></div></div>
+
+    <!-- s6 - the close -->
+    <div class="scene" id="s6"><div class="safe"><div class="col">
+      <svg class="mark" id="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">Spin an era. Draft the greats.</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit" id="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      Every figure is the game&rsquo;s own, read out of <code>data/players.json</code> through
+      <code>initGameData()</code>: Packers 2011&ndash;2015 holds exactly <strong>one</strong> quarterback,
+      Browns 2011&ndash;2015 holds <strong>four</strong>, and <code>grade()</code> gives all four a
+      <strong>D</strong> (43.7, 42.8, 42.0, 41.3 all land in the 40&ndash;48 band) against Rodgers&rsquo;
+      <strong>A+</strong>. No rating is printed on a card, because the game prints none while you draft.
+      <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code> fills the viewport.
+    </p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var DUR = 15;
+  var RENDER = /(^|[?&])render=1(&|$)/.test(location.search);
+  if (RENDER) document.body.classList.add("render");
+  if (/(^|[?&])guides=1(&|$)/.test(location.search)) document.body.classList.add("guides");
+
+  // 160 BPM, 1.5s bars, 15.000s = 10 bars - the same grid tiktok-ad.html and score.mjs are written to.
+  // Every cut below lands on a bar, which is what gives a trending sound laid over this something to
+  // agree with: the film carries no audio of its own by design (see the README note in the plan), so the
+  // cuts are the only thing a borrowed track can lock to.
+  var $ = function (id) { return document.getElementById(id); };
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function at(t, s, d) { return clamp01((t - s) / d); }
+  function outCubic(p) { return 1 - Math.pow(1 - p, 3); }
+  function outBack(p) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); }
+
+  var BEATS = [
+    { id: "s1", start: 0,    end: 3    },   // the spin, and Packers 2011-2015
+    { id: "s2", start: 3,    end: 6    },   // one quarterback
+    { id: "s3", start: 6,    end: 7.5  },   // it spins again
+    { id: "s4", start: 7.5,  end: 12   },   // four quarterbacks
+    { id: "s5", start: 12,   end: 13.5 },   // pick one
+    { id: "s6", start: 13.5, end: 15   }    // the close
+  ];
+  var scenes = {}; BEATS.forEach(function (b) { scenes[b.id] = $(b.id); });
+  function hold(t, s, e) {
+    var xf = .08;
+    if (t < s) return 0;
+    if (s > 0 && t < s + xf) return (t - s) / xf;
+    if (t <= e) return 1;
+    if (t < e + xf) return 1 - (t - e) / xf;
+    return 0;
+  }
+
+  // The reel's own numbers: 14 ticks at 65ms, settling in 910ms. Taken from the product rather than
+  // chosen - the whole point of this film is that the thing on screen is the thing you get.
+  var TICK = 0.065, TICKS = 14, SPIN = TICK * TICKS;
+  var FLICK = ["Bears", "Saints", "Titans", "Jets", "Rams", "Chiefs", "Eagles", "Lions",
+               "Bills", "Colts", "Ravens", "Texans", "Vikings", "Giants"];
+  function reelName(t, start, settled) {
+    var p = t - start;
+    if (p >= SPIN) return { text: settled, spinning: false };
+    if (p < 0) return { text: FLICK[0], spinning: true };
+    return { text: FLICK[Math.floor(p / TICK) % FLICK.length], spinning: true };
+  }
+  function paintReel(teamEl, eraEl, cityEl, t, start, settled) {
+    var r = reelName(t, start, settled);
+    teamEl.textContent = r.text;
+    teamEl.classList.toggle("spinning", r.spinning);
+    var landed = clamp01((t - (start + SPIN)) / .22);
+    eraEl.style.opacity = landed;
+    cityEl.style.opacity = landed;
+    teamEl.style.transform = "scale(" + (1 + (1 - landed) * .04) + ")";
+  }
+
+  // The brand mark, drawn from the same path as static/icon.svg. It is a SIXTH hand copy of those
+  // coordinates (CLAUDE.md counts them), so it changes when the others do.
+  // Copied verbatim from static/icon.svg, viewBox and all. CLAUDE.md counts the hand copies of this
+  // artwork across the repo and says to change every one together; `git ls-files -z | xargs -0 grep -l
+  // "M43.57 18.21"` is the command that lists them, and this file now answers to it.
+  $("mark").setAttribute("viewBox", "0 0 64 64");
+  $("mark").innerHTML =
+    '<rect x="2" y="2" width="60" height="60" rx="15" fill="#B8F500" stroke="#101114" stroke-width="3"/>' +
+    '<path d="M43.57 18.21A18 18 0 1 1 20.43 18.21" fill="none" stroke="#101114" stroke-width="6" stroke-linecap="round"/>' +
+    '<path d="M25.9 12.6 16.2 13.9 22.4 22.2Z" fill="#101114"/>' +
+    '<ellipse cx="32" cy="33.5" rx="9.5" ry="6.2" transform="rotate(-35 32 33.5)" fill="#101114"/>' +
+    '<path d="M29 35.8 35 31.2" stroke="#B8F500" stroke-width="1.8" stroke-linecap="round"/>';
+
+  // One definition, same words as the site: DATA_CREDIT in site-pages.mjs, rendered in the app footer and
+  // on every standalone page. A film is a place the material is used, so it carries the credit too.
+  $("credit").textContent =
+    "Player and team statistics from nflverse, used under CC BY 4.0 and modified: the ratings, boards " +
+    "and eras are this game's own. Not affiliated with the NFL.";
+
+  var four = Array.prototype.slice.call($("four").querySelectorAll(".card"));
+  var grades = Array.prototype.slice.call($("four").querySelectorAll(".gr"));
+
+  function render(t) {
+    BEATS.forEach(function (b) { scenes[b.id].style.setProperty("--vis", hold(t, b.start, b.end)); });
+
+    // s1 - the spin lands at 0.91s, then the board is held for two more seconds.
+    paintReel($("r1team"), $("r1era"), $("r1city"), t, 0, "Packers");
+    $("r1count").style.setProperty("--cnt", at(t, 1.5, .3));
+    $("s1k").style.opacity = 1 - at(t, 2.4, .5) * .35;
+
+    // s2 - the single card rises, then the line that names what you are looking at.
+    $("c1").style.setProperty("--s", outCubic(at(t, 3.15, .45)));
+    $("s2k").style.opacity = at(t, 4.5, .4);
+
+    // s3 - the second spin. Same era label, different team: the only thing that changed is the spin.
+    paintReel($("r2team"), $("r2era"), $("r2city"), t, 6.1, "Browns");
+
+    // s4 - four cards, one every 0.3s, then the grades stamp in together at 10.5s. Together, because the
+    // joke is the COLUMN of them rather than any one card.
+    four.forEach(function (el, i) {
+      el.style.setProperty("--s", outCubic(at(t, 7.7 + i * .3, .4)));
+    });
+    var g = outBack(at(t, 10.5, .5));
+    grades.forEach(function (el) { el.style.setProperty("--g", g); });
+
+    // s5
+    $("p1").style.setProperty("--r", outCubic(at(t, 12.1, .5)));
+    $("s5k").style.opacity = at(t, 12.75, .4);
+
+    // s6
+    $("mark").style.transform = "scale(" + (.8 + outBack(at(t, 13.6, .5)) * .2) + ")";
+    $("credit").style.opacity = at(t, 14.1, .5);
+
+    $("fill").style.setProperty("--pct", (t / DUR * 100) + "%");
+    $("clock").textContent = t.toFixed(1) + " / " + DUR.toFixed(1) + "s";
+  }
+
+  var t = 0, playing = !RENDER, last = 0;
+  function frame(now) {
+    var dt = last ? (now - last) / 1000 : 0; last = now;
+    if (playing) { t += dt; if (t >= DUR) t = 0; }
+    render(t);
+    requestAnimationFrame(frame);
+  }
+  if (!RENDER) requestAnimationFrame(frame); else render(0);
+
+  $("play").addEventListener("click", function () {
+    playing = !playing; $("play").textContent = playing ? "pause" : "play";
+  });
+  $("restart").addEventListener("click", function () { t = 0; render(t); });
+  $("bar").addEventListener("click", function (e) {
+    var r = $("bar").getBoundingClientRect();
+    t = Math.max(0, Math.min(DUR, (e.clientX - r.left) / r.width * DUR));
+    playing = false; $("play").textContent = "play"; render(t);
+  });
+
+  // The contract render.mjs drives: set the film to an exact time and lay out that frame.
+  window.__seek = function (x) { t = Math.max(0, Math.min(DUR, x)); render(t); };
+  window.__duration = DUR;
+  render(0);
+})();
+</script>

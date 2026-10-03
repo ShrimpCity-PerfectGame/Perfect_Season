@@ -19,6 +19,35 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+## [2.21.1] - 2026-10-03
+
+Client only. No migration, no Edge Function change.
+
+**The home pill counts players drafted instead of plays** - `🔥 1,260 players drafted` where it read
+`🔥 224 plays`. The owner's call, and the argument for it only became true the day before: the site is now
+being sent strangers, and of the three true numbers `site_totals()` returns, players drafted is the one that
+reads as a game people play. Both are honest - six picks a season rather than one play - but this is
+deliberately the flattering one, which is a fair thing to do on a landing page and worth saying out loud.
+
+**It still ticks live, six at a time**, because six is what a finished season drafts. The Realtime broadcast
+is unchanged and still carries only `kind`, so a tab running an older bundle sends the same payload and goes
+on counting - the arithmetic lives in the client rather than on the wire, and needed no coordination.
+
+**What it gave up:** a mini-game no longer moves it. Guess the Player, Century and Over/Under draft nobody,
+so they add nothing to a count of players drafted. The plays total in the database still counts them; the
+pill simply is not about them any more.
+
+**Never bare "players"**: `1,260 players` would be read as 1,260 PEOPLE, which is eighty times the number of
+accounts and the one phrasing on this pill that would be a lie rather than a shorthand. A test asserts the
+label. It also falls back to the old plays count when `drafted` is null, because a database that never had
+v2.16.0's migration has no such number and a home screen that loses its pill is worse than an older count.
+
+**The guard got sharper rather than weaker.** CLAUDE.md's rule is that these counts must never become one
+another; the old test proved it by showing a mini-game moved one and not the other. Now a single finished
+season moves the Drafts tile by **one** and the pill by **six**, so a change collapsing them into the same
+number cannot pass. Measured at 320/360/375/430: no horizontal overflow and no overlap, and at 320 alone the
+pill row wraps to two lines, which is a graceful wrap at the narrowest phone rather than a defect.
+
 ## [2.21.0] - 2026-10-02
 
 Client only. No migration, no Edge Function change. **It needs one dashboard step per environment** - see

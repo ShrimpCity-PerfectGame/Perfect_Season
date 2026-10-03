@@ -25,25 +25,32 @@ await runTest("the home screen shows a live online-players count once the presen
 });
 
 const playsCount = () => {
-  const pill = [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("plays"));
+  const pill = [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("players drafted"));
   return pill ? parseInt(pill.textContent.replace(/[^\d]/g, ""), 10) : null;
 };
 
-await runTest("the home screen shows a live plays count that ticks up on a broadcast from another tab", async () => {
-  const pill = [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("plays"));
-  assert(pill, "expected a plays-count pill on the home hero, got: " + container.textContent.slice(0, 500));
-  // The label is the point of the change: the pill counts mini-games now, so it may not say "drafts".
-  assert(!/drafts/.test(pill.textContent), "the hero pill counts mini-games too, so it must not say drafts: " + pill.textContent);
+await runTest("the home screen counts players drafted, and ticks six at a time", async () => {
+  const pill = [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("players drafted"));
+  assert(pill, "expected a players-drafted pill on the home hero, got: " + container.textContent.slice(0, 500));
+  // Never bare "players": 1,260 players would be read as 1,260 PEOPLE, eighty times the number of accounts,
+  // and the one phrasing on this pill that would be a lie rather than a shorthand.
+  assert(/players drafted/.test(pill.textContent), "it says what the number counts: " + pill.textContent);
+  assert(!/drafts\b/.test(pill.textContent), "and is not the Drafts tile, which counts something else: " + pill.textContent);
   const startCount = playsCount();
   assert(!Number.isNaN(startCount) && startCount != null, "expected a numeric count, got: " + pill.textContent);
 
-  // No kind at all: what a tab still running the pre-2.16.0 bundle broadcasts. It has to keep counting,
+  // SIX, because that is what a finished season drafts. The broadcast still carries only `kind` - a tab on
+  // an older bundle sends exactly the same payload - so the arithmetic lives here rather than on the wire.
+  // No kind at all is read as a draft, which is what keeps an old tab counting at all.
   // or a deploy leaves the two halves of the site silently not counting each other.
   await broadcast(auth, "site-activity", "draft_finished", {});
-  assert(playsCount() === startCount + 1, `an old tab's broadcast should tick plays by 1 (${startCount} -> ${startCount + 1}), got ${playsCount()}`);
+  assert(playsCount() === startCount + 6, `an old tab's broadcast drafts six (${startCount} -> ${startCount + 6}), got ${playsCount()}`);
 
   await broadcast(auth, "site-activity", "draft_finished", { kind: "minigame" });
-  assert(playsCount() === startCount + 2, `a mini-game should tick plays by 1 (${startCount + 1} -> ${startCount + 2}), got ${playsCount()}`);
+  // A mini-game drafts nobody, so this pill does NOT move - the one thing it gave up when it stopped
+  // counting plays. Guess the Player and Over/Under still tick the plays total in the database.
+  const afterDraft = playsCount();
+  assert(playsCount() === afterDraft, `a mini-game drafts nobody and must not move it (${afterDraft}), got ${playsCount()}`);
 });
 
 const draftsCount = () => playsCount();
@@ -74,7 +81,7 @@ await runTest("a failed totals request leaves the plays count alone instead of s
   assert(draftsCount() === shown, `expected the plays count to stay at ${shown} when totals fail to load, got ${draftsCount()}`);
 });
 
-await runTest("the Stats screen's Drafts tile counts drafts only, while the pill counts plays too", async () => {
+await runTest("the Drafts tile and the hero pill move by different amounts from the same event", async () => {
   // The whole point of carrying `kind` on the broadcast: these two numbers sit on different screens
   // and must not move together. Without it the Drafts tile silently starts counting Guess the Player.
   const draftsTile = () => {
@@ -90,9 +97,9 @@ await runTest("the Stats screen's Drafts tile counts drafts only, while the pill
   await backToModes();
   const startPlays = playsCount();
 
-  // A mini-game moves plays and leaves drafts alone.
+  // A mini-game drafts nobody and is not a draft, so it moves neither.
   await broadcast(auth, "site-activity", "draft_finished", { kind: "minigame" });
-  assert(playsCount() === startPlays + 1, `a mini-game should tick plays, got ${playsCount()} from ${startPlays}`);
+  assert(playsCount() === startPlays, `a mini-game drafts nobody (${startPlays}), got ${playsCount()}`);
   await openStats();
   assert(draftsTile() === startDrafts, `a mini-game must NOT tick the Drafts tile (${startDrafts}), got ${draftsTile()}`);
   await backToModes();
@@ -106,7 +113,9 @@ await runTest("the Stats screen's Drafts tile counts drafts only, while the pill
     const d0 = draftsTile();
     await backToModes();
     await broadcast(auth, "site-activity", "draft_finished", payload);
-    assert(playsCount() === p0 + 1, `${JSON.stringify(payload)} should tick plays, got ${playsCount()} from ${p0}`);
+    // The discrimination, in one event: six players drafted, one draft. A change that collapsed these two
+    // counts into the same number could not pass this line and the next together.
+    assert(playsCount() === p0 + 6, `${JSON.stringify(payload)} drafts six players (${p0} -> ${p0 + 6}), got ${playsCount()}`);
     await openStats();
     assert(draftsTile() === d0 + 1, `${JSON.stringify(payload)} should tick the Drafts tile too (${d0} -> ${d0 + 1}), got ${draftsTile()}`);
     await backToModes();
