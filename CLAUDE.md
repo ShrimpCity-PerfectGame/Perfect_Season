@@ -1062,11 +1062,14 @@ in `tests/helpers.mjs` reimplements both, and `tests/test-runs-sql.mjs` runs the
 and fails if the mock and the SQL return different JSON — **change both together**, and keep every
 `order by` fully tiebroken (the test is how the missing team tiebreak in most-drafted was found).
 
-**`site_totals()` returns counts that must never become one another** (v2.16.0). `runs` is drafts -
+**`site_totals()` returns counts that must never become one another** (v2.16.0; what the home pill
+SHOWS changed in v2.21.1, which is a different thing from the counts merging). `runs` is drafts -
 `profiles.runs + dnf`; `plays` is that plus every mini-game row (sou_runs, builds, century_runs,
 guess_runs) plus every duel somebody joined; `drafted` is players drafted, six a season out of the runs
-log plus every duel pick. The home screen's pill shows **plays** and the Stats screen's Drafts tile
-shows **runs**; they sit on different screens, so the failure mode is one quietly starting to count the
+log plus every duel pick. The home screen's pill shows **drafted** since v2.21.1 (`N players drafted` -
+the site is sent strangers now, and of the three it is the one that reads as a game people play; it ticks
+SIX at a time, because that is what a season drafts, and a mini-game moves it not at all). The Stats
+screen's Drafts tile shows **runs**; they sit on different screens, so the failure mode is one quietly starting to count the
 other. The Realtime broadcast therefore carries a `kind`, and the app keeps `livePlays` and `liveDrafts`
 as two pieces of state off one event.
 

@@ -2528,6 +2528,7 @@ export default function PerfectSeason() {
   // broadcast carries which kind it was, so a Guess the Player round moves the first and not the second.
   const [livePlays, setLivePlays] = useState(null);
   const [liveDrafts, setLiveDrafts] = useState(null);
+  const [livePicks, setLivePicks] = useState(null);
   const siteActivity = useRef(null); // { unsubscribe, broadcastPlayFinished } from subscribeSiteActivity - finish() and the mini-games reach it to announce one
   // Over/Under's daily game state while playing:
   // { date, roundIndex, lives, score, round, guess, correct, deadline, timeLeft }
@@ -2777,7 +2778,10 @@ export default function PerfectSeason() {
       onOnlineCount: setOnline,
       onPlayFinished: (kind) => {
         setLivePlays((n) => (n == null ? n : n + 1));
-        if (kind === "draft") setLiveDrafts((n) => (n == null ? n : n + 1));
+        if (kind === "draft") {
+          setLiveDrafts((n) => (n == null ? n : n + 1));
+          setLivePicks((n) => (n == null ? n : n + 6));
+        }
       },
     });
     return () => { clearInterval(timer.current); authSub?.subscription?.unsubscribe(); siteActivity.current?.unsubscribe(); };
@@ -3323,6 +3327,7 @@ export default function PerfectSeason() {
       if (totals) {
         setLivePlays((n) => (n == null ? totals.plays : Math.max(n, totals.plays)));
         setLiveDrafts((n) => (n == null ? totals.runs : Math.max(n, totals.runs)));
+        if (totals.drafted != null) setLivePicks((n) => (n == null ? totals.drafted : Math.max(n, totals.drafted)));
       }
     } catch (e) {
       setLb({ loading: false, top: [], totals: { runs: 0, perfect: 0, players: 0, plays: 0 }, myRank: -1, error: true, format: boardFormat });
@@ -4969,8 +4974,10 @@ export default function PerfectSeason() {
                 <button className="btn solid xl" onClick={playUnlimited}>Start my season 🏈</button>
               </div>
               <div className="herostats">
-                {livePlays != null && (
-                  <button className="pill" onClick={() => { setView("stats"); if (!siteStats.loaded) loadSiteStats(); }}>🔥 {livePlays.toLocaleString()} plays</button>
+                {(livePicks ?? livePlays) != null && (
+                  <button className="pill" onClick={() => { setView("stats"); if (!siteStats.loaded) loadSiteStats(); }}>
+                    {livePicks != null ? `🔥 ${livePicks.toLocaleString()} players drafted` : `🔥 ${livePlays.toLocaleString()} plays`}
+                  </button>
                 )}
                 {online != null && <span className="pill">🟢 {online} online now</span>}
                 {installOffer && <button className="pill install" onClick={install}>Install Gridspin</button>}
