@@ -46,23 +46,65 @@
   /* ---- the grid. Six columns, the same five the game compares on plus the name. The headings are the
      game's own (GUESS_HEADS in guess.jsx), authored sentence-case and uppercased here as the app does. ---- */
   .grid { width:100%; display:grid; gap:1.7cqw; }
-  .row { display:grid; grid-template-columns:30fr 12fr 15fr 10fr 14fr 12fr; gap:1.7cqw; align-items:stretch; }
-  .head { font-family:var(--body); font-weight:900; font-size:2.9cqw; letter-spacing:.12em;
-    text-transform:uppercase; color:var(--muted); align-self:end; padding-bottom:.6cqw; opacity:var(--h,0); }
-  .head.nm { text-align:left; }
+  /* Track ratios and type sizes are SOLVED, not chosen: every string here was measured at its real font in
+     the render viewport, and these are the largest sizes whose six columns still fit the 929px grid, with
+     20px to spare, CONFIRMED IN A RENDERED FRAME rather than from a probe. Four things had to give together
+     and none of them is enough alone: the gap (1.7cqw spent 92px of the 929 on five gutters), the headings
+     (2.9cqw/.12em made "Division" need 175px against a 135px track, running it into "POS"), the name
+     (5.2cqw Anton needs 366px in a 270px track) and the cells. The name/cell ratio is held at the original
+     1.37 so only the scale moved, not the hierarchy.
+     A WARNING, because it cost a wrong render: do not size this grid from getComputedStyle(el).font. Chrome
+     returns "" for that shorthand whenever font-variant-numeric is set, which .cell sets - so a probe built
+     on it silently measures in a fallback face and reports that 5.2cqw/3.8cqw fits here. It does not. Check
+     a screenshot. */
+  .row { display:grid; grid-template-columns:38fr 11fr 16fr 9fr 16fr 13fr; gap:1.1cqw; align-items:stretch; }
+  /* Every .row is its own grid container, so each resolves the SAME fr tracks against its OWN content - and a
+     bare fr track is minmax(auto, fr), which floors at min-content. "2007↑" needs 159px against a nominal
+     126px and "#21↓" 132px against 108px, so the first two rows stole ~39px from the name column that the
+     last two kept. Measured before this rule: the Team column started at x=325 on the Peterson row and x=362
+     on the Jackson row, a 37px stagger (Pos 62px, Class 67px) down a grid whose entire point is reading one
+     column top to bottom. tiktok-century.html:57 carries this rule defensively; here it is load-bearing. */
+  .row > * { min-width:0; }
+  /* "Division" is the widest heading by a distance and it, not any cell, is what sizes column 3 - at the
+     original 2.9cqw/.12em it needed 175px against a 135px track and ran into "POS". The product has the same
+     problem and solves it the same way, with headings SMALLER than the cells they label (guess.jsx: 10px
+     headings over 13px cells). */
+  .head { font-family:var(--body); font-weight:900; font-size:2.2cqw; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--muted); align-self:end; padding-bottom:.6cqw; opacity:var(--h,0);
+    text-align:center; }
+  /* The name column's heading is the one that sits over left-aligned text, so it alone goes left - the shape
+     guess.jsx gives the real grid. It must NOT carry .nm as well: that class is the same specificity and is
+     declared later, so it won font-family, font-size and color and drew "PLAYER" as a 56px cream display-face
+     word directly above "ADRIAN PETERSON", reading as a fifth guess rather than a column label. */
+  .row > .head:first-child { text-align:left; }
 
   .guess { opacity:var(--s,0); transform:translateY(calc((1 - var(--s,0)) * 26%)); }
+  /* Deliberately NOT nowrap, which is the opposite of what the card films do - and the difference is the
+     layout, not the taste. On a card the name owns the width and nowrap is free; in a six-column grid with
+     min-width:0 above it, nowrap does not make a long name fit, it makes it OVERFLOW into the Team column
+     and sit under a coloured cell. guess.jsx chose wrapping for this grid for a stronger reason still: "an
+     ellipsis hides the half of the name that identifies him - Davant... could be Davante Adams or Davante
+     Davis - where a second line costs a few pixels of height."
+     At 4.4cqw all four of these names fit on one line with room to spare; wrapping is the fallback for a
+     longer one, not the normal case. */
   .nm { display:flex; align-items:center; justify-content:flex-start; text-align:left;
-    font-family:var(--display); font-size:5.2cqw; line-height:1; text-transform:uppercase; color:var(--cream);
+    font-family:var(--display); font-size:4.4cqw; line-height:1; text-transform:uppercase; color:var(--cream);
     padding-right:1cqw; }
+  /* The transparent border is on the BASE so every state is the same height; .miss only changes its colour.
+     With the border on .miss alone, the all-green winning row measured 112.6px against 114.6px for the rows
+     holding a grey cell, and the last row sat 2px out of step. guess.jsx does it this way for this reason. */
   .cell { display:flex; align-items:center; justify-content:center; border-radius:1.2cqw;
-    font-family:var(--body); font-weight:800; font-size:3.8cqw; letter-spacing:.02em;
-    padding:2.9cqw .4cqw; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    font-family:var(--body); font-weight:800; font-size:3.2cqw; letter-spacing:.02em;
+    padding:2.9cqw .4cqw; font-variant-numeric:tabular-nums; white-space:nowrap;
+    border:1px solid transparent; }
   /* Green is exact, orange is close, grey is no - and the grey one is the only state that keeps cream ink.
-     Named gp-* after the product's own classes so a reader can find the original. */
+     The product's classes are gp-c-hit / gp-c-near / gp-c-miss; these are deliberately NOT those names, and
+     the prefix is not cosmetic there - guess.jsx records that unprefixed `hit` collided with the draft card's
+     own .hit and drew a winning row's five cells stacked in one column. A film loads nothing but itself, so
+     the short names are safe here and only here. Do not carry them back toward app code. */
   .cell.hit  { background:var(--win);    color:var(--cell-ink); }
   .cell.near { background:var(--orange); color:var(--cell-ink); }
-  .cell.miss { background:var(--surface2); border:1px solid var(--line); color:var(--cream); opacity:.75; }
+  .cell.miss { background:var(--surface2); border-color:var(--line); color:var(--cream); opacity:.75; }
 
   /* ---- the reveal ---- */
   .solved { font-family:var(--body); font-weight:800; font-size:3.4cqw; letter-spacing:.24em;
@@ -104,7 +146,7 @@
       <div class="kicker" id="s1k">Five guesses. One NFL player.</div>
       <div class="grid" id="grid">
         <div class="row" id="heads">
-          <div class="head nm">Player</div>
+          <div class="head">Player</div>
           <div class="head">Team</div><div class="head">Division</div><div class="head">Pos</div>
           <div class="head">Class</div><div class="head">No.</div>
         </div>

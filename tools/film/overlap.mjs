@@ -44,7 +44,12 @@ for (let i = 0; i <= Math.round(SECONDS / STEP); i++) {
     // .ceil is deliberately absent: it is a 3px rule the stylesheet paints UNDER every number (z-index),
     // so a value passing over it while a bar grows is a line behind a digit, not a digit with a line
     // through it. That guarantee lives in the CSS and is commented there.
-    const FILLED = ".bar, .card, .stamp, .sl, .g";
+    // `.cell` is tiktok-guess.html's painted block, and it was missing here until v2.21.2. The cost was not
+    // theoretical: this tool matched ZERO elements inside that film and still printed "clean", on a frame
+    // whose grid had names overflowing into the Team column and a heading drawn in the wrong face. The film
+    // with the most text-over-block in the repo was the one least checked. Keep adding the names - the header
+    // above already says a clean run means nothing until the film's own vocabulary is in this list.
+    const FILLED = ".bar, .card, .stamp, .sl, .g, .cell";
     const vis = (el) => {
       let o = 1, n = el;
       while (n && n !== document.body) { o *= parseFloat(getComputedStyle(n).opacity || "1"); n = n.parentElement; }
