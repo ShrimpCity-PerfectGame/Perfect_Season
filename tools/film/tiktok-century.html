@@ -159,7 +159,16 @@
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
   function at(t, s, d) { return clamp01((t - s) / d); }
   function outCubic(p) { return 1 - Math.pow(1 - p, 3); }
-  function outBack(p) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); }
+  // The p <= 0 arm is not defensive, it is arithmetic: 1 - 2.70158 + 1.70158 does not cancel in binary, so
+  // the formula returns 2.220446049250313e-16 at p = 0 rather than 0. Invisible on screen, but it left
+  // `transform:scale(calc(.7 + var(--td) * .3))` permanently off the identity matrix, and overlap.mjs skips
+  // any transformed element - so this film's seven biggest numerals were excluded from its .safe check at
+  // every frame, not just while they move. Math.max(0, ...) does NOT fix it: the epsilon is positive.
+  function outBack(p) {
+    if (p <= 0) return 0;
+    var c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+  }
 
   // The roster, in the game's own slot order (CENTURY_SLOTS) with the game's own labels - "RB" twice, never
   // "RB1". Team is the nickname, which is what every Century screen prints. Each `td` is that player's 2025
@@ -214,7 +223,14 @@
     return 0;
   }
 
-  var PICK_AT = [1.5, 2.25, 3.0, 3.75, 4.5, 5.25, 6.0];  // seven names in 4.5s - brisk, like the drafting is
+  // Seven names in 4.5s - brisk, like the drafting is. Indexed by DISPLAYED row, holding the time of that
+  // row's actual pick, so the roster fills in the order the seed really dealt it rather than top to bottom.
+  // That distinction is the mode: Century deals one random team per spin and you fill one slot from it, so
+  // the board decides which slot is even open. centuryTeamsDealt("F0M2MVJJ") is SF, CIN, MIA, DET, CHI, KC,
+  // ARI - McCaffrey first and Mahomes SIXTH. Lighting the rows top to bottom showed a QB-first draft this
+  // seed cannot produce: replayCentury on the displayed order answers not_on_board, and on this one answers
+  // ok with score 99. Derived from century-logic.mjs rather than written out; re-derive it if the seed moves.
+  var PICK_AT = [5.25, 1.5, 3.0, 2.25, 3.75, 6.0, 4.5];
   var NUM_AT = 7.6;                                       // and then every number at once
 
   function render(t) {

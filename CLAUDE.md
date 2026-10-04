@@ -19,10 +19,14 @@ drafts). Descriptive uses of the phrase stay ("a perfect 20–0 season"), and so
 strings like "Perfect season. 20–0.".
 
 **Brand assets:** the mark (the re-spin ↻ arrow around a football) is `static/icon.svg`, drawn again
-as `GridspinMark` in `perfect-season.jsx`. **It is six hand copies across five tracked files, not two**
-(counted in v2.18.3, and they all agree today): `static/icon.svg`, `GridspinMark`, `tools/brand/avatar.mjs`
-twice - `MARK` and `avatarDark` spell the paths out separately - and both films, `tools/film/spin-an-era.html`
-and `tools/film/tiktok-ad.html`, which inline them because a film loads from a `file://` URL with no server.
+as `GridspinMark` in `perfect-season.jsx`. **It is nine hand copies across eight tracked files**
+(six-in-five was the v2.18.3 count and three films have been added since; they all agree today): `static/icon.svg`, `GridspinMark`, `tools/brand/avatar.mjs`
+twice - `MARK` and `avatarDark` spell the paths out separately - and all five films - `tools/film/spin-an-era.html`,
+`tiktok-ad.html`, `tiktok-spin.html`, `tiktok-guess.html` and `tiktok-century.html` - which inline them
+because a film loads from a `file://` URL with no server. Note that constraint rules out ES `import` and
+`fetch`, NOT a classic `<script src>` or a `<link rel=stylesheet>` beside the film: both were measured
+loading fine under the exact puppeteer launch `render.mjs` uses, so a shared `tools/film/kit.js` holding
+the mark is available whenever this count becomes annoying enough to collapse.
 Change every one together; `git ls-files -z | xargs -0 grep -l "M43.57 18.21"` lists them. Only
 `tools/brand/render.mjs` and `tools/app/icons.mjs` genuinely cannot drift, because those two `readFileSync`
 the SVG. `node tools/brand/render.mjs`
@@ -405,7 +409,10 @@ parts that are unlike everything else:
 
 **Guess the Player (v2.13.0, reshaped in v2.14.0).** A daily game of a different shape: one real player a day
 and **five guesses**, each drawing a row that compares **team, division, position, draft class and jersey
-number** with the answer. Green is exact, grey is no, and yellow means something different in every column.
+number** with the answer. Green is exact, grey is no, and the close state means something different in every
+column. That close state is `--orange` on screen (`gp-c-near` in guess.jsx) and a YELLOW square on the share
+card (`SHARE_SQUARE.near` is the 🟨 emoji, there being no orange one) - so prose that calls the cell yellow is
+describing the card, not the game. This paragraph did exactly that until v2.21.2.
 Daily and Practice, behind Mini games. **`GUESS.md` is the reference** - read it before touching any of it. The
 parts unlike everything else:
 

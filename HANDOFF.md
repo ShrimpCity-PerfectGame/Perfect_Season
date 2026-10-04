@@ -11,20 +11,33 @@ this, not recalled.
 
 ## 1. Where things stand
 
-**Everything is promoted. Production runs 2.21.1.**
+**Production runs 2.21.1. Staging is AHEAD of it** - the film work (the three TikTok cuts, the Guess grid
+fix, the Century pick order) is on `staging` and has never been promoted, because none of it is served to
+the site: `build.mjs` copies only `static/` into `public/`, so nothing under `tools/film/` can reach a
+visitor. That is why it carries no version and no changelog entry, which matches how the first film commit
+(`f0b171d`) was handled. Promote it whenever; nothing waits on it.
 
 **The home pill counts PLAYERS DRAFTED, not plays** (v2.21.1) - the owner's call, once the site started
 being sent strangers. It ticks six at a time because that is what a season drafts, and a mini-game no
 longer moves it at all. The guard is sharper than the one it replaced: a single finished season moves the
 Stats Drafts tile by ONE and the pill by SIX, so a change collapsing the two counts cannot pass.
 
-**There are three TikTok films**, all 1080x1920, 15.000s, 900 frames, SILENT so a trending sound can go
-over them: `tools/film/tiktok-spin.html` (a joke - one QB on the Packers board, four on the Browns board,
-every one a D), `tiktok-guess.html` (tension - a grid narrowing onto Lamar Jackson) and
-`tiktok-century.html` (withhold-then-dump - seven stars drafted blind, revealed at 99 of 100). Every
-figure in all three was replayed through the function the Edge Function itself runs. Challenge codes
-**DELI** (the Browns board) and **F0M2MVJJ** (the Century draw) are the per-video attribution, because
-TikTok captions are not clickable and nobody types eight random characters.
+**There are FOUR 9:16 films**, all 1080x1920, 15.000s, 900 frames, SILENT so a trending sound can go over
+them. Three are current: `tools/film/tiktok-spin.html` (a joke - one QB on the Packers board, four on the
+Browns board, every one a D), `tiktok-guess.html` (tension - a grid narrowing onto Lamar Jackson) and
+`tiktok-century.html` (withhold-then-dump - seven stars drafted blind, revealed at 99 of 100). The fourth
+is `tiktok-ad.html`, the original cut, which is still `overlap.mjs`'s DEFAULT `--film` and whose credit
+sits outside `.stage` behind `body.render .credit{display:none}` - so unlike the other three its MP4
+carries no attribution at all. A list that says "three" misses the one the tooling points at by default.
+Every figure in all of them was replayed through the function the Edge Function itself runs.
+
+**Only `DELI` is a code anyone can type.** It deals the Browns 2011-2015 board as a season draft, through
+the Challenge code box on Modes, and it was brute-forced out of all 1.68M four-character codes for exactly
+that reason. **`F0M2MVJJ` is NOT the same kind of thing and must not be put in a caption**: Century has no
+code box at all - `century.jsx` contains no `<input>` - so typing it into the one box that exists starts a
+different game entirely, a six-board season draft from that seed. Its only real door is
+`/c/F0M2MVJJ?mode=century`, a query string, which is unusable as spoken or typed attribution. Treat it as
+the seed that reproduces the film, not as a code to hand an audience.
 
 **gridspin.app counts page views now** (v2.21.0), and `/privacy` changed in the same deployment to say so -
 the old "no analytics" promise is gone, replaced by what is true: no cookie, a visitor identified by a hash
@@ -57,7 +70,8 @@ to Sign In / Providers, where there is no toggle at all.
 | Production - `www.gridspin.app` | **2.21.1** |
 | Staging | **2.21.1** |
 | `master` head | `706a440` |
-| `staging` head | `c6b41c1`, tagged **`v2.21.1`** |
+| `v2.21.1` tag | `6445a36` - the release commit, NOT a staging head |
+| `staging` head | ahead of master by the film commits; `git log master..staging` is the live answer |
 
 ## The release-readiness list
 
@@ -209,7 +223,11 @@ All three are footnoted at the top of CHANGELOG.md.
 - `tools/film/overlap.mjs` measures `spin-an-era.html` now, but its FILLED list does not include that
   film's `.slot` and `.reel-item`, so a clean run there is weaker evidence than a clean run on the ad.
   Noted in its own header.
-- The brand mark is six hand copies in five files. They agree today; `git ls-files -z | xargs -0 grep -l
+- The brand mark is **nine hand copies across eight files** - the v2.18.3 count of six-in-five predates
+  `tiktok-spin.html`, `tiktok-guess.html` and `tiktok-century.html`, each of which inlines it again.
+  CLAUDE.md's "Brand assets" paragraph still says six in five and is wrong by three. Every copy agrees
+  with `static/icon.svg` character for character today, so nothing has drifted - the cost is entirely to
+  whoever changes the artwork next and trusts the count instead of the grep. They agree today; `git ls-files -z | xargs -0 grep -l
   "M43.57 18.21"` lists them.
 
 ### 3.8 Marketing
