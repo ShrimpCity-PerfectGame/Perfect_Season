@@ -691,6 +691,8 @@ node tests/test-error-boundary.mjs # the crash net: a crash shows a screen rathe
 node tests/test-password-reset.mjs # forgetting a password: the way back in, that it never says who is registered, and that the NEW password is what works after
 node tests/test-captcha.mjs        # the anti-robot check: inert without a site key, every protected auth call carries a token, and a blocked challenge says so
 node tests/test-delete-account.mjs  # closing an account in real Postgres: the person erased, the games kept, the opponent untouched
+node tests/test-film.mjs           # the films in tools/film: every value they hand-copy from theme.mjs, static/icon.svg and
+                                   # DATA_CREDIT, plus render.mjs's __seek/__duration contract. Text only - no Chrome, no ffmpeg.
 
 # Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
 # Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.

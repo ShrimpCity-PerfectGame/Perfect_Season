@@ -634,12 +634,15 @@
   if (reduced) { t = DUR; syncPlay(); }
   syncPlay();
   render(t);
+  // Published OUTSIDE the if, so a tool can ask how long this film is without first putting it into
+  // render mode. render.mjs reads it to default --seconds; it used to sit in the arm below, where a
+  // pre-flight load saw nothing and the renderer silently fell back to 30s.
+  window.__duration = DUR;
   if (RENDER) {
     // The whole contract with the renderer: put the film at exactly this second and draw it. Every
     // beat is a pure function of t, so a frame seeked to cold is identical to the same frame played
     // through - which is what makes a frame-by-frame render possible at all.
     window.__seek = function (time) { t = Math.max(0, Math.min(DUR, time)); render(t); };
-    window.__duration = DUR;
   } else {
     requestAnimationFrame(frame);
   }

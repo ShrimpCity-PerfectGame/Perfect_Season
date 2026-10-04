@@ -220,6 +220,19 @@ All three are footnoted at the top of CHANGELOG.md.
 
 - `PROFILES.md:404-408`'s `ui-common.jsx` export list was corrected to thirty, but these files drift by
   their nature - re-count rather than trust any list of exports in a document.
+- **`tests/test-film.mjs` holds every value a film hand-copies** (v2.21.2): the palette against
+  theme.mjs's dark scope, each inlined brand mark against `static/icon.svg` path by path, the credit
+  against `DATA_CREDIT`, and `window.__seek`/`window.__duration` against what render.mjs needs. Text
+  only - no Chrome, no ffmpeg - which is what lets it live in run-all.mjs. It finds films by reading
+  the directory, never from a list, because a list is what went stale about the brand-mark census.
+  Every assertion was mutation-tested. What it CANNOT see is layout: that is overlap.mjs, and
+  ultimately a human looking at a frame - which is how all three Guess defects were actually found,
+  after the measurements said the grid was fine.
+- **`render.mjs` asks the film** (v2.21.2) for anything you leave off: `--seconds` from
+  `window.__duration`, `--width`/`--height` from the `.stage` aspect-ratio read in a pre-flight load
+  before render mode overrides it. Flags you DO pass are honoured unchanged. Before this, a 9:16 cut
+  rendered with no flags came out 1920x1080 and 1800 frames, half of them copies of the frozen close
+  card, and the banner said so in a line printed before any of it was known.
 - `tools/film/overlap.mjs` measures `spin-an-era.html` now, but its FILLED list does not include that
   film's `.slot` and `.reel-item`, so a clean run there is weaker evidence than a clean run on the ad.
   Noted in its own header.

@@ -9,8 +9,13 @@
 // The frames are piped straight into ffmpeg's stdin rather than written to disk - 1800 PNGs of a
 // dot-matrix field is the better part of a gigabyte, and none of it is wanted afterwards.
 //
-//   node tools/film/render.mjs [--out FILE] [--fps 60] [--width 1920] [--height 1080] [--seconds 30]
+//   node tools/film/render.mjs [--out FILE] [--fps 60] [--width W] [--height H] [--seconds N]
 //                              [--film FILE] [--audio FILE] [--stills 1.5,7,22]
+//
+// --width/--height/--seconds are ASKED OF THE FILM when you leave them off: the duration from its
+// window.__duration and the shape from its .stage aspect-ratio. So the four 9:16 cuts render correctly
+// with nothing but --film, and the 30s title sequence still comes out 1920x1080x30 as it always did.
+// Anything you do pass is used exactly as given.
 //
 // Needs: puppeteer-core (already a devDependency), Chrome, and ffmpeg on PATH or at FFMPEG_PATH.
 //
@@ -46,11 +51,21 @@ const arg = (name, fallback) => {
   return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 };
 
-const WIDTH = Number(arg("width", 1920));
-const HEIGHT = Number(arg("height", 1080));
+// Whether the CALLER said so, as opposed to a default being used. Every flag the caller passes is
+// honoured exactly as before; only the ones they leave out get asked of the film. That split is what
+// makes this safe to add to a tool whose existing commands are written down in several places.
+const argGiven = (name) => process.argv.indexOf(`--${name}`) > -1;
+
+// These were const 1920x1080x30 - the title sequence's shape, and the shape of exactly one of the five
+// films. The four 9:16 cuts each had to be told their own dimensions on the command line, and leaving a
+// flag off was silent: a 15s 1080x1920 film rendered as 1800 landscape frames, of which 900 were
+// identical copies of the frozen close card, because __seek clamps at DUR. Every film already publishes
+// window.__duration and already declares its aspect on .stage; nothing read either. Now they do.
+let WIDTH = Number(arg("width", 1920));
+let HEIGHT = Number(arg("height", 1080));
 const FPS = Number(arg("fps", 60));
-const SECONDS = Number(arg("seconds", 30));
-const FRAMES = Math.round(FPS * SECONDS);
+let SECONDS = Number(arg("seconds", 30));
+let FRAMES = Math.round(FPS * SECONDS);
 const OUT = resolve(arg("out", "build/film/gridspin-30s-1080p60.mp4"));
 const FILM = resolve(arg("film", "tools/film/spin-an-era.html"));
 const AUDIO = arg("audio", null) ? resolve(arg("audio", null)) : null;
@@ -101,7 +116,6 @@ async function main() {
   console.log(`ffmpeg  ${ffmpeg}`);
   console.log(`audio   ${AUDIO || "(silent)"}`);
   console.log(`out     ${OUT}`);
-  console.log(`${WIDTH}x${HEIGHT} @ ${FPS}fps, ${SECONDS}s = ${FRAMES} frames\n`);
 
   const browser = await puppeteer.launch({
     executablePath: chrome,
@@ -119,6 +133,29 @@ async function main() {
 
   try {
     const page = await browser.newPage();
+
+    // Ask the film what it is, for anything the caller did not say. This is a PRE-FLIGHT load WITHOUT
+    // ?render=1, which matters: `body.render .stage` overrides aspect-ratio to auto so the stage can
+    // fill the viewport, so the film's own declared shape is only readable before render mode applies.
+    if (!argGiven("seconds") || !argGiven("width") || !argGiven("height")) {
+      // "load", not "domcontentloaded": spin-an-era.html sets window.__duration late enough that the
+      // earlier event read it as absent, and the renderer then fell back to a default that happened to
+      // be right for that one film. A default that is correct by luck is worse than one that is wrong.
+      await page.goto(pathToFileURL(FILM).href, { waitUntil: "load" });
+      const says = await page.evaluate(() => {
+        const stage = document.querySelector(".stage");
+        const ratio = stage ? getComputedStyle(stage).aspectRatio : "";
+        const m = /^\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*$/.exec(ratio || "");
+        return { aspect: m ? Number(m[1]) / Number(m[2]) : null };
+      });
+      // Height follows width, because width is the side a film's cqw units are measured against.
+      if (!argGiven("width") && !argGiven("height") && says.aspect && Math.abs(says.aspect - WIDTH / HEIGHT) > 0.01) {
+        HEIGHT = Math.round(WIDTH / says.aspect);
+        if (says.aspect < 1) { HEIGHT = 1920; WIDTH = Math.round(HEIGHT * says.aspect); }
+        console.log(`size    ${WIDTH}x${HEIGHT} from the film's own .stage aspect-ratio`);
+      }
+    }
+
     await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 1 });
     // ?render=1 strips the transport and sizes the stage to the viewport exactly. The film is ONE
     // file - a separate "render build" is a second thing to keep in step, and it would drift.
@@ -131,6 +168,22 @@ async function main() {
 
     const ready = await page.evaluate(() => typeof window.__seek === "function");
     if (!ready) throw new Error("the film exposes no window.__seek(t) - it cannot be driven frame by frame");
+
+    // The duration is read HERE rather than in the pre-flight, because this is the only page state in
+    // which all five films publish it: spin-an-era.html and tiktok-ad.html set window.__duration inside
+    // their `if (RENDER)` arm, so a page loaded without ?render=1 sees nothing. Both now set it
+    // unconditionally too, but reading it from the render-mode page is what makes this correct for a
+    // film that has not been updated - including any already delivered.
+    if (!argGiven("seconds")) {
+      const says = await page.evaluate(() => (typeof window.__duration === "number" ? window.__duration : null));
+      if (says > 0 && says !== SECONDS) {
+        SECONDS = says;
+        FRAMES = Math.round(FPS * SECONDS);
+        console.log(`length  ${SECONDS}s from the film's own window.__duration`);
+      }
+    }
+    console.log(`${WIDTH}x${HEIGHT} @ ${FPS}fps, ${SECONDS}s = ${FRAMES} frames
+`);
 
     const stills = arg("stills", null);
     if (stills) {
