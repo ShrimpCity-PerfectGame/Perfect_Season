@@ -154,11 +154,13 @@
     return el;
   });
 
-  // How much cap is left at time t: every pick whose row has fully landed has been paid for. Stepping on
-  // the row's own arrival keeps the number and the list telling the same story on every single frame.
+  // How much cap is left at time t. The step is the row's OWN arrival - the same 0.3s its entrance takes -
+  // so the number and the list can never tell different stories on any frame. It said 0.22 and claimed to
+  // be the arrival, which was true to about two frames and false as a sentence.
+  var ARRIVE = 0.3;
   function leftAt(t) {
     var spent = 0;
-    for (var i = 0; i < PICKS.length; i++) if (t >= times[i] + 0.22) spent += PICKS[i].cost;
+    for (var i = 0; i < PICKS.length; i++) if (t >= times[i] + ARRIVE) spent += PICKS[i].cost;
     return CAP - spent;
   }
 
@@ -172,7 +174,7 @@
       { id: "s4", start: 13.5, end: 15   }
     ],
     render: function (t) {
-      rows.forEach(function (el, i) { el.style.setProperty("--s", outCubic(at(t, times[i], 0.3))); });
+      rows.forEach(function (el, i) { el.style.setProperty("--s", outCubic(at(t, times[i], ARRIVE))); });
 
       var left = leftAt(t);
       $("capN").textContent = "$" + left + "M";

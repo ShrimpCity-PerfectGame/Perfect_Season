@@ -21,7 +21,12 @@ import puppeteer from "puppeteer-core";
 
 const arg = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const FILM = resolve(arg("film", "tools/film/tiktok-ad.html"));
-const SECONDS = Number(arg("seconds", 15));
+// Given, or asked of the film. The default used to be a flat 15, which is the TikTok cuts' length and
+// half the title sequence's - so `overlap.mjs --film spin-an-era.html` silently walked the first half
+// of that film and reported clean on the whole of it. Every film publishes window.__duration; nothing
+// read it here until v2.21.2, the same gap render.mjs had.
+const SECONDS_GIVEN = process.argv.includes("--seconds");
+let SECONDS = Number(arg("seconds", 15));
 const STEP = Number(arg("step", 0.1));
 
 const chrome = [process.env.CHROME_PATH, "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -34,6 +39,12 @@ const page = await browser.newPage();
 await page.setViewport({ width: 1080, height: 1920, deviceScaleFactor: 1 });
 await page.goto(`${pathToFileURL(FILM).href}?render=1`, { waitUntil: "load" });
 await page.evaluate(() => document.fonts.ready);
+
+const DUR = await page.evaluate(() => (typeof window.__duration === "number" ? window.__duration : null));
+if (!SECONDS_GIVEN && DUR > 0 && DUR !== SECONDS) {
+  SECONDS = DUR;
+  console.log(`length  ${SECONDS}s from the film's own window.__duration`);
+}
 
 const seen = new Map();   // one entry per distinct defect, with the window of time it is on screen
 for (let i = 0; i <= Math.round(SECONDS / STEP); i++) {
@@ -137,14 +148,31 @@ for (let i = 0; i <= Math.round(SECONDS / STEP); i++) {
 // cannot see runtime wiring: a mutation that left the string in place and broke the assignment passed it
 // clean. This tool already has the film open in a browser at render size, which is the only place that
 // question can actually be answered, so it is answered here.
-await page.evaluate((d) => window.__seek(d - 0.05), SECONDS);
+// Seek to the FILM's own duration, not --seconds: the two differ whenever the caller passes a window
+// shorter or longer than the clip, and seeking to the wrong one checks a frame the close card is not on.
+await page.evaluate((d) => window.__seek(d - 0.05), DUR || SECONDS);
 const credit = await page.evaluate(() => {
   const stage = document.querySelector(".stage");
-  const els = [...stage.querySelectorAll("*")].filter((e) => !e.children.length
-    && /nflverse/i.test(e.textContent) && getComputedStyle(e).display !== "none");
-  if (!els.length) return { ok: false, why: "no element inside .stage carries the nflverse credit on the last frame" };
-  const r = els[0].getBoundingClientRect();
-  if (r.width < 2 || r.height < 2) return { ok: false, why: "the credit element has no size on the last frame" };
+  // Effective opacity up the tree. display:none alone is NOT the test - a scene that is off screen has
+  // opacity 0 and display:block, so checking display found the credit at EVERY timestamp and reported
+  // "on the last frame" without ever looking at one. That is the same vacuous pass this tool shipped
+  // for tiktok-guess.html, now in the check written to stop it.
+  const shown = (el) => {
+    let o = 1;
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const st = getComputedStyle(n);
+      if (st.display === "none" || st.visibility === "hidden") return 0;
+      o *= parseFloat(st.opacity || "1");
+    }
+    return o;
+  };
+  const carriers = [...stage.querySelectorAll("*")]
+    .filter((e) => !e.children.length && /nflverse/i.test(e.textContent));
+  if (!carriers.length) return { ok: false, why: "no element inside .stage carries the nflverse credit at all" };
+  const lit = carriers.filter((e) => shown(e) > 0.5);
+  if (!lit.length) return { ok: false, why: "the credit exists but is not VISIBLE on the final frame (opacity 0)" };
+  const r = lit[0].getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return { ok: false, why: "the credit element has no size on the final frame" };
   return { ok: true };
 });
 if (!credit.ok) {

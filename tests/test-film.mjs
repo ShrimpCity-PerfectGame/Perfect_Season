@@ -234,10 +234,9 @@ await runTest("the element carrying the data credit is not blanked in render mod
     if (usesKit(raw)) {
       assert(/\.credit[\s\S]{0,120}?textContent\s*=\s*CREDIT|credit\.textContent\s*=\s*CREDIT/.test(noComments(KIT_JS)),
         "kit.js holds the credit string but never assigns it to an element - every kit film would render without it");
-    } else if (!new RegExp(want).test(raw.replace(/<script[\s\S]*?<\/script>/g, (m) => m))) {
-      // non-kit films keep it in their own markup or their own script; both are the file itself, so the
-      // carrier search above is already the wiring check.
     }
+    // A non-kit film keeps the credit in its own markup or its own script - either way it is in the file
+    // the carrier search above already read, so that search IS the wiring check for those.
 
     for (const c of carriers) {
       assert(!hidden.has(c),

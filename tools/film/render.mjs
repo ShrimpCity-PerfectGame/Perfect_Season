@@ -148,10 +148,15 @@ async function main() {
         const m = /^\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*$/.exec(ratio || "");
         return { aspect: m ? Number(m[1]) / Number(m[2]) : null };
       });
-      // Height follows width, because width is the side a film's cqw units are measured against.
-      if (!argGiven("width") && !argGiven("height") && says.aspect && Math.abs(says.aspect - WIDTH / HEIGHT) > 0.01) {
-        HEIGHT = Math.round(WIDTH / says.aspect);
-        if (says.aspect < 1) { HEIGHT = 1920; WIDTH = Math.round(HEIGHT * says.aspect); }
+      // ONE given is enough: `--width 540` on a 9:16 film used to produce 540x1080, because the override
+      // only fired when BOTH were absent. That is a 1:2 render of a 9:16 film, silently - the same shape
+      // of bug as rendering a vertical cut at 1920x1080. If the caller names one side they mean that
+      // side; the other follows the film. Only when they name BOTH is the aspect theirs to decide.
+      if (says.aspect && !(argGiven("width") && argGiven("height"))) {
+        if (argGiven("width")) HEIGHT = Math.round(WIDTH / says.aspect);
+        else if (argGiven("height")) WIDTH = Math.round(HEIGHT * says.aspect);
+        else if (says.aspect < 1) { HEIGHT = 1920; WIDTH = Math.round(HEIGHT * says.aspect); }
+        else HEIGHT = Math.round(WIDTH / says.aspect);
         console.log(`size    ${WIDTH}x${HEIGHT} from the film's own .stage aspect-ratio`);
       }
     }
