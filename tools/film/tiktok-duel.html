@@ -25,10 +25,13 @@
      point of a steal is that it is the SAME player, now on the other roster. */
   .card { width:100%; background:var(--surface); border:1px solid var(--line);
     border-left:0.8cqw solid var(--rb); border-radius:1.4cqw; padding:2cqw 1.8cqw; text-align:center;
-    /* 96.9%, not a round 100: measured as the gap between the two bays' inner edges divided by the card's
-       own width, so the card lands in the right bay exactly where it sat in the left. At 103% it finished
-       36px past the bay's edge - close enough to look like a mistake rather than a move. */
-    transform:translateX(calc(var(--m,0) * 96.9%)); }
+    /* The travel is a PIXEL distance measured from the two bays at run time, not a percentage of this
+       card. A percentage was tried twice and was wrong twice: 103% overshot the bay by 36px, and the
+       measured replacement, 96.9%, was correct only until `box-sizing: border-box` landed in kit.css and
+       made the card 90px narrower - at which point the same percentage moved it 66px short and the card
+       settled straddling the gap between the two bays. A percentage of the element's own width silently
+       re-breaks every time that width changes; the distance between two bays does not. */
+    transform:translateX(var(--travel, 0px)); }
   .card .ps { font-weight:900; font-size:2.3cqw; letter-spacing:.14em; color:var(--rb);
     text-transform:uppercase; }
   .card .nm { font-family:var(--display); font-size:4.6cqw; line-height:1.05; text-transform:uppercase;
@@ -121,6 +124,7 @@
   var $ = FILM.$, at = FILM.at, outCubic = FILM.outCubic, outBack = FILM.outBack;
 
   var MOVE_AT = 3.5, MOVE_FOR = 0.75;   // when the card changes hands, and how long it takes
+  var travel = null;                    // px between the two bays; measured on the first frame, then kept
   var S2 = 6.6, S3 = 10.3, S4 = 13.4;
 
   FILM.start({
@@ -136,7 +140,11 @@
       // is what makes it read as taken rather than handed over.
       var m = outBack(at(t, MOVE_AT, MOVE_FOR));
       var card = $("card");
-      card.style.setProperty("--m", m);
+      // Measured once, on the first frame drawn - by which point render.mjs has awaited document.fonts.ready
+      // and the layout is final. Reading it per frame would be layout thrash across 900 frames for a number
+      // that cannot change; hardcoding it is what broke this twice.
+      if (travel === null) travel = $("bayR").getBoundingClientRect().left - $("bayL").getBoundingClientRect().left;
+      card.style.setProperty("--travel", (m * travel).toFixed(2) + "px");
       card.classList.toggle("taken", m > 0.5);
       $("k1").textContent = m > 0.5 ? "Not any more" : "Your best pick so far";
       $("k1").style.opacity = m > 0.5 ? 1 : 1 - at(t, MOVE_AT - 0.3, 0.3) * 0.6;
