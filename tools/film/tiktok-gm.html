@@ -1,0 +1,196 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One million dollar tight end</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<link rel="stylesheet" href="kit.css">
+<style>
+  /* Shell, palette, mark, credit and driver come from kit.css / kit.js. */
+
+  /* ---- the cap ---------------------------------------------------------------------------------------
+     The one element no other film has: a number that only goes down. It is the mode, and it is also why
+     this film works without knowing any football - everyone understands running out of money. */
+  .cap { width:100%; display:grid; gap:1.2cqw; }
+  .capline { display:flex; justify-content:space-between; align-items:baseline; }
+  .caplab { font-size:2.7cqw; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  .capnum { font-family:var(--display); font-size:7cqw; line-height:1; color:var(--lime);
+    font-variant-numeric:tabular-nums; }
+  .capnum.broke { color:var(--orange); }
+  .bar2 { height:1.8cqw; background:var(--surface2); border:1px solid var(--line); border-radius:1cqw;
+    overflow:hidden; }
+  /* Drains left to right. The fill is what is LEFT, so it shrinks - a bar that grows as you spend reads
+     as progress, and spending your cap is not progress. */
+  .bar2 i { display:block; height:100%; width:calc(var(--left,1) * 100%); background:var(--lime);
+    border-radius:1cqw; }
+  .bar2 i.broke { background:var(--orange); }
+
+  /* ---- the roster ------------------------------------------------------------------------------------ */
+  .roster { width:100%; display:grid; gap:1.3cqw; }
+  .pl { display:grid; grid-template-columns:12fr 56fr 18fr; align-items:center; gap:1.8cqw;
+    background:var(--surface); border:1px solid var(--line); border-left:0.9cqw solid var(--pos,var(--line2));
+    border-radius:1.4cqw; padding:1.9cqw 2.2cqw; text-align:left;
+    opacity:var(--s,0); transform:translateX(calc((1 - var(--s,0)) * -6%)); }
+  .pl > * { min-width:0; }
+  .pl .ps { font-weight:900; font-size:2.5cqw; letter-spacing:.14em; color:var(--pos,var(--muted));
+    text-transform:uppercase; }
+  .pl .nm { font-family:var(--display); font-size:3.7cqw; line-height:1; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; }
+  .pl .cost { font-family:var(--display); font-size:4.2cqw; line-height:1; text-align:right;
+    color:var(--cream); font-variant-numeric:tabular-nums; }
+  /* The sixth pick is the joke, so it is the only row that is coloured. */
+  .pl.min { border-color:var(--orange); border-left-color:var(--orange); }
+  .pl.min .cost { color:var(--orange); }
+
+  /* ---- the punchline --------------------------------------------------------------------------------- */
+  .split { display:grid; gap:1.2cqw; width:100%; }
+  .big { font-family:var(--display); font-size:15cqw; line-height:.9; font-variant-numeric:tabular-nums; }
+  .big.spent { color:var(--cream); }
+  .big.rest { color:var(--orange); }
+  .lab { font-size:3cqw; letter-spacing:.06em; color:var(--muted); }
+  .on5 { opacity:var(--a,0); }
+  .on1 { opacity:var(--b,0); }
+
+  /* ---- the result ------------------------------------------------------------------------------------ */
+  .rec { font-family:var(--display); font-size:26cqw; line-height:.86; color:var(--orange);
+    font-variant-numeric:tabular-nums; }
+  .said { font-family:var(--display); font-size:7.4cqw; line-height:1; text-transform:uppercase; color:var(--cream); }
+  .sub { font-size:2.9cqw; color:var(--muted); }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin's GM mode: a hundred and fifty million dollar cap spent on five players, leaving one million for a tight end, and a six and eleven season.">
+
+    <!-- s1 - the cap drains as six players land -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="kicker">GM mode. $150M for six.</div>
+      <div class="cap">
+        <div class="capline"><span class="caplab">Cap left</span><span class="capnum" id="capN">$150M</span></div>
+        <div class="bar2"><i id="capBar"></i></div>
+      </div>
+      <div class="roster" id="roster"></div>
+    </div></div></div>
+
+    <!-- s2 - what that actually meant -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="split on5">
+        <div class="big spent" id="n5">$149M</div>
+        <div class="lab">on five players</div>
+      </div>
+      <div class="split on1">
+        <div class="big rest" id="n1">$1M</div>
+        <div class="lab">on the sixth</div>
+      </div>
+    </div></div></div>
+
+    <!-- s3 - the season that bought -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <div class="rec" id="recN">6–11</div>
+      <div class="said"><span class="rev" id="sRev"><span>Missed the playoffs.</span></span></div>
+      <div class="sub" id="sSub">The cap is the whole game in GM mode.</div>
+    </div></div></div>
+
+    <!-- s4 - the close -->
+    <div class="scene" id="s4"><div class="safe"><div class="col">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">GM mode</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row2">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      A real GM draft on code <code>MEGAAAAA</code>, accepted by <code>replayDraft</code> with
+      <code>{ gm: true }</code> - the same call <code>submit-run</code> makes. <code>GM_CAP</code> is
+      $150M and <code>MIN_SALARY</code> $1M; every price is <code>playerSalary()</code>, which is derived
+      from the player&rsquo;s rating so an era never changes what he costs. It spends exactly $150M, and
+      <code>simulateSeason</code> returns 6&ndash;11, &ldquo;Missed the playoffs&rdquo;, team score 96.6.
+      The six fill in the order the seed DEALS the boards: ARI, HOU, SEA, DEN, NO, GB.
+      <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code> fills the viewport.
+    </p>
+  </div>
+</div>
+
+<script src="kit.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = FILM.$, at = FILM.at, outCubic = FILM.outCubic, outBack = FILM.outBack;
+
+  // Displayed in the order the boards were DEALT, which for this film is also the order the money went -
+  // and that is the point: the cap is spent before you know what is left to buy. The costs are
+  // playerSalary() to the dollar and they total exactly GM_CAP.
+  var PICKS = [
+    { slot: "Flex", pos: "flex", who: "Larry Fitzgerald",   cost: 19 },
+    { slot: "Flex", pos: "flex", who: "Nico Collins",       cost: 16 },
+    { slot: "WR",   pos: "wr",   who: "Jaxon Smith-Njigba", cost: 42 },
+    { slot: "QB",   pos: "qb",   who: "Jay Cutler",         cost: 24 },
+    { slot: "RB",   pos: "rb",   who: "Alvin Kamara",       cost: 48 },
+    { slot: "TE",   pos: "te",   who: "Andrew Quarless",    cost: 1, min: true }
+  ];
+  var CAP = 150;
+  var PICK_0 = 0.9, GAP = 1.05;
+  var times = PICKS.map(function (_, i) { return PICK_0 + i * GAP; });
+
+  var rows = PICKS.map(function (p) {
+    var el = document.createElement("div");
+    el.className = "pl" + (p.min ? " min" : "");
+    el.style.setProperty("--pos", "var(--" + p.pos + ")");
+    el.innerHTML = '<div class="ps">' + p.slot + "</div>" +
+      '<div class="nm">' + p.who + "</div>" +
+      '<div class="cost">$' + p.cost + "M</div>";
+    $("roster").appendChild(el);
+    return el;
+  });
+
+  // How much cap is left at time t: every pick whose row has fully landed has been paid for. Stepping on
+  // the row's own arrival keeps the number and the list telling the same story on every single frame.
+  function leftAt(t) {
+    var spent = 0;
+    for (var i = 0; i < PICKS.length; i++) if (t >= times[i] + 0.22) spent += PICKS[i].cost;
+    return CAP - spent;
+  }
+
+  var S2 = 7.9;
+  FILM.start({
+    duration: 15,
+    beats: [
+      { id: "s1", start: 0,    end: S2   },
+      { id: "s2", start: S2,   end: 11.4 },
+      { id: "s3", start: 11.4, end: 13.5 },
+      { id: "s4", start: 13.5, end: 15   }
+    ],
+    render: function (t) {
+      rows.forEach(function (el, i) { el.style.setProperty("--s", outCubic(at(t, times[i], 0.3))); });
+
+      var left = leftAt(t);
+      $("capN").textContent = "$" + left + "M";
+      $("capN").classList.toggle("broke", left <= 1);
+      $("capBar").style.setProperty("--left", left / CAP);
+      $("capBar").classList.toggle("broke", left <= 1);
+
+      document.querySelector(".on5").style.setProperty("--a", outCubic(at(t, S2 + 0.25, 0.4)));
+      document.querySelector(".on1").style.setProperty("--b", outCubic(at(t, S2 + 1.5, 0.4)));
+      $("n1").style.transform = "scale(" + (0.9 + outBack(at(t, S2 + 1.6, 0.5)) * 0.1) + ")";
+
+      $("recN").style.transform = "scale(" + (0.9 + outBack(at(t, 11.55, 0.5)) * 0.1) + ")";
+      $("sRev").style.setProperty("--r", outCubic(at(t, 12.05, 0.45)));
+      $("sSub").style.opacity = at(t, 12.65, 0.4);
+
+      document.querySelector(".mark").style.transform = "scale(" + (0.84 + outCubic(at(t, 13.6, 0.5)) * 0.16) + ")";
+      document.querySelector(".credit").style.opacity = at(t, 14.1, 0.5);
+    }
+  });
+})();
+</script>

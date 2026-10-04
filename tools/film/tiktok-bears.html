@@ -1,0 +1,170 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Thirty-eight and thirty-seven</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<link rel="stylesheet" href="kit.css">
+<style>
+  /* Shell, palette, mark, credit and driver come from kit.css / kit.js. */
+
+  .head { font-family:var(--display); font-size:7.4cqw; line-height:1; text-transform:uppercase;
+    color:var(--cream); }
+  .era { font-size:3cqw; letter-spacing:.2em; text-transform:uppercase; color:var(--muted); }
+
+  /* ---- the quarterbacks ------------------------------------------------------------------------------
+     Same card shape the draft board uses: position flag, name, the season, then the two numbers that
+     matter for a passer. The grade chip is the app's own letter from ui-common.jsx's grade(), not a
+     judgement made here - which is the difference between a joke and a smear. */
+  .qbs { width:100%; display:grid; gap:1.6cqw; }
+  .qb { display:grid; grid-template-columns:1fr auto; gap:1.6cqw; align-items:center;
+    background:var(--surface); border:1px solid var(--line); border-left:0.9cqw solid var(--qb);
+    border-radius:1.4cqw; padding:2.1cqw 2.4cqw; text-align:left;
+    opacity:var(--s,0); transform:translateX(calc((1 - var(--s,0)) * -6%)); }
+  .qb > * { min-width:0; }
+  .qb .nm { font-family:var(--display); font-size:4.4cqw; line-height:1.05; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; }
+  .qb .yr { font-size:2.4cqw; color:var(--muted); margin-top:.5cqw; }
+  .qb .line { display:flex; gap:3.4cqw; margin-top:1cqw; }
+  .qb .st { display:grid; }
+  .qb .v { font-family:var(--display); font-size:4.2cqw; line-height:1; font-variant-numeric:tabular-nums; }
+  .qb .v.td { color:var(--cream); }
+  .qb .v.int { color:var(--orange); }
+  .qb .k { font-size:1.9cqw; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-top:.4cqw; }
+  .gr { font-family:var(--display); font-size:6.6cqw; line-height:1; color:var(--gd); }
+
+  /* ---- the combined line ----------------------------------------------------------------------------- */
+  .pair { display:grid; gap:.6cqw; }
+  .huge { font-family:var(--display); font-size:19cqw; line-height:.9; font-variant-numeric:tabular-nums; }
+  .huge.td { color:var(--cream); }
+  .huge.int { color:var(--orange); }
+  .cap2 { font-size:3cqw; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  .fade { opacity:var(--a,0); }
+  .fade2 { opacity:var(--b,0); }
+
+  /* ---- the receiver ----------------------------------------------------------------------------------- */
+  .wrcard { width:100%; background:var(--surface); border:1px solid var(--line);
+    border-left:0.9cqw solid var(--wr); border-radius:1.6cqw; padding:3cqw; text-align:left;
+    display:grid; grid-template-columns:1fr auto; gap:2cqw; align-items:center; opacity:var(--w,0); }
+  .wrcard > * { min-width:0; }
+  .wrcard .nm { font-family:var(--display); font-size:6cqw; line-height:1; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; }
+  .wrcard .sub2 { font-size:2.6cqw; color:var(--muted); margin-top:.8cqw; }
+  .wrcard .gr { color:var(--ga); font-size:8cqw; }
+  .point { font-size:3.4cqw; line-height:1.4; color:var(--cream); max-width:90%; opacity:var(--p,0); }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin: the Chicago Bears board from 1999 to 2005 deals four quarterbacks who threw thirty-eight touchdowns and thirty-seven interceptions between them, while the best player on the board is the receiver catching from them.">
+
+    <!-- s1 - the four of them -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="head">Chicago</div>
+      <div class="era">1999 – 2005 · one board</div>
+      <div class="qbs" id="qbs"></div>
+    </div></div></div>
+
+    <!-- s2 - what the four add up to -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="pair fade"><div class="huge td" id="nTd">38</div><div class="cap2">touchdowns</div></div>
+      <div class="pair fade2"><div class="huge int" id="nInt">37</div><div class="cap2">interceptions</div></div>
+    </div></div></div>
+
+    <!-- s3 - and the best player on the board was catching them -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <div class="point" id="pt">The best player on this board<br>is the man they were throwing to.</div>
+      <div class="wrcard" id="wrc">
+        <div>
+          <div class="nm">Marcus Robinson</div>
+          <div class="sub2">WR · 1999 · 84 catches, 1,400 yards, 9 TD</div>
+        </div>
+        <div class="gr">A−</div>
+      </div>
+    </div></div></div>
+
+    <!-- s4 - the close -->
+    <div class="scene" id="s4"><div class="safe"><div class="col">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">Code: RUSH</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row2">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      The <code>CHI|0</code> board, which <code>data/players.json</code> spans 1999&ndash;2005 (the first era
+      window is seven years; the other four are five). Every passing line is that player&rsquo;s row, and every
+      letter is <code>grade()</code> from <code>ui-common.jsx</code> &ndash; two D&rsquo;s and two F&rsquo;s, not
+      four F&rsquo;s, which is what an invented scale said before the real one was read. 38 TD and 37 INT are the
+      four added up. Marcus Robinson at 97.0 is the highest-rated player on the whole board.
+      <code>seededSequence("RUSH")[0]</code> is <code>CHI|0</code>, so the code deals it first.
+      <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code> fills the viewport.
+    </p>
+  </div>
+</div>
+
+<script src="kit.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = FILM.$, at = FILM.at, outCubic = FILM.outCubic, outBack = FILM.outBack;
+
+  // Ordered best-rated first, which is the order that makes the joke land: it gets worse as you read down.
+  var QBS = [
+    { who: "Cade McNown",     yr: "2000 · 10 games", td: 8,  int: 9,  gr: "D" },
+    { who: "Jim Miller",      yr: "2001 · 14 games", td: 13, int: 10, gr: "D" },
+    { who: "Shane Matthews",  yr: "1999 · 8 games",  td: 10, int: 6,  gr: "F" },
+    { who: "Kordell Stewart", yr: "2003 · 9 games",  td: 7,  int: 12, gr: "F" }
+  ];
+  var T0 = 1.15, GAP = 1.15;
+
+  var cards = QBS.map(function (q) {
+    var el = document.createElement("div");
+    el.className = "qb";
+    el.innerHTML =
+      '<div><div class="nm">' + q.who + '</div><div class="yr">' + q.yr + '</div>' +
+        '<div class="line">' +
+          '<div class="st"><div class="v td">' + q.td + '</div><div class="k">Pass TD</div></div>' +
+          '<div class="st"><div class="v int">' + q.int + '</div><div class="k">Int</div></div>' +
+        '</div></div>' +
+      '<div class="gr">' + q.gr + '</div>';
+    $("qbs").appendChild(el);
+    return el;
+  });
+
+  var S2 = 6.9, S3 = 10.6;
+  FILM.start({
+    duration: 15,
+    beats: [
+      { id: "s1", start: 0,    end: S2   },
+      { id: "s2", start: S2,   end: S3   },
+      { id: "s3", start: S3,   end: 13.4 },
+      { id: "s4", start: 13.4, end: 15   }
+    ],
+    render: function (t) {
+      cards.forEach(function (el, i) { el.style.setProperty("--s", outCubic(at(t, T0 + i * GAP, 0.3))); });
+
+      document.querySelector(".fade").style.setProperty("--a", outCubic(at(t, S2 + 0.2, 0.4)));
+      document.querySelector(".fade2").style.setProperty("--b", outCubic(at(t, S2 + 1.45, 0.4)));
+      $("nInt").style.transform = "scale(" + (0.9 + outBack(at(t, S2 + 1.55, 0.5)) * 0.1) + ")";
+
+      $("pt").style.setProperty("--p", outCubic(at(t, S3 + 0.2, 0.45)));
+      $("wrc").style.setProperty("--w", outCubic(at(t, S3 + 1.1, 0.45)));
+
+      document.querySelector(".mark").style.transform = "scale(" + (0.84 + outCubic(at(t, 13.5, 0.5)) * 0.16) + ")";
+      document.querySelector(".credit").style.opacity = at(t, 14.05, 0.5);
+    }
+  });
+})();
+</script>

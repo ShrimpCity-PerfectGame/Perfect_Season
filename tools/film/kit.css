@@ -25,6 +25,12 @@
   --body:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
 }
 
+/* border-box for EVERYTHING, not just body. Without it any `width:100%` element that also has padding is
+   wider than its parent by twice that padding, and in a film the parent is usually .safe - so the element
+   silently sits under TikTok's own UI. tiktok-bears.html's player card was 1004px wide inside a 928px safe
+   area, 38px over each edge, and overlap.mjs caught it as "settles outside .safe". The Duel's two bays had
+   it too and were NOT caught, because that tool does not inspect a box whose only paint is a dashed border. */
+*, *::before, *::after { box-sizing: border-box; }
 html, body { height:100%; }
 body { margin:0; background:var(--navy); color:var(--cream); font-family:var(--body);
   display:flex; flex-direction:column; align-items:center; justify-content:center;
