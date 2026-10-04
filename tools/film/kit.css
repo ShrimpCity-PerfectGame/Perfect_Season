@@ -1,0 +1,93 @@
+/* The shared half of a Gridspin film: the stage, the safe area, the scene crossfade, the close card and
+   the preview transport. Everything here was identical in all of them - the review that prompted this
+   measured 132 of ~215 non-blank lines the same between two films written the same day - so it lived as
+   four or five hand copies that could, and did, disagree.
+
+   A film loads from a file:// URL with no server, which rules out `import` and `fetch`. It does NOT rule
+   out a plain <link rel=stylesheet> or <script src> beside the film: both were measured loading fine under
+   the exact puppeteer launch tools/film/render.mjs uses. CLAUDE.md said otherwise for several releases and
+   was wrong, which is how the brand mark reached nine hand copies across eight files.
+
+   The three films already posted (tiktok-spin, tiktok-guess, tiktok-century) deliberately do NOT use this.
+   They are delivered work; re-pointing them at a shared stylesheet would put already-published output at
+   the mercy of an edit made for film six. New films build on this; those three stay frozen.
+
+   Colours are theme.mjs's DARK scope, which is the scope the app itself takes while any of these modes is
+   on screen. tests/test-film.mjs holds every one of them to theme.mjs, so this copy cannot drift silently.
+   It is still a copy - the constraint above is real - but now there is exactly one of it. */
+
+:root {
+  --navy:#0B1020; --surface:#131A2E; --surface2:#1B2440; --line:#26304D; --line2:#36416A;
+  --cream:#F7F4EA; --muted:#A9B0C3; --lime:#B8F500; --ink:#101114;
+  --win:#6FD49B; --orange:#FF7043;
+  --qb:#F2557A; --rb:#2FD3B5; --wr:#5AA9FF; --te:#F5A04A; --flex:#B18CFF;
+  --display:'Anton',Impact,'Arial Narrow',sans-serif;
+  --body:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+
+html, body { height:100%; }
+body { margin:0; background:var(--navy); color:var(--cream); font-family:var(--body);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:14px; padding-block:20px; padding-inline:16px; box-sizing:border-box; }
+.wrap { width:100%; max-width:400px; display:flex; flex-direction:column; gap:12px; }
+
+/* container-type:size is what makes every size in a film a cqw - one number that scales from the 400px
+   preview to the 1080px render with no breakpoints. render.mjs reads this element's aspect-ratio to size
+   the render, which is why the declaration has to be here and not only under body.render. */
+.stage { position:relative; width:100%; aspect-ratio:9/16; max-width:100%;
+  background: radial-gradient(120% 70% at 50% 20%, #16203c 0%, var(--navy) 62%), var(--navy);
+  border:1px solid var(--line); border-radius:6px; overflow:hidden;
+  container-type:size; box-shadow:0 20px 60px -30px #000; }
+.stage::before { content:""; position:absolute; inset:0; z-index:5; pointer-events:none;
+  background-image:radial-gradient(circle at 1px 1px, rgba(247,244,234,.05) 1px, transparent 1px);
+  background-size:7px 7px; }
+
+/* The safe box tiktok-ad.html worked out and every film has used since: symmetric left/right so a centred
+   stack centres on the FRAME, and a deep bottom inset so the readable band ends above TikTok's caption and
+   its right-hand rail. ?guides=1 draws it. If TikTok moves that furniture, this is the one place to change
+   now - it used to be five. */
+.safe { position:absolute; z-index:4; top:7.3%; bottom:32%; left:7%; right:7%;
+  display:grid; align-content:center; justify-items:center; text-align:center; }
+body.guides .safe { outline:2px dashed rgba(184,245,0,.45); }
+
+.scene { position:absolute; inset:0; opacity:var(--vis,0); pointer-events:none; }
+.col { display:grid; justify-items:center; gap:2.6cqw; width:100%; }
+
+.kicker { font-family:var(--body); font-weight:800; font-size:3.4cqw; letter-spacing:.24em;
+  text-transform:uppercase; color:var(--lime); }
+.kicker.dim { color:var(--muted); }
+
+/* A line that rises into view out of nothing. The overflow:hidden is the whole trick; the padding/margin
+   pair stops a display face's own overshoot being clipped at the top while it does so. */
+.rev { overflow:hidden; display:block; padding-top:.12em; margin-top:-.12em; }
+.rev > span { display:block; transform:translateY(calc((1 - var(--r,0)) * 118%)); }
+
+/* ---- the close card ---------------------------------------------------------------------------------
+   The credit is NOT hidden under body.render, and that is a fix rather than a style. spin-an-era.html and
+   tiktok-ad.html both carry `body.render .credit { display:none }`, so the nflverse attribution is in their
+   source, passes a source-reading test, and is absent from the MP4 anyone actually watches. DATA.md makes
+   that attribution a licence term, not a preference: CC BY 4.0 asks for it wherever the material is used,
+   and a published video is a use. Any film built on this kit carries it in frame. */
+.mark { width:17cqw; height:17cqw; }
+.word { font-family:var(--display); font-size:12cqw; line-height:.86; text-transform:uppercase; color:var(--cream); }
+.tag { font-family:var(--body); font-weight:800; font-size:3.6cqw; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--lime); }
+.url { font-family:var(--display); font-size:7.6cqw; color:var(--cream); }
+.credit { font-size:2.1cqw; line-height:1.5; color:var(--muted); max-width:86%; }
+
+/* ---- render mode ------------------------------------------------------------------------------------
+   ?render=1 strips the transport and lets the stage fill the viewport exactly. One file serves both the
+   preview and the render on purpose: a separate "render build" is a second thing to keep in step. */
+body.render .stage { width:100vw; height:100vh; aspect-ratio:auto; border:0; border-radius:0; box-shadow:none; }
+body.render .wrap { max-width:none; width:100vw; gap:0; }
+body.render .ui { display:none; }
+
+/* ---- the preview transport (never rendered) ---------------------------------------------------------- */
+.ui { display:grid; gap:8px; font-size:12px; color:var(--muted); }
+.bar { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; cursor:pointer; }
+.bar i { display:block; height:100%; width:var(--pct,0%); background:var(--lime); }
+.ui .row2 { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.ui button { font:inherit; background:var(--surface); color:var(--cream); border:1px solid var(--line);
+  border-radius:4px; padding:4px 10px; cursor:pointer; }
+.note { font-size:11px; line-height:1.5; }
+.note code { color:var(--lime); }

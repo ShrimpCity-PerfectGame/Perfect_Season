@@ -26,6 +26,28 @@ const FILMS = readdirSync(DIR).filter((f) => f.endsWith(".html")).sort();
 const read = (f) => readFileSync(`${DIR}/${f}`, "utf8");
 const hex = (v) => String(v || "").trim().toLowerCase();
 
+// Since v2.21.2 a film may link tools/film/kit.css and kit.js instead of carrying the palette, the brand
+// mark, the licence credit and the driver itself. Every assertion below is about what a film EFFECTIVELY
+// contains, so it reads the same whether a value is inlined or inherited - which is the point: the checks
+// do not get weaker because the duplication was removed, and the three already-posted films (which do not
+// use the kit, and must not, being delivered work) are held to exactly what they were.
+const KIT_CSS = readFileSync(`${DIR}/kit.css`, "utf8");
+const KIT_JS = readFileSync(`${DIR}/kit.js`, "utf8");
+const usesKit = (src) => /src="kit\.js"/.test(src);
+const effective = (f) => {
+  const src = read(f);
+  return usesKit(src) ? src + "\n" + KIT_CSS + "\n" + KIT_JS : src;
+};
+
+await runTest("a film either carries the shell itself or links BOTH halves of the kit", async () => {
+  for (const f of FILMS) {
+    const src = read(f);
+    if (!usesKit(src)) continue;
+    assert(/href="kit\.css"/.test(src), `${f} loads kit.js but not kit.css - it will drive with no stage`);
+    assert(/FILM\.start\(/.test(src), `${f} loads the kit but never calls FILM.start`);
+  }
+});
+
 // Every film is found by reading the directory, never from a list in this file. A list is the thing that
 // goes stale the moment somebody adds film six, which is exactly how CLAUDE.md's brand-mark census came to
 // be wrong by three.
@@ -42,11 +64,11 @@ await runTest("every film in tools/film is covered, and there is more than one",
 // identical copies of the frozen final frame. It looked right in the log and was wrong in the file.
 await runTest("every film publishes __seek and __duration, and __duration is not behind if (RENDER)", async () => {
   for (const f of FILMS) {
-    const src = read(f);
-    assert(/window\.__seek\s*=/.test(src), `${f}: no window.__seek - render.mjs cannot drive it`);
-    assert(/window\.__duration\s*=/.test(src), `${f}: no window.__duration - render.mjs cannot size the render`);
+    const src = effective(f);
+    assert(/window\.__seek\s*=|global\.__seek\s*=/.test(src), `${f}: no window.__seek - render.mjs cannot drive it`);
+    assert(/window\.__duration\s*=|global\.__duration\s*=/.test(src), `${f}: no window.__duration - render.mjs cannot size the render`);
 
-    const dur = src.indexOf("window.__duration");
+    const dur = Math.max(src.indexOf("window.__duration"), src.indexOf("global.__duration"));
     const arm = src.indexOf("if (RENDER) {");
     if (arm > -1 && dur > arm) {
       // Only a problem if it is INSIDE that block; find where the block ends by matching braces.
@@ -77,7 +99,7 @@ await runTest("every film's palette matches theme.mjs's dark scope", async () =>
   const dark = THEME.dark;
   let checked = 0;
   for (const f of FILMS) {
-    const src = read(f);
+    const src = effective(f);
     for (const [name, token] of Object.entries(TOKEN_FOR)) {
       const m = new RegExp(`--${name}\\s*:\\s*(#[0-9a-fA-F]{3,8})`).exec(src);
       if (!m) continue;
@@ -108,7 +130,7 @@ await runTest("every inlined brand mark matches static/icon.svg exactly", async 
   const DRAWS_MARK = /<svg[^>]*viewBox="0 0 64 64"|(?:id|class)="mark"/;
   let films = 0;
   for (const f of FILMS) {
-    const src = read(f);
+    const src = effective(f);
     if (!DRAWS_MARK.test(src)) continue;   // this film does not draw the mark
     films++;
     for (const d of paths) {
@@ -132,7 +154,7 @@ await runTest("every film's data credit is DATA_CREDIT, flattened", async () => 
 
   let films = 0;
   for (const f of FILMS) {
-    const src = read(f);
+    const src = effective(f);
     if (!/nflverse/i.test(src)) continue;
     films++;
     const text = squash(src.replace(/<[^>]*>/g, " ").replace(/"\s*\+\s*"/g, ""));
@@ -157,6 +179,34 @@ await runTest("no film loads an image or an NFL-CDN asset", async () => {
       assert(/^(fonts\.googleapis\.com|fonts\.gstatic\.com|github\.com|creativecommons\.org|gridspin\.app|www\.w3\.org)$/.test(host),
         `${f} reaches ${host}; a film may only load Google Fonts, and may only LINK the credit's own addresses`);
     }
+  }
+});
+
+// --- the credit has to survive into the FRAME -------------------------------------------------------
+//
+// The gap this closes: a film can carry the nflverse credit in its source, pass every check above, and
+// still render an MP4 with no attribution on it, because `body.render .credit { display:none }` hides it
+// in exactly the mode that produces the video. Two films do that, and a source-reading test is blind to it
+// by construction - the same "assertion that touches no door" shape CLAUDE.md records three times.
+//
+// spin-an-era.html and tiktok-ad.html are listed as KNOWN-WRONG rather than quietly skipped. Both predate
+// the kit, both have delivered output, and changing what their frames contain is a decision about
+// published work rather than a test fix - so the debt is named here where it is visible, not left to be
+// rediscovered. Any film built on kit.css inherits a credit that is NOT hidden, so this cannot recur.
+await runTest("a film's data credit is visible in render mode, not just present in the source", async () => {
+  const KNOWN_WRONG = ["spin-an-era.html", "tiktok-ad.html"];
+  // Comments stripped first, and that is not fussiness: kit.css EXPLAINS this bug by quoting the offending
+  // rule verbatim, so a regex over the raw text finds the explanation and fails every film built on the kit.
+  // The first run of this check did exactly that.
+  const noComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  for (const f of FILMS) {
+    const src = noComments(effective(f));
+    const hidden = /body\.render\s+\.credit\s*\{[^}]*display\s*:\s*none/.test(src);
+    if (KNOWN_WRONG.includes(f)) {
+      assert(hidden, `${f} is on the known-wrong list but no longer hides its credit - take it off the list`);
+      continue;
+    }
+    assert(!hidden, `${f} hides .credit under body.render, so its MP4 ships with no nflverse attribution`);
   }
 });
 
