@@ -11,7 +11,20 @@ this, not recalled.
 
 ## 1. Where things stand
 
-**Everything is promoted. Production runs 2.21.0.**
+**Everything is promoted. Production runs 2.21.1.**
+
+**The home pill counts PLAYERS DRAFTED, not plays** (v2.21.1) - the owner's call, once the site started
+being sent strangers. It ticks six at a time because that is what a season drafts, and a mini-game no
+longer moves it at all. The guard is sharper than the one it replaced: a single finished season moves the
+Stats Drafts tile by ONE and the pill by SIX, so a change collapsing the two counts cannot pass.
+
+**There are three TikTok films**, all 1080x1920, 15.000s, 900 frames, SILENT so a trending sound can go
+over them: `tools/film/tiktok-spin.html` (a joke - one QB on the Packers board, four on the Browns board,
+every one a D), `tiktok-guess.html` (tension - a grid narrowing onto Lamar Jackson) and
+`tiktok-century.html` (withhold-then-dump - seven stars drafted blind, revealed at 99 of 100). Every
+figure in all three was replayed through the function the Edge Function itself runs. Challenge codes
+**DELI** (the Browns board) and **F0M2MVJJ** (the Century draw) are the per-video attribution, because
+TikTok captions are not clickable and nobody types eight random characters.
 
 **gridspin.app counts page views now** (v2.21.0), and `/privacy` changed in the same deployment to say so -
 the old "no analytics" promise is gone, replaced by what is true: no cookie, a visitor identified by a hash
@@ -40,11 +53,11 @@ to Sign In / Providers, where there is no toggle at all.
 
 | | |
 |---|---|
-| `package.json` | `2.21.0` |
-| Production - `www.gridspin.app` | **2.21.0** |
-| Staging | **2.21.0** |
-| `master` head | `a952cc9` |
-| `staging` head | `f0b171d`, tagged **`v2.21.0`** |
+| `package.json` | `2.21.1` |
+| Production - `www.gridspin.app` | **2.21.1** |
+| Staging | **2.21.1** |
+| `master` head | `706a440` |
+| `staging` head | `c6b41c1`, tagged **`v2.21.1`** |
 
 ## The release-readiness list
 
