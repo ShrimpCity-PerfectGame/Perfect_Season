@@ -225,6 +225,12 @@
   .word { font-family: var(--display); font-size: 9.6cqw; color: var(--cream); text-transform: uppercase; letter-spacing: .01em; }
   .tagline { font-size: 2.1cqw; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; font-weight: 600; }
   .url { font-family: var(--display); font-size: 2.8cqw; color: var(--lime); letter-spacing: .06em; }
+  /* IN FRAME, and deliberately not the `.credit` further down - that one is a production note about this
+     film and is rightly hidden under body.render, like the transport. This is the nflverse attribution,
+     which DATA.md makes a licence term rather than a preference: CC BY 4.0 asks for it wherever the
+     material is used, and a published video is a use. This film names Randy Moss, Mahomes and Derrick
+     Henry, so it uses the material - and carried no attribution at all until v2.21.2. */
+  .incredit { font-size: 1.05cqw; line-height: 1.5; color: var(--muted); max-width: 54%; margin-top: 1.4cqw; }
 
   /* ---- transport ------------------------------------------------------------------ */
   .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -349,6 +355,7 @@
       </div>
       <div class="tagline">Spin an era. Draft the greats. Go 20&ndash;0.</div>
       <div class="url">gridspin.app</div>
+      <div class="incredit">Player and team statistics from nflverse, used under CC BY 4.0 and modified: the ratings, boards and eras are this game's own. Not affiliated with the NFL.</div>
     </section>
   </div>
 

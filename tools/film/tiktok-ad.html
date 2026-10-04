@@ -130,6 +130,10 @@
   .word { font-family:var(--display); font-size:12cqw; text-transform:uppercase; color:var(--cream); }
   .url { font-family:var(--display); font-size:6.4cqw; color:var(--lime); letter-spacing:.04em; }
   .free { font-size:3.1cqw; color:var(--muted); font-weight:600; letter-spacing:.1em; text-transform:uppercase; }
+  /* IN FRAME, and not the `.credit` below - that one is a production note and is rightly hidden under
+     body.render with the transport. This is the nflverse attribution. CC BY 4.0 asks for it wherever the
+     material is used; this film names real players and prints a rating, and carried none until v2.21.2. */
+  .incredit { font-size:2.1cqw; line-height:1.5; color:var(--muted); max-width:86%; margin-top:2cqw; }
 
   .transport { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .btn { font:inherit; font-weight:600; font-size:13px; color:var(--cream); background:var(--surface2);
@@ -241,6 +245,7 @@
       </div>
       <div class="url">gridspin.app</div>
       <div class="free">Free &middot; in your browser &middot; no signup</div>
+      <div class="incredit">Player and team statistics from nflverse, used under CC BY 4.0 and modified: the ratings, boards and eras are this game's own. Not affiliated with the NFL.</div>
     </div></div></section>
   </div>
 

@@ -132,10 +132,31 @@ for (let i = 0; i <= Math.round(SECONDS / STEP); i++) {
     if (e) e.last = t; else seen.set(key, { ...h, first: t, last: t });
   }
 }
+// The nflverse attribution has to be ON THE LAST FRAME, not merely in the file. tests/test-film.mjs holds
+// the STRING to DATA_CREDIT and checks nothing blanks its element in render mode, but it reads text and so
+// cannot see runtime wiring: a mutation that left the string in place and broke the assignment passed it
+// clean. This tool already has the film open in a browser at render size, which is the only place that
+// question can actually be answered, so it is answered here.
+await page.evaluate((d) => window.__seek(d - 0.05), SECONDS);
+const credit = await page.evaluate(() => {
+  const stage = document.querySelector(".stage");
+  const els = [...stage.querySelectorAll("*")].filter((e) => !e.children.length
+    && /nflverse/i.test(e.textContent) && getComputedStyle(e).display !== "none");
+  if (!els.length) return { ok: false, why: "no element inside .stage carries the nflverse credit on the last frame" };
+  const r = els[0].getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return { ok: false, why: "the credit element has no size on the last frame" };
+  return { ok: true };
+});
+if (!credit.ok) {
+  console.log(`ATTRIBUTION: ${credit.why}`);
+  console.log("  CC BY 4.0 asks for it wherever the material is used, and a published video is a use (DATA.md).");
+  process.exit(1);
+}
+
 await browser.close();
 
 const found = [...seen.values()];
-if (!found.length) { console.log(`clean: no overlaps across ${SECONDS}s sampled every ${STEP}s`); process.exit(0); }
+if (!found.length) { console.log(`clean: no overlaps and the credit is on the last frame, across ${SECONDS}s sampled every ${STEP}s`); process.exit(0); }
 console.log(`${found.length} defect(s) across ${SECONDS}s sampled every ${STEP}s:\n`);
 for (const f of found) console.log(`  [${f.first.toFixed(1)}s-${f.last.toFixed(1)}s] ${f.kind}\n     ${f.a}\n     ${f.b}\n`);
 process.exit(1);

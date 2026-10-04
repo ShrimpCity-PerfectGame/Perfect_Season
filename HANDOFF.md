@@ -235,6 +235,16 @@ All three are footnoted at the top of CHANGELOG.md.
 
 - `PROFILES.md:404-408`'s `ui-common.jsx` export list was corrected to thirty, but these files drift by
   their nature - re-count rather than trust any list of exports in a document.
+- **Every film carries the nflverse credit IN FRAME** (v2.21.2). `spin-an-era.html` and `tiktok-ad.html`
+  carried none at all - the word did not appear in either file - while both name Randy Moss, Mahomes and
+  Derrick Henry and one prints a rating. The earlier diagnosis in this file was WRONG and worth knowing:
+  it said their credit was hidden by `body.render .credit{display:none}`. That rule is correct - their
+  `.credit` is a production NOTE about the film, outside `.stage`, hidden with the transport. The
+  attribution was simply absent. Both now carry `.incredit` inside the close card, and both were
+  re-rendered (the 30s one keeps its score).
+- **`overlap.mjs` now fails a film whose credit is not on the last frame**, and that is where the check
+  belongs: `tests/test-film.mjs` reads text, so it cannot see runtime wiring - a mutation that left the
+  string in kit.js and broke the assignment passed it clean. The browser tool catches exactly that.
 - **`tests/test-film.mjs` holds every value a film hand-copies** (v2.21.2): the palette against
   theme.mjs's dark scope, each inlined brand mark against `static/icon.svg` path by path, the credit
   against `DATA_CREDIT`, and `window.__seek`/`window.__duration` against what render.mjs needs. Text

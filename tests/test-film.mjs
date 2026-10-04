@@ -152,16 +152,19 @@ await runTest("every film's data credit is DATA_CREDIT, flattened", async () => 
     + DATA_CREDIT.licence.text + DATA_CREDIT.after;
   const squash = (s) => s.replace(/\s+/g, " ").trim();
 
+  // NO skipping a film that fails to mention nflverse. That `continue` is how the two films carrying no
+  // attribution AT ALL went unexamined: they were silently dropped from the loop and the `films >= 3` floor
+  // was met by the three that did have it. Every film here shows real players off nflverse data, so every
+  // film owes the credit - there is no honest reason for one of them to be exempt.
   let films = 0;
   for (const f of FILMS) {
     const src = effective(f);
-    if (!/nflverse/i.test(src)) continue;
     films++;
     const text = squash(src.replace(/<[^>]*>/g, " ").replace(/"\s*\+\s*"/g, ""));
     assert(text.includes(squash(want)),
       `${f}: its nflverse credit is not DATA_CREDIT flattened.\n   want: ${squash(want)}`);
   }
-  assert(films >= 3, `only ${films} films carry the credit - CC BY 4.0 asks for it wherever the material is used`);
+  assert(films === FILMS.length, `checked ${films} of ${FILMS.length} films - every one must be checked`);
 });
 
 // --- no club imagery ---------------------------------------------------------------------------------
@@ -184,29 +187,62 @@ await runTest("no film loads an image or an NFL-CDN asset", async () => {
 
 // --- the credit has to survive into the FRAME -------------------------------------------------------
 //
-// The gap this closes: a film can carry the nflverse credit in its source, pass every check above, and
-// still render an MP4 with no attribution on it, because `body.render .credit { display:none }` hides it
-// in exactly the mode that produces the video. Two films do that, and a source-reading test is blind to it
-// by construction - the same "assertion that touches no door" shape CLAUDE.md records three times.
+// A film can carry the attribution in its source, pass the check above, and still render an MP4 with none
+// on it, because `body.render <something> { display:none }` hides it in exactly the mode that makes the
+// video. This is NOT hypothetical and the first version of this test got the mechanism wrong: it assumed
+// spin-an-era.html and tiktok-ad.html were hiding their credit, listed them as known-wrong, and moved on.
+// What those two were actually doing was worse - their `.credit` is a PRODUCTION NOTE about the film
+// ("A thirty-second title sequence...") which is rightly hidden with the transport, and the nflverse
+// attribution was simply absent from the file. Measured in a browser: nflverse elements inside .stage, 0.
 //
-// spin-an-era.html and tiktok-ad.html are listed as KNOWN-WRONG rather than quietly skipped. Both predate
-// the kit, both have delivered output, and changing what their frames contain is a decision about
-// published work rather than a test fix - so the debt is named here where it is visible, not left to be
-// rediscovered. Any film built on kit.css inherits a credit that is NOT hidden, so this cannot recur.
-await runTest("a film's data credit is visible in render mode, not just present in the source", async () => {
-  const KNOWN_WRONG = ["spin-an-era.html", "tiktok-ad.html"];
-  // Comments stripped first, and that is not fussiness: kit.css EXPLAINS this bug by quoting the offending
-  // rule verbatim, so a regex over the raw text finds the explanation and fails every film built on the kit.
-  // The first run of this check did exactly that.
+// So the rule is about the element that actually HOLDS the credit, whatever it is called: find the classes
+// a film blanks in render mode, and require that none of them is the one carrying the attribution.
+await runTest("the element carrying the data credit is not blanked in render mode", async () => {
   const noComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const want = DATA_CREDIT.before.trim().split(/\s+/).slice(0, 4).join(" ");   // "Player and team statistics"
+
   for (const f of FILMS) {
-    const src = noComments(effective(f));
-    const hidden = /body\.render\s+\.credit\s*\{[^}]*display\s*:\s*none/.test(src);
-    if (KNOWN_WRONG.includes(f)) {
-      assert(hidden, `${f} is on the known-wrong list but no longer hides its credit - take it off the list`);
-      continue;
+    const raw = noComments(read(f));
+    const all = noComments(effective(f));
+
+    // Which classes does this film blank once ?render=1 is on?
+    const hidden = new Set();
+    for (const m of all.matchAll(/body\.render([^{]*)\{([^}]*)\}/g)) {
+      if (!/display\s*:\s*none/.test(m[2])) continue;
+      for (const c of m[1].matchAll(/\.([A-Za-z][\w-]*)/g)) hidden.add(c[1]);
     }
-    assert(!hidden, `${f} hides .credit under body.render, so its MP4 ships with no nflverse attribution`);
+
+    // Which class carries the credit? Either the text sits in the markup, or the kit fills `.credit` by JS.
+    const carriers = new Set();
+    for (const m of raw.matchAll(/class="([^"]*)"[^>]*>\s*([^<]{0,120})/g)) {
+      if (m[2].includes(want)) for (const c of m[1].split(/\s+/)) if (c) carriers.add(c);
+    }
+    // Three of the films set the credit from JS onto an element they fetch by id - the text is never in the
+    // markup at all, which is why a markup-only scan reported "nothing carries it" for tiktok-century. Follow
+    // the assignment to the id, then the id to its classes.
+    for (const m of raw.matchAll(/\$\(\s*"([\w-]+)"\s*\)\s*\.textContent\s*=[\s\S]{0,80}?Player and team statistics/g)) {
+      const id = m[1];
+      const el = new RegExp(`id="${id}"[^>]*class="([^"]*)"|class="([^"]*)"[^>]*id="${id}"`).exec(raw);
+      if (el) for (const c of (el[1] || el[2]).split(/\s+/)) if (c) carriers.add(c);
+    }
+    if (usesKit(raw)) carriers.add("credit");
+    assert(carriers.size > 0, `${f}: nothing in it carries the nflverse credit`);
+
+    // Present is not the same as WIRED. A mutation run proved this: breaking the kit so it never assigns
+    // the credit to an element left every check green, because the string was still sitting in kit.js.
+    // A film that fills the credit from JS has to actually put it somewhere.
+    if (usesKit(raw)) {
+      assert(/\.credit[\s\S]{0,120}?textContent\s*=\s*CREDIT|credit\.textContent\s*=\s*CREDIT/.test(noComments(KIT_JS)),
+        "kit.js holds the credit string but never assigns it to an element - every kit film would render without it");
+    } else if (!new RegExp(want).test(raw.replace(/<script[\s\S]*?<\/script>/g, (m) => m))) {
+      // non-kit films keep it in their own markup or their own script; both are the file itself, so the
+      // carrier search above is already the wiring check.
+    }
+
+    for (const c of carriers) {
+      assert(!hidden.has(c),
+        `${f}: .${c} carries the data credit and is display:none under body.render - the MP4 ships with no attribution`);
+    }
   }
 });
 
