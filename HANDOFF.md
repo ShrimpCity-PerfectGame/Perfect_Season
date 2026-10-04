@@ -22,6 +22,21 @@ being sent strangers. It ticks six at a time because that is what a season draft
 longer moves it at all. The guard is sharper than the one it replaced: a single finished season moves the
 Stats Drafts tile by ONE and the pill by SIX, so a change collapsing the two counts cannot pass.
 
+**There are NINE 9:16 films** as of v2.21.2 - the four below plus five built on a shared kit:
+`tiktok-genius.html` (no stats, 20-0 on code `4CMJAAAA`), `tiktok-gm.html` (a $150M cap spent to the
+dollar, `MEGAAAAA`), `tiktok-bears.html` (CHI|0, four QBs, 38 TD and 37 INT, code **`RUSH`**),
+`tiktok-ou.html` (Brady, 28,677 across six boards, over/under 30,000) and `tiktok-duel.html` (a steal
+on `DUEL2026`, replayed to sixteen picks with `missing: 0`). **Four of the five point at modes a
+signed-out visitor can actually play** - season drafts and Over/Under - which the Guess and Century
+films do not.
+
+**`tools/film/kit.css` and `kit.js` are the shared half** (stage, safe area, crossfade, close card,
+palette, brand mark, licence credit, driver). A film on the kit supplies only its scenes, its beats and
+a `render(t)`. The three POSTED films deliberately do not use it - delivered work should not move when
+film ten is edited. Three API shapes cost a correction each and are worth knowing: the duel clock needs
+`move.claim === "clock"`, `replayMatch` wants the DATABASE row shape (`pickId` reads `p.playerId`), and
+a steal row is keyed `by`, not `side` - with `side` the steal is accepted and then silently dropped.
+
 **There are FOUR 9:16 films**, all 1080x1920, 15.000s, 900 frames, SILENT so a trending sound can go over
 them. Three are current: `tools/film/tiktok-spin.html` (a joke - one QB on the Packers board, four on the
 Browns board, every one a D), `tiktok-guess.html` (tension - a grid narrowing onto Lamar Jackson) and
