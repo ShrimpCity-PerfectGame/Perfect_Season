@@ -43,6 +43,8 @@ const ORDER = [
   "migration-wallet.sql",
   "migration-shop.sql",
   "migration-versus.sql",
+  // The crash sink. References nothing and nothing references it, so it is safe anywhere in this list.
+  "migration-client-errors.sql",
 ];
 
 await runTest("every migration in the repo is named here", async () => {
