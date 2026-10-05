@@ -29,8 +29,8 @@ stranger-facing version with that stated. The counter-argument is not a reason t
 | Write path | A sixth Edge Function. Not a client-writable table |
 
 Out of scope: silent failures that never blank the page (rejected promises, failed submits), an in-app
-viewer, alerting, and any aggregation. `kind` exists so the first of those can be added later without a
-migration; nothing else here is built for it.
+viewer, alerting, and any aggregation. `kind` exists so the first of those can be added later without
+reshaping the table; nothing else here is built for it.
 
 ## 2. Two findings this design exists around
 
@@ -63,7 +63,7 @@ of `sou_runs`/`builds`. The function's service role is the only writer and the S
 | `message` | text not null | the thrown error, **capped 500** |
 | `stack` | text | first 6 frames, capped 2000 |
 | `component` | text | React's component stack, 6 lines, capped 1000 |
-| `before` | jsonb | the ring: up to 5 × `{kind, message, extra}`, each message capped 300 |
+| `before` | jsonb | the ring: up to 5 × `{kind, message, extra}`, each entry capped 300 |
 | `browser` | text | **reduced**, e.g. `Chrome 152 / Android` — never the raw user-agent |
 | `screen` | text | **`profile`**, never `/u/ShrimpCity` |
 
@@ -108,8 +108,9 @@ other five — a crash can happen signed out, and a guest's crash matters as muc
 It does four things and nothing else:
 
 1. **Scrub the path to a screen name.** `/u/<name>` → `profile`, `/c/<code>` → `challenge`,
-   `/vs/<code>` → `duel`, `/leaderboard` → `leaderboard`, `/how-to-play` → `rules`, `/privacy` → `privacy`,
-   `/terms` → `terms`, `/` → `home`, anything unrecognised → `other`. **An unrecognised path becomes
+   `/vs/<code>` → `duel`, `/leaderboard` → `leaderboard`, `/how-to-play` → `rules`, `/` → `home`, anything
+   unrecognised → `other`. (`/privacy` and `/terms` are absent deliberately: they carry no bundle, so they
+   cannot crash — and `other` catches them safely if that ever changes.) **An unrecognised path becomes
    `other`, never itself** — a default that passes the path through is the leak wearing a disguise.
 2. **Reduce the user-agent** to browser plus major version plus platform. Unparseable → `unknown`.
 3. **Cap every string** to the lengths in §3, and the `before` array to 5 entries.
