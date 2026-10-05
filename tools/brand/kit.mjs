@@ -209,8 +209,13 @@ try {
         throw new Error(`${size.name} / ${key}: content overflows its safe box (${size.safe.join("x")}) - ${why}`);
       }
       const file = `${size.name}-${key}.png`;
-      writeFileSync(path.join(outDir, file), await page.screenshot({ clip: { x: 0, y: 0, width: size.w, height: size.h } }));
-      made.push({ size, key, way, file, preview: await preview(size.w, size.h, 460) });
+      const shot = await page.screenshot({ clip: { x: 0, y: 0, width: size.w, height: size.h } });
+      writeFileSync(path.join(outDir, file), shot);
+      // `full` is the asset itself, carried into the page so it can be SAVED rather than merely shown:
+      // an artifact runs sandboxed and cannot fetch the PNG sitting next to it, and a plain <a download>
+      // is inert there. `preview` stays a small JPEG so a phone decodes 44 thumbnails instead of 44
+      // full-resolution rasters.
+      made.push({ size, key, way, file, preview: await preview(size.w, size.h, 460), full: shot.toString("base64") });
     }
   }
 
@@ -225,7 +230,10 @@ try {
       await page.evaluate(() => document.querySelector("img").decode());
       const file = `mark-${key}-${px}.png`;
       writeFileSync(path.join(outDir, file), await page.screenshot({ clip: { x: 0, y: 0, width: px, height: px } }));
-      if (px === 512) made.push({ size: { name: "mark", w: px, h: px }, key, way, file, lockup: true, preview: await preview(px, px, 160) });
+      if (px === 512) {
+        made.push({ size: { name: "mark", w: px, h: px }, key, way, file, lockup: true,
+          preview: await preview(px, px, 160), full: readFileSync(path.join(outDir, file)).toString("base64") });
+      }
     }
   }
 } finally {
