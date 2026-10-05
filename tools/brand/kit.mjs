@@ -163,6 +163,20 @@ const browser = await launch();
 const made = [];
 try {
   const page = await browser.newPage();
+  // The kit page is a document people OPEN SOMEWHERE ELSE - sent to a phone, dropped into a chat - where a
+  // relative <img> path to a sibling PNG resolves to nothing and every preview is a broken-image icon. That
+  // happened on the first send. So each asset is also shot small and inlined as a JPEG, while the full PNG
+  // on disk stays the thing you upload.
+  //
+  // The small shot is the SAME page at a fractional deviceScaleFactor, not the PNG pushed back through a
+  // canvas: the CSS viewport is unchanged so the layout is identical, and nothing large crosses the
+  // DevTools protocol. Round-tripping multi-megabyte base64 through page.evaluate wedged the connection
+  // and the next screenshot died with 'Page.captureScreenshot timed out'.
+  const preview = async (w, h, maxW) => {
+    await page.setViewport({ width: w, height: h, deviceScaleFactor: Math.min(1, maxW / w) });
+    const b64 = await page.screenshot({ type: "jpeg", quality: 72, encoding: "base64", clip: { x: 0, y: 0, width: w, height: h } });
+    return "data:image/jpeg;base64," + b64;
+  };
   for (const size of wanted) {
     for (const [key, way] of Object.entries(WAYS)) {
       await page.setViewport({ width: size.w, height: size.h, deviceScaleFactor: size.w >= 2000 ? 1 : 2 });
@@ -196,7 +210,7 @@ try {
       }
       const file = `${size.name}-${key}.png`;
       writeFileSync(path.join(outDir, file), await page.screenshot({ clip: { x: 0, y: 0, width: size.w, height: size.h } }));
-      made.push({ size, key, way, file });
+      made.push({ size, key, way, file, preview: await preview(size.w, size.h, 460) });
     }
   }
 
@@ -211,7 +225,7 @@ try {
       await page.evaluate(() => document.querySelector("img").decode());
       const file = `mark-${key}-${px}.png`;
       writeFileSync(path.join(outDir, file), await page.screenshot({ clip: { x: 0, y: 0, width: px, height: px } }));
-      if (px === 512) made.push({ size: { name: "mark", w: px, h: px }, key, way, file, lockup: true });
+      if (px === 512) made.push({ size: { name: "mark", w: px, h: px }, key, way, file, lockup: true, preview: await preview(px, px, 160) });
     }
   }
 } finally {

@@ -46,14 +46,14 @@ const QUOTES = [
 
 export function kitPage(assets) {
   const gallery = assets.filter((a) => !a.lockup).map((a) => `<figure>
-      <img src="${a.file}" alt="" loading="lazy">
-      <figcaption><b>${esc(a.size.name)}</b>
+      <img src="${a.preview}" alt="" loading="lazy">
+      <figcaption><b>${esc(a.file)}</b>
         <span class="muted">${a.size.w}&times;${a.size.h} &middot; ${esc(a.way.label)}</span>
         ${a.size.check ? `<span class="warn">check the spec</span>` : ""}</figcaption>
     </figure>`).join("");
 
   const marks = assets.filter((a) => a.lockup).map((a) => `<figure class="markfig" style="background:${a.way.bg}">
-      <img src="${a.file}" alt="" width="128" height="128">
+      <img src="${a.preview}" alt="" width="128" height="128">
       <figcaption style="color:${a.way.ink}">${esc(a.way.label)}</figcaption></figure>`).join("");
 
   const credit = DATA_CREDIT.before + DATA_CREDIT.source.text + DATA_CREDIT.middle
@@ -158,7 +158,9 @@ ${scopeRow("Night (black)", THEME.night)}
   ordinary text. Playful wording is for big moments only; everyday controls stay plain.</p>
 
 <h2>Assets</h2>
-<p class="lede">Every canvas in four colourways. <span class="warn">check the spec</span> marks a size this
+<p class="lede"><b>The previews below are downscaled and inlined</b> so this page works anywhere you open
+  it; the file named under each one is the full-resolution PNG in the same folder, and that is what you
+  upload. Every canvas comes in four colourways. <span class="warn">check the spec</span> marks a size this
   kit could not confirm against the platform's own current documentation &mdash; confirm it before
   uploading, because a wrong canvas is a cropped logo. Content sits inside each platform's safe box and the
   edges carry texture only, so a crop loses nothing that matters.</p>
