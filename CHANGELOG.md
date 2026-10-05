@@ -20,6 +20,59 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.21.5] - 2026-10-05
+
+### Fixed
+- **A failed save said one thing for eight different failures, and now says which.** Found on production,
+  from a screenshot: the "Your last season couldn't be saved" panel sitting over a fresh Unlimited draft
+  with a player already locked into it. Two separate defects behind one picture.
+
+  **The panel outlived its subject.** The result screen and the draft screen are both `view === "play"`, and
+  the clearing effect added for exactly this (v2.20.x) watched the view alone - so `restart()`'s
+  `setView("play")` over `"play"` was a no-op and Run it back carried the notice into the next draft, where
+  it read as a complaint about a board with nothing wrong with it. It is keyed on the draft's seed as well
+  now: a new seed is a new draft, which is precisely when a sentence about the last one stops being true.
+
+  **And nothing anywhere said WHY.** `submitRun` kept `duplicate` and `reserved_code` and collapsed every
+  other answer to a bare `{ ok: false }`; `submitDnf` answered a boolean; an `invoke` that threw was caught
+  by `submitAndSync` with nothing to report. So a lapsed session, a 502, a dead radio and a roster the
+  server refused outright were one sentence with nothing to act on - and, against the real database, one
+  shape with no evidence: no `runs` row, no `finished_codes` row, no counter moved, nothing in the error
+  ring. The run this was diagnosed from left exactly that, six hours of it, and which of the four it had
+  been could only be inferred.
+
+  Both now answer `{ ok: false, reason, status }` over seven reasons, each with a sentence of its own, and
+  each failure is pushed into the crash net's ring so the next **Copy error details** carries it.
+
+  **submit-run's contract is the OPPOSITE of submit-guess's, and copying v2.18.2's rule here would have
+  been a new bug rather than a tidy-up.** Guess and Century name a reason on every answer they give a POST,
+  which is what makes a body with no reason provably the platform in between. submit-run names one on four
+  answers out of two dozen: `malformed submission`, `a daily submission must be for today`, `no profile for
+  this account`, `unknown mode`, `unknown scoring format` and `missing challenge code` are all a bare 400 -
+  and every one of them is final. Reading those as transient is how a screen came to promise a GM season
+  refused for the salary cap that it would be saved next time. What submit-run always sets is the **status**,
+  so that is what is read; `functions-js` distinguishes nothing-arrived, the relay, and the function's own
+  response by error *name*, so all three are told apart rather than guessed at.
+
+  **There is still no outbox for a season, and the copy must never imply one.** A season is a trace, a seed
+  and a client that has to agree with the deployed function, so holding one to re-send is a feature rather
+  than a patch. The sentences say what happened and that it will not be counted; a test fails if any of them
+  starts promising a retry, which is v2.18.2's lesson with the words the other way round.
+
+- **An abandoned draft is no longer called a season.** `recordDnf` raises the same panel a finished season
+  does, and it read "Your last season couldn't be saved, so it isn't on the board" - of a draft that has no
+  roster, no score, and was never going to a board.
+
+- **The mock answered an unresolvable session differently from the real function.** `invokeSubmitRun` sent a
+  bare `{ error: { message: "unauthorized" } }` with no status on it, where `index.ts` sends a 401 - so the
+  one failure a player can act on was, to the client, indistinguishable from the server falling over. It is
+  a 401 in the mock too. The seam that classifies failures is the last place a mock may differ.
+
+  `tests/test-submit-reasons.mjs` covers the classification (fifteen shapes, season and DNF both);
+  `tests/test-dnf.mjs` presses the panel in the real app and reads its words, because a sentence proved by
+  calling the function that returns it proves nothing about whether a screen shows it. All seven fixes were
+  mutation-checked.
+
 ## [2.21.4] - 2026-10-05
 
 ### Fixed

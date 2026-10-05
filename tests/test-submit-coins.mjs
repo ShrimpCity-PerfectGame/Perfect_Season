@@ -5,7 +5,8 @@
 //   - badges pay once, including ones earned before coins existed, which pay with the next finished season;
 //   - a Daily pays 40 and its streak, under its date and format;
 //   - a draft counts once: the same challenge code (in any variant) or the same Daily again answers
-//     { ok: false, reason: "duplicate" } and writes nothing - not the profile, the runs log or the wallet;
+//     { ok: false, reason: "duplicate", status: 409 } and writes nothing - not the profile, the runs log
+//     or the wallet;
 //   - a challenge code over 32 characters is refused before anything is written;
 //   - 20 Unlimited, Genius and GM seasons pay each UTC day, the 21st counts but pays nothing (capped), and a Daily
 //     still pays;
@@ -27,6 +28,11 @@ const { submitRun, submitDnf, fetchWallet } = await import("../storage.js");
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
 const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 const show = (v) => String(JSON.stringify(v)).slice(0, 500);
+// The refusal shapes, asserted WHOLE rather than field by field: the point is as much that nothing else came
+// back - no run, no score, no coins - as that it was named correctly. `status` joined them in v2.21.5, when
+// submitRun stopped collapsing every failure to a bare { ok: false }.
+const DUPLICATE = { ok: false, reason: "duplicate", status: 409 };
+const SAVE_FAILED = { ok: false, reason: "server", status: 500 };
 const TODAY = new Date().toISOString().slice(0, 10);
 // A joined date after Day One's window, so that badge only pays where a test gives it on purpose.
 const JOINED_LATER = "2026-11-01T00:00:00.000Z";
@@ -187,7 +193,7 @@ await runTest("the same challenge code again, in any variant or format, answers 
   const before = snapshot(player.id);
   for (const extra of [{}, { gm: true }, { genius: true }, { format: "standard" }]) {
     const again = await season("TWICE-CODE", extra);
-    assert(same(again, { ok: false, reason: "duplicate" }), `again ${show(extra)}: ${show(again)}`);
+    assert(same(again, DUPLICATE), `again ${show(extra)}: ${show(again)}`);
     assert(snapshot(player.id) === before, `again ${show(extra)} wrote nothing`);
   }
   const http = await answer({ mode: { kind: "free", code: "TWICE-CODE" }, ...legalTrace("TWICE-CODE"), gm: false });
@@ -204,7 +210,7 @@ await runTest("the same Daily again answers duplicate and writes nothing", async
   assert((await daily("fantasy")).ok, "the first Daily counts");
   const before = snapshot(player.id);
   const again = await daily("fantasy");
-  assert(same(again, { ok: false, reason: "duplicate" }), `the same Daily again: ${show(again)}`);
+  assert(same(again, DUPLICATE), `the same Daily again: ${show(again)}`);
   assert(snapshot(player.id) === before, "wrote nothing");
   const http = await answer({ mode: { kind: "daily", date: TODAY }, ...legalTrace(GL.dailySeed(TODAY, "fantasy")), gm: false });
   assert(same(http, { status: 409, body: { error: "today's daily is already recorded", reason: "duplicate" } }), `the function's answer: ${show(http)}`);
@@ -253,7 +259,7 @@ await runTest("a DNF pays nothing and costs nothing", async () => {
   const quitter = await signUp("quitter");
   assert((await season("QUIT-1")).ok, "a season first");
   const coinsBefore = JSON.stringify({ ledger: ledgerOf(quitter.id), wallet: auth._wallets.get(quitter.id), awards: [...awardedOf(quitter.id)] });
-  for (const [picks, ladder] of [[3, "unlimited"], [0, "gm"], [5, "daily"]]) assert((await submitDnf(picks, ladder)) === true, `a ${ladder} DNF is recorded`);
+  for (const [picks, ladder] of [[3, "unlimited"], [0, "gm"], [5, "daily"]]) assert((await submitDnf(picks, ladder)).ok === true, `a ${ladder} DNF is recorded`);
   assert(auth._profiles.get(quitter.id).dnf === 3, "three DNFs on the record");
   assert(JSON.stringify({ ledger: ledgerOf(quitter.id), wallet: auth._wallets.get(quitter.id), awards: [...awardedOf(quitter.id)] }) === coinsBefore, "and not a coin moved");
   const http = await answer({ dnf: true, picks: 2, mode: "unlimited" });
@@ -277,7 +283,7 @@ await runTest("a reward that fails still counts the season, answering coins: nul
   assert(res.ok === true && res.coins === null && same(res.newBadges, []), `the season counts without coins: ${show({ ...res, run: undefined })}`);
   assert(auth._profiles.get(unlucky.id).runs === 1 && rowsOf(auth._runs, unlucky.id).length === 1, "it's on the record and in the runs log");
   assert(same(ledgerOf(unlucky.id), [{ amount: 250, kind: "welcome", ref: "welcome" }]) && awardedOf(unlucky.id).size === 0, "no coins and no badges were recorded");
-  assert(same(await season("UNLUCKY-1"), { ok: false, reason: "duplicate" }), "it counted, so the same draft is now a duplicate");
+  assert(same(await season("UNLUCKY-1"), DUPLICATE), "it counted, so the same draft is now a duplicate");
 
   // A database refusal is a failure the same way.
   server.credit_coins = () => {
@@ -322,7 +328,7 @@ await runTest("a failed save gives the challenge code back so a retry counts, an
   } finally {
     auth._failWrites.delete("profiles");
   }
-  assert(same(res, { ok: false }), `a failed profile save: ${show(res)}`);
+  assert(same(res, SAVE_FAILED), `a failed profile save: ${show(res)}`);
   assert(same(http, { status: 500, body: { error: "failed to save" } }), `the function's answer: ${show(http)}`);
   assert(snapshot(flaky.id) === before, "the code was given back and nothing else written");
   const retry = await season("FLAKY-1");
@@ -336,7 +342,7 @@ await runTest("a failed save gives the challenge code back so a retry counts, an
   } finally {
     auth._failWrites.delete("profiles");
   }
-  assert(same(res, { ok: false }), `a failed Daily profile save: ${show(res)}`);
+  assert(same(res, SAVE_FAILED), `a failed Daily profile save: ${show(res)}`);
   assert(snapshot(flaky.id) === beforeDaily, "the Daily's row was given back and nothing else written");
   const dailyRetry = await daily("standard");
   assert(dailyRetry.ok && dailyRetry.coins?.lines[0]?.key === "season" && dailyRetry.coins.lines[0].coins === COIN_RULES.dailySeason,
@@ -350,7 +356,7 @@ await runTest("a failed save gives the challenge code back so a retry counts, an
     } finally {
       auth._failWrites.delete(table);
     }
-    assert(same(res, { ok: false }), `a failed ${table} insert is a failed save, not a duplicate: ${show(res)}`);
+    assert(same(res, SAVE_FAILED), `a failed ${table} insert is a failed save, not a duplicate: ${show(res)}`);
     assert(snapshot(flaky.id) === beforeFailure, `and writes nothing (${table})`);
     assert((await submit()).ok, `a retry after the ${table} failure counts`);
   }
@@ -388,26 +394,33 @@ await runTest("a free code cannot be the daily's own seed", async () => {
   assert(!/reserved/i.test(JSON.stringify(fine)), `an ordinary code still works: ${JSON.stringify(fine).slice(0, 160)}`);
 });
 
-await runTest("a refusal reaches the client the way the server sends it, and submitRun carries only what it should", async () => {
+await runTest("a refusal reaches the client the way the server sends it, named and with its status", async () => {
   // supabase-js turns any non-2xx into an `error` and hands the body over separately, so storage.js's
   // submitRun has to read it - and until 2.0 the mock answered every 400 in a SUCCESS envelope, so that parse
   // was executed by no test at all. `reserved_code` looked covered and was not: the assertion was reading a
-  // body that had leaked through `data`. Everything else is deliberately dropped, because for those "it will
-  // be saved next time" is true and the result screen says so.
+  // body that had leaked through `data`.
+  //
+  // **This test used to assert that everything else was DROPPED** - "a bare { ok: false }, the reason stays on
+  // the server" - with the note that for those "it will be saved next time" is true. Both halves were wrong,
+  // and v2.21.5 reversed them: none of the refusals below will EVER be accepted, however often they are sent,
+  // and dropping the reason is what left one sentence on screen for eight different failures and no record of
+  // which had happened. A 4xx that is not one of the two named verdicts is `refused` now, and it carries the
+  // status and the function's own sentence - see runFailure in storage.js for why the status is what is read.
   const p1 = await signUp("refusalreader");
   await signIn(p1);
   const today = GL.dailySeed(TODAY, "fantasy");
 
   // reserved_code: the code IS the daily's own seed, so it can never be accepted, however often it is sent.
   const reserved = await season(today);
-  assert(same(reserved, { ok: false, reason: "reserved_code" }), `a reserved code is carried through: ${show(reserved)}`);
+  assert(same(reserved, { ok: false, reason: "reserved_code", status: 400 }), `a reserved code is carried through: ${show(reserved)}`);
 
   // duplicate: the same finished draft again.
   const first = await season("REFUSAL-ONE");
   assert(first.ok, `the first one counts: ${show(first.error || first)}`);
-  assert(same(await season("REFUSAL-ONE"), { ok: false, reason: "duplicate" }), "and the second is a duplicate");
+  assert(same(await season("REFUSAL-ONE"), DUPLICATE), "and the second is a duplicate");
 
-  // Everything else is `{ ok: false }` and nothing more - the reason stays on the server.
+  // Everything else is `refused`, with the server's own sentence as `detail` - which is asserted AGAINST the
+  // raw answer rather than against a copy of it, so the client cannot drift from what the function said.
   for (const [label, body] of [
     ["an over-long code", { mode: { kind: "free", code: "L".repeat(33) }, ...legalTrace("x"), gm: false }],
     ["a backdated daily", { mode: { kind: "daily", date: "2020-01-01" }, ...legalTrace(GL.dailySeed("2020-01-01", "fantasy")), gm: false, format: "fantasy" }],
@@ -415,11 +428,12 @@ await runTest("a refusal reaches the client the way the server sends it, and sub
     ["an unknown mode", { mode: { kind: "nonsense" }, ...legalTrace("REFUSAL-MODE"), gm: false }],
   ]) {
     const res = await submitRun(body);
-    assert(same(res, { ok: false }), `${label} is a bare refusal: ${show(res)}`);
-    // ...and the server really did send it as an HTTP error with a readable body, which is the half that
-    // could not be seen while the mock answered in a success envelope.
+    // The server really did send it as an HTTP error with a readable body, which is the half that could not
+    // be seen while the mock answered in a success envelope.
     const raw = await answer(body);
     assert(raw.status === 400 && raw.body?.error, `${label} is a 400 with a body: ${show(raw)}`);
+    assert(same(res, { ok: false, reason: "refused", status: raw.status, detail: raw.body.error }),
+      `${label} is refused, with the status and the server's own sentence: ${show(res)} vs ${show(raw)}`);
   }
 });
 

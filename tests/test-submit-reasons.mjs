@@ -149,4 +149,89 @@ await runTest("the two retry lists have not drifted apart", async () => {
     `GUESS_RETRY ${JSON.stringify(GUESS_RETRY)} vs CENTURY_RETRY ${JSON.stringify(CENTURY_RETRY)}`);
 });
 
+// --------------------------------------------------------------------------------------------------
+// submit-run, whose contract is the OPPOSITE of the two above - and copying their rule here would be a
+// bug rather than a tidy-up (v2.21.5).
+//
+// Guess and Century name a reason on every answer they give a POST, so a body with no reason in it is
+// provably the platform. submit-run names one on four answers out of two dozen: "malformed submission",
+// "a daily submission must be for today", "no profile for this account", "unknown mode", "unknown
+// scoring format" and "missing challenge code" are all a bare 400 with no reason at all - and every one
+// of them is a verdict this function will repeat for ever. Reading those as transient is how a screen
+// came to promise a GM season refused for the salary cap that it would be saved next time.
+//
+// So this half reads the STATUS, which submit-run always sets. These cases are what the four shapes
+// supabase-js actually hands back look like (@supabase/functions-js FunctionsClient): a fetch error
+// means nothing arrived, a relay error is the platform, and an http error carries the function's own
+// Response - which is why `context.status` is the only honest signal in it.
+// The WORDS these reasons reach are not checked here, deliberately: they are checked in
+// tests/test-dnf.mjs by rendering the panel in the real app and reading it, because a sentence proved by
+// calling the function that returns it proves nothing about whether any screen shows it. That is the trap
+// CLAUDE.md names three times - the GM cap's two buttons, the names on two boards, and the anti-robot
+// sentence that only one of four screens ever displayed.
+const { submitRun, submitDnf } = await import("../storage.js");
+
+const httpStatus = (status, body) => ({
+  data: null,
+  error: { name: "FunctionsHttpError", message: "Edge Function returned a non-2xx status code", context: { status, json: async () => body } },
+});
+
+const RUN_CASES = [
+  // The two that were already carried through, and must stay carried: for both of them "it will be saved
+  // next time" is a lie.
+  { why: "a draft that already counted", answer: httpStatus(409, { error: "this draft is already recorded", reason: "duplicate" }), reason: "duplicate" },
+  { why: "the daily's own seed as a code", answer: httpStatus(400, { error: "that code is reserved", reason: "reserved_code" }), reason: "reserved_code" },
+  { why: "a guest handing in a daily", answer: httpStatus(403, { error: "the daily is for accounts", reason: "guest_daily" }), reason: "guest_daily" },
+  // THE ONE THIS RELEASE EXISTS FOR. A bare 401 with nothing in the body: the session had lapsed by the
+  // time a seventeen-game season was handed in, which is the failure a player can actually act on.
+  { why: "a session that had lapsed", answer: httpStatus(401, { error: "unauthorized" }), reason: "signed_out" },
+  // Bare 400s. Every one is final, and NONE of them may read as the platform.
+  { why: "a malformed body", answer: httpStatus(400, { error: "malformed submission" }), reason: "refused" },
+  { why: "a daily submitted on the wrong day", answer: httpStatus(400, { error: "a daily submission must be for today" }), reason: "refused" },
+  { why: "an account with no profile", answer: httpStatus(400, { error: "no profile for this account" }), reason: "refused" },
+  { why: "a roster over the salary cap", answer: httpStatus(400, { error: "illegal roster", reason: "over the salary cap" }), reason: "refused" },
+  { why: "an illegal roster", answer: httpStatus(400, { error: "illegal roster", reason: "pick 3 skipped a playable board" }), reason: "refused" },
+  // The function or the platform fell over. Nothing is wrong with the season.
+  { why: "the function throwing", answer: httpStatus(500, { error: "failed to save" }), reason: "server" },
+  { why: "a gateway in between", answer: httpStatus(502, { error: "upstream connect error" }), reason: "server" },
+  { why: "the Supabase relay", answer: { data: null, error: { name: "FunctionsRelayError", message: "Relay Error invoking the Edge Function", context: { status: 500 } } }, reason: "server" },
+  { why: "a 200 that does not say ok", answer: { data: {}, error: null }, reason: "server" },
+  { why: "an unreadable body", answer: { data: null, error: { name: "FunctionsHttpError", message: "non-2xx", context: { status: 0, json: async () => { throw new Error("not json"); } } } }, reason: "server" },
+  // Nothing reached the function at all.
+  { why: "a dead radio", answer: { data: null, error: { name: "FunctionsFetchError", message: "Failed to send a request to the Edge Function", context: new TypeError("Failed to fetch") } }, reason: "offline" },
+];
+
+for (const c of RUN_CASES) {
+  await runTest(`submit-run: ${c.why} is "${c.reason}"`, async () => {
+    const run = await withClient(c.answer, () => submitRun({ mode: { kind: "free", code: "ABC" }, history: [], seq: [] }));
+    assert(run.ok === false && run.reason === c.reason,
+      `season: expected ${c.reason}, got ${JSON.stringify(run)}`);
+    // submitDnf goes to the same function and must name a failure the same way, or an abandoned draft
+    // raises the same panel with a different (or no) explanation behind it. It answered a bare boolean
+    // until v2.21.5, which is why the panel had nothing to say on that path at all.
+    const dnf = await withClient(c.answer, () => submitDnf(3, "unlimited"));
+    assert(dnf.ok === false && dnf.reason === c.reason,
+      `dnf: expected ${c.reason}, got ${JSON.stringify(dnf)}`);
+  });
+}
+
+await runTest("submit-run: a success is the server's own answer, passed through whole", async () => {
+  const data = { ok: true, run: { w: 17, l: 3, score: 108.2 }, coins: { balance: 940 }, newBadges: [] };
+  const res = await withClient({ data, error: null }, () => submitRun({ mode: { kind: "free", code: "ABC" }, history: [], seq: [] }));
+  assert(res.ok === true && res.run.score === 108.2 && res.coins.balance === 940, `got ${JSON.stringify(res)}`);
+  const dnf = await withClient({ data: { ok: true }, error: null }, () => submitDnf(3, "unlimited"));
+  assert(dnf.ok === true, `a recorded DNF is ok, got ${JSON.stringify(dnf)}`);
+});
+
+await runTest("submit-run: invoke throwing is a dead radio rather than an escaped exception", async () => {
+  // It used to throw out of submitRun into submitAndSync's catch, which set the panel with nothing to
+  // say about why - the catch was the only thing standing between a dropped request and an unhandled
+  // rejection, and it could not tell callers apart from a 400.
+  const res = await withClient(null, async () => {
+    globalThis.window.__ps_supabase__ = { functions: { invoke: async () => { throw new TypeError("Failed to fetch"); } } };
+    return submitRun({ mode: { kind: "free", code: "ABC" }, history: [], seq: [] });
+  });
+  assert(res.ok === false && res.reason === "offline", `expected offline, got ${JSON.stringify(res)}`);
+});
+
 console.log("test-submit-reasons.mjs done");

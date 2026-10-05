@@ -349,4 +349,104 @@ await runTest("Run it back after a Genius season deals Genius mode again", async
   assert(auth._profiles.get(userId).dnf === 0, "a new season after a finished one is not a DNF");
 });
 
+// --------------------------------------------------------------------------------------------------
+// What the player is TOLD when the save fails, pressed through the real app rather than by calling the
+// function that returns the sentence (v2.21.5). tests/test-submit-reasons.mjs proves storage.js names the
+// failures apart; these prove a screen says so, which is the half CLAUDE.md records being skipped three
+// times - the GM cap's two buttons, the names on Century's and Guess's boards, and the anti-robot sentence
+// that only one of its four screens ever displayed.
+const savePanel = (container) =>
+  [...container.querySelectorAll(".panel")].find((p) => /couldn't be saved|wasn't recorded/i.test(p.textContent)) || null;
+
+// Make submit-run unreachable, the way a dead radio does: invoke throws before anything leaves the tab.
+function killRadio(auth) {
+  const real = auth.functions.invoke;
+  auth.functions.invoke = async (name, opts) => {
+    if (name === "submit-run") throw new TypeError("Failed to fetch");
+    return real(name, opts);
+  };
+  return () => { auth.functions.invoke = real; };
+}
+
+async function playUnlimited(container) {
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await click(modeButton(container, "Unlimited"));
+  await flush(3);
+}
+
+await runTest("a season the server wouldn't save says so, and calls it a season", async () => {
+  const { container, auth } = await signedInApp("dnfsaysseason");
+  await playUnlimited(container);
+  // Armed BEFORE the sixth pick, because that is when finish() fires the submission - it does not wait for
+  // the reveal, which is the whole reason the result screen is live while a season is still in flight.
+  // The profile write inside submit-run then fails the way a database error does, which index.ts and the
+  // mock both answer with a 500 - the function's side, not this player's connection.
+  auth._failWrites.add("profiles");
+  for (let i = 0; i < 6; i++) await draftOne(container);
+  await flush(6);
+  await finishSeason(container);
+  await flush(4);
+  const said = savePanel(container);
+  assert(said, "a failed season should raise the panel at all");
+  assert(/season/i.test(said.textContent), `and should call it a season: ${said.textContent}`);
+  assert(/on us/i.test(said.textContent), `a 500 is ours, not the player's connection: ${said.textContent}`);
+  // There is no outbox for a season, so nothing here may suggest one.
+  assert(!/try again later|we'll try again|saved next time/i.test(said.textContent),
+    `and must not promise a retry that does not exist: ${said.textContent}`);
+});
+
+await runTest("a dead radio says to check the connection - a different sentence from a 500", async () => {
+  const { container, auth } = await signedInApp("dnfdeadradio");
+  await playUnlimited(container);
+  const revive = killRadio(auth);
+  for (let i = 0; i < 6; i++) await draftOne(container);
+  await flush(6);
+  await finishSeason(container);
+  await flush(4);
+  const said = savePanel(container);
+  revive();
+  assert(said, "a season that never reached the server should raise the panel");
+  assert(/connection/i.test(said.textContent) && !/on us/i.test(said.textContent),
+    `nothing arrived, so the sentence is about the connection: ${said.textContent}`);
+});
+
+await runTest("an abandoned draft is not called a season", async () => {
+  const { container, auth } = await signedInApp("dnfsaysdraft");
+  await playUnlimited(container);
+  await draftOne(container);
+  auth._failWrites.add("profiles");
+  // Two taps: the first arms the confirm (which relabels the button), the second actually resets.
+  await click(findButtonByText(container, "Reset draft"));
+  await flush();
+  await click(findButtonByText(container, "Tap again"));
+  await flush(4);
+  const said = savePanel(container);
+  assert(said, "a failed DNF should raise the panel");
+  // It said "Your last season couldn't be saved, so it isn't on the board" on this path for as long as the
+  // panel existed. An abandoned draft has no roster, no score and is on no board.
+  assert(/draft/i.test(said.textContent) && !/season/i.test(said.textContent),
+    `an abandoned draft is a draft: ${said.textContent}`);
+});
+
+await runTest("Run it back clears the panel instead of carrying it onto the next draft", async () => {
+  // THE BUG, found on production: the result screen and the draft screen are both view === "play", so
+  // restart()'s setView("play") changed nothing the clearing effect was watching. The notice rode into the
+  // next draft and read as a complaint about a board with nothing wrong with it.
+  const { container, auth } = await signedInApp("dnfcarryover");
+  await playUnlimited(container);
+  auth._failWrites.add("profiles");
+  for (let i = 0; i < 6; i++) await draftOne(container);
+  await flush(6);
+  await finishSeason(container);
+  await flush(4);
+  assert(savePanel(container), "the failed season should raise the panel first");
+  // The next draft has to be able to save, or the new one raises its own panel and proves nothing.
+  auth._failWrites.delete("profiles");
+  await click(findButtonByText(container, "Run it back"));
+  await flush(6);
+  assert(!savePanel(container),
+    `a new draft is a new subject: ${savePanel(container)?.textContent}`);
+});
+
 console.log("test-dnf.mjs done");

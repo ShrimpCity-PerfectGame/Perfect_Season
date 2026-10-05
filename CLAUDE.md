@@ -1043,6 +1043,30 @@ Duel under their new name. It now throws, PGRST116 ("no rows") being the one err
 `adoptSession` gives it a second go and then says so rather than claiming anything about who you are, and
 `onSeasonsKept` applies what `claim_username` has already done instead of waiting on a re-read.
 
+**And a failed WRITE is not one failure - but HOW you tell them apart is per function, not a rule you can
+copy** (v2.21.5, and the fourth of this family). v2.18.2 taught `submitGuess`/`submitCentury` to tell a
+verdict from the platform in between by reading the BODY: those functions name a reason on every answer they
+give a POST, so a body with no reason in it provably never came from the function. **That inference is false
+of `submit-run`**, which names a reason on four answers out of two dozen - `malformed submission`, `a daily
+submission must be for today`, `no profile for this account`, `unknown mode`, `unknown scoring format` and
+`missing challenge code` are all a bare 400, and every one of them is final. Applying v2.18.2's rule here
+would call each of them transient, which is how a screen came to promise a GM season refused for the salary
+cap that it would be saved next time. What submit-run always sets is the **status**, so that is what
+`runFailure` in storage.js reads; `functions-js` separates nothing-arrived (`FunctionsFetchError`), the relay
+(`FunctionsRelayError`) and the function's own response (`FunctionsHttpError`, whose `context` IS the
+Response) by error NAME, so all three are told apart rather than guessed at. Before it, `submitRun` kept two
+reasons and collapsed the rest to `{ ok: false }`, `submitDnf` answered a boolean, and a thrown `invoke` was
+caught with nothing to report - so a lapsed session, a 502, a dead radio and a refused roster were one
+sentence on screen and, in the database, one shape with no evidence at all: no `runs` row, no
+`finished_codes` row, no counter moved. **Check the contract of the function you are classifying.**
+
+Two things ride with it. Every such failure is now pushed into the crash net's ring (`recordError`), because
+a failure nothing records is one the next bug report cannot mention - that is why the lost Guess daily on
+2026-09-30 could only be diagnosed by inference. And **there is still no outbox for a season**, so not one of
+the seven sentences may imply a retry: a season is a trace, a seed and a client that has to agree with the
+deployed function, so holding one to re-send is a feature rather than a patch. A test fails if the copy
+starts promising one, which is v2.18.2's lesson with the words the other way round.
+
 **`profiles` is a read-modify-write, so every write carries the revision it read.** submit-run applies a
 season by reading the whole row, working out the new one with `applyRun`/`applyDnf`, and writing it back - the
 rules live in game-logic.mjs and must not have a second copy in SQL, which is exactly why the database can't
@@ -1349,6 +1373,14 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.21.5's (a failed save says which): client only. No migration, no Edge Function change - what moved is how
+  the BROWSER reads submit-run's failures, and the function is untouched. Two user-visible halves: the panel is
+  keyed on the draft's SEED as well as the view, so Run it back no longer carries it onto the next board (the
+  result screen and the draft screen are the same `view`, which is why the v2.20.x clearing effect never fired
+  on that path); and `submitRun`/`submitDnf` answer `{ ok: false, reason, status }` over seven reasons with a
+  sentence each. `tests/mock-supabase.mjs` changed too - its unresolvable session answered without a status
+  where index.ts answers 401, so the one failure a player can act on was indistinguishable from a 5xx.
+
   v2.21.0's (the page counter): client only, **plus one dashboard step per environment, which comes FIRST**:
   enable Web Analytics in that Vercel project (Analytics in the sidebar > Enable), then deploy. Enabling is
   what adds the `/_vercel/insights/*` routes, so deploying first only 404s the script until the toggle
