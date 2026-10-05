@@ -20,6 +20,35 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.21.4] - 2026-10-05
+
+### Fixed
+- **Over/Under's round in progress no longer crosses a sign-out either.** Half of this leak was closed in
+  v2.18.11: `openSou` asks `sou_runs` first and, when the server says this account has not played today,
+  explicitly throws away the device's done-record as somebody else's. The round IN PROGRESS beside it was
+  then read unconditionally - so clearing `souDone` only sent the next account one line further down, to
+  inherit the previous player's game instead of their result. Alice uses a life and scores 5, closes the
+  tab; Bob signs up on the same browser, opens Over/Under, and starts at her round with her lives and her
+  score, which posts as his day. `ps-sou-wip:<date>` is keyed by the date alone, with no account in it.
+
+  It now carries the account that was playing, and a round belonging to anyone else is dropped rather than
+  resumed - dropped, not merely ignored, so it cannot catch the next tap either. Over/Under differs from
+  Guess and Century in one way worth knowing: it is NOT account-gated, so a signed-out player's round is
+  stamped `null`, which is a value rather than an absence and is exactly what tells it apart from a
+  pre-v2.21.4 snapshot carrying no owner at all. An account that signs in mid-day loses a casual partial
+  run that `sou_runs` could not have saved while they were signed out.
+
+  Three writers had to be stamped, not one: dealing a round saves it as ALREADY MISSED, and that is a
+  different code path from recording an answer. Dropping the stamp from the deal path alone passed every
+  other test in test-sou-leave.mjs, because they all read what the answer path wrote. There is an
+  assertion at the deal now.
+
+  **That is the per-device cluster finished** except for the season draft's `FREE_PROGRESS`, which cannot
+  be fixed this way at all: a signed-out visitor's draft is MEANT to carry into the guest account they then
+  create, which is the whole of v1.17.0's guest flow. Stamping it would break the carry-over; clearing on
+  sign-out would not, and is probably the shape - but it is a decision about that flow rather than a patch.
+
+
 ## [2.21.3] - 2026-10-05
 
 ### Fixed

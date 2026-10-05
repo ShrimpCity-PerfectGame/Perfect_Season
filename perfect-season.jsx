@@ -2195,6 +2195,17 @@ const CENTURY_DONE_KEY = (d) => `ps-century:${d}`;
 // Same shape, same UTC day, for the same reason (see utcDayKey below).
 const GUESS_DONE_KEY = (d) => `ps-guess:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
+// A round in progress belongs to whoever is playing it. The slot is keyed by DATE alone - no account - so
+// without this the next person on a shared browser inherits the last one's game: Alice uses a life and
+// scores 5, closes the tab; Bob signs up, opens Over/Under, and starts at her round with her lives and her
+// score, which then posts as HIS day. The done-record half of that leak was closed in v2.18.11 by asking
+// `sou_runs` first (see openSou) - this is the half that resumes, and it was read unconditionally.
+// Guess and Century carry the same stamp since v2.21.3. Over/Under differs in one way: it is NOT
+// account-gated, so a signed-out player's round is stamped `null` and is refused to an account that signs
+// in mid-day. That costs a casual partial run - one that `sou_runs` could not have saved anyway while they
+// were signed out - and it is the price of not handing somebody else's score to the next account.
+const souOwner = (uid) => uid || null;
+const souMine = (wip, uid) => !!wip && wip.owner === souOwner(uid);
 const findPlayer = (key, id, season) => (BOARDS[key] || []).find((p) => p.id === id && p.season === season);
 
 function bestAvailable(key, draftedIds, openSlots, format) {
@@ -4117,7 +4128,7 @@ export default function PerfectSeason() {
     const deadline = Date.now() + SOU_ROUND_SECONDS * 1000;
     // Saved as if this round were already missed; answering overwrites it. So reloading the page
     // mid-round lands on the next round a life down, rather than re-dealing this one with a fresh clock.
-    sset(SOU_PROGRESS(date), { roundIndex: roundIndex + 1, lives: lives - 1, score }, false);
+    sset(SOU_PROGRESS(date), { roundIndex: roundIndex + 1, lives: lives - 1, score, owner: souOwner(userId) }, false);
     setSou({ date, roundIndex, lives, score, round, guess: null, correct: undefined, deadline, timeLeft: SOU_ROUND_SECONDS });
     souTimer.current = setInterval(() => {
       setSou((s) => {
@@ -4187,7 +4198,11 @@ export default function PerfectSeason() {
       // else, and leaving it would send the next tap back down the branch above.
       setSouDone(null);
     }
-    const wip = await sget(SOU_PROGRESS(date), false);
+    // Whose round is this? A snapshot from another account - or one written before v2.21.3, which carries
+    // no owner at all - is not resumed and not left lying there to catch the next tap either.
+    const stored = await sget(SOU_PROGRESS(date), false);
+    const wip = souMine(stored, userId) ? stored : null;
+    if (stored && !wip) await sdel(SOU_PROGRESS(date), false);
     setSou(null);
     // A round abandoned on the last life (page closed or reloaded) leaves no lives to resume with.
     if (wip && wip.lives <= 0) { finishSouDay(date, wip.score); return; }
@@ -4207,7 +4222,7 @@ export default function PerfectSeason() {
     clearInterval(souTimer.current);
     if (sou && !sou.guess) {
       const lives = sou.lives - 1;
-      if (lives > 0) sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex + 1, lives, score: sou.score }, false);
+      if (lives > 0) sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex + 1, lives, score: sou.score, owner: souOwner(userId) }, false);
       else finishSouDay(sou.date, sou.score);
     }
     setSou(null);
@@ -4263,7 +4278,7 @@ export default function PerfectSeason() {
   // answer it again for another point.
   useEffect(() => {
     if (!sou || !sou.guess) return;
-    if (sou.lives > 0) { sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex + 1, lives: sou.lives, score: sou.score }, false); return; }
+    if (sou.lives > 0) { sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex + 1, lives: sou.lives, score: sou.score, owner: souOwner(userId) }, false); return; }
     finishSouDay(sou.date, sou.score);
   }, [sou?.guess, sou?.roundIndex]);
 
