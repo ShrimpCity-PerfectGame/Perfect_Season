@@ -88,6 +88,15 @@ to Sign In / Providers, where there is no toggle at all.
 | `v2.21.1` tag | `6445a36` - the release commit, NOT a staging head |
 | `staging` head | ahead of master by the film commits; `git log master..staging` is the live answer |
 
+**Who is playing, and when:** paste `supabase/query-play-log.sql` into the Supabase SQL editor for
+either project. One row per completed game - account, game, UTC timestamp - across drafts, Century,
+Guess, Over/Under, Build-a-player and duels. It is a runbook query rather than a screen, because a
+dashboard login is already the access control and an in-app version would add a surface without
+making anything more private: every table it reads is `for select using (true)`, since the
+leaderboards are public. Tested against the real migrations in PGlite; the file's header explains the
+four traps (the daily is in two tables, backfilled rows are not events, a duel is two people, and
+`runs.created_at` is the run's own time).
+
 ## The release-readiness list
 
 A four-lens audit (abuse/economy, operations, first-run experience, legal/store) asked whether the game is
