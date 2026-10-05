@@ -19,6 +19,35 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+
+## [2.21.3] - 2026-10-05
+
+### Fixed
+- **A half-played daily no longer crosses a sign-out.** Guess the Player and Century save a run in progress
+  to a per-DEVICE slot - one key, no account in it - and the resume path only asked whether the CURRENT
+  account had finished today, never whose game it was. So Alice played three guesses of the daily and signed
+  out, Bob signed up on the same browser, and his first ever daily opened into her game: her three guessed
+  players on screen, two tries left. Century did the same from "Pick 3 of 7" of seven teams he never spun.
+  Finishing it spent Bob's day on somebody else's picks and destroyed Alice's run. A snapshot now carries
+  the account that started it, and a DAILY is refused to anyone else.
+
+  **Only the daily.** An unlimited or practice game is a seed and no record, so inheriting one costs nobody
+  anything - `tests/test-century-screen.mjs` has said exactly that for releases and is right. That
+  distinction IS the fix: a first attempt refused every mismatched snapshot, and the comment is what caught
+  it.
+
+  A snapshot written before this release has no owner, so a legacy DAILY is refused too. That costs whoever
+  is mid-daily at deploy a few picks and nothing else - the answer follows the date, so the day is still
+  playable with a fresh board and full tries. Losing a few guesses beats losing the day.
+
+  Held by `test-guess-screen.mjs` 19 and `test-century-screen.mjs` 20, both of which check the STAMP as well
+  as the check: without a test that plays a real game and reads the slot back, removing the stamp passed.
+
+  This is the last of the per-device cluster v2.18.9-v2.18.13 began. What is left is Over/Under's own
+  done-record and the season draft's `FREE_PROGRESS`, and neither can be keyed this way: a signed-out
+  visitor's draft is MEANT to carry into the guest account they then create, which is the whole of v1.17.0,
+  so it wants deciding rather than patching.
+
 ## [2.21.1] - 2026-10-03
 
 Client only. No migration, no Edge Function change.

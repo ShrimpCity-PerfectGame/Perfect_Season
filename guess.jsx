@@ -149,10 +149,21 @@ export function GuessScreen({
     return () => { alive = false; };
   }, [pool]);
 
+  // Stamped with whoever is playing. The slot is per-DEVICE - one key, no account in it - so without this
+  // the next account on a shared browser resumes the last one's game: Alice plays three guesses of today's
+  // daily and signs out, Bob signs up and opens Guess the Player to find her three guessed players on screen
+  // and two tries left, on the daily he has never played. The spent-check below asks whether BOB finished
+  // today, which he has not, so it let him straight in.
+  //
+  // Stamped rather than re-keyed (`ps-guess-wip:<uid>`) because a stamp can also refuse, and refusing is what
+  // this needs: a re-key would silently leave Alice's snapshot on the device forever. The season draft's
+  // version of this bug cannot be fixed either way - a signed-out visitor's draft is MEANT to carry into the
+  // guest account they then create, which is the whole of v1.17.0 - but Guess is account-gated at every
+  // entrance, so a snapshot here always has an owner and there is nothing to carry.
   const saveWip = useCallback(async (value) => {
-    if (value) await sset(GUESS_WIP, value, false);
+    if (value) await sset(GUESS_WIP, { ...value, owner: userId || null }, false);
     else await clearDraft(GUESS_WIP);
-  }, []);
+  }, [userId]);
 
   // Resume. The same shape Century's has, including the ref that stops a slow read landing on top of a game
   // that has since been started - see CENTURY.md for what that cost the first time.
@@ -165,7 +176,13 @@ export function GuessScreen({
       const spent = saved && saved.variant === "daily" && saved.day === day && userId
         ? !!(await sget(GUESS_DONE(userId, day), false)) : false;
       if (!alive || started.current) return;
-      const usable = saved && !spent && Array.isArray(saved.guesses) && saved.guesses.length < GUESS_TRIES
+      // Whose game is this? Only the DAILY is refused when the owner differs, and the distinction is the whole
+      // of it: an unlimited run is a game against a seed and no record, so inheriting one costs nobody anything - century.jsx's dropWip comment says so and is right. A daily is not that. Finishing somebody else's
+      // half-played daily spends YOUR day on guesses you never made and destroys theirs. A snapshot written
+      // before v2.21.3 has no owner at all, so it fails this the same way, which is the correct answer for a
+      // daily: the player loses a few guesses and can still play the day - the answer follows the date, so it is the same player with five fresh tries, where the alternative is losing it.
+      const mine = saved && (saved.variant !== "daily" || saved.owner === (userId || null));
+      const usable = saved && mine && !spent && Array.isArray(saved.guesses) && saved.guesses.length < GUESS_TRIES
         && (saved.variant !== "daily" || saved.day === day);
       if (usable) { setRun(saved); setStage("play"); }
       else if (saved) saveWip(null);

@@ -22,6 +22,14 @@ being sent strangers. It ticks six at a time because that is what a season draft
 longer moves it at all. The guard is sharper than the one it replaced: a single finished season moves the
 Stats Drafts tile by ONE and the pill by SIX, so a change collapsing the two counts cannot pass.
 
+**The per-device cluster is one item from done** (v2.21.3). Guess and Century no longer let a daily
+snapshot cross a sign-out: the slot carries the account that started it and a DAILY is refused to anyone
+else. Only the daily - an unlimited run is a seed and no record, and test-century-screen.mjs said so
+before this and was right; a first attempt refused every mismatched snapshot and that comment caught it.
+What is LEFT of the cluster: Over/Under's own done-record (SOU_DONE_KEY / SOU_PROGRESS carry no
+account), and the season draft's FREE_PROGRESS, which cannot be keyed this way at all - a signed-out
+visitor's draft is MEANT to carry into the guest account they create, which is the whole of v1.17.0.
+
 **There are NINE 9:16 films** as of v2.21.2 - the four below plus five built on a shared kit:
 `tiktok-genius.html` (no stats, 20-0 on code `4CMJAAAA`), `tiktok-gm.html` (a $150M cap spent to the
 dollar, `MEGAAAAA`), `tiktok-bears.html` (CHI|0, four QBs, 38 TD and 37 INT, code **`RUSH`**),
@@ -372,7 +380,7 @@ devices, the way `builds.day` got one.
   A guest fills in Keep your seasons. The email attaches, `claim_username` runs and the account is renamed and un-guested in the database - but the POST's reply is lost on the way back. `claimUsername` answers "failed", so the panel says "Something went wrong. Try again.". Every retry now answers `already_named`, which the panel's map does not cover, so it says the same thing again. The header still shows Guest_XXXXX, 
   *Fix:* Map `already_named` in KeepSeasons to the trade-up having already gone through, and act on it rather than just saying so: call `onKept(username)` (or re-read the profile) so the app picks up `guest: false` without a reload. The same treatment suits `not_signed
 
-- **[MEDIUM] A daily Guess or Century run in progress crosses a sign-out: the next account opens today's daily mid-game with the previous player's guesses and fewer tries left**
+- **[FIXED in v2.21.3] A daily Guess or Century run in progress crosses a sign-out: the next account opens today's daily mid-game with the previous player's guesses and fewer tries left**
   `guess.jsx`
   Alice plays three guesses of today's daily Guess the Player and logs out without finishing. Bob signs up on the same device and opens Guess the Player: his first ever daily opens straight into Alice's game - her three guessed players and their coloured comparison rows are on screen, and he has 2 of 5 guesses left. Century behaves the same way: a half-played daily leaves the next account on "Pick 3 of 7" of a run it n
   *Fix:* Key both WIP slots by account (`ps-guess-wip:<uid>` / `ps-century-wip:<uid>`), or - cheaper, and it also covers the guest who may not play the daily at all - stamp the snapshot with the account that started it and refuse to resume a DAILY snapshot whose owner 

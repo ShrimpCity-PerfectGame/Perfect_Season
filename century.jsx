@@ -173,10 +173,14 @@ export function CenturyScreen({
   // a null rather than a throw. Clearing uses clearDraft, which OVERWRITES with a snapshot that cannot pass the
   // check below and only then deletes - because a delete that does not land must never bring a finished run back
   // as a resumable one (CLAUDE.md, "Assume storage operations can fail").
+  // Stamped with whoever is playing - see the same note in guess.jsx. The slot is per-DEVICE, so without an
+  // owner the next account on a shared browser resumes the last one's run: a half-played daily leaves the
+  // next player on "Pick 3 of 7" of seven teams they never spun. The spent-check below asks whether THIS
+  // account finished today, which a new one has not, so it waved them through.
   const saveWip = useCallback(async (value) => {
-    if (value) await sset(CENTURY_WIP, value, false);
+    if (value) await sset(CENTURY_WIP, { ...value, owner: userId || null }, false);
     else await clearDraft(CENTURY_WIP);
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     let alive = true;
@@ -192,7 +196,14 @@ export function CenturyScreen({
           && (await sget(CENTURY_DONE(userId, day), false))) { saveWip(null); return; }
       if (!alive || started.current) return;
       // A daily snapshot from a day that has passed is not resumable: its seven teams were yesterday's.
-      const usable = saved && typeof saved.seed === "string" && Array.isArray(saved.picks)
+      // Whose run is this? Only the DAILY is refused when the owner differs, and the distinction is the whole
+      // of it: an unlimited run is seven picks and no record, so inheriting one costs nobody anything - this
+      // file's own dropWip comment says so and is right. A daily is not that. Finishing somebody else's
+      // half-played daily spends YOUR day on a board you never spun and destroys theirs. A snapshot written
+      // before v2.21.3 has no owner at all, so it fails this the same way, which is the correct answer for a
+      // daily: the player loses a few picks and can still play the day, where the alternative is losing it.
+      const mine = saved && (saved.variant !== "daily" || saved.owner === (userId || null));
+      const usable = saved && mine && typeof saved.seed === "string" && Array.isArray(saved.picks)
         && saved.picks.length < CENTURY_SLOTS.length
         && (saved.variant !== "daily" || saved.day === day);
       if (usable) { setRun(saved); setStage("play"); }

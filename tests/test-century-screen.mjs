@@ -500,7 +500,10 @@ await runTest("11. every refusal the function can answer with has a line on scre
 });
 
 // A run in progress is saved per DEVICE, not per account, so a half-finished one is still there after signing in
-// as somebody else - which is right (it is seven picks, not a record) and is also how a test leaves one behind.
+// as somebody else - which is right for an UNLIMITED run (it is seven picks, not a record) and is also how a
+// test leaves one behind. It is not right for a daily, and since v2.21.3 is not what happens: finishing
+// somebody else's half-played daily would spend your day on a board you never spun and destroy theirs, so a
+// daily snapshot carries the account that started it and is refused to anyone else.
 const dropWip = async () => { await window.storage.delete("ps-century-wip"); };
 
 await runTest("12. a second daily is reported as already recorded, not shown as a saved run", async () => {
@@ -523,8 +526,12 @@ await runTest("12. a second daily is reported as already recorded, not shown as 
   // moment ago goes with it - since v2.18.0 the resume path consults it, and a tab stale because the day
   // was finished ELSEWHERE is by definition a device that never wrote one.
   for (const k of (await window.storage.list("ps-century-done", false)).keys) await window.storage.delete(k, false);
+  // Stamped with this account, because that is what the screen writes since v2.21.3 and this tab is the
+  // SAME player's - staging it without an owner stages a snapshot the app would never produce, and it is
+  // refused for the reason a stranger's is. See test 20.
   await window.storage.set("ps-century-wip", JSON.stringify({
     variant: "daily", day: today(), seed: centuryDailySeed(today()), picks: [],
+    owner: (await auth.auth.getSession())?.data?.session?.user?.id ?? null,
   }));
   await openCentury();
   assert(ce().dataset.view === "play", `the stale tab resumes into a run: ${ce().dataset.view}`);
@@ -661,6 +668,43 @@ await runTest("16. the played-today hint survives a reload, keyed by the day the
   const tile = [...container.querySelectorAll("button.mode")].find((b) => b.textContent.includes("Century"));
   assert(tile.textContent.includes(`Done · ${score}`),
     `the Century tile remembers across a reload: ${tile.textContent}`);
+});
+
+await runTest("20. a daily belonging to another account is never resumed, and the slot records its owner", async () => {
+  // The leak: the WIP slot is per-DEVICE (`ps-century-wip`, no account in the key), so before v2.21.3 the
+  // next person on a shared browser walked into the last one's half-played daily - seven teams they never
+  // spun, and finishing it would spend THEIR day and destroy the first player's. Only the daily is refused;
+  // an unlimited run is picks and no record, which the dropWip note above explains.
+  await dropWip();
+  await signUp("century9@example.test", "owner9");
+  await openCentury();
+  await click(variantTiles()[1]);                         // unlimited, so no day is spent staging this
+  await flush();
+
+  // The STAMP, not just the check: the screen has to write the owner, or the check below has nothing to
+  // compare and every snapshot reads as a stranger's.
+  const written = JSON.parse((await window.storage.get("ps-century-wip")).value);
+  const uid = (await auth.auth.getSession())?.data?.session?.user?.id ?? null;
+  assert(written.owner === uid, `the saved run records who is playing: ${written.owner} vs ${uid}`);
+
+  // A stranger's daily must not open.
+  await window.storage.set("ps-century-wip", JSON.stringify({
+    variant: "daily", day: today(), seed: centuryDailySeed(today()), picks: [],
+    owner: "00000000-0000-4000-8000-00000000dead",
+  }));
+  for (const k of (await window.storage.list("ps-century-done", false)).keys) await window.storage.delete(k, false);
+  let m = await mount(); container = m.container; await flush();
+  await openCentury();
+  assert(ce().dataset.view !== "play", `another account's daily is refused: ${ce().dataset.view}`);
+
+  // ...and so must one written before the stamp existed, which has no owner at all.
+  await window.storage.set("ps-century-wip", JSON.stringify({
+    variant: "daily", day: today(), seed: centuryDailySeed(today()), picks: [],
+  }));
+  m = await mount(); container = m.container; await flush();
+  await openCentury();
+  assert(ce().dataset.view !== "play", `a legacy daily with no owner is refused: ${ce().dataset.view}`);
+  await dropWip();
 });
 
 console.log("test-century-screen.mjs done");
