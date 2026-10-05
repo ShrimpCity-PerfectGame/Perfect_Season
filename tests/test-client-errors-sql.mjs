@@ -52,5 +52,45 @@ await runTest("kind is crash and nothing else", async () => {
   assert(refused, "the check constraint holds kind to 'crash'");
 });
 
+await runTest("each length bound accepts exactly at its limit and refuses one character past it", async () => {
+  const str = (n) => "x".repeat(n);
+  const base = { version: "v", kind: "crash", message: "m" };
+
+  // One insert per db.query call, each catching its own error - a refused insert must not leave the
+  // connection in a failed-transaction state for the next assertion, which batching several into one
+  // call (or one transaction) would risk.
+  async function tryInsert(overrides) {
+    const row = { ...base, ...overrides };
+    const cols = Object.keys(row);
+    const vals = cols.map((c) => row[c]);
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(", ");
+    try {
+      await db.query(`insert into public.client_errors (${cols.join(", ")}) values (${placeholders})`, vals);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // version is the one bound that is a range, not just a ceiling: 1-40.
+  assert(!(await tryInsert({ version: str(0) })), "version at length 0 should be refused");
+  assert(await tryInsert({ version: str(1) }), "version at length 1 should be accepted");
+  assert(await tryInsert({ version: str(40) }), "version at length 40 should be accepted");
+  assert(!(await tryInsert({ version: str(41) })), "version at length 41 should be refused");
+
+  assert(await tryInsert({ message: str(500) }), "message at length 500 should be accepted");
+  assert(!(await tryInsert({ message: str(501) })), "message at length 501 should be refused");
+
+  assert(await tryInsert({ stack: str(2000) }), "stack at length 2000 should be accepted");
+  assert(!(await tryInsert({ stack: str(2001) })), "stack at length 2001 should be refused");
+
+  assert(await tryInsert({ component: str(1000) }), "component at length 1000 should be accepted");
+  assert(!(await tryInsert({ component: str(1001) })), "component at length 1001 should be refused");
+
+  assert(await tryInsert({ browser: str(80) }), "browser at length 80 should be accepted");
+  assert(!(await tryInsert({ browser: str(81) })), "browser at length 81 should be refused");
+
+  assert(await tryInsert({ screen: str(40) }), "screen at length 40 should be accepted");
+  assert(!(await tryInsert({ screen: str(41) })), "screen at length 41 should be refused");
+});
+
 await db.close();
 console.log("test-client-errors-sql.mjs done");
