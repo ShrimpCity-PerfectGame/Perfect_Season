@@ -66,7 +66,7 @@ export const clearErrorLog = () => { recent.length = 0; };
 const SINK = typeof SUPABASE_URL !== "undefined" ? SUPABASE_URL : "";
 const SINK_KEY = typeof SUPABASE_ANON_KEY !== "undefined" ? SUPABASE_ANON_KEY : "";
 
-export function sendReport(err, info) {
+export function sendReport(err, info, own) {
   // The tests and tools/ui-harness build with no Supabase environment, so both defines are "". Without this
   // guard the whole suite POSTs at a relative URL on every caught render error.
   if (!SINK || !SINK_KEY) return;
@@ -86,11 +86,12 @@ export function sendReport(err, info) {
         component: firstLines(info && info.componentStack, 6),
         // The ring, which is usually where the answer is: a crash is normally the SECOND failure, and the
         // first one is what explains it.
-        // Filtered the way crashReport filters it one function down: componentDidCatch calls
-        // recordError BEFORE sendReport, so the ring always ends with the very error being reported.
-        // Left in, this spends a slot repeating `message` and overstates how much led up to the crash -
-        // and the whole value of the field is that a crash is usually the SECOND failure.
-        before: recent.filter((r) => r.message !== message).slice(-5)
+        // componentDidCatch calls recordError BEFORE sendReport, so the ring always ends with the very
+        // error being reported - and the whole value of this field is that a crash is usually the SECOND
+        // failure. `own` is the entry recordError just returned, so the exclusion is by IDENTITY: filtering
+        // on the message instead would strip a genuinely different earlier failure that happened to share
+        // one, and "Failed to fetch" is exactly the message that repeats.
+        before: recent.filter((r) => r !== own).slice(-5)
           .map((r) => ({ kind: r.kind, message: r.message, extra: r.extra })),
         // Sent raw and scrubbed SERVER-side. /u/<name> is a username, and the code that just crashed is the
         // last code that should be trusted to remove it - see report-error/index.ts's own header.
@@ -197,8 +198,10 @@ export class ErrorBoundary extends React.Component {
 
   componentDidCatch(err, info) {
     this.setState({ info });
-    recordError("render", err, "");
-    sendReport(err, info);
+    // recordError returns the entry it pushed, which is what lets sendReport leave the crash out of its own
+    // ring without guessing from the text.
+    const own = recordError("render", err, "");
+    sendReport(err, info, own);
     // The console is the only sink there is, and it is what the owner reads when a player screen-shares.
     // Never swallowed: a crash nobody can see is the bug this whole file exists for.
     try { console.error("Gridspin crashed:", err, info && info.componentStack); } catch (e) { /* no console */ }

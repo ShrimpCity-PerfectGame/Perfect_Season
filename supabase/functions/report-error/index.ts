@@ -114,6 +114,17 @@ Deno.serve(async (req) => {
   // rest of this design spends its effort not storing. Its ceiling is real and accepted: a flood fills the
   // hour and genuine crashes are dropped. The upgrade, if it is ever needed, is a daily-salted IP hash - the
   // pattern /privacy already describes for the visit counter, so the policy language exists.
+  // Retention FIRST, before the counts and before any early return. It used to sit after the insert, which
+  // meant the moment the table hit MAX_ROWS the drop returned above it and the prune could never run again -
+  // crash reporting switching itself off for good, and rows outliving the 90 days /privacy promises. A
+  // failure here must still never fail the report, so it stays wrapped.
+  // Retention FIRST, before the counts and before any early return. Put after the insert it becomes a dead
+  // end: the moment the table reaches MAX_ROWS the drop returns above it, the prune can never run again,
+  // crash reporting switches itself off for good, and rows outlive the 90 days /privacy promises. Run here
+  // it also heals a table that is already full. A failure must never fail the report, so it stays wrapped.
+  const cutoff = new Date(Date.now() - KEEP_DAYS * 86400_000).toISOString();
+  try { await service.from("client_errors").delete().lt("created_at", cutoff); } catch (e) { /* carry on */ }
+
   const since = new Date(Date.now() - 3600_000).toISOString();
   const { count } = await service.from("client_errors").select("id", { count: "exact", head: true }).gte("created_at", since);
   const { count: total } = await service.from("client_errors").select("id", { count: "exact", head: true });
@@ -137,11 +148,6 @@ Deno.serve(async (req) => {
     console.error("report-error: insert failed:", error.message);
     return json({ error: "failed to record" }, 500);
   }
-
-  // Opportunistic retention: no cron to schedule and nothing to forget. A table that only ever receives rows
-  // is a privacy promise with a slow leak in it. A failure here must never fail the report that just landed.
-  const cutoff = new Date(Date.now() - KEEP_DAYS * 86400_000).toISOString();
-  try { await service.from("client_errors").delete().lt("created_at", cutoff); } catch (e) { /* the row is in */ }
 
   return json({ ok: true });
 });

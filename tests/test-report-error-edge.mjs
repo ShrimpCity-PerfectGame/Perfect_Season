@@ -23,7 +23,14 @@ function store() {
     users: new Map(),
     rowsOf: (t) => rows[t] || [],
     insert: (t, row) => { (rows[t] ||= []).push(row); return { data: [row], error: null }; },
-    remove: (t, filters, ranges) => { (rows.__removed ||= []).push({ t, filters, ranges }); },
+    remove: (t, filters, ranges) => {
+      (rows.__removed ||= []).push({ t, filters, ranges });
+      // Actually apply it. A no-op remove cannot show that a full table heals itself, which is the
+      // whole question the dead-end tests below ask.
+      for (const [col, op, val] of ranges || []) {
+        rows[t] = (rows[t] || []).filter((r) => (op === "lt" ? !(r[col] < val) : !(r[col] >= val)));
+      }
+    },
     rpcs: {},
     _rows: rows,
     _removed: () => rows.__removed || [],
@@ -211,6 +218,44 @@ await runTest("a hostile user-agent cannot make the function chew on it", async 
   assert(res.status === 200, `still answered: ${res.status}`);
   assert(Date.now() - started < 2000, `and promptly: ${Date.now() - started}ms`);
   assert(s._rows.client_errors[0].browser.length <= 80, "with a bounded browser string");
+});
+
+await runTest("a full table still prunes, so the sink cannot switch itself off for good", async () => {
+  // THE DEAD END, found in re-review. With the prune after the insert, the first request to find the table
+  // at MAX_ROWS returned above it - so nothing could ever delete again, crash reporting was off permanently,
+  // and rows outlived the 90 days /privacy promises. The prune runs before both counts now, which means a
+  // table that is already full heals itself on the very next request.
+  const s = store();
+  globalThis.__edge_store__ = s;
+  const ancient = new Date(Date.now() - 200 * 86400_000).toISOString();
+  for (let i = 0; i < 10_000; i++) s._rows.client_errors.push({ created_at: ancient });
+
+  const first = await invoke(ok);
+  assert(first.status === 200, `answered: ${first.status}`);
+  // Every one of those rows is older than 90 days, so the prune should have taken the lot - and because it
+  // runs first, this request is not dropped at all.
+  assert(s._rows.client_errors.length === 1,
+    `the old rows were pruned and the report written: ${s._rows.client_errors.length}`);
+  assert(!first.body?.dropped, `and it was not dropped: ${JSON.stringify(first.body)}`);
+});
+
+await runTest("a full table of RECENT rows drops, but is still pruned when they age out", async () => {
+  // The other half: rows inside the window are not pruned, so the ceiling does its job and the report is
+  // dropped. The point is that the drop is temporary rather than terminal.
+  const s = store();
+  globalThis.__edge_store__ = s;
+  const recent = new Date(Date.now() - 86400_000).toISOString();
+  for (let i = 0; i < 10_000; i++) s._rows.client_errors.push({ created_at: recent });
+
+  const dropped = await invoke(ok);
+  assert(dropped.body?.dropped === true, `full of recent rows, so dropped: ${JSON.stringify(dropped.body)}`);
+  assert(s._rows.client_errors.length === 10_000, "and nothing added");
+
+  // Age them past the window; the next request prunes them and lands.
+  for (const r of s._rows.client_errors) r.created_at = new Date(Date.now() - 200 * 86400_000).toISOString();
+  const after = await invoke(ok);
+  assert(!after.body?.dropped && s._rows.client_errors.length === 1,
+    `once they age out the sink recovers by itself: ${s._rows.client_errors.length}`);
 });
 
 console.log("test-report-error-edge.mjs done");
