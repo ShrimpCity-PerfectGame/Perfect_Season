@@ -20,6 +20,69 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-10-05
+
+### Added
+- **A crash now reports itself.** The crash net has shown a screen instead of a blank page since v2.19.0, and
+  offered **Copy error details** — which is the whole reporting path, so a failure nobody copies and pastes is
+  a failure nobody ever hears about. `componentDidCatch` now also sends the report to a new `report-error`
+  Edge Function, which writes `public.client_errors`.
+
+  **It sends automatically, with no prompt, and that is the design rather than a shortcut.** A button would
+  have been a cheaper privacy story, but the people worth hearing from are the ones who hit a broken page and
+  close the tab; asking them to press something collects reports from the engaged players you could already
+  reach. `keepalive: true` is on the request for the same reason — a crash is frequently followed by the tab
+  closing, and without it the request dies with the page.
+
+  **The reason this is a function and not an insert policy on the table:** `crashReport` has always carried
+  `location.pathname`, and `/u/<name>` is a username. On a clipboard the player can see it and decline to
+  paste. Stored automatically it would land in the database with nobody looking — and the code that just
+  crashed is the last code that should be trusted to scrub its own report. So the function maps the path to a
+  screen name (`profile`, `challenge`, `duel`, `home`) and an unrecognised path becomes `other`, **never
+  itself**: a default that passes the path through is that same leak wearing a disguise. The user-agent is
+  reduced to browser, major version and platform rather than stored raw.
+
+  `client_errors` has **RLS on with no policy of any kind** — not for writing and not for reading — like
+  `profiles` and `guess_runs` rather than `sou_runs`. **Three columns are absent on purpose: no user id, no
+  username, no IP.** The function sees the caller's address, because it cannot not, and never writes it.
+
+  Caps are by **code point**, not UTF-16 unit. Slicing at a fixed length can cut an emoji in half and leave a
+  lone surrogate, which is invalid UTF-8 — Postgres then refuses the whole row, turning one bad report into no
+  report. Retention is 90 days, pruned opportunistically by the same insert so there is no cron to forget.
+
+  **What it costs on `/privacy`**, and the trap was already documented: the lede said *"the one thing that
+  counts visits"*, and it is two things now. v2.21.0 needed exactly three changes — the section, the lede and
+  the meta description — and that release's first test read only `page.sections`, so it passed while the top
+  of the page contradicted the middle. All three change here and the test reads all three; reverting only the
+  lede reproduces the v2.21.0 bug exactly.
+
+  **Three ceilings are accepted rather than solved**, and each is a comment beside the code it constrains: a
+  thrown `message` can carry anything a future `throw` puts in it (capped at 500, not closed — which is the
+  argument for keeping `kind` to `crash` only); the hourly cap is global rather than per-IP, so a flood costs
+  you signal, because per-IP means storing an address hash and that is the one thing the rest of this spends
+  effort not storing; and a crash bad enough to kill the request loses its own report, which `keepalive`
+  narrows and only a persisted retry queue would close.
+
+  **And it catches nobody until there are players.** That was argued at design time and chosen anyway; it is
+  recorded in the spec so the decision is not re-opened by someone reading this later.
+
+### Fixed
+- **The crash net's central rule is finally asserted.** `error-boundary.jsx` imports nothing but React — that
+  is what makes it work when the app it is reporting on did not — and since v2.19.0 the rule has been stated
+  in a comment and checked by nothing. It matters more now than it did, because the obvious way to write a
+  network call is to import `storage.js`, which would make the reporter depend on the thing it reports on.
+  `SUPABASE_URL` and `SUPABASE_ANON_KEY` are esbuild defines instead, the same mechanism `APP_VERSION`
+  already used there. Adding an import to `theme.mjs` now fails the suite.
+
+- **`tests/test-client-errors-sql.mjs` drives every CHECK bound at its edge**, accept-at-limit and
+  refuse-one-past. A bound nothing exercises is a bound that can be wrong by a factor of ten and still pass.
+
+- **The edge-function test harness learned `.gte()`, `.lt()` and a count-only `select`.** `report-error` needs
+  all three for its rate-limit window and its retention delete, and the stub implemented none of them — the
+  function would have thrown `TypeError` inside its own test. The ranges live in their own array rather than
+  widening `filters`, because the four edge tests that predate this pass `filters` straight to their own
+  `store.remove`.
+
 ## [2.21.5] - 2026-10-05
 
 ### Fixed

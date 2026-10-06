@@ -158,8 +158,18 @@ component:
   the NEXT report rather than shown. The lost Guess daily on 2026-09-30 was diagnosed by inference precisely
   because nothing recorded the first failure.
 
-A first-party sink (a bounded `client_errors` table, insert-only) is the obvious next step and would need a
-line in the privacy policy; the copy button is what makes the next bug reportable at all without one.
+**The first-party sink is built (v2.22.0)** - `client_errors`, written only by the `report-error` Edge
+Function, and `/privacy` gained the paragraph it costs. The copy button stays: it is what a player uses
+when they want to tell you something, and the sink is what catches the ones who never would.
+
+**Why it is a function rather than an insert policy** is the part worth keeping: `crashReport` carries
+`location.pathname`, and `/u/<name>` is a username. On a clipboard the player can see it and decline to
+paste; stored automatically it would land in the database with nobody looking - and the code that just
+crashed is the last code that should be trusted to scrub its own report. The function maps the path to a
+screen name, and **an unrecognised path becomes `other`, never itself**, because a default that passes
+the path through is that same leak wearing a disguise. Three columns are absent on purpose: no user id,
+no username, no IP. The design and its accepted ceilings are in
+`docs/superpowers/specs/2026-10-05-client-error-sink-design.md`.
 
 **Sharing (v1.10.0).** `shareText` builds a Wordle-style card and must never name the players (that
 would spoil the daily): a title (`Gridspin Daily N`, numbered from `GRIDSPIN_DAY_ONE` = launch day
@@ -1373,6 +1383,13 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.22.0's (the crash sink): run **`migration-client-errors.sql`**, then **deploy the Edge Functions**
+  (`node deploy-function.mjs <env>` deploys **SIX** now), then the client. **The order is not optional
+  here**: a client ahead of the function POSTs at a 404 and silently drops every report, which is
+  invisible and looks exactly like "no crashes" - the worst shape a failure can take for a feature whose
+  whole job is making failures visible. The other direction is harmless: a deployed function with no
+  client simply receives nothing. It also changes `/privacy`, a live legal page, so this one cannot skip
+  the staging step.
   v2.21.5's (a failed save says which): client only. No migration, no Edge Function change - what moved is how
   the BROWSER reads submit-run's failures, and the function is untouched. Two user-visible halves: the panel is
   keyed on the draft's SEED as well as the view, so Run it back no longer carries it onto the next board (the
