@@ -94,6 +94,28 @@ await runTest("leaving by any route - even the header's Log in link - cleans up 
 });
 
 await runTest("a round in progress belonging to another account is never resumed", async () => {
+  // THIS TEST DEALS ITS OWN ROUND, and that is a fix rather than a flourish. It used to read whatever the
+  // tests above happened to leave behind, which made the whole file date-dependent: test 1 clicks "Over"
+  // unconditionally and accepts either reveal, so on a date where "Over" is WRONG that answer costs a life
+  // the file's arithmetic never budgeted for, the three run out one step early, the run ends, and this test
+  // found a finished day instead of a round in progress. It failed on 2026-10-06 for exactly that reason,
+  // having passed the day before - roughly half of all dates would have done it.
+  //
+  // Clearing both of the day's keys and dealing a fresh round makes every assertion below depend on what
+  // this test does rather than on which questions the seed produced.
+  for (const k of Object.keys(window.storage.data).filter((k) => k.startsWith("personal:ps-sou"))) {
+    delete window.storage.data[k];
+  }
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await openSou();
+  await click(findButtonByText(container, "I'm ready - start the clock"));
+  await flush();
+  // And step off it, so what sits on the device is a SAVED round rather than a live one. With the round
+  // still running, the navigation further down LEAVES it - and leaving rewrites the record with this
+  // player's own owner, erasing the stranger stamp the test had just written.
+  await click(findButtonByText(container, "Modes"));
+  await flush(3);
   // The slot is keyed by DATE alone - `ps-sou-wip:<date>`, no account in it - so before v2.21.3 the next
   // person on a shared browser inherited the last one's game. Alice uses a life and scores 5, closes the
   // tab; Bob signs up, opens Over/Under, and starts at her round with her lives and her score, which then
