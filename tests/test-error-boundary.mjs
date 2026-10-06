@@ -184,4 +184,49 @@ await runTest("the crash screen's own colours clear AA, since no token file hold
   assert(!/color:\s*"#C8FF3D"/.test(src), "lime is never used as an ink");
 });
 
+// THE RULE THIS WHOLE FILE RESTS ON, finally asserted. It is stated in the comment at the top and above
+// sendReport, and until v2.22.0 it was checked by nothing - the exact shape CLAUDE.md records walking into
+// three times. It matters more now than it did: sendReport posts a crash over the network, and the obvious
+// way to write that is to import storage.js, which would make the crash net depend on the app it reports on.
+await runTest("error-boundary.jsx imports nothing but React", async () => {
+  const src = fs.readFileSync(new URL("../error-boundary.jsx", import.meta.url), "utf8");
+  const from = [...src.matchAll(/^\s*import\s[\s\S]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+  const bare = [...src.matchAll(/^\s*import\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+  const all = [...from, ...bare];
+  assert(all.length === 1 && all[0] === "react",
+    `the crash net may import react and nothing else, found: ${JSON.stringify(all)}`);
+  assert(!/\brequire\s*\(|\bawait\s+import\s*\(/.test(src), "and nothing dynamic either");
+});
+
+// Every jsdom test and tools/ui-harness build with no Supabase environment, so both defines are "". Without
+// the guard, every caught render error in the suite POSTs at a relative URL - which jsdom answers in ways
+// that are slow at best and noisy at worst.
+await runTest("the reporter is inert when the build has no Supabase", async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (...a) => { calls.push(a); return Promise.resolve({ ok: true }); };
+  try {
+    mod.sendReport(new Error("no backend in a test build"), { componentStack: "    at App" });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert(calls.length === 0, `nothing was sent: ${JSON.stringify(calls).slice(0, 200)}`);
+});
+
+// It must also never be the thing that breaks a crash screen. A report built from a junk error, or thrown at
+// by a hostile fetch, still has to return quietly.
+await runTest("the reporter cannot throw, whatever it is handed", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => { throw new TypeError("fetch itself exploded"); };
+  try {
+    for (const [err, info] of [[new Error("x"), null], ["a string, not an Error", undefined],
+                               [null, { componentStack: null }], [{ weird: true }, {}]]) {
+      mod.sendReport(err, info);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert(true, "sendReport returned on every shape without throwing");
+});
+
 console.log("test-error-boundary.mjs done");
