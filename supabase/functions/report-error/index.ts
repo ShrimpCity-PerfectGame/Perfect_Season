@@ -20,6 +20,14 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // why tests/test-client-errors-sql.mjs drives every one of them at its edge.
 const MAX = { version: 40, message: 500, stack: 2000, component: 1000, entry: 300, extra: 120, kind: 40, before: 5, browser: 80 };
 const RATE_PER_HOUR = 200;
+// A second ceiling, on TOTAL rows rather than rate. The hourly cap bounds how FAST this grows and says
+// nothing about how BIG it gets: 200/hr across the 90-day window is 432,000 rows, and one row can reach
+// ~23 KB because the caps above count code points while the column checks count characters - four bytes
+// each for astral text. That is roughly 10 GB reachable from an endpoint anybody can POST to, and a full
+// Supabase project goes READ-ONLY, which stops the whole game. The crash sink taking the site down would
+// be a poor trade for catching crashes. 10,000 rows is ~235 MB at that worst case, and far more reports
+// than anyone will ever read.
+const MAX_ROWS = 10_000;
 const KEEP_DAYS = 90;
 
 function corsHeaders(req: Request) {
@@ -108,19 +116,27 @@ Deno.serve(async (req) => {
   // pattern /privacy already describes for the visit counter, so the policy language exists.
   const since = new Date(Date.now() - 3600_000).toISOString();
   const { count } = await service.from("client_errors").select("id", { count: "exact", head: true }).gte("created_at", since);
+  const { count: total } = await service.from("client_errors").select("id", { count: "exact", head: true });
   // Answered ok, not refused: the browser can do nothing about the cap and must not retry. `dropped` is
   // there so a test - and only a test - can tell the two apart.
-  if ((count ?? 0) >= RATE_PER_HOUR) return json({ ok: true, dropped: true });
+  if ((count ?? 0) >= RATE_PER_HOUR || (total ?? 0) >= MAX_ROWS) return json({ ok: true, dropped: true });
 
   const { error } = await service.from("client_errors").insert({
     version, kind: "crash", message,
     stack: cap(body?.stack, MAX.stack),
     component: cap(body?.component, MAX.component),
     before,
-    browser: browserOf(body?.ua),
+    // Capped BEFORE the regexes run: the Safari pattern backtracks badly over a long string full of
+    // near-matches, and the body is whatever anyone cares to POST.
+    browser: browserOf(cap(body?.ua, 400)),
     screen: screenOf(body?.path),
   });
-  if (error) return json({ error: "failed to record" }, 500);
+  if (error) {
+    // The one class of failure this function cannot record is its own, so it goes to the platform log the
+    // way the other five functions log theirs.
+    console.error("report-error: insert failed:", error.message);
+    return json({ error: "failed to record" }, 500);
+  }
 
   // Opportunistic retention: no cron to schedule and nothing to forget. A table that only ever receives rows
   // is a privacy promise with a slow leak in it. A failure here must never fail the report that just landed.

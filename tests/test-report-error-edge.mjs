@@ -172,4 +172,45 @@ await runTest("the insert also prunes anything older than 90 days", async () => 
   assert(days > 89 && days < 91, `about 90 days ago: ${days.toFixed(1)}`);
 });
 
+await runTest("a total-rows ceiling stops the table eating the project's disk", async () => {
+  // The hourly cap bounds how FAST this grows and says nothing about how BIG it gets. 200/hr across the
+  // 90-day window is 432,000 rows, and a row can reach ~23 KB because the caps count code points while the
+  // column checks count characters. A full Supabase project goes read-only, which stops the whole game -
+  // so the crash sink would have been able to take the site down. Found in the final review.
+  const s = store();
+  globalThis.__edge_store__ = s;
+  const old = new Date(Date.now() - 30 * 86400_000).toISOString();
+  for (let i = 0; i < 10_000; i++) s._rows.client_errors.push({ created_at: old });
+  const res = await invoke(ok);
+  assert(res.status === 200 && res.body?.dropped === true,
+    `dropped once the table is full, not failed: ${res.status} ${JSON.stringify(res.body)}`);
+  assert(s._rows.client_errors.length === 10_000, `and nothing was added: ${s._rows.client_errors.length}`);
+});
+
+await runTest("the total ceiling counts rows of every age, not just this hour", async () => {
+  // The whole point of the second ceiling is that it sees what the hourly one cannot: these rows are a
+  // month old, so the rate limit is nowhere near tripped.
+  const s = store();
+  globalThis.__edge_store__ = s;
+  const old = new Date(Date.now() - 30 * 86400_000).toISOString();
+  for (let i = 0; i < 9_999; i++) s._rows.client_errors.push({ created_at: old });
+  const under = await invoke(ok);
+  assert(under.status === 200 && !under.body?.dropped, `9,999 is under the ceiling: ${JSON.stringify(under.body)}`);
+  assert(s._rows.client_errors.length === 10_000, "the report was written");
+  const over = await invoke(ok);
+  assert(over.body?.dropped === true, `and the next one is over it: ${JSON.stringify(over.body)}`);
+});
+
+await runTest("a hostile user-agent cannot make the function chew on it", async () => {
+  // browserOf runs regexes over the body, and the Safari pattern backtracks over a long string of
+  // near-matches. The cap goes on before the regexes, not after.
+  const s = store();
+  globalThis.__edge_store__ = s;
+  const started = Date.now();
+  const res = await invoke({ ...ok, ua: "Version/1 ".repeat(20_000) });
+  assert(res.status === 200, `still answered: ${res.status}`);
+  assert(Date.now() - started < 2000, `and promptly: ${Date.now() - started}ms`);
+  assert(s._rows.client_errors[0].browser.length <= 80, "with a bounded browser string");
+});
+
 console.log("test-report-error-edge.mjs done");

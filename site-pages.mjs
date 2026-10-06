@@ -117,7 +117,7 @@ const PRIVACY_SECTIONS = [
     // the code does rather than a reassurance. The screen name is the load-bearing one: the browser sends
     // the address it crashed on, and /u/<name> is a username, so the server replaces it with a name like
     // "profile" before anything is stored. supabase/functions/report-error/index.ts is where that happens.
-    "If the game crashes, your browser sends a report so the fault can be found and fixed. It carries the version of the game, the error and where in the code it happened, which screen you were on and which browser you are using - never your name, your account, your email address or your IP address. The screen is a name like \"profile\" rather than the address you were at, so a report sent from somebody's profile page cannot say whose. Reports are deleted after 90 days. This page and the terms cannot send one at all: they carry none of the game's code.",
+    "If the game crashes, your browser sends a report so the fault can be found and fixed. It carries the version of the game, the error and where in the code it happened, which screen you were on and which browser you are using - never your name, your account, your email address or your IP address. The screen is a name like \"profile\" rather than the address you were at, so a report sent from somebody's profile page cannot say whose. Reports are kept no longer than 90 days, and are removed as later ones arrive. This page and the terms cannot send one at all: they carry none of the game's code.",
     "There are no adverts, no tracking pixels and nothing from an advertising network. Nothing else on the site is loaded from anywhere else.",
     "Nothing is sold, rented or handed to anyone else.",
   ]],

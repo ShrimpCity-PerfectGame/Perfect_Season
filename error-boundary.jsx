@@ -11,12 +11,14 @@
 // perfect-season.jsx as it renders and a crash during that render means there may be no stylesheet at all. A
 // crash screen that needs the crashed app's CSS is not a crash screen.
 //
-// There is no third party in here either. The privacy policy promises "no adverts, no analytics and no
-// trackers" (site-pages.mjs), and crash reporting that posts to somebody else's servers is the kind of thing
-// a player would reasonably call a tracker. So this reports the only way that needs no vendor, no account and
-// no policy change: it shows the player what broke and gives them a button that copies it, which turns a blank
-// page into a message the owner can actually act on. A first-party sink can come later; the copy button is
-// what makes the next bug reportable at all.
+// There is no third party in here either, and there never will be: crash reporting that posts to somebody
+// else's servers is the kind of thing a player would reasonably call a tracker, and /privacy promises there
+// are none. Since v2.22.0 it reports to the game's OWN Edge Function instead (sendReport below) and to
+// nowhere else, which cost one paragraph on /privacy and no vendor at all. The copy button stays beside it:
+// the sink catches the stranger who closes the tab, the button is for the player who wants to tell you.
+//
+// This header used to quote /privacy as promising "no analytics". That stopped being true in v2.21.0 when
+// the visit counter landed and the page was rewritten; the comment was not.
 import React from "react";
 
 // Newest last, bounded, and never allowed to grow: this is a diagnostic, not a log. 20 is enough to show what
@@ -84,7 +86,12 @@ export function sendReport(err, info) {
         component: firstLines(info && info.componentStack, 6),
         // The ring, which is usually where the answer is: a crash is normally the SECOND failure, and the
         // first one is what explains it.
-        before: recent.slice(-5).map((r) => ({ kind: r.kind, message: r.message, extra: r.extra })),
+        // Filtered the way crashReport filters it one function down: componentDidCatch calls
+        // recordError BEFORE sendReport, so the ring always ends with the very error being reported.
+        // Left in, this spends a slot repeating `message` and overstates how much led up to the crash -
+        // and the whole value of the field is that a crash is usually the SECOND failure.
+        before: recent.filter((r) => r.message !== message).slice(-5)
+          .map((r) => ({ kind: r.kind, message: r.message, extra: r.extra })),
         // Sent raw and scrubbed SERVER-side. /u/<name> is a username, and the code that just crashed is the
         // last code that should be trusted to remove it - see report-error/index.ts's own header.
         ua: typeof navigator !== "undefined" ? navigator.userAgent : "",
