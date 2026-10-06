@@ -263,4 +263,30 @@ await runTest("no shipped data file carries an image URL, or any URL at all", as
 });
 
 await close();
+// v2.21.0 is both the precedent and the warning. When the visit counter landed, exactly three places had to
+// change - the section, the LEDE and the meta description - and the first test read only page.sections, so
+// it passed while the top of the page said the opposite of the middle. All three are read here.
+await runTest("the privacy page accounts for the crash sink in all three places", async () => {
+  const page = SITE_PAGES.find((p) => p.id === "privacy");
+  // Sections are [heading, [paragraphs]] tuples.
+  const sectionText = page.sections.flatMap(([h, body]) => [h, ...body]).join("\n");
+  const whole = [page.description, ...page.intro, sectionText].join("\n");
+
+  assert(/crash/i.test(sectionText), "a section describes it");
+  assert(/crash/i.test(page.intro.join("\n")), "the lede does not pretend one thing is all that is collected");
+  assert(/crash/i.test(page.description), "and neither does the meta description");
+
+  // The exact claim that stopped being true the moment a second thing collected.
+  assert(!/the one thing that counts visits/i.test(whole),
+    "nothing still calls the counter 'the one thing'");
+
+  // The promises the section must actually make, since this is a legal page and not a changelog.
+  assert(/never your name|not your name|no name/i.test(sectionText), "it says a report carries no name");
+  assert(/90 days/.test(sectionText), "and says how long one is kept");
+
+  // The page's own date moves with its copy - the file says to change these together.
+  assert(page.updated === "2026-10-05" && /5 October 2026/.test(sectionText + whole),
+    `the page's date was bumped with its copy: ${page.updated}`);
+});
+
 console.log("test-site-pages.mjs done");
