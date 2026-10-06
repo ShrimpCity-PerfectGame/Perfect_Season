@@ -18,7 +18,7 @@ export const sql = (file) => readFileSync(new URL(`../supabase/${file}`, import.
 export const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 // The order tests/test-migrations.mjs holds the runbook to. migration-century.sql is FIRST: player_stats in
 // runs-log reads century_runs and is `language sql`, so it is validated - and the table has to be there.
-export const MIGRATIONS = ["migration-century.sql", "migration-guess.sql", "migration-runs-log.sql", "migration-profiles.sql", "migration-moderation.sql", "migration-wallet.sql", "migration-shop.sql", "migration-versus.sql"];
+export const MIGRATIONS = ["migration-century.sql", "migration-guess.sql", "migration-runs-log.sql", "migration-profiles.sql", "migration-moderation.sql", "migration-wallet.sql", "migration-shop.sql", "migration-versus.sql", "migration-client-errors.sql"];
 // Just v1.11.0's (PROFILES.md), for the tests that deliberately model a database from BEFORE the wallet and the
 // shop existed. Named rather than sliced off MIGRATIONS: a file inserted in the middle of that list used to
 // change what this meant, and these three are a release, not a prefix - adding v2.9.0's century migration to it

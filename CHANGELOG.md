@@ -19,6 +19,180 @@ Releases go to the staging site and are verified there before production — see
 CLAUDE.md.
 
 ## [Unreleased]
+
+## [2.22.0] - 2026-10-05
+
+### Added
+- **A crash now reports itself.** The crash net has shown a screen instead of a blank page since v2.19.0, and
+  offered **Copy error details** — which is the whole reporting path, so a failure nobody copies and pastes is
+  a failure nobody ever hears about. `componentDidCatch` now also sends the report to a new `report-error`
+  Edge Function, which writes `public.client_errors`.
+
+  **It sends automatically, with no prompt, and that is the design rather than a shortcut.** A button would
+  have been a cheaper privacy story, but the people worth hearing from are the ones who hit a broken page and
+  close the tab; asking them to press something collects reports from the engaged players you could already
+  reach. `keepalive: true` is on the request for the same reason — a crash is frequently followed by the tab
+  closing, and without it the request dies with the page.
+
+  **The reason this is a function and not an insert policy on the table:** `crashReport` has always carried
+  `location.pathname`, and `/u/<name>` is a username. On a clipboard the player can see it and decline to
+  paste. Stored automatically it would land in the database with nobody looking — and the code that just
+  crashed is the last code that should be trusted to scrub its own report. So the function maps the path to a
+  screen name (`profile`, `challenge`, `duel`, `home`) and an unrecognised path becomes `other`, **never
+  itself**: a default that passes the path through is that same leak wearing a disguise. The user-agent is
+  reduced to browser, major version and platform rather than stored raw.
+
+  `client_errors` has **RLS on with no policy of any kind** — not for writing and not for reading — like
+  `profiles` and `guess_runs` rather than `sou_runs`. **Three columns are absent on purpose: no user id, no
+  username, no IP.** The function sees the caller's address, because it cannot not, and never writes it.
+
+  Caps are by **code point**, not UTF-16 unit. Slicing at a fixed length can cut an emoji in half and leave a
+  lone surrogate, which is invalid UTF-8 — Postgres then refuses the whole row, turning one bad report into no
+  report. Retention is 90 days, pruned opportunistically by the same insert so there is no cron to forget.
+
+  **What it costs on `/privacy`**, and the trap was already documented: the lede said *"the one thing that
+  counts visits"*, and it is two things now. v2.21.0 needed exactly three changes — the section, the lede and
+  the meta description — and that release's first test read only `page.sections`, so it passed while the top
+  of the page contradicted the middle. All three change here and the test reads all three; reverting only the
+  lede reproduces the v2.21.0 bug exactly.
+
+  **Three ceilings are accepted rather than solved**, and each is a comment beside the code it constrains: a
+  thrown `message` can carry anything a future `throw` puts in it (capped at 500, not closed — which is the
+  argument for keeping `kind` to `crash` only); the hourly cap is global rather than per-IP, so a flood costs
+  you signal, because per-IP means storing an address hash and that is the one thing the rest of this spends
+  effort not storing; and a crash bad enough to kill the request loses its own report, which `keepalive`
+  narrows and only a persisted retry queue would close.
+
+  **And it catches nobody until there are players.** That was argued at design time and chosen anyway; it is
+  recorded in the spec so the decision is not re-opened by someone reading this later.
+
+### Fixed
+- **The crash net's central rule is finally asserted.** `error-boundary.jsx` imports nothing but React — that
+  is what makes it work when the app it is reporting on did not — and since v2.19.0 the rule has been stated
+  in a comment and checked by nothing. It matters more now than it did, because the obvious way to write a
+  network call is to import `storage.js`, which would make the reporter depend on the thing it reports on.
+  `SUPABASE_URL` and `SUPABASE_ANON_KEY` are esbuild defines instead, the same mechanism `APP_VERSION`
+  already used there. Adding an import to `theme.mjs` now fails the suite.
+
+- **`tests/test-client-errors-sql.mjs` drives every CHECK bound at its edge**, accept-at-limit and
+  refuse-one-past. A bound nothing exercises is a bound that can be wrong by a factor of ten and still pass.
+
+- **The edge-function test harness learned `.gte()`, `.lt()` and a count-only `select`.** `report-error` needs
+  all three for its rate-limit window and its retention delete, and the stub implemented none of them — the
+  function would have thrown `TypeError` inside its own test. The ranges live in their own array rather than
+  widening `filters`, because the four edge tests that predate this pass `filters` straight to their own
+  `store.remove`.
+
+## [2.21.5] - 2026-10-05
+
+### Fixed
+- **A failed save said one thing for eight different failures, and now says which.** Found on production,
+  from a screenshot: the "Your last season couldn't be saved" panel sitting over a fresh Unlimited draft
+  with a player already locked into it. Two separate defects behind one picture.
+
+  **The panel outlived its subject.** The result screen and the draft screen are both `view === "play"`, and
+  the clearing effect added for exactly this (v2.20.x) watched the view alone - so `restart()`'s
+  `setView("play")` over `"play"` was a no-op and Run it back carried the notice into the next draft, where
+  it read as a complaint about a board with nothing wrong with it. It is keyed on the draft's seed as well
+  now: a new seed is a new draft, which is precisely when a sentence about the last one stops being true.
+
+  **And nothing anywhere said WHY.** `submitRun` kept `duplicate` and `reserved_code` and collapsed every
+  other answer to a bare `{ ok: false }`; `submitDnf` answered a boolean; an `invoke` that threw was caught
+  by `submitAndSync` with nothing to report. So a lapsed session, a 502, a dead radio and a roster the
+  server refused outright were one sentence with nothing to act on - and, against the real database, one
+  shape with no evidence: no `runs` row, no `finished_codes` row, no counter moved, nothing in the error
+  ring. The run this was diagnosed from left exactly that, six hours of it, and which of the four it had
+  been could only be inferred.
+
+  Both now answer `{ ok: false, reason, status }` over seven reasons, each with a sentence of its own, and
+  each failure is pushed into the crash net's ring so the next **Copy error details** carries it.
+
+  **submit-run's contract is the OPPOSITE of submit-guess's, and copying v2.18.2's rule here would have
+  been a new bug rather than a tidy-up.** Guess and Century name a reason on every answer they give a POST,
+  which is what makes a body with no reason provably the platform in between. submit-run names one on four
+  answers out of two dozen: `malformed submission`, `a daily submission must be for today`, `no profile for
+  this account`, `unknown mode`, `unknown scoring format` and `missing challenge code` are all a bare 400 -
+  and every one of them is final. Reading those as transient is how a screen came to promise a GM season
+  refused for the salary cap that it would be saved next time. What submit-run always sets is the **status**,
+  so that is what is read; `functions-js` distinguishes nothing-arrived, the relay, and the function's own
+  response by error *name*, so all three are told apart rather than guessed at.
+
+  **There is still no outbox for a season, and the copy must never imply one.** A season is a trace, a seed
+  and a client that has to agree with the deployed function, so holding one to re-send is a feature rather
+  than a patch. The sentences say what happened and that it will not be counted; a test fails if any of them
+  starts promising a retry, which is v2.18.2's lesson with the words the other way round.
+
+- **An abandoned draft is no longer called a season.** `recordDnf` raises the same panel a finished season
+  does, and it read "Your last season couldn't be saved, so it isn't on the board" - of a draft that has no
+  roster, no score, and was never going to a board.
+
+- **The mock answered an unresolvable session differently from the real function.** `invokeSubmitRun` sent a
+  bare `{ error: { message: "unauthorized" } }` with no status on it, where `index.ts` sends a 401 - so the
+  one failure a player can act on was, to the client, indistinguishable from the server falling over. It is
+  a 401 in the mock too. The seam that classifies failures is the last place a mock may differ.
+
+  `tests/test-submit-reasons.mjs` covers the classification (fifteen shapes, season and DNF both);
+  `tests/test-dnf.mjs` presses the panel in the real app and reads its words, because a sentence proved by
+  calling the function that returns it proves nothing about whether a screen shows it. All seven fixes were
+  mutation-checked.
+
+## [2.21.4] - 2026-10-05
+
+### Fixed
+- **Over/Under's round in progress no longer crosses a sign-out either.** Half of this leak was closed in
+  v2.18.11: `openSou` asks `sou_runs` first and, when the server says this account has not played today,
+  explicitly throws away the device's done-record as somebody else's. The round IN PROGRESS beside it was
+  then read unconditionally - so clearing `souDone` only sent the next account one line further down, to
+  inherit the previous player's game instead of their result. Alice uses a life and scores 5, closes the
+  tab; Bob signs up on the same browser, opens Over/Under, and starts at her round with her lives and her
+  score, which posts as his day. `ps-sou-wip:<date>` is keyed by the date alone, with no account in it.
+
+  It now carries the account that was playing, and a round belonging to anyone else is dropped rather than
+  resumed - dropped, not merely ignored, so it cannot catch the next tap either. Over/Under differs from
+  Guess and Century in one way worth knowing: it is NOT account-gated, so a signed-out player's round is
+  stamped `null`, which is a value rather than an absence and is exactly what tells it apart from a
+  pre-v2.21.4 snapshot carrying no owner at all. An account that signs in mid-day loses a casual partial
+  run that `sou_runs` could not have saved while they were signed out.
+
+  Three writers had to be stamped, not one: dealing a round saves it as ALREADY MISSED, and that is a
+  different code path from recording an answer. Dropping the stamp from the deal path alone passed every
+  other test in test-sou-leave.mjs, because they all read what the answer path wrote. There is an
+  assertion at the deal now.
+
+  **That is the per-device cluster finished** except for the season draft's `FREE_PROGRESS`, which cannot
+  be fixed this way at all: a signed-out visitor's draft is MEANT to carry into the guest account they then
+  create, which is the whole of v1.17.0's guest flow. Stamping it would break the carry-over; clearing on
+  sign-out would not, and is probably the shape - but it is a decision about that flow rather than a patch.
+
+
+## [2.21.3] - 2026-10-05
+
+### Fixed
+- **A half-played daily no longer crosses a sign-out.** Guess the Player and Century save a run in progress
+  to a per-DEVICE slot - one key, no account in it - and the resume path only asked whether the CURRENT
+  account had finished today, never whose game it was. So Alice played three guesses of the daily and signed
+  out, Bob signed up on the same browser, and his first ever daily opened into her game: her three guessed
+  players on screen, two tries left. Century did the same from "Pick 3 of 7" of seven teams he never spun.
+  Finishing it spent Bob's day on somebody else's picks and destroyed Alice's run. A snapshot now carries
+  the account that started it, and a DAILY is refused to anyone else.
+
+  **Only the daily.** An unlimited or practice game is a seed and no record, so inheriting one costs nobody
+  anything - `tests/test-century-screen.mjs` has said exactly that for releases and is right. That
+  distinction IS the fix: a first attempt refused every mismatched snapshot, and the comment is what caught
+  it.
+
+  A snapshot written before this release has no owner, so a legacy DAILY is refused too. That costs whoever
+  is mid-daily at deploy a few picks and nothing else - the answer follows the date, so the day is still
+  playable with a fresh board and full tries. Losing a few guesses beats losing the day.
+
+  Held by `test-guess-screen.mjs` 19 and `test-century-screen.mjs` 20, both of which check the STAMP as well
+  as the check: without a test that plays a real game and reads the slot back, removing the stamp passed.
+
+  This is the last of the per-device cluster v2.18.9-v2.18.13 began. What is left is Over/Under's own
+  done-record and the season draft's `FREE_PROGRESS`, and neither can be keyed this way: a signed-out
+  visitor's draft is MEANT to carry into the guest account they then create, which is the whole of v1.17.0,
+  so it wants deciding rather than patching.
+
 ## [2.21.1] - 2026-10-03
 
 Client only. No migration, no Edge Function change.

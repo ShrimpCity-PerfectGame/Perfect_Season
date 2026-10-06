@@ -25,6 +25,10 @@ const ch = (...codes) => String.fromCodePoint(...codes);
 const plain = (v) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x));
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" && !(v instanceof Date) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
 const same = (a, b) => plain(canon(a)) === plain(canon(b));
+// A refused repeat, asserted WHOLE rather than field by field: the point is as much that nothing else
+// came back - no run, no score, no coins - as that it was called a duplicate. `status` joined the shape
+// in v2.21.5, when submitRun started naming its failures apart (409 here, and it is always 409 here).
+const DUPLICATE = { ok: false, reason: "duplicate", status: 409 };
 const show = (v) => String(plain(v)).slice(0, 300).replace(/[^\x20-\x7e]/g, (c) => `<U+${c.codePointAt(0).toString(16).toUpperCase()}>`);
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 const PG_TEMP_LAST = "public, pg_temp";
@@ -1293,7 +1297,7 @@ await runTest("8d. the same draft counts once: the same code in any variant or f
   const before = snapshotOf(P.id);
   for (const extra of [{}, { gm: true, mode: { gm: true } }, { genius: true }, { format: "standard" }, { format: "fantasy" }, { gm: true, genius: true, format: "standard" }]) {
     const again = await free(base, draftTrace(base), extra);
-    assert(same(again, { ok: false, reason: "duplicate" }), `${base} again ${show(extra)}: ${show(again)}`);
+    assert(same(again, DUPLICATE), `${base} again ${show(extra)}: ${show(again)}`);
   }
   assert(snapshotOf(P.id) === before, "no repeat wrote anything");
   const fullWidth = (c) => ch(0xFF21 + c.charCodeAt(0) - 65);
@@ -1309,7 +1313,7 @@ await runTest("8d. the same draft counts once: the same code in any variant or f
   for (const v of variants) {
     const own = await free(v, draftTrace(v));
     assert(own.ok && own.coins?.lines[0]?.key === "season", `${show(v)} with its own draft counts and pays: ${show(own.error)}`);
-    assert(same(await free(v, draftTrace(v)), { ok: false, reason: "duplicate" }), `and only once (${show(v)})`);
+    assert(same(await free(v, draftTrace(v)), DUPLICATE), `and only once (${show(v)})`);
   }
   assert(rowsOf(auth._finishedCodes, P.id).length === variants.length + 1 && mockLedger(P.id).filter((l) => l.kind === "season").length === variants.length + 1, "one code row and one payment per seed");
 });
@@ -1324,7 +1328,7 @@ await runTest("8e. a Daily counts once per date and format; the three dates a pl
       assert(r.ok && r.coins?.lines[0]?.coins === COIN_RULES.dailySeason, `${date} ${format} counts and pays the Daily's 40: ${show(r.error)}`);
       streaks.push(r.coins.lines.find((l) => l.key === "streak")?.coins);
       const again = await daily(date, format);
-      assert(same(again, { ok: false, reason: "duplicate" }), `${date} ${format} again: ${show(again)}`);
+      assert(same(again, DUPLICATE), `${date} ${format} again: ${show(again)}`);
     }
   }
   assert(same(streaks, [5, 5, 10, 10, 15, 15]), `the streak climbs a day per date, both formats sharing it: ${show(streaks)}`);
@@ -1362,7 +1366,7 @@ await runTest("8f. 20 Unlimited, Genius and GM seasons pay each UTC day - the 21
   assert(next.ok && next.coins.capped === false && next.coins.lines[0]?.key === "season", `the next day's first season pays: ${show(next.coins)}`);
   // A DNF pays nothing and takes no allowance.
   const ledgerBefore = plain(mockLedger(P.id));
-  for (const ladder of ["unlimited", "gm", "daily"]) assert((await submitDnf(6, ladder)) === true, `a ${ladder} DNF is recorded`);
+  for (const ladder of ["unlimited", "gm", "daily"]) assert((await submitDnf(6, ladder)).ok === true, `a ${ladder} DNF is recorded`);
   assert(plain(mockLedger(P.id)) === ledgerBefore, "DNFs moved no coins");
 });
 

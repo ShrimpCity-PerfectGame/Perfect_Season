@@ -8,7 +8,10 @@
 // and hands them something to send. And that it stands up with no stylesheet, because the stylesheet is
 // injected by the component that just crashed.
 import fs from "node:fs";
-import { setupDom, loadModule, renderComponent, click, flush, assert, runTest, findButtonByText } from "./helpers.mjs";
+import nodePath from "node:path";
+import { pathToFileURL } from "node:url";
+import * as esbuild from "esbuild";
+import { setupDom, loadModule, renderComponent, click, flush, assert, runTest, findButtonByText, root } from "./helpers.mjs";
 
 setupDom();
 const { act } = await import("react-dom/test-utils");
@@ -182,6 +185,192 @@ await runTest("the crash screen's own colours clear AA, since no token file hold
   }
   // Lime is a fill and never text - the rule the whole design system turns on.
   assert(!/color:\s*"#C8FF3D"/.test(src), "lime is never used as an ink");
+});
+
+// THE RULE THIS WHOLE FILE RESTS ON, finally asserted. It is stated in the comment at the top and above
+// sendReport, and until v2.22.0 it was checked by nothing - the exact shape CLAUDE.md records walking into
+// three times. It matters more now than it did: sendReport posts a crash over the network, and the obvious
+// way to write that is to import storage.js, which would make the crash net depend on the app it reports on.
+await runTest("error-boundary.jsx imports nothing but React", async () => {
+  const src = fs.readFileSync(new URL("../error-boundary.jsx", import.meta.url), "utf8");
+  const from = [...src.matchAll(/^\s*import\s[\s\S]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+  const bare = [...src.matchAll(/^\s*import\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+  const all = [...from, ...bare];
+  assert(all.length === 1 && all[0] === "react",
+    `the crash net may import react and nothing else, found: ${JSON.stringify(all)}`);
+  assert(!/\brequire\s*\(|\bawait\s+import\s*\(/.test(src), "and nothing dynamic either");
+});
+
+// Every jsdom test and tools/ui-harness build with no Supabase environment, so both defines are "". Without
+// the guard, every caught render error in the suite POSTs at a relative URL - which jsdom answers in ways
+// that are slow at best and noisy at worst.
+await runTest("the reporter is inert when the build has no Supabase", async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (...a) => { calls.push(a); return Promise.resolve({ ok: true }); };
+  try {
+    mod.sendReport(new Error("no backend in a test build"), { componentStack: "    at App" });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert(calls.length === 0, `nothing was sent: ${JSON.stringify(calls).slice(0, 200)}`);
+});
+
+// THE SEND PATH, ACTUALLY EXERCISED. The tests above load error-boundary.jsx through loadModule, which sets
+// no SUPABASE_URL - so SINK is "" and sendReport returns at its guard before touching anything. That made
+// the first version of the test below vacuous: it asserted the reporter could not throw while never reaching
+// a single line of it, and with it green you could delete the sendReport call from componentDidCatch, or
+// misname `path` and `ua` in the body, and the whole suite stayed green. Found by review, not by the suite.
+//
+// So this bundles a SECOND copy with both defines set, which is the only way to run the half that matters.
+const sinkOut = nodePath.join(root, "build", "test-error-boundary-sink.mjs");
+await esbuild.build({
+  entryPoints: [nodePath.join(root, "error-boundary.jsx")],
+  bundle: true, format: "esm", platform: "browser", external: ["react", "react-dom", "react-dom/client"],
+  define: {
+    APP_VERSION: JSON.stringify("test"),
+    APP_ENV: JSON.stringify("production"),
+    APP_SITE_URL: JSON.stringify("https://gridspin.test"),
+    SUPABASE_URL: JSON.stringify("https://sink.test"),
+    SUPABASE_ANON_KEY: JSON.stringify("anon-test-key"),
+  },
+  outfile: sinkOut, logLevel: "silent",
+});
+const sink = await import(pathToFileURL(sinkOut).href + `?t=${Date.now()}`);
+
+await runTest("a build WITH Supabase actually sends, to the right place and shape", async () => {
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => { sent.push({ url, init }); return Promise.resolve({ ok: true }); };
+  try {
+    sink.clearErrorLog();
+    sink.recordError("submitRun", new Error("Failed to fetch"), "status 0");
+    sink.sendReport(new Error("the board read a turn that no longer exists"), { componentStack: "\n    at VersusScreen\n    at App" });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert(sent.length === 1, `exactly one request: ${sent.length}`);
+  const { url, init } = sent[0];
+  assert(url === "https://sink.test/functions/v1/report-error", `to the function: ${url}`);
+  assert(init.method === "POST", "as a POST");
+  // A crash is frequently followed by the tab closing; without keepalive the request dies with the page.
+  assert(init.keepalive === true, "with keepalive, or the reports that matter most are the ones lost");
+  assert(init.headers.apikey === "anon-test-key", "carrying the anon key");
+
+  const body = JSON.parse(init.body);
+  // Every field the function reads, by the name it reads it under. Misname one and that column silently
+  // becomes 'other' or 'unknown' on every row ever written - which no other test would notice.
+  for (const k of ["version", "message", "stack", "component", "before", "ua", "path"]) {
+    assert(k in body, `the body carries ${k}: ${Object.keys(body).join(", ")}`);
+  }
+  assert(body.version === "test", `the release: ${body.version}`);
+  assert(body.message === "the board read a turn that no longer exists", `the error: ${body.message}`);
+  assert(body.component.includes("VersusScreen"), `and where: ${body.component}`);
+  // The path is sent RAW and scrubbed server-side - the crashed client is the last code that should be
+  // trusted to remove a username from it.
+  assert(typeof body.path === "string", `path is a string for the function to scrub: ${typeof body.path}`);
+});
+
+await runTest("the ring sent is what LED UP TO the crash, not the crash itself", async () => {
+  // componentDidCatch calls recordError before sendReport, so the ring always ends with the error being
+  // reported. Left in, `before` spends a slot repeating `message` and the count is one too high - and the
+  // whole point of that field is that a crash is usually the SECOND failure. crashReport already filters it.
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => { sent.push(JSON.parse(init.body)); return Promise.resolve({ ok: true }); };
+  try {
+    sink.clearErrorLog();
+    sink.recordError("submitRun", new Error("Failed to fetch"), "status 0");
+    const own = sink.recordError("render", new Error("the one being reported"), "");
+    sink.sendReport(new Error("the one being reported"), { componentStack: "    at App" }, own);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const before = sent[0].before;
+  assert(!before.some((r) => r.message === "the one being reported"),
+    `the crash is not in its own ring: ${JSON.stringify(before)}`);
+  assert(before.some((r) => r.message === "Failed to fetch"), `but what preceded it is: ${JSON.stringify(before)}`);
+});
+
+await runTest("a hostile fetch and junk arguments still cannot throw", async () => {
+  // Now meaningful: with the defines set, every line of sendReport actually runs.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => { throw new TypeError("fetch itself exploded"); };
+  try {
+    for (const [err, info] of [[new Error("x"), null], ["a string, not an Error", undefined],
+                               [null, { componentStack: null }], [{ weird: true }, {}]]) {
+      sink.sendReport(err, info);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert(true, "sendReport returned on every shape, with the send path live");
+});
+
+await runTest("a rejected send is swallowed, not left unhandled", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.reject(new TypeError("network down"));
+  let unhandled = null;
+  const onUnhandled = (e) => { unhandled = e; };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    sink.sendReport(new Error("offline crash"), { componentStack: "    at App" });
+    await new Promise((r) => setTimeout(r, 20));
+  } finally {
+    globalThis.fetch = realFetch;
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert(!unhandled, `a dropped report is not an unhandled rejection: ${unhandled}`);
+});
+
+await runTest("a REAL crash sends - the componentDidCatch wire itself, not just sendReport", async () => {
+  // The tests above call sendReport directly, which leaves the one line that calls it untested: delete
+  // `sendReport(err, info, own)` from componentDidCatch and every one of them still passes. That is the same
+  // species of vacuity the re-review named one call-frame down, so this renders a component that really
+  // throws, inside the sink bundle's own ErrorBoundary, and asserts a request left the building.
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => { sent.push(JSON.parse(init.body)); return Promise.resolve({ ok: true }); };
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    sink.clearErrorLog();
+    sink.recordError("submitRun", new Error("Failed to fetch"), "status 0");
+    const Explode = () => { throw new Error("a real render error"); };
+    await renderComponent(sink.ErrorBoundary, { children: React.createElement(Explode) });
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = quiet;
+  }
+  assert(sent.length === 1, `componentDidCatch sent exactly one report: ${sent.length}`);
+  assert(sent[0].message === "a real render error", `about the error that was thrown: ${sent[0].message}`);
+  assert(sent[0].component && sent[0].component.length > 0, "carrying where in the tree it happened");
+  // And the crash is still not in its own ring, through the real path rather than a hand-made call.
+  assert(!sent[0].before.some((r) => r.message === "a real render error"),
+    `the crash is not in its own ring: ${JSON.stringify(sent[0].before)}`);
+  assert(sent[0].before.some((r) => r.message === "Failed to fetch"),
+    `but what preceded it is: ${JSON.stringify(sent[0].before)}`);
+});
+
+await runTest("two different failures sharing a message both survive in the ring", async () => {
+  // The exclusion is by IDENTITY, not by text. Filtering on the message would strip a genuinely different
+  // earlier failure that happened to share one - and "Failed to fetch" is exactly the message that repeats.
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => { sent.push(JSON.parse(init.body)); return Promise.resolve({ ok: true }); };
+  try {
+    sink.clearErrorLog();
+    sink.recordError("submitRun", new Error("Failed to fetch"), "status 0");
+    sink.recordError("fetchProfile", new Error("Failed to fetch"), "status 0");
+    const own = sink.recordError("render", new Error("Failed to fetch"), "");
+    sink.sendReport(new Error("Failed to fetch"), { componentStack: "    at App" }, own);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const before = sent[0].before;
+  assert(before.length === 2, `both earlier failures kept, not collapsed by their text: ${JSON.stringify(before)}`);
+  assert(before.some((r) => r.kind === "submitRun") && before.some((r) => r.kind === "fetchProfile"),
+    `and they are the two that preceded it: ${JSON.stringify(before)}`);
 });
 
 console.log("test-error-boundary.mjs done");

@@ -19,10 +19,14 @@ drafts). Descriptive uses of the phrase stay ("a perfect 20–0 season"), and so
 strings like "Perfect season. 20–0.".
 
 **Brand assets:** the mark (the re-spin ↻ arrow around a football) is `static/icon.svg`, drawn again
-as `GridspinMark` in `perfect-season.jsx`. **It is six hand copies across five tracked files, not two**
-(counted in v2.18.3, and they all agree today): `static/icon.svg`, `GridspinMark`, `tools/brand/avatar.mjs`
-twice - `MARK` and `avatarDark` spell the paths out separately - and both films, `tools/film/spin-an-era.html`
-and `tools/film/tiktok-ad.html`, which inline them because a film loads from a `file://` URL with no server.
+as `GridspinMark` in `perfect-season.jsx`. **It is nine hand copies across eight tracked files**
+(six-in-five was the v2.18.3 count and three films have been added since; they all agree today): `static/icon.svg`, `GridspinMark`, `tools/brand/avatar.mjs`
+twice - `MARK` and `avatarDark` spell the paths out separately - and all five films - `tools/film/spin-an-era.html`,
+`tiktok-ad.html`, `tiktok-spin.html`, `tiktok-guess.html` and `tiktok-century.html` - which inline them
+because a film loads from a `file://` URL with no server. Note that constraint rules out ES `import` and
+`fetch`, NOT a classic `<script src>` or a `<link rel=stylesheet>` beside the film: both were measured
+loading fine under the exact puppeteer launch `render.mjs` uses, so a shared `tools/film/kit.js` holding
+the mark is available whenever this count becomes annoying enough to collapse.
 Change every one together; `git ls-files -z | xargs -0 grep -l "M43.57 18.21"` lists them. Only
 `tools/brand/render.mjs` and `tools/app/icons.mjs` genuinely cannot drift, because those two `readFileSync`
 the SVG. `node tools/brand/render.mjs`
@@ -154,8 +158,18 @@ component:
   the NEXT report rather than shown. The lost Guess daily on 2026-09-30 was diagnosed by inference precisely
   because nothing recorded the first failure.
 
-A first-party sink (a bounded `client_errors` table, insert-only) is the obvious next step and would need a
-line in the privacy policy; the copy button is what makes the next bug reportable at all without one.
+**The first-party sink is built (v2.22.0)** - `client_errors`, written only by the `report-error` Edge
+Function, and `/privacy` gained the paragraph it costs. The copy button stays: it is what a player uses
+when they want to tell you something, and the sink is what catches the ones who never would.
+
+**Why it is a function rather than an insert policy** is the part worth keeping: `crashReport` carries
+`location.pathname`, and `/u/<name>` is a username. On a clipboard the player can see it and decline to
+paste; stored automatically it would land in the database with nobody looking - and the code that just
+crashed is the last code that should be trusted to scrub its own report. The function maps the path to a
+screen name, and **an unrecognised path becomes `other`, never itself**, because a default that passes
+the path through is that same leak wearing a disguise. Three columns are absent on purpose: no user id,
+no username, no IP. The design and its accepted ceilings are in
+`docs/superpowers/specs/2026-10-05-client-error-sink-design.md`.
 
 **Sharing (v1.10.0).** `shareText` builds a Wordle-style card and must never name the players (that
 would spoil the daily): a title (`Gridspin Daily N`, numbered from `GRIDSPIN_DAY_ONE` = launch day
@@ -405,7 +419,10 @@ parts that are unlike everything else:
 
 **Guess the Player (v2.13.0, reshaped in v2.14.0).** A daily game of a different shape: one real player a day
 and **five guesses**, each drawing a row that compares **team, division, position, draft class and jersey
-number** with the answer. Green is exact, grey is no, and yellow means something different in every column.
+number** with the answer. Green is exact, grey is no, and the close state means something different in every
+column. That close state is `--orange` on screen (`gp-c-near` in guess.jsx) and a YELLOW square on the share
+card (`SHARE_SQUARE.near` is the 🟨 emoji, there being no orange one) - so prose that calls the cell yellow is
+describing the card, not the game. This paragraph did exactly that until v2.21.2.
 Daily and Practice, behind Mini games. **`GUESS.md` is the reference** - read it before touching any of it. The
 parts unlike everything else:
 
@@ -684,6 +701,8 @@ node tests/test-error-boundary.mjs # the crash net: a crash shows a screen rathe
 node tests/test-password-reset.mjs # forgetting a password: the way back in, that it never says who is registered, and that the NEW password is what works after
 node tests/test-captcha.mjs        # the anti-robot check: inert without a site key, every protected auth call carries a token, and a blocked challenge says so
 node tests/test-delete-account.mjs  # closing an account in real Postgres: the person erased, the games kept, the opponent untouched
+node tests/test-film.mjs           # the films in tools/film: every value they hand-copy from theme.mjs, static/icon.svg and
+                                   # DATA_CREDIT, plus render.mjs's __seek/__duration contract. Text only - no Chrome, no ffmpeg.
 
 # Profiles (v1.11.0). The SQL ones run the real migrations in PGlite through tests/pg-fixture.mjs (a
 # Supabase-like database: anon/authenticated roles, auth.uid(), a storage schema) and compare against the mock.
@@ -1034,6 +1053,30 @@ Duel under their new name. It now throws, PGRST116 ("no rows") being the one err
 `adoptSession` gives it a second go and then says so rather than claiming anything about who you are, and
 `onSeasonsKept` applies what `claim_username` has already done instead of waiting on a re-read.
 
+**And a failed WRITE is not one failure - but HOW you tell them apart is per function, not a rule you can
+copy** (v2.21.5, and the fourth of this family). v2.18.2 taught `submitGuess`/`submitCentury` to tell a
+verdict from the platform in between by reading the BODY: those functions name a reason on every answer they
+give a POST, so a body with no reason in it provably never came from the function. **That inference is false
+of `submit-run`**, which names a reason on four answers out of two dozen - `malformed submission`, `a daily
+submission must be for today`, `no profile for this account`, `unknown mode`, `unknown scoring format` and
+`missing challenge code` are all a bare 400, and every one of them is final. Applying v2.18.2's rule here
+would call each of them transient, which is how a screen came to promise a GM season refused for the salary
+cap that it would be saved next time. What submit-run always sets is the **status**, so that is what
+`runFailure` in storage.js reads; `functions-js` separates nothing-arrived (`FunctionsFetchError`), the relay
+(`FunctionsRelayError`) and the function's own response (`FunctionsHttpError`, whose `context` IS the
+Response) by error NAME, so all three are told apart rather than guessed at. Before it, `submitRun` kept two
+reasons and collapsed the rest to `{ ok: false }`, `submitDnf` answered a boolean, and a thrown `invoke` was
+caught with nothing to report - so a lapsed session, a 502, a dead radio and a refused roster were one
+sentence on screen and, in the database, one shape with no evidence at all: no `runs` row, no
+`finished_codes` row, no counter moved. **Check the contract of the function you are classifying.**
+
+Two things ride with it. Every such failure is now pushed into the crash net's ring (`recordError`), because
+a failure nothing records is one the next bug report cannot mention - that is why the lost Guess daily on
+2026-09-30 could only be diagnosed by inference. And **there is still no outbox for a season**, so not one of
+the seven sentences may imply a retry: a season is a trace, a seed and a client that has to agree with the
+deployed function, so holding one to re-send is a feature rather than a patch. A test fails if the copy
+starts promising one, which is v2.18.2's lesson with the words the other way round.
+
 **`profiles` is a read-modify-write, so every write carries the revision it read.** submit-run applies a
 season by reading the whole row, working out the new one with `applyRun`/`applyDnf`, and writing it back - the
 rules live in game-logic.mjs and must not have a second copy in SQL, which is exactly why the database can't
@@ -1340,6 +1383,21 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.22.0's (the crash sink): run **`migration-client-errors.sql`**, then **deploy the Edge Functions**
+  (`node deploy-function.mjs <env>` deploys **SIX** now), then the client. **The order is not optional
+  here**: a client ahead of the function POSTs at a 404 and silently drops every report, which is
+  invisible and looks exactly like "no crashes" - the worst shape a failure can take for a feature whose
+  whole job is making failures visible. The other direction is harmless: a deployed function with no
+  client simply receives nothing. It also changes `/privacy`, a live legal page, so this one cannot skip
+  the staging step.
+  v2.21.5's (a failed save says which): client only. No migration, no Edge Function change - what moved is how
+  the BROWSER reads submit-run's failures, and the function is untouched. Two user-visible halves: the panel is
+  keyed on the draft's SEED as well as the view, so Run it back no longer carries it onto the next board (the
+  result screen and the draft screen are the same `view`, which is why the v2.20.x clearing effect never fired
+  on that path); and `submitRun`/`submitDnf` answer `{ ok: false, reason, status }` over seven reasons with a
+  sentence each. `tests/mock-supabase.mjs` changed too - its unresolvable session answered without a status
+  where index.ts answers 401, so the one failure a player can act on was indistinguishable from a 5xx.
+
   v2.21.0's (the page counter): client only, **plus one dashboard step per environment, which comes FIRST**:
   enable Web Analytics in that Vercel project (Analytics in the sidebar > Enable), then deploy. Enabling is
   what adds the `/_vercel/insights/*` routes, so deploying first only 404s the script until the toggle

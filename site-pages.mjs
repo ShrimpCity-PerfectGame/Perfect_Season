@@ -56,7 +56,7 @@ const BOARDS = [
 // than a person's mailbox: it can be forwarded anywhere, and it doesn't put a personal address in front of
 // every crawler that reads this page.
 export const PRIVACY_CONTACT = "privacy@gridspin.app";
-export const PRIVACY_UPDATED = "2 October 2026";
+export const PRIVACY_UPDATED = "5 October 2026";
 
 // Who may play. Shared, because the privacy policy and the terms both state it and two live pages
 // disagreeing about it is worse than either alone.
@@ -113,6 +113,11 @@ const PRIVACY_SECTIONS = [
     // something Vercel documents about how their Web Analytics works, and the last sentence is a promise
     // build.mjs keeps mechanically - standalone pages have the tag stripped, and the build fails if they do not.
     "There is a counter, so the site can tell whether anybody is arriving and from where. It is run by Vercel, who already serve the site, and it records that a page was opened, which page it was, and which site you came from - never who you are. It sets no cookie. The identifier it uses is a number worked out from the request itself and thrown away at the end of each day, so it cannot tell that today's visitor is yesterday's, and it cannot follow you to any other site. This page and the terms do not carry it at all: a page you came to read to find out what is collected is not a good place to collect anything.",
+    // The crash sink (v2.22.0). Written like the counter paragraph above it - every clause is something
+    // the code does rather than a reassurance. The screen name is the load-bearing one: the browser sends
+    // the address it crashed on, and /u/<name> is a username, so the server replaces it with a name like
+    // "profile" before anything is stored. supabase/functions/report-error/index.ts is where that happens.
+    "If the game crashes, your browser sends a report so the fault can be found and fixed. It carries the version of the game, the error and where in the code it happened, which screen you were on and which browser you are using - never your name, your account, your email address or your IP address. The screen is a name like \"profile\" rather than the address you were at, so a report sent from somebody's profile page cannot say whose. Reports are kept no longer than 90 days, and are removed as later ones arrive. This page and the terms cannot send one at all: they carry none of the game's code.",
     "There are no adverts, no tracking pixels and nothing from an advertising network. Nothing else on the site is loaded from anywhere else.",
     "Nothing is sold, rented or handed to anyone else.",
   ]],
@@ -249,17 +254,17 @@ export const SITE_PAGES = [
     path: PRIVACY_PATH,
     file: "privacy.html",
     // PRIVACY_UPDATED in words, and this in the sitemap: change both together.
-    updated: "2026-10-02",
+    updated: "2026-10-05",
     nav: "Privacy",
     title: "Gridspin privacy policy - what the game keeps",
-    description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. No adverts, no trackers, nothing sold.",
+    description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. A visit counter and a crash report, both nameless. No adverts, no trackers, nothing sold.",
     h1: "Privacy policy",
     // A page of words with nothing behind it: no screen in the app answers this address, so the built page is
     // the whole thing and build.mjs leaves the game's bundle off it. That also means it reads with JavaScript
     // off, which is what a policy should do.
     standalone: true,
     intro: [
-      "Gridspin is a free football game. It keeps as little about you as it can: an email address if you want an account, the name you pick, and the seasons you play. There are no adverts and no trackers, nothing is sold or handed to anyone else, and the one thing that counts visits sets no cookie and cannot follow you off the site.",
+      "Gridspin is a free football game. It keeps as little about you as it can: an email address if you want an account, the name you pick, and the seasons you play. There are no adverts and no trackers, nothing is sold or handed to anyone else, and the two things it does record - a counter for visits and a report when the game crashes - set no cookie, carry no name, and cannot follow you off the site.",
       `Anything below can be undone by writing to ${PRIVACY_CONTACT}.`,
     ],
     sections: PRIVACY_SECTIONS,

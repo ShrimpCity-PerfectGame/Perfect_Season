@@ -1,0 +1,143 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Seven seconds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<link rel="stylesheet" href="kit.css">
+<style>
+  /* Shell, palette, mark, credit and driver come from kit.css / kit.js. */
+
+  /* ---- the clock -------------------------------------------------------------------------------------
+     SOU_ROUND_SECONDS is 7 and the bar really does drain over seven seconds of film, so the pressure a
+     viewer feels is the pressure the mode applies. It exists to stop people looking the answer up, which
+     is also why it has to be visibly short rather than merely stated. */
+  .clock { display:grid; gap:1.4cqw; width:100%; justify-items:center; }
+  .secs { font-family:var(--display); font-size:11cqw; line-height:1; color:var(--lime);
+    font-variant-numeric:tabular-nums; }
+  .secs.low { color:var(--orange); }
+  .ring { width:100%; height:2.2cqw; background:var(--surface2); border:1px solid var(--line);
+    border-radius:1.2cqw; overflow:hidden; }
+  .ring i { display:block; height:100%; width:calc(var(--left,1) * 100%); background:var(--lime); }
+  .ring i.low { background:var(--orange); }
+  .lives { display:flex; gap:1.6cqw; }
+  .life { width:3.2cqw; height:3.2cqw; border-radius:50%; background:var(--orange); }
+
+  /* ---- the question ----------------------------------------------------------------------------------- */
+  .who { font-family:var(--display); font-size:9.5cqw; line-height:1; text-transform:uppercase; color:var(--cream); }
+  .from { font-size:2.7cqw; color:var(--muted); }
+  .ask { font-size:3.6cqw; line-height:1.35; color:var(--cream); max-width:94%; }
+  .line { font-family:var(--display); font-size:17cqw; line-height:.92; color:var(--cream);
+    font-variant-numeric:tabular-nums; }
+  .unit { font-size:3cqw; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); }
+  .choice { display:flex; gap:3.2cqw; }
+  .choice div { font-family:var(--display); font-size:6.4cqw; line-height:1; text-transform:uppercase;
+    color:var(--muted); border:0.5cqw solid var(--line2); border-radius:1.6cqw; padding:1.4cqw 4cqw; }
+
+  /* ---- the answer -------------------------------------------------------------------------------------- */
+  .real { font-family:var(--display); font-size:19cqw; line-height:.9; color:var(--lime);
+    font-variant-numeric:tabular-nums; }
+  .verdict { font-family:var(--display); font-size:11cqw; line-height:1; text-transform:uppercase;
+    color:var(--orange); }
+  .why { font-size:2.9cqw; line-height:1.5; color:var(--muted); max-width:92%; }
+  .fade { opacity:var(--a,0); }
+  .fade2 { opacity:var(--b,0); }
+  .fade3 { opacity:var(--c,0); }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin's Over Under: seven seconds to say whether Tom Brady's best season on each of six boards adds up to over or under thirty thousand passing yards. It is twenty-eight thousand six hundred and seventy-seven, so under.">
+
+    <!-- s1 - the question, under a clock that really is seven seconds long -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="clock">
+        <div class="secs" id="secs">7</div>
+        <div class="ring"><i id="ring"></i></div>
+        <div class="lives"><div class="life"></div><div class="life"></div><div class="life"></div></div>
+      </div>
+      <div class="who">Tom Brady</div>
+      <div class="from">His best season on each of 6 Gridspin boards · Patriots, Buccaneers</div>
+      <div class="ask">Added together, is that over or under</div>
+      <div class="line">30,000</div>
+      <div class="unit">passing yards</div>
+      <div class="choice"><div>Over</div><div>Under</div></div>
+    </div></div></div>
+
+    <!-- s2 - the answer -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="real fade" id="real">28,677</div>
+      <div class="verdict fade2" id="verd">Under</div>
+      <div class="why fade3">Six boards, six seasons &ndash; not a career total. Three lives, seven seconds a guess, and everyone gets the same questions that day.</div>
+    </div></div></div>
+
+    <!-- s3 - the close -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">Over / Under</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row2">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      28,677 is Tom Brady&rsquo;s <code>py</code> summed across every board he appears on &ndash; six of them,
+      New England and Tampa Bay &ndash; which is exactly what <code>souRoundFor</code> adds up. It is NOT his
+      career passing total, and the film says so on screen, because a board keeps only a player&rsquo;s best
+      season per five-year era: perfect-season.jsx calls it &ldquo;a real but partial slice of his career&rdquo;.
+      30,000 is a line the game&rsquo;s own formula can set (it rounds to the nearest 25 within 0.8&ndash;1.2x
+      the true value, so 22,950&ndash;34,400 here). <code>SOU_LIVES</code> is 3 and
+      <code>SOU_ROUND_SECONDS</code> is 7 &ndash; the bar really drains over seven seconds of film.
+      <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code> fills the viewport.
+    </p>
+  </div>
+</div>
+
+<script src="kit.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = FILM.$, at = FILM.at, outCubic = FILM.outCubic, outBack = FILM.outBack;
+
+  var SECONDS = 7;        // SOU_ROUND_SECONDS
+  var TICK_0 = 0.55;      // the clock starts here, so it runs out at TICK_0 + 7
+  var S2 = 7.9, S3 = 13.4;
+
+  FILM.start({
+    duration: 15,
+    beats: [
+      { id: "s1", start: 0,  end: S2 },
+      { id: "s2", start: S2, end: S3 },
+      { id: "s3", start: S3, end: 15 }
+    ],
+    render: function (t) {
+      // Whole seconds counting down, and a bar draining continuously - the number is what you read, the
+      // bar is what you feel. Both stop at zero rather than going negative.
+      var gone = Math.max(0, Math.min(SECONDS, t - TICK_0));
+      var left = SECONDS - gone;
+      $("secs").textContent = String(Math.ceil(left));
+      $("secs").classList.toggle("low", left <= 3);
+      $("ring").style.setProperty("--left", left / SECONDS);
+      $("ring").classList.toggle("low", left <= 3);
+
+      document.querySelector(".fade").style.setProperty("--a", outCubic(at(t, S2 + 0.2, 0.4)));
+      $("real").style.transform = "scale(" + (0.9 + outBack(at(t, S2 + 0.3, 0.5)) * 0.1) + ")";
+      document.querySelector(".fade2").style.setProperty("--b", outCubic(at(t, S2 + 1.3, 0.4)));
+      document.querySelector(".fade3").style.setProperty("--c", outCubic(at(t, S2 + 2.4, 0.5)));
+
+      document.querySelector(".mark").style.transform = "scale(" + (0.84 + outCubic(at(t, S3 + 0.1, 0.5)) * 0.16) + ")";
+      document.querySelector(".credit").style.opacity = at(t, 14.05, 0.5);
+    }
+  });
+})();
+</script>

@@ -1,0 +1,163 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stolen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<link rel="stylesheet" href="kit.css">
+<style>
+  /* Shell, palette, mark, credit and driver come from kit.css / kit.js. */
+
+  .kick2 { font-size:2.9cqw; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+
+  /* ---- two drafters, one board ------------------------------------------------------------------------
+     The only film that shows a second person. Everything else Gridspin does is solitaire against the data;
+     this is the one mode where the thing that ruins your roster is a human being. */
+  .sides { display:grid; grid-template-columns:1fr 1fr; gap:3cqw; width:100%; }
+  .side { display:grid; gap:1.4cqw; justify-items:center; }
+  .sidelab { font-size:2.5cqw; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); }
+  .sidelab.me { color:var(--lime); }
+  .bayarea { width:100%; min-height:21cqw; border:0.4cqw dashed var(--line2); border-radius:1.6cqw;
+    display:grid; align-content:center; justify-items:center; padding:1.6cqw; }
+
+  /* The card that changes hands. One element, moved - not two drawn and one hidden - because the whole
+     point of a steal is that it is the SAME player, now on the other roster. */
+  .card { width:100%; background:var(--surface); border:1px solid var(--line);
+    border-left:0.8cqw solid var(--rb); border-radius:1.4cqw; padding:2cqw 1.8cqw; text-align:center;
+    /* The travel is a PIXEL distance measured from the two bays at run time, not a percentage of this
+       card. A percentage was tried twice and was wrong twice: 103% overshot the bay by 36px, and the
+       measured replacement, 96.9%, was correct only until `box-sizing: border-box` landed in kit.css and
+       made the card 90px narrower - at which point the same percentage moved it 66px short and the card
+       settled straddling the gap between the two bays. A percentage of the element's own width silently
+       re-breaks every time that width changes; the distance between two bays does not. */
+    transform:translateX(var(--travel, 0px)); }
+  .card .ps { font-weight:900; font-size:2.3cqw; letter-spacing:.14em; color:var(--rb);
+    text-transform:uppercase; }
+  .card .nm { font-family:var(--display); font-size:4.6cqw; line-height:1.05; text-transform:uppercase;
+    color:var(--cream); margin-top:.5cqw; }
+  .card .yr { font-size:2.2cqw; color:var(--muted); margin-top:.5cqw; }
+  .card.taken { border-left-color:var(--orange); }
+  .card.taken .ps { color:var(--orange); }
+
+  .stamp { font-family:var(--display); font-size:13cqw; line-height:1; text-transform:uppercase;
+    color:var(--orange); opacity:var(--k,0); transform:rotate(-6deg) scale(calc(.8 + var(--k,0) * .2)); }
+
+  /* ---- the rule --------------------------------------------------------------------------------------- */
+  .rule { font-size:3.4cqw; line-height:1.45; color:var(--cream); max-width:92%; opacity:var(--r2,0); }
+  .rule b { color:var(--lime); }
+  .small { font-size:2.6cqw; line-height:1.5; color:var(--muted); max-width:88%; opacity:var(--r3,0); }
+
+  .replace { width:76%; background:var(--surface); border:1px solid var(--line);
+    border-left:0.8cqw solid var(--wr); border-radius:1.4cqw; padding:2.2cqw; text-align:center;
+    opacity:var(--n,0); }
+  .replace .ps { font-weight:900; font-size:2.3cqw; letter-spacing:.14em; color:var(--wr); text-transform:uppercase; }
+  .replace .nm { font-family:var(--display); font-size:5cqw; line-height:1.05; text-transform:uppercase;
+    color:var(--cream); margin-top:.5cqw; }
+  .replace .yr { font-size:2.3cqw; color:var(--muted); margin-top:.5cqw; }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin's Duel: one player spends their turn to take Tiki Barber off the other's roster, and the robbed player uses the turn they get back on Amani Toomer.">
+
+    <!-- s1 - two drafters, and the player about to change hands -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="kicker">Duel. Two drafters, one board.</div>
+      <div class="sides">
+        <div class="side"><div class="sidelab me">You</div><div class="bayarea" id="bayL">
+          <div class="card" id="card"><div class="ps">Flex</div><div class="nm">Tiki Barber</div><div class="yr">Giants 2005</div></div>
+        </div></div>
+        <div class="side"><div class="sidelab">Them</div><div class="bayarea" id="bayR"></div></div>
+      </div>
+      <div class="kick2" id="k1">Your best pick so far</div>
+    </div></div></div>
+
+    <!-- s2 - they spend their whole turn on taking him -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="stamp" id="stamp">Stolen</div>
+      <div class="rule" id="rule">They didn&rsquo;t draft anyone this turn.<br>They just took <b>yours</b>.</div>
+    </div></div></div>
+
+    <!-- s3 - and the turn comes back to you -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <div class="kick2">You get that turn back</div>
+      <div class="replace" id="rep"><div class="ps">Flex</div><div class="nm">Amani Toomer</div><div class="yr">Giants 2002</div></div>
+      <div class="small" id="sm">One steal each &ndash; and he can only change hands once, so you can&rsquo;t take him back.</div>
+    </div></div></div>
+
+    <!-- s4 - the close -->
+    <div class="scene" id="s4"><div class="safe"><div class="col">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">Duel</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row2">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      A real match on code <code>DUEL2026</code>, played out through <code>decideMove</code> and
+      <code>replayMatch</code> &ndash; the rulebook <code>match-pick</code> itself runs &ndash; to sixteen picks
+      with <code>missing: 0</code>. The guest drafted Tiki Barber (Giants 2005) into Flex; at turn 8 the host
+      spent their turn stealing him into RB; the guest took the turn that hands back and replaced him with
+      Amani Toomer (Giants 2002). All three are what the replay returns, not a staging of what one would look
+      like. The two rules on screen are <code>stealsLeft</code> (one each) and the
+      <code>already_stolen</code> refusal.
+      <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code> fills the viewport.
+    </p>
+  </div>
+</div>
+
+<script src="kit.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = FILM.$, at = FILM.at, outCubic = FILM.outCubic, outBack = FILM.outBack;
+
+  var MOVE_AT = 3.5, MOVE_FOR = 0.75;   // when the card changes hands, and how long it takes
+  var travel = null;                    // px between the two bays; measured on the first frame, then kept
+  var S2 = 6.6, S3 = 10.3, S4 = 13.4;
+
+  FILM.start({
+    duration: 15,
+    beats: [
+      { id: "s1", start: 0,  end: S2 },
+      { id: "s2", start: S2, end: S3 },
+      { id: "s3", start: S3, end: S4 },
+      { id: "s4", start: S4, end: 15 }
+    ],
+    render: function (t) {
+      // One card, moved across - the same man, now on the other roster. outBack overshoots slightly, which
+      // is what makes it read as taken rather than handed over.
+      var m = outBack(at(t, MOVE_AT, MOVE_FOR));
+      var card = $("card");
+      // Measured once, on the first frame drawn - by which point render.mjs has awaited document.fonts.ready
+      // and the layout is final. Reading it per frame would be layout thrash across 900 frames for a number
+      // that cannot change; hardcoding it is what broke this twice.
+      if (travel === null) travel = $("bayR").getBoundingClientRect().left - $("bayL").getBoundingClientRect().left;
+      card.style.setProperty("--travel", (m * travel).toFixed(2) + "px");
+      card.classList.toggle("taken", m > 0.5);
+      $("k1").textContent = m > 0.5 ? "Not any more" : "Your best pick so far";
+      $("k1").style.opacity = m > 0.5 ? 1 : 1 - at(t, MOVE_AT - 0.3, 0.3) * 0.6;
+
+      $("stamp").style.setProperty("--k", outBack(at(t, S2 + 0.15, 0.45)));
+      $("rule").style.setProperty("--r2", outCubic(at(t, S2 + 1.1, 0.45)));
+
+      $("rep").style.setProperty("--n", outCubic(at(t, S3 + 0.5, 0.45)));
+      $("sm").style.setProperty("--r3", outCubic(at(t, S3 + 1.5, 0.5)));
+
+      document.querySelector(".mark").style.transform = "scale(" + (0.84 + outCubic(at(t, S4 + 0.1, 0.5)) * 0.16) + ")";
+      document.querySelector(".credit").style.opacity = at(t, 14.05, 0.5);
+    }
+  });
+})();
+</script>

@@ -31,3 +31,9 @@ entrypoint = "./functions/submit-guess/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/delete-account/index.ts"
+
+[functions.report-error]
+enabled = true
+# Not authenticated on purpose: a crash can happen signed out, and a guest's crash matters as much as
+# anyone's. The hourly cap in index.ts is what bounds it, not who is asking.
+verify_jwt = false

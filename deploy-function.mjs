@@ -14,7 +14,7 @@
 // the drift CLAUDE.md's release notes warn about.
 import { spawnSync } from "node:child_process";
 
-const FUNCTIONS = ["submit-run", "match-pick", "submit-century", "submit-guess", "delete-account"];
+const FUNCTIONS = ["submit-run", "match-pick", "submit-century", "submit-guess", "delete-account", "report-error"];
 const target = process.argv[2];
 const only = process.argv[3];
 if (only && !FUNCTIONS.includes(only)) {

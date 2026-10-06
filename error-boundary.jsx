@@ -11,12 +11,14 @@
 // perfect-season.jsx as it renders and a crash during that render means there may be no stylesheet at all. A
 // crash screen that needs the crashed app's CSS is not a crash screen.
 //
-// There is no third party in here either. The privacy policy promises "no adverts, no analytics and no
-// trackers" (site-pages.mjs), and crash reporting that posts to somebody else's servers is the kind of thing
-// a player would reasonably call a tracker. So this reports the only way that needs no vendor, no account and
-// no policy change: it shows the player what broke and gives them a button that copies it, which turns a blank
-// page into a message the owner can actually act on. A first-party sink can come later; the copy button is
-// what makes the next bug reportable at all.
+// There is no third party in here either, and there never will be: crash reporting that posts to somebody
+// else's servers is the kind of thing a player would reasonably call a tracker, and /privacy promises there
+// are none. Since v2.22.0 it reports to the game's OWN Edge Function instead (sendReport below) and to
+// nowhere else, which cost one paragraph on /privacy and no vendor at all. The copy button stays beside it:
+// the sink catches the stranger who closes the tab, the button is for the player who wants to tell you.
+//
+// This header used to quote /privacy as promising "no analytics". That stopped being true in v2.21.0 when
+// the visit counter landed and the page was rewritten; the comment was not.
 import React from "react";
 
 // Newest last, bounded, and never allowed to grow: this is a diagnostic, not a log. 20 is enough to show what
@@ -53,6 +55,54 @@ export function recordError(kind, err, extra) {
 
 export const errorLog = () => recent.slice();
 export const clearErrorLog = () => { recent.length = 0; };
+
+// The crash sink (docs/superpowers/specs/2026-10-05-client-error-sink-design.md). Fire-and-forget: a crash
+// report is worth less than anything else happening on this screen, so it may never delay, throw or retry.
+//
+// IT IMPORTS NOTHING, and that is the point of this whole file. SUPABASE_URL and SUPABASE_ANON_KEY are
+// esbuild DEFINES - bare identifiers replaced at build time, exactly as APP_VERSION is above - so the crash
+// net can send a report over the network while still depending on nothing but React. Importing storage.js
+// here would make the reporter depend on the app it is reporting on.
+const SINK = typeof SUPABASE_URL !== "undefined" ? SUPABASE_URL : "";
+const SINK_KEY = typeof SUPABASE_ANON_KEY !== "undefined" ? SUPABASE_ANON_KEY : "";
+
+export function sendReport(err, info, own) {
+  // The tests and tools/ui-harness build with no Supabase environment, so both defines are "". Without this
+  // guard the whole suite POSTs at a relative URL on every caught render error.
+  if (!SINK || !SINK_KEY) return;
+  try {
+    const { message, stack } = describeError(err);
+    const firstLines = (text, n) => (text ? String(text).split("\n").slice(0, n).join("\n") : "");
+    fetch(SINK + "/functions/v1/report-error", {
+      method: "POST",
+      // A crash is frequently followed by the tab closing. Without keepalive the request dies with the page,
+      // and the reports lost are the ones from the most annoyed strangers - who are the whole point of this.
+      keepalive: true,
+      headers: { "Content-Type": "application/json", apikey: SINK_KEY },
+      body: JSON.stringify({
+        version: VERSION,
+        message,
+        stack: firstLines(stack, 6),
+        component: firstLines(info && info.componentStack, 6),
+        // The ring, which is usually where the answer is: a crash is normally the SECOND failure, and the
+        // first one is what explains it.
+        // componentDidCatch calls recordError BEFORE sendReport, so the ring always ends with the very
+        // error being reported - and the whole value of this field is that a crash is usually the SECOND
+        // failure. `own` is the entry recordError just returned, so the exclusion is by IDENTITY: filtering
+        // on the message instead would strip a genuinely different earlier failure that happened to share
+        // one, and "Failed to fetch" is exactly the message that repeats.
+        before: recent.filter((r) => r !== own).slice(-5)
+          .map((r) => ({ kind: r.kind, message: r.message, extra: r.extra })),
+        // Sent raw and scrubbed SERVER-side. /u/<name> is a username, and the code that just crashed is the
+        // last code that should be trusted to remove it - see report-error/index.ts's own header.
+        ua: typeof navigator !== "undefined" ? navigator.userAgent : "",
+        path: typeof location !== "undefined" ? location.pathname : "",
+      }),
+    }).catch(() => {});
+  } catch (e) {
+    // The one thing worse than losing a report is the crash net crashing.
+  }
+}
 
 // The async half. An error boundary catches nothing that happens outside rendering - a failed storage write, a
 // rejected fetch in an effect, a handler that throws - and those are exactly the silent failures this repo
@@ -148,7 +198,10 @@ export class ErrorBoundary extends React.Component {
 
   componentDidCatch(err, info) {
     this.setState({ info });
-    recordError("render", err, "");
+    // recordError returns the entry it pushed, which is what lets sendReport leave the crash out of its own
+    // ring without guessing from the text.
+    const own = recordError("render", err, "");
+    sendReport(err, info, own);
     // The console is the only sink there is, and it is what the owner reads when a player screen-shares.
     // Never swallowed: a crash nobody can see is the bug this whole file exists for.
     try { console.error("Gridspin crashed:", err, info && info.componentStack); } catch (e) { /* no console */ }

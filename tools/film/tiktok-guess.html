@@ -1,0 +1,294 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Five guesses</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<style>
+  :root {
+    --navy:#0B1020; --surface:#131A2E; --surface2:#1B2440; --line:#26304D; --line2:#36416A;
+    --cream:#F7F4EA; --muted:#A9B0C3; --lime:#B8F500; --ink:#101114;
+    /* The grid's own colours, from theme.mjs's DARK scope, which is the scope the root takes while a Guess
+       game is in progress. Both coloured states carry a fixed dark ink: --win is a light green and white on
+       it measures 1.8:1, which tests/test-a11y.mjs caught the first time this grid was built. */
+    --win:#6FD49B; --orange:#FF7043; --cell-ink:#1B1B1B;
+    --display:'Anton',Impact,'Arial Narrow',sans-serif;
+    --body:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  html, body { height:100%; }
+  body { margin:0; background:var(--navy); color:var(--cream); font-family:var(--body);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; padding-block:20px; padding-inline:16px; box-sizing:border-box; }
+  .wrap { width:100%; max-width:400px; display:flex; flex-direction:column; gap:12px; }
+
+  .stage { position:relative; width:100%; aspect-ratio:9/16; max-width:100%;
+    background: radial-gradient(120% 70% at 50% 20%, #16203c 0%, var(--navy) 62%), var(--navy);
+    border:1px solid var(--line); border-radius:6px; overflow:hidden;
+    container-type:size; box-shadow:0 20px 60px -30px #000; }
+  .stage::before { content:""; position:absolute; inset:0; z-index:5; pointer-events:none;
+    background-image:radial-gradient(circle at 1px 1px, rgba(247,244,234,.05) 1px, transparent 1px);
+    background-size:7px 7px; }
+
+  /* The same safe box tiktok-ad.html worked out: symmetric left/right so a centred stack centres on the
+     FRAME, and a deep bottom inset so the readable band ends above TikTok's rail and caption. ?guides=1. */
+  .safe { position:absolute; z-index:4; top:7.3%; bottom:32%; left:7%; right:7%;
+    display:grid; align-content:center; justify-items:center; text-align:center; }
+  body.guides .safe { outline:2px dashed rgba(184,245,0,.45); }
+
+  .scene { position:absolute; inset:0; opacity:var(--vis,0); pointer-events:none; }
+  .col { display:grid; justify-items:center; gap:3cqw; width:100%; }
+
+  .kicker { font-family:var(--body); font-weight:800; font-size:3.4cqw; letter-spacing:.24em;
+    text-transform:uppercase; color:var(--lime); }
+  .kicker.dim { color:var(--muted); }
+
+  /* ---- the grid. Six columns, the same five the game compares on plus the name. The headings are the
+     game's own (GUESS_HEADS in guess.jsx), authored sentence-case and uppercased here as the app does. ---- */
+  .grid { width:100%; display:grid; gap:1.7cqw; }
+  /* Track ratios and type sizes are SOLVED, not chosen: every string here was measured at its real font in
+     the render viewport, and these are the largest sizes whose six columns still fit the 929px grid, with
+     20px to spare, CONFIRMED IN A RENDERED FRAME rather than from a probe. Four things had to give together
+     and none of them is enough alone: the gap (1.7cqw spent 92px of the 929 on five gutters), the headings
+     (2.9cqw/.12em made "Division" need 175px against a 135px track, running it into "POS"), the name
+     (5.2cqw Anton needs 366px in a 270px track) and the cells. The name/cell ratio is held at the original
+     1.37 so only the scale moved, not the hierarchy.
+     A WARNING, because it cost a wrong render: do not size this grid from getComputedStyle(el).font. Chrome
+     returns "" for that shorthand whenever font-variant-numeric is set, which .cell sets - so a probe built
+     on it silently measures in a fallback face and reports that 5.2cqw/3.8cqw fits here. It does not. Check
+     a screenshot. */
+  .row { display:grid; grid-template-columns:38fr 11fr 16fr 9fr 16fr 13fr; gap:1.1cqw; align-items:stretch; }
+  /* Every .row is its own grid container, so each resolves the SAME fr tracks against its OWN content - and a
+     bare fr track is minmax(auto, fr), which floors at min-content. "2007↑" needs 159px against a nominal
+     126px and "#21↓" 132px against 108px, so the first two rows stole ~39px from the name column that the
+     last two kept. Measured before this rule: the Team column started at x=325 on the Peterson row and x=362
+     on the Jackson row, a 37px stagger (Pos 62px, Class 67px) down a grid whose entire point is reading one
+     column top to bottom. tiktok-century.html:57 carries this rule defensively; here it is load-bearing. */
+  .row > * { min-width:0; }
+  /* "Division" is the widest heading by a distance and it, not any cell, is what sizes column 3 - at the
+     original 2.9cqw/.12em it needed 175px against a 135px track and ran into "POS". The product has the same
+     problem and solves it the same way, with headings SMALLER than the cells they label (guess.jsx: 10px
+     headings over 13px cells). */
+  .head { font-family:var(--body); font-weight:900; font-size:2.2cqw; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--muted); align-self:end; padding-bottom:.6cqw; opacity:var(--h,0);
+    text-align:center; }
+  /* The name column's heading is the one that sits over left-aligned text, so it alone goes left - the shape
+     guess.jsx gives the real grid. It must NOT carry .nm as well: that class is the same specificity and is
+     declared later, so it won font-family, font-size and color and drew "PLAYER" as a 56px cream display-face
+     word directly above "ADRIAN PETERSON", reading as a fifth guess rather than a column label. */
+  .row > .head:first-child { text-align:left; }
+
+  .guess { opacity:var(--s,0); transform:translateY(calc((1 - var(--s,0)) * 26%)); }
+  /* Deliberately NOT nowrap, which is the opposite of what the card films do - and the difference is the
+     layout, not the taste. On a card the name owns the width and nowrap is free; in a six-column grid with
+     min-width:0 above it, nowrap does not make a long name fit, it makes it OVERFLOW into the Team column
+     and sit under a coloured cell. guess.jsx chose wrapping for this grid for a stronger reason still: "an
+     ellipsis hides the half of the name that identifies him - Davant... could be Davante Adams or Davante
+     Davis - where a second line costs a few pixels of height."
+     At 4.4cqw all four of these names fit on one line with room to spare; wrapping is the fallback for a
+     longer one, not the normal case. */
+  .nm { display:flex; align-items:center; justify-content:flex-start; text-align:left;
+    font-family:var(--display); font-size:4.4cqw; line-height:1; text-transform:uppercase; color:var(--cream);
+    padding-right:1cqw; }
+  /* The transparent border is on the BASE so every state is the same height; .miss only changes its colour.
+     With the border on .miss alone, the all-green winning row measured 112.6px against 114.6px for the rows
+     holding a grey cell, and the last row sat 2px out of step. guess.jsx does it this way for this reason. */
+  .cell { display:flex; align-items:center; justify-content:center; border-radius:1.2cqw;
+    font-family:var(--body); font-weight:800; font-size:3.2cqw; letter-spacing:.02em;
+    padding:2.9cqw .4cqw; font-variant-numeric:tabular-nums; white-space:nowrap;
+    border:1px solid transparent; }
+  /* Green is exact, orange is close, grey is no - and the grey one is the only state that keeps cream ink.
+     The product's classes are gp-c-hit / gp-c-near / gp-c-miss; these are deliberately NOT those names, and
+     the prefix is not cosmetic there - guess.jsx records that unprefixed `hit` collided with the draft card's
+     own .hit and drew a winning row's five cells stacked in one column. A film loads nothing but itself, so
+     the short names are safe here and only here. Do not carry them back toward app code. */
+  .cell.hit  { background:var(--win);    color:var(--cell-ink); }
+  .cell.near { background:var(--orange); color:var(--cell-ink); }
+  .cell.miss { background:var(--surface2); border-color:var(--line); color:var(--cream); opacity:.75; }
+
+  /* ---- the reveal ---- */
+  .solved { font-family:var(--body); font-weight:800; font-size:3.4cqw; letter-spacing:.24em;
+    text-transform:uppercase; color:var(--win); }
+  .who { font-family:var(--display); font-size:12cqw; line-height:.88; text-transform:uppercase; color:var(--cream); }
+  .deets { font-size:3cqw; color:var(--muted); }
+
+  /* ---- close ---- */
+  .mark { width:17cqw; height:17cqw; }
+  .word { font-family:var(--display); font-size:12cqw; line-height:.86; text-transform:uppercase; color:var(--cream); }
+  .tag { font-family:var(--body); font-weight:800; font-size:3.6cqw; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--lime); }
+  .url { font-family:var(--display); font-size:7.6cqw; color:var(--cream); }
+  .credit { font-size:2.1cqw; line-height:1.5; color:var(--muted); max-width:86%; }
+
+  .rev { overflow:hidden; display:block; padding-top:.12em; margin-top:-.12em; }
+  .rev > span { display:block; transform:translateY(calc((1 - var(--r,0)) * 118%)); }
+
+  body.render .stage { width:100vw; height:100vh; aspect-ratio:auto; border:0; border-radius:0; box-shadow:none; }
+  body.render .wrap { max-width:none; width:100vw; gap:0; }
+  body.render .ui { display:none; }
+
+  .ui { display:grid; gap:8px; font-size:12px; color:var(--muted); }
+  .bar { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; cursor:pointer; }
+  .bar i { display:block; height:100%; width:var(--pct,0%); background:var(--lime); }
+  .ui .row2 { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .ui button { font:inherit; background:var(--surface); color:var(--cream); border:1px solid var(--line);
+    border-radius:4px; padding:4px 10px; cursor:pointer; }
+  .note { font-size:11px; line-height:1.5; }
+  .note code { color:var(--lime); }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin's Guess the Player: four guesses narrow from no greens to all five, and the answer is Lamar Jackson.">
+
+    <!-- s1 - the grid, filling a row at a time -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="kicker" id="s1k">Five guesses. One NFL player.</div>
+      <div class="grid" id="grid">
+        <div class="row" id="heads">
+          <div class="head">Player</div>
+          <div class="head">Team</div><div class="head">Division</div><div class="head">Pos</div>
+          <div class="head">Class</div><div class="head">No.</div>
+        </div>
+        <!-- rows injected below, from DATA, so one table is the only place the cells exist -->
+      </div>
+    </div></div></div>
+
+    <!-- s2 - who it was -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="solved" id="s2k">Got it in 4</div>
+      <div class="who"><span class="rev" id="whoRev"><span>Lamar Jackson</span></span></div>
+      <div class="deets" id="deets">QB · Ravens · drafted 2018 · #8</div>
+    </div></div></div>
+
+    <!-- s3 - the close -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <svg class="mark" id="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">A new player every day</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit" id="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row2">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      Every cell is what <code>compareGuess</code> returns for these four guesses against Lamar Jackson, and the
+      whole trace was replayed through <code>replayGuessGame</code> - the function <code>submit-guess</code>
+      itself replays with - which answered solved in 4. The team column is the DRAFT team
+      (<code>tools/data/build-guess-pool.mjs</code>), the position cell can never be grey because every player in
+      the pool is offence, and the arrow points at where the ANSWER is.
+      <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code> fills the viewport.
+    </p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var DUR = 15;
+  var RENDER = /(^|[?&])render=1(&|$)/.test(location.search);
+  if (RENDER) document.body.classList.add("render");
+  if (/(^|[?&])guides=1(&|$)/.test(location.search)) document.body.classList.add("guides");
+
+  var $ = function (id) { return document.getElementById(id); };
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function at(t, s, d) { return clamp01((t - s) / d); }
+  function outCubic(p) { return 1 - Math.pow(1 - p, 3); }
+
+  // The four guesses, exactly as compareGuess returns them against Lamar Jackson (BAL, AFC North, QB, 2018,
+  // #8). Written once, here, so no cell can exist in two versions: the markup is generated from it.
+  // Arrows are the game's own and point at where the ANSWER is, appended with no space, as guess.jsx does.
+  var DATA = [
+    { who: "Adrian Peterson", cells: [["MIN","miss"],["NFC N","miss"],["RB","near"],["2007↑","miss"],["#21↓","miss"]] },
+    { who: "Ja'Marr Chase",   cells: [["CIN","miss"],["AFC N","hit"], ["WR","near"],["2021↓","miss"],["#1↑","miss"]] },
+    { who: "Baker Mayfield",  cells: [["CLE","miss"],["AFC N","hit"], ["QB","hit"], ["2018","hit"],  ["#6↑","near"]] },
+    { who: "Lamar Jackson",   cells: [["BAL","hit"], ["AFC N","hit"], ["QB","hit"], ["2018","hit"],  ["#8","hit"]] }
+  ];
+  var rows = DATA.map(function (g) {
+    var el = document.createElement("div");
+    el.className = "row guess";
+    el.innerHTML = '<div class="nm">' + g.who + "</div>" +
+      g.cells.map(function (c) { return '<div class="cell ' + c[1] + '">' + c[0] + "</div>"; }).join("");
+    $("grid").appendChild(el);
+    return el;
+  });
+
+  // Copied verbatim from static/icon.svg. CLAUDE.md counts the hand copies of this artwork and says to
+  // change every one together; `git ls-files -z | xargs -0 grep -l "M43.57 18.21"` lists them.
+  $("mark").innerHTML =
+    '<rect x="2" y="2" width="60" height="60" rx="15" fill="#B8F500" stroke="#101114" stroke-width="3"/>' +
+    '<path d="M43.57 18.21A18 18 0 1 1 20.43 18.21" fill="none" stroke="#101114" stroke-width="6" stroke-linecap="round"/>' +
+    '<path d="M25.9 12.6 16.2 13.9 22.4 22.2Z" fill="#101114"/>' +
+    '<ellipse cx="32" cy="33.5" rx="9.5" ry="6.2" transform="rotate(-35 32 33.5)" fill="#101114"/>' +
+    '<path d="M29 35.8 35 31.2" stroke="#B8F500" stroke-width="1.8" stroke-linecap="round"/>';
+
+  // One definition, the site's own words: DATA_CREDIT in site-pages.mjs, rendered in the app footer and on
+  // every standalone page. A film is a place the material is used, so it carries the credit too.
+  $("credit").textContent =
+    "Player and team statistics from nflverse, used under CC BY 4.0 and modified: the ratings, boards " +
+    "and eras are this game's own. Not affiliated with the NFL.";
+
+  // 160 BPM, 1.5s bars, 10 bars. The grid gets three quarters of the film because watching it close in IS
+  // the mode - this one is tension where tiktok-spin.html is a joke, so the shape is different on purpose.
+  var BEATS = [
+    { id: "s1", start: 0,     end: 11.25 },  // the grid, a row at a time
+    { id: "s2", start: 11.25, end: 13.5  },  // who it was
+    { id: "s3", start: 13.5,  end: 15    }   // the close
+  ];
+  var scenes = {}; BEATS.forEach(function (b) { scenes[b.id] = $(b.id); });
+  function hold(t, s, e) {
+    var xf = .08;
+    if (t < s) return 0;
+    if (s > 0 && t < s + xf) return (t - s) / xf;
+    if (t <= e) return 1;
+    if (t < e + xf) return 1 - (t - e) / xf;
+    return 0;
+  }
+
+  var ROW_AT = [2.0, 4.2, 6.4, 8.6];   // 2.2s a row: long enough to read five cells on a phone.
+
+  function render(t) {
+    BEATS.forEach(function (b) { scenes[b.id].style.setProperty("--vis", hold(t, b.start, b.end)); });
+    $("heads").style.setProperty("--h", at(t, 0.5, .5));
+    $("s1k").style.opacity = 1 - at(t, 9.6, .6) * .4;
+    rows.forEach(function (el, i) { el.style.setProperty("--s", outCubic(at(t, ROW_AT[i], .34))); });
+    $("whoRev").style.setProperty("--r", outCubic(at(t, 11.45, .5)));
+    $("deets").style.opacity = at(t, 12.1, .4);
+    $("mark").style.transform = "scale(" + (.84 + outCubic(at(t, 13.6, .5)) * .16) + ")";
+    $("credit").style.opacity = at(t, 14.1, .5);
+    $("fill").style.setProperty("--pct", (t / DUR * 100) + "%");
+    $("clock").textContent = t.toFixed(1) + " / " + DUR.toFixed(1) + "s";
+  }
+
+  var t = 0, playing = !RENDER, last = 0;
+  function frame(now) {
+    var dt = last ? (now - last) / 1000 : 0; last = now;
+    if (playing) { t += dt; if (t >= DUR) t = 0; }
+    render(t);
+    requestAnimationFrame(frame);
+  }
+  if (!RENDER) requestAnimationFrame(frame); else render(0);
+
+  $("play").addEventListener("click", function () {
+    playing = !playing; $("play").textContent = playing ? "pause" : "play";
+  });
+  $("restart").addEventListener("click", function () { t = 0; render(t); });
+  $("bar").addEventListener("click", function (e) {
+    var r = $("bar").getBoundingClientRect();
+    t = Math.max(0, Math.min(DUR, (e.clientX - r.left) / r.width * DUR));
+    playing = false; $("play").textContent = "play"; render(t);
+  });
+
+  window.__seek = function (x) { t = Math.max(0, Math.min(DUR, x)); render(t); };
+  window.__duration = DUR;
+  render(0);
+})();
+</script>

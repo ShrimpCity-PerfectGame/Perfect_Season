@@ -11,7 +11,58 @@ this, not recalled.
 
 ## 1. Where things stand
 
-**Everything is promoted. Production runs 2.21.0.**
+**Production runs 2.21.1. Staging is AHEAD of it** - the film work (the three TikTok cuts, the Guess grid
+fix, the Century pick order) is on `staging` and has never been promoted, because none of it is served to
+the site: `build.mjs` copies only `static/` into `public/`, so nothing under `tools/film/` can reach a
+visitor. That is why it carries no version and no changelog entry, which matches how the first film commit
+(`f0b171d`) was handled. Promote it whenever; nothing waits on it.
+
+**The home pill counts PLAYERS DRAFTED, not plays** (v2.21.1) - the owner's call, once the site started
+being sent strangers. It ticks six at a time because that is what a season drafts, and a mini-game no
+longer moves it at all. The guard is sharper than the one it replaced: a single finished season moves the
+Stats Drafts tile by ONE and the pill by SIX, so a change collapsing the two counts cannot pass.
+
+**The per-device cluster is DONE** (v2.21.3, v2.21.4) except for one that cannot be fixed this way. Guess and Century no longer let a daily
+snapshot cross a sign-out: the slot carries the account that started it and a DAILY is refused to anyone
+else. Only the daily - an unlimited run is a seed and no record, and test-century-screen.mjs said so
+before this and was right; a first attempt refused every mismatched snapshot and that comment caught it.
+Over/Under followed in v2.21.4 - its done-record half was already closed in v2.18.11, and the round IN
+PROGRESS beside it was the half still open. What is LEFT is the season draft's FREE_PROGRESS alone,
+which cannot be keyed this way at all: a signed-out visitor's draft is MEANT to carry into the guest
+account they create, which is the whole of v1.17.0. Clearing on sign-out is probably the shape, but it
+is a decision about that flow rather than a patch.
+
+**There are NINE 9:16 films** as of v2.21.2 - the four below plus five built on a shared kit:
+`tiktok-genius.html` (no stats, 20-0 on code `4CMJAAAA`), `tiktok-gm.html` (a $150M cap spent to the
+dollar, `MEGAAAAA`), `tiktok-bears.html` (CHI|0, four QBs, 38 TD and 37 INT, code **`RUSH`**),
+`tiktok-ou.html` (Brady, 28,677 across six boards, over/under 30,000) and `tiktok-duel.html` (a steal
+on `DUEL2026`, replayed to sixteen picks with `missing: 0`). **Four of the five point at modes a
+signed-out visitor can actually play** - season drafts and Over/Under - which the Guess and Century
+films do not.
+
+**`tools/film/kit.css` and `kit.js` are the shared half** (stage, safe area, crossfade, close card,
+palette, brand mark, licence credit, driver). A film on the kit supplies only its scenes, its beats and
+a `render(t)`. The three POSTED films deliberately do not use it - delivered work should not move when
+film ten is edited. Three API shapes cost a correction each and are worth knowing: the duel clock needs
+`move.claim === "clock"`, `replayMatch` wants the DATABASE row shape (`pickId` reads `p.playerId`), and
+a steal row is keyed `by`, not `side` - with `side` the steal is accepted and then silently dropped.
+
+**There are FOUR 9:16 films**, all 1080x1920, 15.000s, 900 frames, SILENT so a trending sound can go over
+them. Three are current: `tools/film/tiktok-spin.html` (a joke - one QB on the Packers board, four on the
+Browns board, every one a D), `tiktok-guess.html` (tension - a grid narrowing onto Lamar Jackson) and
+`tiktok-century.html` (withhold-then-dump - seven stars drafted blind, revealed at 99 of 100). The fourth
+is `tiktok-ad.html`, the original cut, which is still `overlap.mjs`'s DEFAULT `--film` and whose credit
+sits outside `.stage` behind `body.render .credit{display:none}` - so unlike the other three its MP4
+carries no attribution at all. A list that says "three" misses the one the tooling points at by default.
+Every figure in all of them was replayed through the function the Edge Function itself runs.
+
+**Only `DELI` is a code anyone can type.** It deals the Browns 2011-2015 board as a season draft, through
+the Challenge code box on Modes, and it was brute-forced out of all 1.68M four-character codes for exactly
+that reason. **`F0M2MVJJ` is NOT the same kind of thing and must not be put in a caption**: Century has no
+code box at all - `century.jsx` contains no `<input>` - so typing it into the one box that exists starts a
+different game entirely, a six-board season draft from that seed. Its only real door is
+`/c/F0M2MVJJ?mode=century`, a query string, which is unusable as spoken or typed attribution. Treat it as
+the seed that reproduces the film, not as a code to hand an audience.
 
 **gridspin.app counts page views now** (v2.21.0), and `/privacy` changed in the same deployment to say so -
 the old "no analytics" promise is gone, replaced by what is true: no cookie, a visitor identified by a hash
@@ -40,11 +91,21 @@ to Sign In / Providers, where there is no toggle at all.
 
 | | |
 |---|---|
-| `package.json` | `2.21.0` |
-| Production - `www.gridspin.app` | **2.21.0** |
-| Staging | **2.21.0** |
-| `master` head | `a952cc9` |
-| `staging` head | `f0b171d`, tagged **`v2.21.0`** |
+| `package.json` | `2.21.1` |
+| Production - `www.gridspin.app` | **2.21.1** |
+| Staging | **2.21.1** |
+| `master` head | `706a440` |
+| `v2.21.1` tag | `6445a36` - the release commit, NOT a staging head |
+| `staging` head | ahead of master by the film commits; `git log master..staging` is the live answer |
+
+**Who is playing, and when:** paste `supabase/query-play-log.sql` into the Supabase SQL editor for
+either project. One row per completed game - account, game, UTC timestamp - across drafts, Century,
+Guess, Over/Under, Build-a-player and duels. It is a runbook query rather than a screen, because a
+dashboard login is already the access control and an in-app version would add a surface without
+making anything more private: every table it reads is `for select using (true)`, since the
+leaderboards are public. Tested against the real migrations in PGlite; the file's header explains the
+four traps (the daily is in two tables, backfilled rows are not events, a duel is two people, and
+`runs.created_at` is the run's own time).
 
 ## The release-readiness list
 
@@ -193,10 +254,37 @@ All three are footnoted at the top of CHANGELOG.md.
 
 - `PROFILES.md:404-408`'s `ui-common.jsx` export list was corrected to thirty, but these files drift by
   their nature - re-count rather than trust any list of exports in a document.
+- **Every film carries the nflverse credit IN FRAME** (v2.21.2). `spin-an-era.html` and `tiktok-ad.html`
+  carried none at all - the word did not appear in either file - while both name Randy Moss, Mahomes and
+  Derrick Henry and one prints a rating. The earlier diagnosis in this file was WRONG and worth knowing:
+  it said their credit was hidden by `body.render .credit{display:none}`. That rule is correct - their
+  `.credit` is a production NOTE about the film, outside `.stage`, hidden with the transport. The
+  attribution was simply absent. Both now carry `.incredit` inside the close card, and both were
+  re-rendered (the 30s one keeps its score).
+- **`overlap.mjs` now fails a film whose credit is not on the last frame**, and that is where the check
+  belongs: `tests/test-film.mjs` reads text, so it cannot see runtime wiring - a mutation that left the
+  string in kit.js and broke the assignment passed it clean. The browser tool catches exactly that.
+- **`tests/test-film.mjs` holds every value a film hand-copies** (v2.21.2): the palette against
+  theme.mjs's dark scope, each inlined brand mark against `static/icon.svg` path by path, the credit
+  against `DATA_CREDIT`, and `window.__seek`/`window.__duration` against what render.mjs needs. Text
+  only - no Chrome, no ffmpeg - which is what lets it live in run-all.mjs. It finds films by reading
+  the directory, never from a list, because a list is what went stale about the brand-mark census.
+  Every assertion was mutation-tested. What it CANNOT see is layout: that is overlap.mjs, and
+  ultimately a human looking at a frame - which is how all three Guess defects were actually found,
+  after the measurements said the grid was fine.
+- **`render.mjs` asks the film** (v2.21.2) for anything you leave off: `--seconds` from
+  `window.__duration`, `--width`/`--height` from the `.stage` aspect-ratio read in a pre-flight load
+  before render mode overrides it. Flags you DO pass are honoured unchanged. Before this, a 9:16 cut
+  rendered with no flags came out 1920x1080 and 1800 frames, half of them copies of the frozen close
+  card, and the banner said so in a line printed before any of it was known.
 - `tools/film/overlap.mjs` measures `spin-an-era.html` now, but its FILLED list does not include that
   film's `.slot` and `.reel-item`, so a clean run there is weaker evidence than a clean run on the ad.
   Noted in its own header.
-- The brand mark is six hand copies in five files. They agree today; `git ls-files -z | xargs -0 grep -l
+- The brand mark is **nine hand copies across eight files** - the v2.18.3 count of six-in-five predates
+  `tiktok-spin.html`, `tiktok-guess.html` and `tiktok-century.html`, each of which inlines it again.
+  CLAUDE.md's "Brand assets" paragraph still says six in five and is wrong by three. Every copy agrees
+  with `static/icon.svg` character for character today, so nothing has drifted - the cost is entirely to
+  whoever changes the artwork next and trusts the count instead of the grep. They agree today; `git ls-files -z | xargs -0 grep -l
   "M43.57 18.21"` lists them.
 
 ### 3.8 Marketing
@@ -294,12 +382,12 @@ devices, the way `builds.day` got one.
   A guest fills in Keep your seasons. The email attaches, `claim_username` runs and the account is renamed and un-guested in the database - but the POST's reply is lost on the way back. `claimUsername` answers "failed", so the panel says "Something went wrong. Try again.". Every retry now answers `already_named`, which the panel's map does not cover, so it says the same thing again. The header still shows Guest_XXXXX, 
   *Fix:* Map `already_named` in KeepSeasons to the trade-up having already gone through, and act on it rather than just saying so: call `onKept(username)` (or re-read the profile) so the app picks up `guest: false` without a reload. The same treatment suits `not_signed
 
-- **[MEDIUM] A daily Guess or Century run in progress crosses a sign-out: the next account opens today's daily mid-game with the previous player's guesses and fewer tries left**
+- **[FIXED in v2.21.3] A daily Guess or Century run in progress crosses a sign-out: the next account opens today's daily mid-game with the previous player's guesses and fewer tries left**
   `guess.jsx`
   Alice plays three guesses of today's daily Guess the Player and logs out without finishing. Bob signs up on the same device and opens Guess the Player: his first ever daily opens straight into Alice's game - her three guessed players and their coloured comparison rows are on screen, and he has 2 of 5 guesses left. Century behaves the same way: a half-played daily leaves the next account on "Pick 3 of 7" of a run it n
   *Fix:* Key both WIP slots by account (`ps-guess-wip:<uid>` / `ps-century-wip:<uid>`), or - cheaper, and it also covers the guest who may not play the daily at all - stamp the snapshot with the account that started it and refuse to resume a DAILY snapshot whose owner 
 
-- **[MEDIUM] Over/Under's finished-day record is keyed by device, so a second account on the device is shown the first account's score and cannot play that day**
+- **[FIXED in v2.18.11 and v2.21.4] Over/Under's finished-day record is keyed by device, so a second account on the device is shown the first account's score and cannot play that day**
   `perfect-season.jsx`
   Alice finishes today's Over/Under with 11. She logs out; Bob signs up on the same device and opens Over/Under from Mini games. He is shown "Your score: 11" - Alice's - and today's leaderboard, with no round to play and no way to play one until the local date rolls over.
   *Fix:* Key both Over/Under keys by account the way century.jsx and guess.jsx key theirs, and in `openSou` fall back to `fetchMySouRun` when the device has no record for THIS account. The `readDay` read of `SOU_DONE_KEY` (line 2567) needs the same account in its key a

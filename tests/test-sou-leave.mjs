@@ -28,6 +28,11 @@ await runTest("an answered round is never dealt again after leaving", async () =
   await openSou();
   await click(findButtonByText(container, "I'm ready - start the clock"));
   await flush();
+  // Dealing a round saves it as ALREADY MISSED, and that is a different writer from the one that records
+  // an answer - so it needs the owner stamp of its own. Checked here because a mutation that dropped the
+  // stamp from this path alone passed every other test in the file: the later checks all read what the
+  // ANSWER path wrote, which still had it.
+  assert("owner" in (progress() || {}), `a dealt round records who is playing: ${JSON.stringify(progress())}`);
   const panel = container.querySelector(".panel");
   await click(findButtonByText(panel, "Over"));
   await flush(3);
@@ -86,6 +91,65 @@ await runTest("leaving by any route - even the header's Log in link - cleans up 
   const headings = [...container.querySelectorAll("h1.h, h2.h")].filter((h) => h.textContent === "Over/Under").length;
   assert(headings === 1, "expected just the resume screen, not the rules stacked on a stale round, got " + headings + " Over/Under headings");
   assert(!container.querySelector(".sou-answers"), "no stale round's answer buttons should be on screen");
+});
+
+await runTest("a round in progress belonging to another account is never resumed", async () => {
+  // THIS TEST DEALS ITS OWN ROUND, and that is a fix rather than a flourish. It used to read whatever the
+  // tests above happened to leave behind, which made the whole file date-dependent: test 1 clicks "Over"
+  // unconditionally and accepts either reveal, so on a date where "Over" is WRONG that answer costs a life
+  // the file's arithmetic never budgeted for, the three run out one step early, the run ends, and this test
+  // found a finished day instead of a round in progress. It failed on 2026-10-06 for exactly that reason,
+  // having passed the day before - roughly half of all dates would have done it.
+  //
+  // Clearing both of the day's keys and dealing a fresh round makes every assertion below depend on what
+  // this test does rather than on which questions the seed produced.
+  for (const k of Object.keys(window.storage.data).filter((k) => k.startsWith("personal:ps-sou"))) {
+    delete window.storage.data[k];
+  }
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await openSou();
+  await click(findButtonByText(container, "I'm ready - start the clock"));
+  await flush();
+  // And step off it, so what sits on the device is a SAVED round rather than a live one. With the round
+  // still running, the navigation further down LEAVES it - and leaving rewrites the record with this
+  // player's own owner, erasing the stranger stamp the test had just written.
+  await click(findButtonByText(container, "Modes"));
+  await flush(3);
+  // The slot is keyed by DATE alone - `ps-sou-wip:<date>`, no account in it - so before v2.21.3 the next
+  // person on a shared browser inherited the last one's game. Alice uses a life and scores 5, closes the
+  // tab; Bob signs up, opens Over/Under, and starts at her round with her lives and her score, which then
+  // posts as HIS day. The DONE half of that leak was closed in v2.18.11 by asking sou_runs first - openSou
+  // explicitly discards the device record when the server says this account has not played - but the round
+  // in progress beside it was read unconditionally, so clearing `souDone` only sent Bob one line further
+  // down to inherit her game instead.
+  const key = Object.keys(window.storage.data).find((k) => k.startsWith("personal:ps-sou-wip:"));
+  assert(key, "a round in progress is on the device to work with");
+
+  // The STAMP: whatever the screen wrote has to say who wrote it, or the check below compares against
+  // nothing and every snapshot reads as a stranger's. Signed out here, so the owner is null - which is a
+  // value, not an absence, and is exactly what distinguishes it from a pre-v2.21.3 snapshot.
+  const written = JSON.parse(window.storage.data[key]);
+  assert("owner" in written, `the saved round records who is playing: ${JSON.stringify(written)}`);
+  assert(written.owner === null, `signed out, that is null: ${written.owner}`);
+
+  // Somebody else's round must not be offered back.
+  window.storage.data[key] = JSON.stringify({ ...written, owner: "00000000-0000-4000-8000-00000000dead" });
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await openSou();
+  assert(!findButtonByText(container, "Resume - start the clock"),
+    "another account's round is not offered for resuming");
+  assert(findButtonByText(container, "I'm ready - start the clock"),
+    "and a fresh day is offered instead");
+
+  // ...and so must one written before the stamp existed, which carries no owner at all.
+  window.storage.data[key] = JSON.stringify({ roundIndex: 4, lives: 1, score: 3 });
+  await click(findButtonByText(container, "Modes"));
+  await flush();
+  await openSou();
+  assert(!findButtonByText(container, "Resume - start the clock"),
+    "a legacy round with no owner is not resumed either");
 });
 
 console.log("test-sou-leave.mjs done");

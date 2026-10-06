@@ -414,7 +414,11 @@ export function makeMockAuth() {
     }
   };
   async function invokeSubmitRun(body) {
-    if (!session?.user) return { error: { message: "unauthorized" } };
+    // index.ts answers a missing or unresolvable session with a bare 401 and no reason in the body, and
+    // storage.js reads that status to tell "you were signed out" from "the server fell over". This used to
+    // answer a bare `{ error: { message } }` with no status on it at all, which the client could only read
+    // as the latter - a mock diverging from the function on exactly the seam that classifies failures.
+    if (!session?.user) return refused(401, { error: "unauthorized" });
     const userId = session.user.id;
 
     // index.ts's applyToProfile: read, decide in game-logic.mjs, write back only if the revision has

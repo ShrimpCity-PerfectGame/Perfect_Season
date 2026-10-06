@@ -33,7 +33,7 @@ export function createClient(url, key, opts) {
     },
   };
   const from = (table) => {
-    const q = { table, filters: [], orderBy: null, patch: null, wantRows: false, mode: "select" };
+    const q = { table, filters: [], ranges: [], orderBy: null, patch: null, wantRows: false, mode: "select", countOnly: false };
     const rows = () => {
       // Not a failure the client reports - a failure it THROWS. supabase-js does, and so does any bug in the
       // handler itself; the only question is whether the response still carries its CORS headers, because one
@@ -42,13 +42,26 @@ export function createClient(url, key, opts) {
       if (store.readFails?.[table]) return { error: { message: "read failed" }, data: null };
       let out = store.rowsOf(table);
       for (const [col, val] of q.filters) out = out.filter((r) => r[col] === val);
+      // Range filters, for report-error's rate limit and its retention delete. Plain JS comparison, which
+      // is what PostgREST does for an ISO timestamp string too - they sort lexically.
+      for (const [col, op, val] of q.ranges) out = out.filter((r) => (op === "gte" ? r[col] >= val : r[col] < val));
       if (q.orderBy) out = out.slice().sort((a, b) => (a[q.orderBy] > b[q.orderBy] ? 1 : a[q.orderBy] < b[q.orderBy] ? -1 : 0));
       return { data: out, error: null };
     };
     const fail = (msg, code) => ({ data: null, error: { message: msg, code } });
     const api = {
-      select(columns) { q.columns = columns; q.wantRows = true; return api; },
+      // opts2 is PostgREST's { count, head }: head means do not send the rows back, just how many.
+      select(columns, opts2) {
+        q.columns = columns;
+        q.wantRows = true;
+        if (opts2 && opts2.count) q.countOnly = !!opts2.head;
+        return api;
+      },
       eq(col, val) { q.filters.push([col, val]); return api; },
+      // Additive, and deliberately a SEPARATE array from filters: the four edge tests that predate this
+      // pass filters straight to their own store.remove, so widening that tuple would reach into them.
+      gte(col, val) { q.ranges.push([col, "gte", val]); return api; },
+      lt(col, val) { q.ranges.push([col, "lt", val]); return api; },
       order(col) { q.orderBy = col; return api; },
       update(patch) { q.mode = "update"; q.patch = patch; return api; },
       insert(row) { q.mode = "insert"; q.row = row; return api; },
@@ -75,10 +88,12 @@ export function createClient(url, key, opts) {
           return res?.error ? fail(res.error.message, res.error.code) : { data: q.wantRows ? [res?.row ?? q.row] : null, error: null };
         }
         if (q.mode === "delete") {
-          store.remove(q.table, q.filters);
+          store.remove(q.table, q.filters, q.ranges);
           return { data: null, error: null };
         }
-        return rows();
+        const r = rows();
+        if (q.countOnly) return r.error ? { ...r, count: null } : { data: null, count: r.data.length, error: null };
+        return r;
       },
     };
     return api;

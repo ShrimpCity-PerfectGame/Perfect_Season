@@ -2,7 +2,8 @@
 
 A daily game shipped in v2.13.0. The site picks one real player a day and you have **five guesses**. Every
 guess is a player, and the row it draws compares five things with the answer: **team, division, position, draft
-class and jersey number**. Green is exact, yellow is close, grey is no. Daily and Practice.
+class and jersey number**. Green is exact, ORANGE is close, grey is no - the share card's close square is
+yellow (🟨) only because no orange one exists. Daily and Practice.
 
 The name is not one of the five columns — it is the guess.
 

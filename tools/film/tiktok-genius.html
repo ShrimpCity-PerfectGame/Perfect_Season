@@ -1,0 +1,185 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>No stats</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<link rel="stylesheet" href="kit.css">
+<style>
+  /* Only what makes THIS film. The stage, safe area, scene crossfade, close card, palette and transport all
+     come from kit.css - see the note at the top of it for why a film may link a stylesheet at all. */
+
+  /* ---- the roster, with the stat cells simply absent ------------------------------------------------
+     That absence IS Genius mode: the same draft, the same cards, every stat cell left off. The app does it
+     by rendering the card without its stat grid, which is also precisely what Century does - so the two
+     films had to be told apart some other way, and they are: Century ends on a number, this one ends on a
+     SEASON. No film before this showed what happens after the draft at all. */
+  .roster { width:100%; display:grid; gap:1.5cqw; }
+  .pl { display:grid; grid-template-columns:13fr 62fr 25fr; align-items:center; gap:2cqw;
+    background:var(--surface); border:1px solid var(--line); border-left:0.9cqw solid var(--pos,var(--line2));
+    border-radius:1.4cqw; padding:2.1cqw 2.4cqw; text-align:left;
+    opacity:var(--s,0); transform:translateX(calc((1 - var(--s,0)) * -6%)); }
+  .pl > * { min-width:0; }   /* an fr track floors at min-content; see tiktok-guess.html for what that cost */
+  /* uppercase in CSS, sentence case in the markup - CLAUDE.md's copy rule, and without it "Flex" renders
+     mixed-case beside four labels that are already capitals. */
+  .pl .ps { font-weight:900; font-size:2.7cqw; letter-spacing:.14em; color:var(--pos,var(--muted));
+    text-transform:uppercase; }
+  .pl .nm { font-family:var(--display); font-size:4cqw; line-height:1; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; }
+  .pl .tm { font-size:2.5cqw; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    text-align:right; }
+  .hid { font-size:2.9cqw; letter-spacing:.1em; text-transform:uppercase; color:var(--muted);
+    opacity:var(--h,0); }
+
+  /* ---- the season --------------------------------------------------------------------------------- */
+  .wk { font-size:2.9cqw; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:1.8cqw; width:76%; }
+  .sq { aspect-ratio:1; border-radius:1.2cqw; background:var(--surface2); border:1px solid var(--line);
+    opacity:var(--q,0); transform:scale(calc(.55 + var(--q,0) * .45)); }
+  .sq.on { background:var(--win); border-color:var(--win); }
+  .po { display:grid; grid-template-columns:repeat(3, 1fr); gap:2.4cqw; width:48%; margin-top:1.4cqw; }
+  .po .sq { border-radius:1.6cqw; }
+  .polab { display:grid; grid-template-columns:repeat(3, 1fr); gap:2.4cqw; width:48%; }
+  .polab span { font-size:2.1cqw; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+    opacity:var(--p,0); }
+  .final { font-size:3.1cqw; color:var(--muted); opacity:var(--f,0); }
+  .final b { color:var(--cream); font-weight:700; }
+
+  /* ---- the record --------------------------------------------------------------------------------- */
+  .rec { font-family:var(--display); font-size:30cqw; line-height:.86; color:var(--lime);
+    font-variant-numeric:tabular-nums; }
+  .said { font-family:var(--display); font-size:9cqw; line-height:1; text-transform:uppercase; color:var(--cream); }
+  .sub { font-size:2.9cqw; color:var(--muted); }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin's Genius mode: six players drafted with no statistics shown, who then go twenty and zero and win the championship.">
+
+    <!-- s1 - the roster fills, in the order the seed actually deals the boards, with no stats anywhere -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="kicker" id="s1k">Genius mode. No stats.</div>
+      <div class="roster" id="roster"></div>
+      <div class="hid" id="s1h">Six names. That is all you get.</div>
+    </div></div></div>
+
+    <!-- s2 - the season, which no film has shown before -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="wk">Seventeen games</div>
+      <div class="grid" id="grid"></div>
+      <div class="polab"><span id="pl0">Divisional</span><span id="pl1">Conference</span><span id="pl2">Title</span></div>
+      <div class="po" id="po"></div>
+      <div class="final" id="final">Championship: <b>16–6</b> over the 2017 Vikings</div>
+    </div></div></div>
+
+    <!-- s3 - the record -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <div class="rec" id="recN">20–0</div>
+      <div class="said"><span class="rev" id="sRev"><span>Perfect season.</span></span></div>
+      <div class="sub" id="sSub">Genius mode: the same draft, with every stat hidden.</div>
+    </div></div></div>
+
+    <!-- s4 - the close -->
+    <div class="scene" id="s4"><div class="safe"><div class="col">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">Genius mode</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row2">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      A real draft on code <code>4CMJAAAA</code>, accepted by <code>replayDraft</code> - the function
+      <code>submit-run</code> itself replays a submitted season with - and simulated by the shipped
+      <code>simulateSeason</code>, which returns 20&ndash;0, champions, team score 118.9. The six fill in the
+      order the seed DEALS the boards (DET, CAR, MIN, NE, BAL, NYG), not down the roster: Calvin Johnson is
+      the first pick and Brady the fourth. Every scoreline is the simulation&rsquo;s own.
+      <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code> fills the viewport.
+    </p>
+  </div>
+</div>
+
+<script src="kit.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = FILM.$, at = FILM.at, outCubic = FILM.outCubic, outBack = FILM.outBack;
+
+  // The roster is DISPLAYED in slot order, because that is how every Gridspin roster reads, and FILLED in
+  // the order the seed deals - which for 4CMJAAAA is DET, CAR, MIN, NE, BAL, NYG. `pickAt` therefore
+  // indexes by displayed row and holds the time of that row's actual pick. The Century film shipped this
+  // the wrong way round once and showed a draft its own code could not produce.
+  var ROSTER = [
+    { slot: "QB",   pos: "qb",   who: "Tom Brady",          team: "Patriots 2007", pick: 4 },
+    { slot: "RB",   pos: "rb",   who: "Adrian Peterson",    team: "Vikings 2012",  pick: 3 },
+    { slot: "WR",   pos: "wr",   who: "Odell Beckham Jr.",  team: "Giants 2016",   pick: 6 },
+    { slot: "TE",   pos: "te",   who: "Dennis Pitta",       team: "Ravens 2012",   pick: 5 },
+    { slot: "Flex", pos: "flex", who: "Calvin Johnson",     team: "Lions 2008",    pick: 1 },
+    { slot: "Flex", pos: "flex", who: "Christian McCaffrey", team: "Panthers 2019", pick: 2 }
+  ];
+  var PICK_0 = 0.75, PICK_GAP = 0.62;          // first pick lands here, then one every PICK_GAP
+  var pickTime = function (n) { return PICK_0 + (n - 1) * PICK_GAP; };
+
+  var slots = ROSTER.map(function (r) {
+    var el = document.createElement("div");
+    el.className = "pl";
+    el.style.setProperty("--pos", "var(--" + r.pos + ")");
+    el.innerHTML = '<div class="ps">' + r.slot + "</div>" +
+      '<div class="nm">' + r.who + "</div>" +
+      '<div class="tm">' + r.team + "</div>";
+    $("roster").appendChild(el);
+    return el;
+  });
+
+  // Twenty squares: seventeen regular-season games then three playoff rounds, every one of them a win,
+  // which is what simulateSeason returned for this seed and roster. They are all green because the season
+  // really was - not because the film only draws green ones.
+  var REG = 17, PO = 3;
+  var reg = [], po = [];
+  for (var i = 0; i < REG; i++) { var s = document.createElement("div"); s.className = "sq on"; $("grid").appendChild(s); reg.push(s); }
+  for (var j = 0; j < PO; j++) { var q = document.createElement("div"); q.className = "sq on"; $("po").appendChild(q); po.push(q); }
+
+  var S2 = 5.6;                                  // the season scene opens here
+  var REG_0 = S2 + 0.35, REG_GAP = 0.13;         // seventeen games, brisk
+  var PO_0 = REG_0 + REG * REG_GAP + 0.45, PO_GAP = 0.42;
+
+  FILM.start({
+    duration: 15,
+    beats: [
+      { id: "s1", start: 0,    end: S2   },
+      { id: "s2", start: S2,   end: 11.3 },
+      { id: "s3", start: 11.3, end: 13.5 },
+      { id: "s4", start: 13.5, end: 15   }
+    ],
+    render: function (t) {
+      slots.forEach(function (el, i) {
+        el.style.setProperty("--s", outCubic(at(t, pickTime(ROSTER[i].pick), 0.3)));
+      });
+      $("s1k").style.opacity = 1 - at(t, S2 - 0.8, 0.5) * 0.35;
+      $("s1h").style.setProperty("--h", at(t, pickTime(6) + 0.35, 0.45));
+
+      reg.forEach(function (el, i) { el.style.setProperty("--q", outBack(at(t, REG_0 + i * REG_GAP, 0.3))); });
+      po.forEach(function (el, i) { el.style.setProperty("--q", outBack(at(t, PO_0 + i * PO_GAP, 0.34))); });
+      for (var k = 0; k < 3; k++) $("pl" + k).style.setProperty("--p", at(t, PO_0 + k * PO_GAP - 0.1, 0.3));
+      $("final").style.setProperty("--f", at(t, PO_0 + 2 * PO_GAP + 0.5, 0.45));
+
+      $("recN").style.transform = "scale(" + (0.9 + outBack(at(t, 11.45, 0.5)) * 0.1) + ")";
+      $("sRev").style.setProperty("--r", outCubic(at(t, 12.0, 0.45)));
+      $("sSub").style.opacity = at(t, 12.6, 0.4);
+
+      document.querySelector(".mark").style.transform = "scale(" + (0.84 + outCubic(at(t, 13.6, 0.5)) * 0.16) + ")";
+      document.querySelector(".credit").style.opacity = at(t, 14.1, 0.5);
+    }
+  });
+})();
+</script>

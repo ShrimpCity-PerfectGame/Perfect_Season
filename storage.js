@@ -171,27 +171,95 @@ export async function fetchProfile(userId) {
 // applies the increment) and recomputes everything server-side before writing - see
 // game-logic.mjs's replayDraft/simulateSeason and supabase/functions/submit-run.
 // On success, the function's answer: { ok: true, run, coins, newBadges } (SHOP.md 4.2 - coins is null when
-// the season counted but its coins couldn't be paid). A refusal comes back as an HTTP error whose body names
-// a reason. Two are carried through, because for both of them "it will be saved next time" is a lie:
-// "duplicate" (this draft already counted) and "reserved_code" (the code is the daily's own draft, so
-// it will never be accepted, however many times it is sent).
+// the season counted but its coins couldn't be paid). A failure is always { ok: false, reason, status },
+// named by `runFailure` below.
+//
+// The reasons, and they are the whole vocabulary both of these answer with:
+//   duplicate      this draft has already counted - not a failed save at all, and the result screen says so
+//   reserved_code  the code is the daily's own draft, so it will never be accepted however often it is sent
+//   guest_daily    a guest may not hand in a daily
+//   signed_out     the function could not say who was asking: the session had lapsed by hand-in time
+//   refused        some other verdict on THIS submission - the roster, the day, the body. Final.
+//   server         the function or the platform in between fell over. Nothing is wrong with the season.
+//   offline        nothing reached the function at all
+//
+// **There is no outbox for a season**, unlike Guess, Century and a daily finished while signed out, so
+// none of this is a retry list - it is what the player is told. A season is a draft trace, a seed and a
+// client that must agree with the deployed function (see "A re-spin may repeat a team" in CLAUDE.md), so
+// holding one to re-send later is a feature, not a patch. Do not let the copy promise a queue: writing
+// "we'll try again" over a run nothing will retry is the v2.18.2 bug with the words the other way round.
 export async function submitRun(trace) {
-  const { data, error } = await getClient().functions.invoke("submit-run", { body: trace });
-  if (error) {
-    let body = null;
-    try { body = await error.context?.json?.(); } catch (e) { /* no readable body */ }
-    const reason = body?.reason;
-    return reason === "duplicate" || reason === "reserved_code" ? { ok: false, reason } : { ok: false };
+  try {
+    const { data, error } = await getClient().functions.invoke("submit-run", { body: trace });
+    if (error) return runFailure(error);
+    // A 200 that doesn't say ok is the platform again - a truncated or rewritten response - not a verdict.
+    if (!data?.ok) return { ok: false, reason: "server", status: 200 };
+    return data;
+  } catch (e) {
+    // invoke() threw: DNS, TLS, CORS, a dead radio. Nothing reached the function. This used to propagate
+    // out of here into submitAndSync's catch, which set the panel with nothing to say about why.
+    return { ok: false, reason: "offline", status: 0 };
   }
-  return data;
 }
+
 // `mode` is the ladder the abandoned draft belonged to, so the points penalty lands on the right
 // board. It's a tag rather than a claim about a roster - the server falls back to "unlimited" for
 // anything it doesn't recognize.
+//
+// It answers the same shape submitRun does rather than a bare boolean, because an abandoned draft
+// raises the same on-screen panel a failed season does and the player is owed the same distinction.
 export async function submitDnf(picks, mode) {
-  const { data, error } = await getClient().functions.invoke("submit-run", { body: { dnf: true, picks, mode } });
-  if (error) return false;
-  return !!data?.ok;
+  try {
+    const { data, error } = await getClient().functions.invoke("submit-run", { body: { dnf: true, picks, mode } });
+    if (error) return runFailure(error);
+    if (!data?.ok) return { ok: false, reason: "server", status: 200 };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: "offline", status: 0 };
+  }
+}
+
+// The verdicts submit-run names in its body. Each is final: re-sending cannot change the answer.
+const RUN_REFUSALS = ["duplicate", "reserved_code", "guest_daily"];
+
+// **submit-run's contract is NOT submit-guess's, and the difference is the whole of this function.**
+//
+// submit-guess and submit-century name a reason on EVERY answer they give a POST, so a body with no
+// reason in it is provably the platform in between and is worth another go - that is v2.18.2, and
+// tests/test-submit-reasons.mjs pins it. submit-run is the opposite: of its two dozen answers only four
+// carry a `reason`, and "malformed submission", "a daily submission must be for today", "no profile for
+// this account", "unknown mode", "unknown scoring format" and "missing challenge code" all come back as a
+// bare 400. Reading a missing reason as the platform here would call every one of those transient, and
+// tell a player a season would be saved next time that this function will refuse for ever. That exact
+// sentence over a GM season refused for the salary cap is in CLAUDE.md as a bug already.
+//
+// What submit-run always sets is the STATUS, so that is what this reads. functions-js is explicit about
+// the three shapes it throws (@supabase/functions-js FunctionsClient): a **FunctionsFetchError** carries
+// the fetch error itself and means nothing reached the function; a **FunctionsRelayError** carries a
+// response the Supabase relay refused; and a **FunctionsHttpError** carries the function's own Response,
+// so `error.context.status` is the function's answer and nobody else's.
+async function runFailure(error) {
+  // Nothing reached the function at all: DNS, TLS, CORS, an aborted request.
+  if (error?.name === "FunctionsFetchError") return { ok: false, reason: "offline", status: 0 };
+  const status = Number(error?.context?.status) || 0;
+  // The relay could not get to the function. Its side, and transient.
+  if (error?.name === "FunctionsRelayError") return { ok: false, reason: "server", status };
+  let body = null;
+  try { body = await error?.context?.json?.(); } catch (e) { /* no readable body */ }
+  const reason = body?.reason;
+  if (RUN_REFUSALS.includes(reason)) return { ok: false, reason, status };
+  // 401 is the one failure the player can act on themselves, and the only one with a next step: the
+  // function could not resolve the session, so it had lapsed by the time the season was handed in.
+  // finish() deliberately does not await the submission, so a seventeen-game season is plenty of time.
+  if (status === 401) return { ok: false, reason: "signed_out", status };
+  // Everything else in the 4xx range is this function's verdict on THIS submission and re-sending cannot
+  // change it. `detail` is the function's own sentence, kept for the error ring and never for the screen:
+  // replayDraft's reasons are English rather than codes, so nothing may switch on them.
+  if (status >= 400 && status < 500) {
+    return { ok: false, reason: "refused", status, detail: String(body?.reason || body?.error || "").slice(0, 120) };
+  }
+  // A 5xx, or a status that could not be read at all.
+  return { ok: false, reason: "server", status };
 }
 
 export async function fetchLeaderboardTop(limit = 10, format = "fantasy") {

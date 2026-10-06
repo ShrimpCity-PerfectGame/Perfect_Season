@@ -1,0 +1,278 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One short</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<style>
+  :root {
+    --navy:#0B1020; --surface:#131A2E; --surface2:#1B2440; --line:#26304D; --line2:#36416A;
+    --cream:#F7F4EA; --muted:#A9B0C3; --lime:#B8F500; --ink:#101114;
+    --win:#6FD49B; --orange:#FF7043;
+    --qb:#F2557A; --rb:#2FD3B5; --wr:#5AA9FF; --te:#F5A04A; --flex:#B18CFF;
+    --display:'Anton',Impact,'Arial Narrow',sans-serif;
+    --body:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  html, body { height:100%; }
+  body { margin:0; background:var(--navy); color:var(--cream); font-family:var(--body);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; padding-block:20px; padding-inline:16px; box-sizing:border-box; }
+  .wrap { width:100%; max-width:400px; display:flex; flex-direction:column; gap:12px; }
+
+  .stage { position:relative; width:100%; aspect-ratio:9/16; max-width:100%;
+    background: radial-gradient(120% 70% at 50% 20%, #16203c 0%, var(--navy) 62%), var(--navy);
+    border:1px solid var(--line); border-radius:6px; overflow:hidden;
+    container-type:size; box-shadow:0 20px 60px -30px #000; }
+  .stage::before { content:""; position:absolute; inset:0; z-index:5; pointer-events:none;
+    background-image:radial-gradient(circle at 1px 1px, rgba(247,244,234,.05) 1px, transparent 1px);
+    background-size:7px 7px; }
+
+  .safe { position:absolute; z-index:4; top:7.3%; bottom:32%; left:7%; right:7%;
+    display:grid; align-content:center; justify-items:center; text-align:center; }
+  body.guides .safe { outline:2px dashed rgba(184,245,0,.45); }
+
+  .scene { position:absolute; inset:0; opacity:var(--vis,0); pointer-events:none; }
+  .col { display:grid; justify-items:center; gap:2.6cqw; width:100%; }
+
+  .kicker { font-family:var(--body); font-weight:800; font-size:3.4cqw; letter-spacing:.24em;
+    text-transform:uppercase; color:var(--lime); }
+  .kicker.dim { color:var(--muted); }
+  .hid { font-family:var(--body); font-weight:800; font-size:3cqw; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--muted); }
+
+  /* ---- the roster, the game's own seven slots in the game's own order and labels (CENTURY_SLOTS /
+     CENTURY_SLOT_LABEL in century-logic.mjs - never "RB1" on screen, always "RB"). ---- */
+  .roster { width:100%; display:grid; gap:1.5cqw; }
+  .sl { display:grid; grid-template-columns:10fr 44fr 20fr 14fr; gap:1.6cqw; align-items:center;
+    background:var(--surface); border:1px solid var(--line); border-left:1.2cqw solid var(--pos,var(--line2));
+    padding:2.1cqw 2.4cqw; text-align:left;
+    opacity:var(--s,0); transform:translateX(calc((1 - var(--s,0)) * -6%)); }
+  /* min-width:0 because an fr track otherwise takes its MIN-CONTENT as a floor, and a nowrap name could
+     push the grid past 100%. Defensive rather than a fix: measured with the original tracks and a 4.6cqw
+     name, the touchdown column sat 11px INSIDE .safe and nothing was ever clipped. A screenshot taken while
+     the preview viewport was in a transient state looked cut off and was misread as a layout bug;
+     overlap.mjs was right to report clean. Kept because a longer name than any here would reintroduce the
+     risk for real, and it costs nothing. */
+  .sl > * { min-width:0; }
+  .sl .ps { font-weight:900; font-size:2.7cqw; letter-spacing:.14em; color:var(--pos,var(--muted)); }
+  .sl .nm { font-family:var(--display); font-size:4cqw; line-height:1; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; }
+  .sl .tm { font-size:2.5cqw; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* The whole point of the mode: this column is empty while you pick and only fills at the end.
+     `--td` is 0 for the entire first half of the film. */
+  .sl .td { font-family:var(--display); font-size:6cqw; line-height:1; text-align:right;
+    color:var(--lime); font-variant-numeric:tabular-nums;
+    opacity:var(--td,0); transform:scale(calc(.7 + var(--td,0) * .3)); }
+
+  /* ---- the total ---- */
+  .score { font-family:var(--display); font-size:30cqw; line-height:.84; color:var(--cream);
+    font-variant-numeric:tabular-nums; }
+  .of { font-family:var(--body); font-weight:800; font-size:4cqw; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--muted); }
+  .verdict { font-family:var(--display); font-size:11cqw; line-height:.9; text-transform:uppercase;
+    color:var(--orange); }
+  .ceil { font-size:2.9cqw; color:var(--muted); }
+
+  /* ---- close ---- */
+  .mark { width:17cqw; height:17cqw; }
+  .word { font-family:var(--display); font-size:12cqw; line-height:.86; text-transform:uppercase; color:var(--cream); }
+  .tag { font-family:var(--body); font-weight:800; font-size:3.6cqw; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--lime); }
+  .url { font-family:var(--display); font-size:7.6cqw; color:var(--cream); }
+  .credit { font-size:2.1cqw; line-height:1.5; color:var(--muted); max-width:86%; }
+
+  .rev { overflow:hidden; display:block; padding-top:.12em; margin-top:-.12em; }
+  .rev > span { display:block; transform:translateY(calc((1 - var(--r,0)) * 118%)); }
+
+  body.render .stage { width:100vw; height:100vh; aspect-ratio:auto; border:0; border-radius:0; box-shadow:none; }
+  body.render .wrap { max-width:none; width:100vw; gap:0; }
+  body.render .ui { display:none; }
+
+  .ui { display:grid; gap:8px; font-size:12px; color:var(--muted); }
+  .bar { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; cursor:pointer; }
+  .bar i { display:block; height:100%; width:var(--pct,0%); background:var(--lime); }
+  .ui .row2 { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .ui button { font:inherit; background:var(--surface); color:var(--cream); border:1px solid var(--line);
+    border-radius:4px; padding:4px 10px; cursor:pointer; }
+  .note { font-size:11px; line-height:1.5; }
+  .note code { color:var(--lime); }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin's Century mode: seven players drafted with their statistics hidden, revealed to total 99 touchdowns, one short of 100.">
+
+    <!-- s1 - the roster fills, with no numbers at all -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="kicker" id="s1k">Seven players. One season.</div>
+      <div class="roster" id="roster"></div>
+      <div class="hid" id="s1h">Stats hidden while you pick</div>
+    </div></div></div>
+
+    <!-- s2 - the total -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="score" id="scoreN">99</div>
+      <div class="of">of 100 touchdowns</div>
+      <div class="verdict"><span class="rev" id="vRev"><span>One short.</span></span></div>
+      <div class="ceil" id="ceil">Best possible from your seven teams: 106</div>
+    </div></div></div>
+
+    <!-- s3 - the close -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <svg class="mark" id="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">Century mode</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit" id="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row2">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      A real Century run, code <code>F0M2MVJJ</code>, replayed through <code>replayCentury</code> - the function
+      <code>submit-century</code> itself runs - which returns 99 against a ceiling of 106. Every touchdown is the
+      <code>td</code> field of <code>data/season-2025.json</code>, which is already passing + rushing + receiving
+      for the regular season. The numbers are absent for the first half on purpose: Century hides every statistic
+      while you pick, and the only figure on a real card is games played.
+      <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code> fills the viewport.
+    </p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var DUR = 15;
+  var RENDER = /(^|[?&])render=1(&|$)/.test(location.search);
+  if (RENDER) document.body.classList.add("render");
+  if (/(^|[?&])guides=1(&|$)/.test(location.search)) document.body.classList.add("guides");
+
+  var $ = function (id) { return document.getElementById(id); };
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function at(t, s, d) { return clamp01((t - s) / d); }
+  function outCubic(p) { return 1 - Math.pow(1 - p, 3); }
+  // The p <= 0 arm is not defensive, it is arithmetic: 1 - 2.70158 + 1.70158 does not cancel in binary, so
+  // the formula returns 2.220446049250313e-16 at p = 0 rather than 0. Invisible on screen, but it left
+  // `transform:scale(calc(.7 + var(--td) * .3))` permanently off the identity matrix, and overlap.mjs skips
+  // any transformed element - so this film's seven biggest numerals were excluded from its .safe check at
+  // every frame, not just while they move. Math.max(0, ...) does NOT fix it: the epsilon is positive.
+  function outBack(p) {
+    if (p <= 0) return 0;
+    var c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+  }
+
+  // The roster, in the game's own slot order (CENTURY_SLOTS) with the game's own labels - "RB" twice, never
+  // "RB1". Team is the nickname, which is what every Century screen prints. Each `td` is that player's 2025
+  // regular-season passing + rushing + receiving touchdowns, read from data/season-2025.json; they add to 99.
+  var ROSTER = [
+    { slot: "QB",   pos: "qb",   who: "Patrick Mahomes",     team: "Chiefs",    td: 27 },
+    { slot: "RB",   pos: "rb",   who: "Christian McCaffrey", team: "49ers",     td: 17 },
+    { slot: "RB",   pos: "rb",   who: "De'Von Achane",       team: "Dolphins",  td: 12 },
+    { slot: "WR",   pos: "wr",   who: "Tee Higgins",         team: "Bengals",   td: 11 },
+    { slot: "WR",   pos: "wr",   who: "Amon-Ra St. Brown",   team: "Lions",     td: 11 },
+    { slot: "TE",   pos: "te",   who: "Trey McBride",        team: "Cardinals", td: 11 },
+    { slot: "Flex", pos: "flex", who: "D'Andre Swift",       team: "Bears",     td: 10 }
+  ];
+  var slots = ROSTER.map(function (r) {
+    var el = document.createElement("div");
+    el.className = "sl";
+    el.style.setProperty("--pos", "var(--" + r.pos + ")");
+    el.innerHTML = '<div class="ps">' + r.slot + "</div>" +
+      '<div class="nm">' + r.who + "</div>" +
+      '<div class="tm">' + r.team + "</div>" +
+      '<div class="td">' + r.td + "</div>";
+    $("roster").appendChild(el);
+    return el;
+  });
+
+  // Copied verbatim from static/icon.svg - CLAUDE.md counts the hand copies and says to change them together.
+  $("mark").innerHTML =
+    '<rect x="2" y="2" width="60" height="60" rx="15" fill="#B8F500" stroke="#101114" stroke-width="3"/>' +
+    '<path d="M43.57 18.21A18 18 0 1 1 20.43 18.21" fill="none" stroke="#101114" stroke-width="6" stroke-linecap="round"/>' +
+    '<path d="M25.9 12.6 16.2 13.9 22.4 22.2Z" fill="#101114"/>' +
+    '<ellipse cx="32" cy="33.5" rx="9.5" ry="6.2" transform="rotate(-35 32 33.5)" fill="#101114"/>' +
+    '<path d="M29 35.8 35 31.2" stroke="#B8F500" stroke-width="1.8" stroke-linecap="round"/>';
+
+  $("credit").textContent =
+    "Player and team statistics from nflverse, used under CC BY 4.0 and modified: the ratings, boards " +
+    "and eras are this game's own. Not affiliated with the NFL.";
+
+  // 160 BPM, 1.5s bars. The shape is withhold-then-dump, which is the mode: seven names arrive with no
+  // numbers at all, the numbers land together, and only then does the total resolve.
+  var BEATS = [
+    { id: "s1", start: 0,     end: 11.25 },  // the roster, then the reveal of its numbers
+    { id: "s2", start: 11.25, end: 13.5  },  // 99
+    { id: "s3", start: 13.5,  end: 15    }   // the close
+  ];
+  var scenes = {}; BEATS.forEach(function (b) { scenes[b.id] = $(b.id); });
+  function hold(t, s, e) {
+    var xf = .08;
+    if (t < s) return 0;
+    if (s > 0 && t < s + xf) return (t - s) / xf;
+    if (t <= e) return 1;
+    if (t < e + xf) return 1 - (t - e) / xf;
+    return 0;
+  }
+
+  // Seven names in 4.5s - brisk, like the drafting is. Indexed by DISPLAYED row, holding the time of that
+  // row's actual pick, so the roster fills in the order the seed really dealt it rather than top to bottom.
+  // That distinction is the mode: Century deals one random team per spin and you fill one slot from it, so
+  // the board decides which slot is even open. centuryTeamsDealt("F0M2MVJJ") is SF, CIN, MIA, DET, CHI, KC,
+  // ARI - McCaffrey first and Mahomes SIXTH. Lighting the rows top to bottom showed a QB-first draft this
+  // seed cannot produce: replayCentury on the displayed order answers not_on_board, and on this one answers
+  // ok with score 99. Derived from century-logic.mjs rather than written out; re-derive it if the seed moves.
+  var PICK_AT = [5.25, 1.5, 3.0, 2.25, 3.75, 6.0, 4.5];
+  var NUM_AT = 7.6;                                       // and then every number at once
+
+  function render(t) {
+    BEATS.forEach(function (b) { scenes[b.id].style.setProperty("--vis", hold(t, b.start, b.end)); });
+    slots.forEach(function (el, i) {
+      el.style.setProperty("--s", outCubic(at(t, PICK_AT[i], .3)));
+      // Staggered by a twentieth of a second each: together enough to read as one event, uneven enough that
+      // the eye catches movement down the column rather than a single flat flash.
+      el.style.setProperty("--td", outBack(at(t, NUM_AT + i * .05, .45)));
+    });
+    $("s1h").style.opacity = 1 - at(t, NUM_AT - .3, .4);       // the promise goes the moment it is kept
+    $("s1k").style.opacity = 1 - at(t, 9.8, .6) * .4;
+    $("scoreN").style.transform = "scale(" + (.9 + outBack(at(t, 11.4, .5)) * .1) + ")";
+    $("vRev").style.setProperty("--r", outCubic(at(t, 12.0, .45)));
+    $("ceil").style.opacity = at(t, 12.6, .4);
+    $("mark").style.transform = "scale(" + (.84 + outCubic(at(t, 13.6, .5)) * .16) + ")";
+    $("credit").style.opacity = at(t, 14.1, .5);
+    $("fill").style.setProperty("--pct", (t / DUR * 100) + "%");
+    $("clock").textContent = t.toFixed(1) + " / " + DUR.toFixed(1) + "s";
+  }
+
+  var t = 0, playing = !RENDER, last = 0;
+  function frame(now) {
+    var dt = last ? (now - last) / 1000 : 0; last = now;
+    if (playing) { t += dt; if (t >= DUR) t = 0; }
+    render(t);
+    requestAnimationFrame(frame);
+  }
+  if (!RENDER) requestAnimationFrame(frame); else render(0);
+
+  $("play").addEventListener("click", function () {
+    playing = !playing; $("play").textContent = playing ? "pause" : "play";
+  });
+  $("restart").addEventListener("click", function () { t = 0; render(t); });
+  $("bar").addEventListener("click", function (e) {
+    var r = $("bar").getBoundingClientRect();
+    t = Math.max(0, Math.min(DUR, (e.clientX - r.left) / r.width * DUR));
+    playing = false; $("play").textContent = "play"; render(t);
+  });
+
+  window.__seek = function (x) { t = Math.max(0, Math.min(DUR, x)); render(t); };
+  window.__duration = DUR;
+  render(0);
+})();
+</script>

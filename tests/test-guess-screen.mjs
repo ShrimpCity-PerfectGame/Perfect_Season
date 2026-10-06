@@ -118,7 +118,16 @@ async function guessPlayerByName(p) {
 // eight guesses, not a record) and is also why a test wanting the menu has to say so. Writing one by hand goes
 // through the same shape sset leaves behind, a JSON string, or the screen reads nothing and resumes nothing.
 const dropWip = async () => { await window.storage.delete(GUESS_WIP, false); };
-const putWip = async (run) => { await window.storage.set(GUESS_WIP, JSON.stringify(run), false); };
+// Stamped with whoever is signed in, because that is what the screen writes since v2.21.3 - a daily
+// snapshot carries its owner and is refused to anyone else. A test staging one BY HAND without the stamp
+// is staging a snapshot the app would never produce, and the two stale-tab tests below were doing exactly
+// that: they model the same account's tab left open elsewhere, which in production has an owner. Pass
+// `owner` explicitly to stage somebody else's.
+const currentUid = async () => (await auth.auth.getSession())?.data?.session?.user?.id ?? null;
+const putWip = async (run) => {
+  const owner = "owner" in run ? run.owner : await currentUid();
+  await window.storage.set(GUESS_WIP, JSON.stringify({ ...run, owner }), false);
+};
 
 // Somebody who is not the answer, and not already used by this game.
 function someoneElse(answer, used = new Set(), pick = () => true) {
@@ -750,6 +759,55 @@ await runTest("18. a daily whose save failed cannot be replayed from a surviving
     assert(rows[0].tries === 3, `the re-send carries the game that was played, not a replay: tries ${rows[0].tries}`);
     assert(rows[0].day === today(), "filed under its own day");
   }
+});
+
+await runTest("19. a saved game belonging to another account is never resumed", async () => {
+  // The slot is per-DEVICE - one key, `ps-guess-wip`, with no account in it - so before v2.21.3 the next
+  // person on a shared browser walked into the last one's game. Alice plays three guesses of today's daily
+  // and signs out; Bob signs up, opens Guess the Player, and finds her three guessed players on screen with
+  // two tries left, on a daily he has never played. The spent-check beside this asks whether BOB finished
+  // today, which he has not, so it let him straight in.
+  //
+  // GUESS_DONE was given an account for exactly this reason and the WIP slot was not. Only the DAILY is
+  // refused: an unlimited or practice game is a seed and no record, so inheriting one costs nobody anything
+  // - century.jsx's dropWip comment makes that case and is right. A snapshot written before the stamp
+  // existed has no owner, so a legacy DAILY fails the same check, which is the answer that protects the day.
+  const fresh = async () => {
+    const m = await mount();
+    container = m.container;
+    await flush();
+    await openGuess();
+  };
+
+  // The STAMP first, not just the check: the screen has to WRITE the owner, or the check has nothing to
+  // compare and every snapshot would read as a stranger's. A practice game, so no day is spent staging it.
+  await dropWip();
+  await fresh();
+  await click(variantTiles()[1]);
+  await flush();
+  const written = JSON.parse((await window.storage.get(GUESS_WIP, false)).value);
+  const uid = (await currentUid());
+  assert(written.owner === uid, `the saved game records who is playing: ${written.owner} vs ${uid}`);
+
+  await putWip({ variant: "daily", day: today(), seed: null, guesses: [], owner: "00000000-0000-4000-8000-00000000dead" });
+  for (const k of (await window.storage.list("ps-guess-done", false)).keys) await window.storage.delete(k, false);
+  window.__ps_supabase__._guess.clear();
+  await fresh();
+  assert(view() !== "play", `another account's daily is not resumed: ${view()}`);
+
+  // `owner: undefined` opts out of putWip's stamp, and JSON.stringify drops the key - which is exactly what
+  // a snapshot written before v2.21.3 looks like on a real device.
+  await putWip({ variant: "daily", day: today(), seed: null, guesses: [], owner: undefined });
+  await fresh();
+  assert(view() !== "play", `a legacy daily snapshot with no owner is not resumed: ${view()}`);
+
+  // ...but a legacy PRACTICE snapshot still resumes, because refusing it would throw away a game for
+  // nothing: practice spends no day and reveals no daily answer.
+  await putWip({ variant: "practice", day: null, seed: "ABCD1234", guesses: [], owner: undefined });
+  await fresh();
+  assert(view() === "play", `a legacy practice snapshot still resumes: ${view()}`);
+
+  await dropWip();
 });
 
 console.log("test-guess-screen.mjs done");

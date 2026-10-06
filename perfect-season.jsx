@@ -29,6 +29,11 @@ import {
   outcomeSentence, draftsOf, scoreOf, runOf, RosterRows, RosterChips, useCloseOnBack, closeTopDialog, keepFocusInside,
   POS_NAME, cityRange, statCells, Confetti, BoardWear, OpenProfile, reducedMotion, GRIDSPIN_DAY_ONE, dailyNumber,
 } from "./ui-common.jsx";
+// The crash net's ring, not its screen. A failed submission does not blank the page, so there is nothing to
+// show at the time - it is kept so the NEXT Copy error details carries what led up to it. That ring is what
+// made the lost Guess daily on 2026-09-30 diagnosable only by inference, because nothing recorded the first
+// failure. error-boundary.jsx imports nothing but React, so importing FROM it adds no dependency to anything.
+import { recordError } from "./error-boundary.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
 import { PICKER_CSS } from "./avatar-picker.jsx";
@@ -1680,6 +1685,44 @@ function setPasswordError(error) {
   return "That password couldn't be saved. Try again.";
 }
 
+// Why the last season or draft wasn't recorded, in words - one sentence per reason storage.js's submitRun
+// and submitDnf can answer with, with the thing it is ABOUT ("season" or "draft") decided by which of the
+// two raised it. There is no outbox behind any of these, so not one of them may say "we'll try again": that
+// is the half of v2.18.2 that was about copy rather than classification, and writing a queue that does not
+// exist into the words is how a player stops believing the next message too.
+//
+// Deliberately NOT exported, and there is no test that calls it directly: the sentences are read off the
+// rendered panel in tests/test-dnf.mjs instead. Proving the words exist here proves nothing about whether a
+// screen shows them, which is the trap CLAUDE.md records being walked into three times.
+function saveErrorText(e) {
+  const reason = typeof e === "string" ? e : e?.reason;
+  // A season is graded, scored and ranked; an abandoned draft is none of those, so "it isn't on the board"
+  // is a sentence about a place it was never going.
+  const dnf = typeof e === "object" && !!e?.dnf;
+  const it = dnf ? "That abandoned draft wasn't recorded" : "Your last season couldn't be saved, so it isn't on the board";
+  switch (reason) {
+    // Final, and the player can do something about this one specifically: play the real daily.
+    case "reserved_code":
+      return "That code is the daily's own draft, so this season can't be counted. Play the daily itself from Modes.";
+    case "guest_daily":
+      return "The daily is for accounts, so this one couldn't be counted. Make an account from the Account tab and the next one will be.";
+    // The only reason with a next step, and the most likely one on a long season: finish() does not await the
+    // submission, so the session can lapse between the first board and the last playoff round.
+    case "signed_out":
+      return `${it} — you weren't signed in by the time it was handed in. Sign in again and the next one will count.`;
+    case "offline":
+      return `${it}. Nothing reached the server, so check your connection — but this one is gone either way, there's no queue behind it.`;
+    case "server":
+      return `${it}, and that one's on us rather than on your connection. Nothing is queued behind it, so it won't be counted.`;
+    // A verdict about this submission - the roster, the day, the body. The GM cap's history is why this must
+    // not say "next time": a screen promising that sat over seasons submit-run was refusing for good.
+    case "refused":
+      return `${it}. The server wouldn't accept it, and re-sending wouldn't change that — what you played stands, but it won't be counted.`;
+    default:
+      return `${it}. There's no queue behind this one — what you played stands, but it won't be counted.`;
+  }
+}
+
 // The second half of a password reset. The player followed the one-time link, supabase-js put the recovery
 // session in place and announced PASSWORD_RECOVERY, and this is where the new password is actually set.
 //
@@ -2195,6 +2238,17 @@ const CENTURY_DONE_KEY = (d) => `ps-century:${d}`;
 // Same shape, same UTC day, for the same reason (see utcDayKey below).
 const GUESS_DONE_KEY = (d) => `ps-guess:${d}`;
 const SOU_PROGRESS = (d) => `ps-sou-wip:${d}`;
+// A round in progress belongs to whoever is playing it. The slot is keyed by DATE alone - no account - so
+// without this the next person on a shared browser inherits the last one's game: Alice uses a life and
+// scores 5, closes the tab; Bob signs up, opens Over/Under, and starts at her round with her lives and her
+// score, which then posts as HIS day. The done-record half of that leak was closed in v2.18.11 by asking
+// `sou_runs` first (see openSou) - this is the half that resumes, and it was read unconditionally.
+// Guess and Century carry the same stamp since v2.21.3. Over/Under differs in one way: it is NOT
+// account-gated, so a signed-out player's round is stamped `null` and is refused to an account that signs
+// in mid-day. That costs a casual partial run - one that `sou_runs` could not have saved anyway while they
+// were signed out - and it is the price of not handing somebody else's score to the next account.
+const souOwner = (uid) => uid || null;
+const souMine = (wip, uid) => !!wip && wip.owner === souOwner(uid);
 const findPlayer = (key, id, season) => (BOARDS[key] || []).find((p) => p.id === id && p.season === season);
 
 function bestAvailable(key, draftedIds, openSlots, format) {
@@ -2446,7 +2500,11 @@ export default function PerfectSeason() {
   const [pendingDaily, setPendingDaily] = useState(null);
   const pendingDailyRun = useRef(null);
   const [notice, setNotice] = useState("");
-  const [saveError, setSaveError] = useState(false);
+  // null, or { reason, dnf } - storage.js's submitRun/submitDnf vocabulary plus which of the two raised it.
+  // It was a bare boolean (with one string special case) until v2.21.5, so every failure read as the same
+  // sentence: a lapsed session, a 5xx, a dead radio and a roster the server refused outright, all four
+  // "couldn't be saved" with nothing to act on and nothing recorded anywhere to tell them apart afterwards.
+  const [saveError, setSaveError] = useState(null);
   // `format` records which scoring format `top`/`myRank` were actually fetched for. The board is
   // always rendered from THAT, never from the live boardFormat state - switching format flips the
   // state immediately while the refetch is still in flight, and rendering one format's rows under
@@ -2954,12 +3012,25 @@ export default function PerfectSeason() {
   // The same for saveError, which is rendered in the same place and had no such mechanism: one failed save
   // left "Your last season couldn't be saved" above every screen for the rest of the session, including
   // screens with no season on them and drafts played afterwards.
+  //
+  // **The draft is half of the key, and on the one path that matters it is the whole of it.** The result
+  // screen and the draft screen are both `view === "play"`, so Run it back changed nothing this effect was
+  // watching: `restart()` calls `setView("play")` over "play", a no-op, and the notice rode into the next
+  // draft and read as a complaint about it. That is how it was found - on production, sitting over a fresh
+  // Unlimited board with a player locked in and nothing wrong with it. A new seed is a new draft, which is
+  // precisely when a sentence about the last one stops being true.
+  //
+  // The residual race is real and left alone: a submission slow enough to answer AFTER Run it back has
+  // dealt the next board stamps itself against the new seed and shows there anyway. Still the right
+  // outcome - the player is owed the news - and the copy below no longer claims the draft on screen is the
+  // one that failed.
   const saveErrorAt = useRef(null);
+  const draftStamp = `${view}|${mode?.seed || ""}`;
   useEffect(() => {
     if (!saveError) { saveErrorAt.current = null; return; }
-    if (saveErrorAt.current === null) { saveErrorAt.current = view; return; }
-    if (saveErrorAt.current !== view) { saveErrorAt.current = null; setSaveError(false); }
-  }, [saveError, view]);
+    if (saveErrorAt.current === null) { saveErrorAt.current = draftStamp; return; }
+    if (saveErrorAt.current !== draftStamp) { saveErrorAt.current = null; setSaveError(null); }
+  }, [saveError, draftStamp]);
 
   const historyScreen = useRef(null);
   const leftAt = useRef(0);
@@ -3360,7 +3431,14 @@ export default function PerfectSeason() {
     if (!user || !stats) return;
     const ladder = modeKey({ mode: m?.kind, gm: m?.gm, genius: m?.genius });
     setStats(applyDnf(stats, picks, ladder));
-    submitDnf(picks, ladder).then((ok) => setSaveError(!ok));
+    // `dnf: true` so the panel says "draft" rather than "season". It had said season since the panel
+    // existed, on a path where there is no season: an abandoned draft has no roster, no score and is on no
+    // board, so "it isn't on the board" described something that was never going there.
+    submitDnf(picks, ladder).then((res) => {
+      if (res.ok) return;
+      setSaveError({ reason: res.reason || "server", dnf: true });
+      recordError("submit-dnf", res.reason || "server", `status ${res.status ?? "?"}${res.detail ? ` ${res.detail}` : ""}`);
+    });
   }
 
   // Submits a draft trace to submit-run and, once the server has independently replayed and
@@ -3396,15 +3474,23 @@ export default function PerfectSeason() {
         }
       }
       // A draft that had already counted isn't a failed save: the result screen says so instead (SHOP.md 8).
-      // The string, not just true, when the refusal is final - the panel says something different for one
-      // that will never succeed. A draft that had already counted isn't a failed save at all (SHOP.md 8).
-      setSaveError(res.ok || res.reason === "duplicate" ? false : (res.reason === "reserved_code" ? "reserved_code" : true));
+      // Everything else carries the reason storage.js named, because the panel says something different for
+      // a refusal that will never succeed, a session that had lapsed, and a server that fell over - and
+      // because a failure nothing records is a failure the next bug report cannot mention.
+      if (res.ok || res.reason === "duplicate") setSaveError(null);
+      else {
+        setSaveError({ reason: res.reason || "server", dnf: false });
+        recordError("submit-run", res.reason || "server", `status ${res.status ?? "?"}${res.detail ? ` ${res.detail}` : ""}`);
+      }
       // `fresh` is the server's profile after this run, so the result screen can show the streak
       // it actually extended rather than a locally guessed one. `uid` is who the answer belongs to.
       return { ...res, fresh, uid };
     } catch (e) {
-      setSaveError(true);
-      return { ok: false };
+      // submitRun no longer throws - a dead radio comes back as `offline` - so what reaches here is a throw
+      // from this function's own body, which is this side falling over rather than the server's.
+      setSaveError({ reason: "server", dnf: false });
+      recordError("submit-run", e, "threw after the submission");
+      return { ok: false, reason: "server" };
     }
   }
 
@@ -4117,7 +4203,7 @@ export default function PerfectSeason() {
     const deadline = Date.now() + SOU_ROUND_SECONDS * 1000;
     // Saved as if this round were already missed; answering overwrites it. So reloading the page
     // mid-round lands on the next round a life down, rather than re-dealing this one with a fresh clock.
-    sset(SOU_PROGRESS(date), { roundIndex: roundIndex + 1, lives: lives - 1, score }, false);
+    sset(SOU_PROGRESS(date), { roundIndex: roundIndex + 1, lives: lives - 1, score, owner: souOwner(userId) }, false);
     setSou({ date, roundIndex, lives, score, round, guess: null, correct: undefined, deadline, timeLeft: SOU_ROUND_SECONDS });
     souTimer.current = setInterval(() => {
       setSou((s) => {
@@ -4187,7 +4273,11 @@ export default function PerfectSeason() {
       // else, and leaving it would send the next tap back down the branch above.
       setSouDone(null);
     }
-    const wip = await sget(SOU_PROGRESS(date), false);
+    // Whose round is this? A snapshot from another account - or one written before v2.21.3, which carries
+    // no owner at all - is not resumed and not left lying there to catch the next tap either.
+    const stored = await sget(SOU_PROGRESS(date), false);
+    const wip = souMine(stored, userId) ? stored : null;
+    if (stored && !wip) await sdel(SOU_PROGRESS(date), false);
     setSou(null);
     // A round abandoned on the last life (page closed or reloaded) leaves no lives to resume with.
     if (wip && wip.lives <= 0) { finishSouDay(date, wip.score); return; }
@@ -4207,7 +4297,7 @@ export default function PerfectSeason() {
     clearInterval(souTimer.current);
     if (sou && !sou.guess) {
       const lives = sou.lives - 1;
-      if (lives > 0) sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex + 1, lives, score: sou.score }, false);
+      if (lives > 0) sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex + 1, lives, score: sou.score, owner: souOwner(userId) }, false);
       else finishSouDay(sou.date, sou.score);
     }
     setSou(null);
@@ -4263,7 +4353,7 @@ export default function PerfectSeason() {
   // answer it again for another point.
   useEffect(() => {
     if (!sou || !sou.guess) return;
-    if (sou.lives > 0) { sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex + 1, lives: sou.lives, score: sou.score }, false); return; }
+    if (sou.lives > 0) { sset(SOU_PROGRESS(sou.date), { roundIndex: sou.roundIndex + 1, lives: sou.lives, score: sou.score, owner: souOwner(userId) }, false); return; }
     finishSouDay(sou.date, sou.score);
   }, [sou?.guess, sou?.roundIndex]);
 
@@ -4895,10 +4985,9 @@ export default function PerfectSeason() {
           </div>
         )}
 
-        {/* A reserved code is refused for good, so it must not be told it will be picked up later. */}
-        {saveError && <div className="panel"><p style={{ margin: 0 }}>{saveError === "reserved_code"
-          ? "That code is the daily's own draft, so this season can't be counted. Play the daily itself from Modes."
-          : "Your last season couldn't be saved, so it isn't on the board. There's no queue behind this one — the season you just played stands, but it won't be counted."}</p></div>}
+        {/* One sentence per failure, and none of them promises a retry - there is no outbox for a season.
+            Cleared by the effect above when the screen or the draft changes, so it cannot outlive its subject. */}
+        {saveError && <div className="panel"><p style={{ margin: 0 }}>{saveErrorText(saveError)}</p></div>}
         {notice && <div className="panel"><p style={{ margin: 0 }}>{notice}</p></div>}
         {howTo && <HowTo onClose={closeHowTo} />}
         {needsName && <PickName email={needsName.email} onClaimed={onNameClaimed} onSignOut={logOut} />}
