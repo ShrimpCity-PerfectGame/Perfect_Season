@@ -1,0 +1,208 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The journeyman</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&display=swap">
+<link rel="stylesheet" href="kit.css">
+<style>
+  /* Shell, palette, mark, credit and driver come from kit.css / kit.js.
+
+     THE ONE RULE THIS FILM HAD TO OBEY, and the reason it shows no points: a Gridspin board shows a real
+     season "with full stats but no fantasy points" (CLAUDE.md). Every one of these nine rows IS a board,
+     so printing each season's PPR beside it - the number that made the list interesting to build in the
+     first place - would put on screen the exact figure the game withholds. The rows carry the team, the
+     era and the year instead, which is what a board itself announces. */
+
+  /* ---- the hook --------------------------------------------------------------------------------------- */
+  .ask { font-size:3.9cqw; line-height:1.4; color:var(--muted); max-width:92%; }
+  .name { font-family:var(--display); font-size:14cqw; line-height:.9; text-transform:uppercase;
+    color:var(--cream); }
+  .cnt { font-family:var(--display); font-size:7.4cqw; line-height:1; text-transform:uppercase;
+    color:var(--lime); opacity:var(--o,0); }
+
+  /* ---- the nine boards --------------------------------------------------------------------------------
+     Nine rows have to fit between .safe's own edges, which leave about 60% of a 9:16 frame. At the sizes
+     the other films use for a single figure that came to roughly 1,340px of rows in an 1,165px box, so a
+     row here is deliberately ONE line tall: team, era and season on a baseline rather than stacked.
+     Column one is a fixed 27cqw so the eras line up as a column and the list reads as a list. */
+  .rows { display:grid; gap:1.2cqw; width:100%; }
+  .row { display:grid; grid-template-columns:27cqw 1fr auto; align-items:center; column-gap:2cqw;
+    padding:1.1cqw 2.4cqw; border:0.35cqw solid var(--line); border-radius:1.3cqw;
+    background:var(--surface); text-align:left;
+    opacity:var(--o,0); transform:translateY(calc((1 - var(--o,0)) * 45%)); }
+  .tm { font-family:var(--display); font-size:4.8cqw; line-height:1; text-transform:uppercase;
+    color:var(--cream); white-space:nowrap; }
+  .er { font-size:2.6cqw; letter-spacing:.05em; color:var(--muted); white-space:nowrap; }
+  .sn { font-family:var(--display); font-size:4.8cqw; line-height:1; color:var(--lime);
+    font-variant-numeric:tabular-nums; text-align:right; }
+  .same { font-size:2.8cqw; line-height:1.5; color:var(--muted); max-width:94%; opacity:var(--o,0); }
+
+  /* ---- the point --------------------------------------------------------------------------------------- */
+  .stat { font-family:var(--display); font-size:16cqw; line-height:.92; color:var(--cream);
+    font-variant-numeric:tabular-nums; opacity:var(--o,0); }
+  .of { font-size:3.2cqw; line-height:1.45; color:var(--muted); max-width:92%; opacity:var(--o,0); }
+  /* Two SHORT lines rather than one long one. Written as a single sentence pair it rendered as four
+     wrapped lines of lime display type - a block, not a punchline, and the <br> between the sentences
+     landed mid-thought because both halves wrapped anyway. Each line here is short enough to hold one
+     line at 8cqw, which is what makes them read as two beats. */
+  .punch { font-family:var(--display); font-size:8cqw; line-height:1.04; text-transform:uppercase;
+    color:var(--cream); opacity:var(--o,0); }
+  .punch.hit { color:var(--lime); }
+</style>
+
+<div class="wrap">
+  <div class="stage" id="stage" role="img"
+       aria-label="Gridspin deals 160 team-and-era boards. Ryan Fitzpatrick appears on nine of them, more than any other player: the Bengals of 2006 to 2010, the Bills in two different eras, the Titans, the Texans, the Jets in two eras, the Buccaneers and the Dolphins. 821 of the 1,639 players in the game appear on more than one board.">
+
+    <!-- s1 - the hook. The first frame is the thumbnail, so the kicker and the question are up from frame
+         zero and only the answer arrives. -->
+    <div class="scene" id="s1"><div class="safe"><div class="col">
+      <div class="kicker">160 boards in Gridspin</div>
+      <div class="ask">One man turns up on more of them than anybody else in the game.</div>
+      <div class="name rev" id="n1"><span>Ryan</span></div>
+      <div class="name rev" id="n2"><span>Fitzpatrick</span></div>
+      <div class="cnt" id="cnt">9 boards &middot; 7 teams</div>
+    </div></div></div>
+
+    <!-- s2 - the nine, one at a time. Every row is a real board in data/players.json. -->
+    <div class="scene" id="s2"><div class="safe"><div class="col">
+      <div class="kicker dim">Every board he is on</div>
+      <div class="rows">
+        <div class="row" id="r1"><div class="tm">Bengals</div><div class="er">2006&ndash;2010</div><div class="sn">2008</div></div>
+        <div class="row" id="r2"><div class="tm">Bills</div><div class="er">2006&ndash;2010</div><div class="sn">2010</div></div>
+        <div class="row" id="r3"><div class="tm">Bills</div><div class="er">2011&ndash;2015</div><div class="sn">2011</div></div>
+        <div class="row" id="r4"><div class="tm">Titans</div><div class="er">2011&ndash;2015</div><div class="sn">2013</div></div>
+        <div class="row" id="r5"><div class="tm">Texans</div><div class="er">2011&ndash;2015</div><div class="sn">2014</div></div>
+        <div class="row" id="r6"><div class="tm">Jets</div><div class="er">2011&ndash;2015</div><div class="sn">2015</div></div>
+        <div class="row" id="r7"><div class="tm">Jets</div><div class="er">2016&ndash;2020</div><div class="sn">2016</div></div>
+        <div class="row" id="r8"><div class="tm">Buccaneers</div><div class="er">2016&ndash;2020</div><div class="sn">2018</div></div>
+        <div class="row" id="r9"><div class="tm">Dolphins</div><div class="er">2016&ndash;2020</div><div class="sn">2019</div></div>
+      </div>
+      <!-- SHORT on purpose. This sat on screen for about 1.5s and ran to 100 characters, which is four
+           seconds of reading - the sentence was never readable in either cut. The era column above is
+           already doing the explaining; this only has to point at it. -->
+      <div class="same" id="same">Buffalo twice. New York twice. Different eras.</div>
+    </div></div></div>
+
+    <!-- s3 - the point, and the reason this is an advert rather than a fact -->
+    <div class="scene" id="s3"><div class="safe"><div class="col">
+      <div class="stat" id="p1">821</div>
+      <div class="of" id="p2">of the 1,639 players in Gridspin are on more than one board.</div>
+      <div class="punch" id="p3">You will know the name.</div>
+      <div class="punch hit" id="p4">You forgot the jersey.</div>
+    </div></div></div>
+
+    <!-- s4 - the close -->
+    <div class="scene" id="s4"><div class="safe"><div class="col">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"></svg>
+      <div class="word">Gridspin</div>
+      <div class="tag">Spin an era. Draft the greats.</div>
+      <div class="url">gridspin.app</div>
+      <div class="credit"></div>
+    </div></div></div>
+
+  </div>
+
+  <div class="ui">
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="row2">
+      <button id="play">pause</button>
+      <span id="clock">0.0 / 15.0s</span>
+      <button id="restart">restart</button>
+    </div>
+    <p class="note">
+      Every figure here was replayed out of the shipped data rather than written down: <code>BOARDS</code>
+      holds 160 team-and-era boards over 1,639 men, Fitzpatrick is on 9 of them across 7 teams (the next
+      most is Frank Gore at 8), and he is the only man at 9. The nine rows are those boards, printed the
+      way the app prints a board title &ndash; <code>TEAMS[team][0]</code> and <code>WINDOWS[w]</code>. 821
+      is how many men appear on more than one board, the same number VERSUS.md uses.
+      <strong>No fantasy points appear on screen</strong>, deliberately: a board shows a real season with
+      its stats and never its points, so the PPR that made this list worth building is the one thing the
+      film may not show. <code>?guides=1</code> shows TikTok&rsquo;s safe area; <code>?render=1</code>
+      fills the viewport.
+    </p>
+    <p class="note">
+      <strong>It is cut to the music, so the two ship together.</strong> The cue is the owner&rsquo;s own
+      (<code>tools/film/gridspin-20-0.m4a</code>), 109.3&nbsp;bpm, drop at 11.26s, onsets measured on a
+      0.5495s beat grid to within one frame. Every time in the script is <code>BEAT</code> or
+      <code>BAR</code> arithmetic: the scene changes are downbeats, the nine boards cascade on eighth
+      notes, and the lime count under the name lands on the downbeat the drop lands on. Rendering this
+      silent and dropping any other track over it puts every cut off the beat. Render, then mux &ndash;
+      never re-render 900 frames just to attach sound:
+    </p>
+    <p class="note"><code>
+      node tools/film/render.mjs --film tools/film/tiktok-journeyman.html --out build/film/silent-journeyman.mp4<br>
+      ffmpeg -y -ss 9.064 -i tools/film/gridspin-20-0.m4a -i build/film/silent-journeyman.mp4 \<br>
+      &nbsp;&nbsp;-map 1:v -map 0:a -c:v copy -c:a aac -b:a 256k -t 15 \<br>
+      &nbsp;&nbsp;-af "afade=t=in:st=0:d=0.04,afade=t=out:st=14.6:d=0.4" \<br>
+      &nbsp;&nbsp;-movflags +faststart build/film/gridspin-tiktok-journeyman-15s.mp4
+    </code></p>
+    <p class="note">
+      <strong>No <code>loudnorm</code>, deliberately.</strong> That window measures &minus;14.6&nbsp;LUFS
+      integrated at &minus;1.7&nbsp;dBTP &ndash; already inside half a dB of what the platforms normalise
+      to, and with an LRA of 0.5 there is nothing to even out. loudnorm&rsquo;s dynamic mode would
+      compress a master that needs none for 0.6&nbsp;LU nobody can hear. The two fades are real, though:
+      the window is cut out of the middle of a track, so the in-fade kills the click at the splice and
+      the out-fade keeps it from stopping dead under the close card.
+    </p>
+  </div>
+</div>
+
+<script src="kit.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = FILM.$, at = FILM.at, outCubic = FILM.outCubic, outBack = FILM.outBack;
+
+  // ---- EVERY TIME IN THIS FILM IS A BAR LINE -------------------------------------------------------
+  // The cue (tools/film/gridspin-20-0.m4a, the owner's) runs at 109.3 bpm with its drop at 11.26s, and
+  // its onsets were measured sitting on a 0.5495s beat grid to within 0.02s - one frame at 60fps. So the
+  // film is cut TO it rather than laid under it: the window starts on a bar line, every scene change is
+  // a downbeat, and the nine boards cascade on eighth notes.
+  //
+  // AUDIO_IN is what makes that true and is NOT a free parameter: change it and every number below is
+  // off the grid. It is the drop's time minus the film-time the drop should land on (2.198s, where the
+  // lime count lands under the name) - see the mux command in the note above.
+  var BEAT = 0.5495, BAR = BEAT * 4;   // 109.3 bpm, measured
+  var S2 = BAR * 2, S3 = BAR * 4, S4 = BAR * 6;          // 4.396, 8.792, 13.188 - all downbeats
+  var ROW0 = S2, STEP = BEAT / 2;      // nine rows on eighth notes: 4.396 to 6.594, exactly one bar
+
+  FILM.start({
+    duration: 15,
+    beats: [
+      { id: "s1", start: 0,  end: S2 },
+      { id: "s2", start: S2, end: S3 },
+      { id: "s3", start: S3, end: S4 },
+      { id: "s4", start: S4, end: 15 }
+    ],
+    render: function (t) {
+      // s1 - Ryan on beat 2, Fitzpatrick on beat 3, the count on the downbeat THE DROP lands on
+      $("n1").style.setProperty("--r", outCubic(at(t, BEAT * 2, 0.5)));
+      $("n2").style.setProperty("--r", outCubic(at(t, BEAT * 3, 0.5)));
+      $("cnt").style.setProperty("--o", outCubic(at(t, BAR, 0.4)));
+      $("cnt").style.transform = "scale(" + (0.92 + outBack(at(t, BAR, 0.55)) * 0.08) + ")";
+
+      // s2 - nine boards on nine eighth notes, each staying once it has arrived
+      for (var i = 0; i < 9; i++) {
+        $("r" + (i + 1)).style.setProperty("--o", outCubic(at(t, ROW0 + i * STEP, 0.3)));
+      }
+      $("same").style.setProperty("--o", outCubic(at(t, S2 + BAR + BEAT / 2, 0.4)));   // 6.869
+
+      // s3 - the number on the downbeat, then the two lines a bar apart. The second bar is what buys
+      // the punchline its time on screen: at one bar it was fully opaque for 0.15s.
+      $("p1").style.setProperty("--o", outCubic(at(t, S3 + 0.02, 0.35)));
+      $("p1").style.transform = "scale(" + (0.9 + outBack(at(t, S3 + 0.02, 0.55)) * 0.1) + ")";
+      $("p2").style.setProperty("--o", outCubic(at(t, S3 + BEAT, 0.4)));               // 9.341
+      $("p3").style.setProperty("--o", outCubic(at(t, S3 + BAR, 0.4)));                // 10.990, downbeat
+      $("p4").style.setProperty("--o", outCubic(at(t, S3 + BAR + BEAT, 0.4)));         // 11.540
+
+      // s4
+      document.querySelector(".mark").style.transform =
+        "scale(" + (0.84 + outCubic(at(t, S4 + 0.1, 0.5)) * 0.16) + ")";
+      document.querySelector(".credit").style.opacity = at(t, 14.05, 0.5);
+    }
+  });
+})();
+</script>

@@ -2064,6 +2064,20 @@ const fmtSuffix = (f) => (normFormat(f) === "standard" ? ":std" : "");
 const DAILY_KEY = (d, f) => `ps-daily:${d}${fmtSuffix(f)}`;
 const DAILY_PROGRESS = (d, f) => `ps-daily-wip:${d}${fmtSuffix(f)}`;
 const FREE_PROGRESS = "ps-free-wip";
+// A season that has been played and not yet answered for. finish() renders the result from a LOCAL
+// simulateSeason and does not await the submission, so there is a window - for a signed-out player the
+// whole chain of a Turnstile token, signInAnonymously, a profile read and then submit-run replaying the
+// draft - in which the season exists only in React state and in flight. A reload inside it took
+// everything with it: no row, no account, and no message, because the code that would have shown one
+// went too. Reported from production on 2026-10-06, three seasons lost in front of the owner.
+//
+// THIS IS NOT AN OUTBOX, and the difference is the whole of why it is allowed to exist. CLAUDE.md
+// refuses one for a season because "a season is a trace, a seed and a client that has to agree with the
+// deployed function". So this is stamped with the release that built it and dropped if the bundle has
+// moved, dropped once it is older than a day, and released the moment submit-run gives ANY answer -
+// including a refusal. It survives a page death; it never retries a failure, and no copy promises it will.
+const UNSENT_KEY = "ps-unsent-run";
+const UNSENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FORMAT_KEY = "ps-format";
 // Which saved-progress slot a mode occupies. Free-mode variants (genius/gm/format) all share one
 // slot the way they always have; the two dailies genuinely coexist, so they don't.
@@ -2846,6 +2860,35 @@ export default function PerfectSeason() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A season held across a page that died while it was still being saved (see the note on UNSENT_KEY).
+  // Once, and only after auth has settled, because WHO to send it as is the whole question: the account
+  // that played it if they are still signed in, or a guest account taken now if they were not.
+  //
+  // The copy is dropped BEFORE the attempt rather than after, so this can try exactly once however it
+  // goes. That is what keeps it a hand-off across a reload instead of a queue that retries a refusal for
+  // ever - which CLAUDE.md refuses for a season, and rightly.
+  const flushedUnsent = useRef(false);
+  useEffect(() => {
+    if (!authReady || flushedUnsent.current) return;
+    flushedUnsent.current = true;
+    (async () => {
+      const rec = await sget(UNSENT_KEY, false);
+      if (!rec?.trace) return;
+      sdel(UNSENT_KEY, false);
+      // A trace is only ever replayed by the function it was drafted against: a bundle that has moved may
+      // deal or grade differently, and submit-run would refuse it as an illegal roster with the day
+      // already spent. Age bounds it as well - a tab shut for a week is not a save in flight.
+      if (rec.v !== APP_VERSION || Date.now() - (rec.at || 0) > UNSENT_MAX_AGE_MS) return;
+      const uid = userIdRef.current;
+      // It belongs to whoever played it. Signed in as somebody else now, or signed out of the account it
+      // was played on, and there is nobody here it can honestly be posted as.
+      if (rec.uid && rec.uid !== uid) return;
+      if (uid) { await submitAndSync(uid, rec.trace); return; }
+      await postAsGuest(rec.trace, null);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady]);
+
   // What today's daily and Over/Under have already been played, and which day that answer is about.
   //
   // Read once at mount, a tab left open across midnight kept yesterday's answers: the daily tile still said
@@ -3473,6 +3516,19 @@ export default function PerfectSeason() {
           if (fresh.username) setUser(fresh.username);
         }
       }
+      // The season has been answered for, whatever the answer was, so the copy held against a page death
+      // is done. Released on a REFUSAL too: this exists to survive a reload, never to retry a failure -
+      // see the note on UNSENT_KEY. Cleared here rather than at the call sites because this is the one
+      // function every season goes through.
+      //
+      // Cleared unless the held copy is positively a DIFFERENT season. Two saves in flight is not
+      // reachable today - a season takes minutes to play and a save answers in seconds - but clearing
+      // flatly would mean the first answer releases the second season's copy, which is the one thing this
+      // key exists to stop. The polarity matters: `sget` swallows a failed read and returns null, and
+      // leaving the key behind on one of those is far worse than the race, because a copy nobody clears
+      // is posted AGAIN on the next load under a second guest account that `finished_codes` cannot catch.
+      const heldNow = await sget(UNSENT_KEY, false);
+      if (!heldNow || heldNow?.trace?.mode?.seed === trace?.mode?.seed) sdel(UNSENT_KEY, false);
       // A draft that had already counted isn't a failed save: the result screen says so instead (SHOP.md 8).
       // Everything else carries the reason storage.js named, because the panel says something different for
       // a refusal that will never succeed, a session that had lapsed, and a server that fell over - and
@@ -3993,6 +4049,13 @@ export default function PerfectSeason() {
         mode: { kind: mode.kind, seed: mode.seed, code: mode.code, date: mode.date, gm: mode.gm },
         history: finishedHistory, seq, gm: !!mode.gm, genius: !!mode.genius, format: fmt,
       };
+      // Held BEFORE anything is attempted, so the copy exists even if the page dies on the very first
+      // step. Not for a signed-out DAILY: a guest may never hand one in (submit-run answers guest_daily),
+      // so there is nothing for the next load to do with it - that one waits in `pendingDaily` for a real
+      // account exactly as it did before.
+      if (user || mode.kind !== "daily") {
+        sset(UNSENT_KEY, { v: APP_VERSION, at: Date.now(), uid: userId || null, trace }, false);
+      }
       const saving = user ? submitAndSync(userId, trace) : Promise.resolve(null);
       // The trace is handed over rather than read back from state: it was only just set, and this runs in
       // the same pass.
