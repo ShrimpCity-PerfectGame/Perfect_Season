@@ -1077,6 +1077,33 @@ the seven sentences may imply a retry: a season is a trace, a seed and a client 
 deployed function, so holding one to re-send is a feature rather than a patch. A test fails if the copy
 starts promising one, which is v2.18.2's lesson with the words the other way round.
 
+**A season now survives the page dying mid-save, which is NOT the outbox above** (v2.22.1). `finish()`
+renders the result from a local `simulateSeason` and does not await the submission, so there is a window in
+which the season exists only in React state and in flight - and for a signed-out player that window is the
+whole chain: a Turnstile token (up to eight seconds), `signInAnonymously`, a profile read, and only then
+submit-run replaying the draft. A reload inside it took everything with it: no row, no account, and **no
+message**, because the code that would have shown one went with the page. Reported from production on
+2026-10-06, three seasons lost in front of the owner by a visitor who reloaded between games, and invisible
+until then because `pending` is React state and nothing else, so nothing was left to find afterwards.
+
+`UNSENT_KEY` holds the trace from before the first attempt until submit-run gives **any** answer. Four rules
+are what keep it from being the retry queue the paragraph above refuses, and they are the whole design:
+it is **stamped with the release that built it** and dropped if the bundle has moved (the stated objection -
+a moved bundle may deal or grade differently, and submit-run would refuse the trace as an illegal roster
+with the day already spent); it is dropped once it is **older than a day**; the copy is deleted **before**
+the one attempt rather than after, so it can never try twice; and it is released on a **refusal** as
+readily as on a success. It survives a page death; it never retries a failure, and no copy promises it will.
+
+Two things that are easy to get wrong here. A signed-out **daily** is deliberately not held - a guest may
+never hand one in (`guest_daily`), so there is nothing the next load could do with it, and it waits in
+`pendingDaily` for a real account exactly as before. And the release is **load-bearing rather than tidiness**:
+left behind after a save the server has already answered, the next load posts the season again, and for a
+signed-out one that second attempt takes a SECOND guest account - which `finished_codes` cannot catch,
+because its duplicate guard is per account. One season, two guests, counted twice. A mutation run is what
+found that; removing the release broke nothing any other test could see. `tests/test-unsent-run.mjs` holds
+all four rules, and models the reload by holding the sign-in on a promise that never resolves - unmounting
+in jsdom does not kill a pending promise the way a reload kills a page.
+
 **`profiles` is a read-modify-write, so every write carries the revision it read.** submit-run applies a
 season by reading the whole row, working out the new one with `applyRun`/`applyDnf`, and writing it back - the
 rules live in game-logic.mjs and must not have a second copy in SQL, which is exactly why the database can't

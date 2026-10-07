@@ -402,6 +402,8 @@ export function makeMockAuth() {
   // and the duplicate guard) and no way to hold a lock across them, which is the whole reason
   // applyToProfile compares revisions - see the note above it in index.ts.
   let beforeProfileWrite = null;
+  // test-only: a promise the anonymous sign-in waits on, so a test can hold the guest save in flight.
+  let holdAnonSignIn = null;
   const UNIQUE_VIOLATION = "23505";
   const uniqueViolation = (constraint) => ({ code: UNIQUE_VIOLATION, message: `duplicate key value violates unique constraint "${constraint}"` });
   // A database function called the way supabase-js calls one: { data, error }, never a throw. The mock's
@@ -769,6 +771,8 @@ export function makeMockAuth() {
     _failReads: (table, times = 1) => failReads.set(table, times),
     // test-only: a promise submit-run awaits between reading a profile and writing it back, used once.
     _pauseBeforeProfileWrite: (fn) => { beforeProfileWrite = fn; },
+    // test-only: hold the anonymous sign-in on `gate` for the next call only.
+    _holdAnonSignIn: (gate) => { holdAnonSignIn = gate; },
     _century: century, // test-only: Century's runs, and the two boards over them
     _guess: guess,     // test-only: Guess the Player's runs and boards
     _versus: versus, // test-only: 1v1's matches, and the state of one as versus-logic sees it
@@ -804,6 +808,10 @@ export function makeMockAuth() {
       // A guest: Supabase's anonymous sign-in. The signup trigger answers it with a profile straight away,
       // because the season that prompted it is already waiting to be saved (migration-profiles.sql).
       async signInAnonymously() {
+        // test-only: hold the sign-in so a test can model a page that goes away mid-save. A promise that
+        // NEVER resolves is the faithful model - unmounting in jsdom does not kill a pending promise the
+        // way a reload kills a page, so a test that released this would be measuring the wrong thing.
+        if (holdAnonSignIn) { const gate = holdAnonSignIn; holdAnonSignIn = null; await gate; }
         const id = `guest-${authUsers.size + 1}`;
         authUsers.set(`anon-${id}`, { id, email: null, password: null });
         createProfile(id, newGuestName(new Set([...profiles.values()].map((p) => p.username))), true);

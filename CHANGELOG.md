@@ -20,6 +20,44 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.22.1] - 2026-10-06
+
+### Fixed
+- **A season played and then reloaded was lost, silently.** `finish()` renders the result from a local
+  `simulateSeason` and deliberately does not await the submission, so an honest client sees its numbers
+  with no added latency. The cost was a window in which the season existed only in React state and in
+  flight — and for a signed-out player that window is the whole chain: a Turnstile token (up to eight
+  seconds), `signInAnonymously`, a profile read, and only then submit-run replaying the draft and
+  simulating seventeen games. Reload inside it and all of it died with the page: no row, no guest account,
+  and **no message**, because the code that would have shown one went too.
+
+  Reported from production on 2026-10-06 — a visitor played three seasons in front of the owner and not one
+  was recorded. It had been invisible because there was nothing left to find: `pending` is React state and
+  nothing else, so a lost season leaves no `runs` row, no `finished_codes` row and no counter moved, which
+  is indistinguishable from nobody having played.
+
+  The trace is now held in `ps-unsent-run` from before the first attempt until submit-run gives **any**
+  answer, and the next load sends it — as the account that played it if they are still signed in, or as a
+  guest taken then if they were not.
+
+  **This is not the outbox the project refuses for a season**, and four rules are what keep it from becoming
+  one: it is stamped with the release that built it and dropped if the bundle has moved (a moved bundle may
+  deal or grade differently, and submit-run would refuse the trace as an illegal roster with the day already
+  spent); it is dropped once it is older than a day; the copy is deleted **before** the single attempt
+  rather than after, so it cannot try twice; and it is released on a refusal as readily as on a success. No
+  copy promises a retry, so the v2.18.2 rule about what the seven sentences may say is untouched.
+
+  A signed-out **daily** is deliberately not held: a guest may never hand one in (`guest_daily`), so there
+  is nothing the next load could do with it, and it waits in `pendingDaily` for a real account as before.
+
+  `tests/test-unsent-run.mjs` is new and holds all four rules. It models the reload by holding the
+  anonymous sign-in on a promise that never resolves — unmounting in jsdom does not kill a pending promise
+  the way a reload kills a page, so a test that released it would be measuring a tab that stayed open. One
+  of its four tests exists only because a mutation run found it missing: removing the release left every
+  other test green, while the real cost is that the next load posts the season again and, for a signed-out
+  one, takes a **second** guest account to do it — which `finished_codes` cannot catch, its duplicate guard
+  being per account. One season, two guests, counted twice.
+
 ## [2.22.0] - 2026-10-05
 
 ### Added
