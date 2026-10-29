@@ -17,11 +17,26 @@ window.__ps_supabase__ = auth;
 const { container } = await mount();
 await flush();
 
-await runTest("the home screen shows a live online-players count once the presence channel syncs", async () => {
+await runTest("the online count shows only once it is a number worth showing, and live", async () => {
   assert(findButtonByText(container, "Modes")?.className.includes("on"), "expected to land on the home screen");
-  const pill = [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("online now"));
-  assert(pill, "expected an online-count pill on the Sitewide panel, got: " + container.textContent.slice(0, 500));
-  assert(/\d+ online now/.test(pill.textContent), "expected a numeric count, got: " + pill.textContent);
+  const pill = () => [...container.querySelectorAll(".pill")].find((p) => p.textContent.includes("online now"));
+  const online = async (n) => {
+    const { act } = await import("react");
+    await act(async () => auth._channels.get("site-activity")._setOnline(n));
+    await flush(1);
+  };
+  // This tab alone. "1 online now" told a newcomer, before anything else, that nobody was here - so a quiet
+  // count says nothing, and the challenge in the hero does the selling.
+  assert(auth._channels.get("site-activity").presenceState()["mock-self"], "this tab tracks itself");
+  assert(!pill(), "one player online shows no pill, got: " + (pill()?.textContent || ""));
+  await online(9);
+  assert(!pill(), "nor do nine: " + (pill()?.textContent || ""));
+  await online(10);
+  assert(pill()?.textContent === "🟢 10 online now", "ten do, as a live count: " + (pill()?.textContent || "none"));
+  await online(57);
+  assert(pill()?.textContent === "🟢 57 online now", "and it follows the presence set: " + (pill()?.textContent || "none"));
+  await online(3);
+  assert(!pill(), "and goes again when the site quietens");
 });
 
 const playsCount = () => {

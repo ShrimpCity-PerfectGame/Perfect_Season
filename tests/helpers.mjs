@@ -281,6 +281,17 @@ export async function clickMode(container, name) {
   await click(tile);
 }
 
+// Closes the How to play dialog by its ×, which every version of it has - never by the words on its buttons,
+// which depend on how it was opened. A first visit's offers the first draft and closes with "Look around
+// first" (v2.23.0); one somebody asked for closes with "Got it, let's draft". Same reason clickMode exists.
+// Answers whether there was a dialog to close.
+export async function closeRules(container) {
+  const x = container.querySelector('[role="dialog"][aria-labelledby="howto-title"] .modal-x');
+  if (!x) return false;
+  await click(x);
+  return true;
+}
+
 export function findButtonByText(container, needle) {
   const buttons = [...container.querySelectorAll("button")];
   return buttons.find((b) => b.textContent.includes(needle)) || null;

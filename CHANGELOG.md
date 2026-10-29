@@ -20,6 +20,92 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-10-29
+
+Client only. No migration, no Edge Function change. The service worker changes too, and every deploy already
+ships that. Rebuild the Android app (`npm run app:sync`) whenever it is next built, since two fixes are its own.
+**`/privacy` changes by one phrase:** its list of what is kept on your device now names the new first-draft flag
+(`ps-coach`, beside "whether you have seen the rules"), and its date moves to 29 October. The page promises that
+every line is something the code does, so a new key the page did not mention would have made that promise false.
+`tests/test-site-pages.mjs` had pinned the page's date to exactly 5 October and went red on this. It now holds
+the printed date and the sitemap date to each other, and to no earlier than the crash sink's own release.
+
+### Changed - the first visit, from a player's feedback
+A tester's notes, forwarded by the owner, put it in one line: the gameplay communicates the appeal better than a
+lengthy explanation does. A stranger's first minute was spent reading seven rules and a note on grading, then
+choosing among seven modes, under a pill announcing that one person was online. Four changes, all on that path.
+
+- **The rules open on three steps.** Spin a team and an era; fill six spots, each a player's best real season;
+  play the season. The finer points (Flex grading, the re-spins, Unlimited and the daily, the two scoring
+  formats, the eras) are folded under them on a first visit, and open when somebody asked for the rules: the
+  header's How to play, or `/how-to-play`, which carries both halves so the rules still exist in one version.
+  Measured in Chromium, the first-visit dialog is 609px tall on a 320x640 phone and 549px on a 375x667 one, so
+  it fits on screen with its button in view. The old one was 1,233px and 1,005px on the same two phones, about
+  two screens of reading before the button.
+
+- **The first draft is the first visit.** The first-visit dialog's own button is **Start my first draft 🏈**,
+  which deals an Unlimited board straight away; **Look around first** closes it onto Modes as before. It is
+  offered only where starting a draft takes nothing from anybody: on Modes, with no challenge card waiting (that
+  visitor came for those boards), nothing in progress, and never to an account with drafts behind it.
+
+  That draft then teaches what the rules stopped front-loading, one line at a time and only when it applies.
+  The re-spins come up on the first board, while both are still there to spend. Flex comes up when the player
+  is choosing between a player's own spot and Flex, and stops once a Flex slot is filled. The scoring comes up
+  on the first result, the one point where a format means something. Coaching ends at that result, which is
+  recorded the moment it appears, so a reload afterwards is a veteran's. It never starts on a device that had
+  closed the rules before this release, or for an account with drafts behind it, on any device.
+  `tests/test-first-visit.mjs` is new, and eight mutations of the coaching rules each turn it red.
+
+- **Daily and Unlimited lead Modes.** They sit alone under Drafts, and Genius, GM, Duel, Mini games and the
+  challenge code moved into **More ways to play** below them: smaller tiles, two to a row once there is room.
+  Nothing is hidden. Every mode is still one tap away, and `clickMode` still finds every tile.
+
+- **"1 online now" is gone until the number is worth showing.** The pill counts every open tab, the viewer's
+  own included, so on a young site what it usually said was that nobody else was here. It appears from ten
+  (`ONLINE_SHOWN_FROM`) and comes back by itself as the site grows. The count is still kept, and the players
+  drafted pill beside it is untouched.
+
+### Fixed
+- **The rules called every era five years, and their example was the one that isn't.** "A five-year era, like
+  Rams, 1999–2005": the data starts in 1999, so the first era takes in seven seasons. A reader who checked the
+  example caught the rules out, which costs more than it should in a game made of statistics. Four
+  player-facing places said "five-year": the rules, `/how-to-play`'s description and introduction, and the
+  no-JavaScript text in `page.html`. The example is Patriots, 2006–2010 now, and the finer points list every
+  era, read from `WINDOWS` so the sentence cannot go stale. A test fails if any of the four says five-year
+  again, or if the example stops being an era the game deals.
+
+- **The profile's #1 crown was read aloud.** The best-score tile wrote "👑" into its label as text, so a screen
+  reader said "crown, number 1 sitewide". It was the one emoji on the screen not hidden. It is `aria-hidden` now,
+  and the test reads each tile the way a screen reader does.
+
+- **Team colors said nothing to a player with no favourite team.** Both items are worn as plain Ink or Navy
+  without a team, so a free item looked broken. Their tiles now say "Pick a favorite team in Edit profile to see
+  it", but only when the profile was read and has no team: a profile that failed to load says nothing about one.
+  `TEAM_ITEMS` in cosmetics.jsx is the one list, and the shop and the two look functions all read it.
+
+- **The service worker could keep a failed font stylesheet, and serve it first on every load.** The page asked
+  for Google's stylesheet without CORS, so its answer was opaque (status 0, `ok` false, whatever it really was),
+  and the worker stored opaque font answers on trust. A 403 or a filter's block page was kept until the next
+  release replaced the store. The stylesheet is asked for with `crossorigin` now, after checking that Google
+  sends `access-control-allow-origin: *`, and the worker stores only answers that say they worked. Checked in
+  real Chromium: both faces load, the sheet's rules are readable as a CORS response, and the worker stores it
+  as one.
+
+- **Android: Privacy and Terms could not be opened from the app.** In the app, `/privacy` goes to Capacitor's
+  local server, which answers every path without a file extension with the game itself, so the game reloaded
+  onto Modes. Inside the app those two links now point at the live site, which Capacitor hands to the phone's
+  browser, leaving the game where it was. The website's links are unchanged. Exercised in jsdom with the bridge
+  present; the app has still never run on a phone.
+
+- **Android: Back walked into a screen you had already left.** Your profile, the Shop from its card, the
+  Leaderboard tab, then Back: Modes, correctly, and the next Back opened the Shop instead of leaving the app. It
+  took four presses to leave. Every history entry now records how many entries the game pushed above the first,
+  and Back from a tab goes to Modes past all of them at once.
+
+- **The shop's tests had been red since 14 October because of the calendar alone.** The showcase test expected a
+  brand-new account to have Day One, which is earned by joining before `DAY_ONE_BEFORE`. It pins the join date
+  now. This is the second test of this kind in the repo, after Over/Under's in v2.22.0.
+
 ## [2.22.1] - 2026-10-06
 
 ### Fixed

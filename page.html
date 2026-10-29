@@ -39,15 +39,17 @@
 "isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
 ]}
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
+<!-- crossorigin on the stylesheet, so the service worker can tell a stylesheet from a block page and stores only
+     the first (service-worker.js); both preconnects carry it so the connection they open is the one used. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap" crossorigin />
 <style>html,body{margin:0;background:#F7F4EA}body{overflow-x:hidden}</style>
 </head>
 <body>
 <noscript>
 <h1>Gridspin</h1>
-<p>Spin an era. Draft the greats. Go 20–0. Gridspin is a free football draft game: each round spins a random NFL team and a five-year era, you draft one real player season from that board, and your six-man roster plays a 17-game season and the playoffs. Turn on JavaScript to play.</p>
+<p>Spin an era. Draft the greats. Go 20–0. Gridspin is a free football draft game: each round spins a random NFL team and an era, you draft one real player season from that board, and your six-man roster plays a 17-game season and the playoffs. Turn on JavaScript to play.</p>
 </noscript>
 <div id="root"></div>
 <script src="build/page.js"></script>

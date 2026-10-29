@@ -3,8 +3,7 @@
 // the exact boards (/c/CODE?beat=W-L), and opening one offers those boards on the Modes screen.
 import {
   setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto,
-  makeMockAuth, clickMode, loadAppModule, loadModule,
-} from "./helpers.mjs";
+  makeMockAuth, clickMode, loadAppModule, loadModule, closeRules } from "./helpers.mjs";
 import { OPPS, TEAMS } from "../game-logic.mjs";
 import { readFileSync } from "node:fs";
 import { initCenturyData, CENTURY_TEAMS, CENTURY_BOARDS, centuryPlan } from "../century-logic.mjs";
@@ -87,8 +86,7 @@ await runTest("opening a challenge link offers the boards, and drafting them kee
   window.__ps_supabase__ = makeMockAuth();
   const { container } = await mount();
   await flush(3);
-  const howto = findButtonByText(container, "Got it, let's draft");
-  if (howto) { await click(howto); await flush(); }
+  if (await closeRules(container)) await flush();
 
   const card = container.querySelector(".challenge");
   assert(card, "expected the challenge card on the Modes screen, got: " + text(container).slice(0, 300));
@@ -111,8 +109,7 @@ await runTest("Not now puts the challenge away", async () => {
   window.__ps_supabase__ = makeMockAuth();
   const { container } = await mount();
   await flush(3);
-  const howto = findButtonByText(container, "Got it, let's draft");
-  if (howto) { await click(howto); await flush(); }
+  if (await closeRules(container)) await flush();
   const card = container.querySelector(".challenge");
   assert(card && card.textContent.includes("Can you beat") && card.textContent.includes("Fantasy"), "a link with no record still offers the boards, got: " + card?.textContent);
   await click(findButtonByText(card, "Not now"));
@@ -166,8 +163,7 @@ async function openLink(url, auth = makeMockAuth()) {
   window.__ps_supabase__ = auth;
   const { container } = await mount();
   await flush(3);
-  const howto = findButtonByText(container, "Got it, let's draft");
-  if (howto) { await click(howto); await flush(); }
+  if (await closeRules(container)) await flush();
   return container;
 }
 

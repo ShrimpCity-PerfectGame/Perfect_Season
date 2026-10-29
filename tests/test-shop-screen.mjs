@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import { setupDom, loadModule, renderComponent, click, flush, text, assert, runTest, makeMockAuth, root } from "./helpers.mjs";
 import { veteranProfile } from "./fixtures/profile-fixture.mjs";
-import { badgeProgress, topBadges } from "../badges.mjs";
+import { badgeProgress, topBadges, DAY_ONE_BEFORE } from "../badges.mjs";
 import { KIND_LABEL, LAUNCH_PRICES } from "../shop-catalog.mjs";
 
 setupDom();
@@ -209,6 +209,38 @@ await runTest("equip an owned item, and take off a title", async () => {
   assert(balance(c) === "1750", "3,250 less 750 twice, got " + balance(c));
 });
 
+await runTest("Team colors says it needs a favorite team, and only when the profile says there is none", async () => {
+  // Both Team colors items are worn as the plain default without a team (cosmetics.jsx's frameLook/cardLook),
+  // so to a player with no team the free item was a tile, a preview and an Equip button that all looked like
+  // Ink or Navy, with nothing saying why.
+  const HINT = "Pick a favorite team in Edit profile to see it";
+  const { auth, uid } = await player("teamless");
+  let { c } = await openShop("teamless", uid);
+  assert(text(tile(c, "frame-team")).includes(HINT), "the frame's tile says what it needs: " + text(tile(c, "frame-team")));
+  assert(!text(tile(c, "frame-ink")).includes(HINT) && !text(tile(c, "frame-lime")).includes(HINT), "and no other frame does");
+  await openTab(c, "Card themes");
+  assert(text(tile(c, "card-team")).includes(HINT), "the card theme says it too: " + text(tile(c, "card-team")));
+  // The tile's text is what its button is described by, so a screen reader hears it on the way past.
+  const info = tile(c, "card-team").querySelector(".sh-pick").getAttribute("aria-describedby");
+  assert(document.getElementById(info)?.textContent.includes(HINT), "the item button is described by the hint");
+
+  // A profile read that FAILED says nothing about a team, so nothing is said.
+  const realRpc = auth.rpc;
+  auth.rpc = (name, args, opts) => (name === "player_profile"
+    ? Promise.resolve({ data: null, error: { message: "Failed to fetch" } }) : realRpc(name, args, opts));
+  ({ c } = await openShop("teamless", uid));
+  assert(!text(tile(c, "frame-team")).includes(HINT), "an unread profile is not a teamless one: " + text(tile(c, "frame-team")));
+  auth.rpc = realRpc;
+
+  // With a team the items are what they say they are.
+  const saved = await auth.rpc("save_profile", { p_bio: "", p_favorite_team: "KC" });
+  assert(!saved.error, "the favorite team saves: " + JSON.stringify(saved.error));
+  ({ c } = await openShop("teamless", uid));
+  // The preview wearing KC is what proves the profile was read, so the missing hint means something.
+  assert(tile(c, "frame-team")?.querySelector('[data-team="KC"]'), "the preview wears the team once there is one");
+  assert(!text(tile(c, "frame-team")).includes(HINT), "a player with a team gets no hint: " + text(tile(c, "frame-team")));
+});
+
 await runTest("badge items: locked until earned, then waiting for a season, then yours once awarded", async () => {
   const { auth, uid } = await player("chaser");
   let { c } = await openShop("chaser", uid);
@@ -290,7 +322,11 @@ await runTest("an item bought elsewhere reloads the shop", async () => {
 
 await runTest("showcase: earned badges only, at most three, saved in order, and the card shows them", async () => {
   const { auth, uid } = await player("showoff");
-  Object.assign(auth._profiles.get(uid), { runs: 100, champs: 10, perfect: 1 });
+  // Joined inside Gridspin's first month, so Day One is one of the badges. The mock stamps a new account with
+  // today, which earned it only until DAY_ONE_BEFORE came round: this test went red on 2026-10-14 by the calendar
+  // alone, with nothing in the shop changed.
+  const joined = new Date(Date.parse(DAY_ONE_BEFORE) - 24 * 3600 * 1000).toISOString();
+  Object.assign(auth._profiles.get(uid), { runs: 100, champs: 10, perfect: 1, created_at: joined });
   const { c, props } = await openShop("showoff", uid);
   await openTab(c, "Showcase");
   const boxes = () => [...c.querySelectorAll('input[name="showcase"]')];
@@ -298,7 +334,6 @@ await runTest("showcase: earned badges only, at most three, saved in order, and 
   assert(JSON.stringify(values) === JSON.stringify(["first-down", "starter", "veteran", "ring-bearer", "dynasty", "undefeated", "day-one"]), "one checkbox per earned badge: " + values);
   const box = (id) => c.querySelector(`input[name="showcase"][value="${id}"]`);
   const cardOrder = () => [...preview(c).querySelectorAll("[data-badge]")].map((b) => b.dataset.badge);
-  const joined = auth._profiles.get(uid).created_at;
   const top = topBadges(badgeProgress({ stats: { runs: 100, champs: 10, perfect: 1 }, joined }), 3).map((b) => b.id);
   assert(JSON.stringify(cardOrder()) === JSON.stringify(top), "with nothing chosen the card shows the top three: " + cardOrder());
   assert(button(c, "Save showcase").disabled, "nothing to save yet");

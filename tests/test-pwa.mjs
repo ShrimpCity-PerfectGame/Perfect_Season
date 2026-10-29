@@ -278,4 +278,60 @@ await runTest("the worker that ships files a page under its path, not the addres
   assert((await cache.match(`${SITE}/`)) === shellBefore, "opening /icon.svg in a tab does not replace the shell");
 });
 
+await runTest("a font is stored only when its answer says it worked, and the page asks in a way that can say", async () => {
+  // The stylesheet used to be asked for without CORS, so its answer was opaque - status 0, ok false, whatever it
+  // really was - and the worker stored opaque font answers on trust. A 403 or a filter's block page in its place
+  // was kept, then served FIRST on every load after, since fonts come from the store and refresh behind the player.
+  execFileSync(process.execPath, ["build.mjs"], {
+    cwd: root, stdio: "pipe",
+    env: { ...process.env, APP_ENV: "staging", SITE_URL: SITE, SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "k" },
+  });
+  const source = readFileSync(path.join(root, "public", "sw.js"), "utf8");
+  const store = new Map();
+  const keyOf = (r) => (typeof r === "string" ? r : r.url);
+  const cache = { put: async (r, res) => { store.set(keyOf(r), res); }, match: async (r) => store.get(keyOf(r)), add: async () => {} };
+  let network = null; // what the next fetch answers
+  const listeners = {};
+  const sandbox = {
+    self: { addEventListener: (name, fn) => { listeners[name] = fn; }, location: { origin: SITE }, skipWaiting: async () => {}, clients: { claim: async () => {} } },
+    caches: { open: async () => cache, keys: async () => [], delete: async () => {}, match: async (r) => cache.match(r) },
+    fetch: async (r) => ({ ...network, url: keyOf(r), clone() { return this; } }),
+    URL, Set, Map, Promise, console,
+  };
+  sandbox.self.caches = sandbox.caches;
+  vm.createContext(sandbox);
+  vm.runInContext(source, sandbox);
+  const ask = async (url) => {
+    const answered = [], waits = [];
+    listeners.fetch({ request: { url, method: "GET", mode: "cors" }, respondWith: (p) => answered.push(p), waitUntil: (p) => waits.push(p) });
+    assert(answered.length === 1, `the worker answers ${url} itself`);
+    const got = await answered[0].catch(() => null);
+    await Promise.all(waits).catch(() => {});
+    return got;
+  };
+
+  const CSS = "https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap";
+  network = { ok: false, status: 0, type: "opaque" };
+  const passed = await ask(CSS);
+  assert(passed?.type === "opaque", "an opaque answer is still handed to the page - it just is not kept");
+  assert(!store.has(CSS), "and it is never stored: there is no telling a stylesheet from a block page");
+  network = { ok: false, status: 403, type: "cors" };
+  await ask(CSS);
+  assert(!store.has(CSS), "nor is a refusal");
+  network = { ok: true, status: 200, type: "cors" };
+  await ask(CSS);
+  assert(store.get(CSS)?.ok === true, "a stylesheet that arrived is kept, for the next load and for no signal");
+  const FILE = "https://fonts.gstatic.com/s/anton/v25/1Ptgg87LROyAm3Kz-C8.woff2";
+  await ask(FILE);
+  assert(store.get(FILE)?.ok === true, "and so is a font file");
+
+  // The other half: the page has to ask with CORS, or the stylesheet comes back opaque and is now never stored -
+  // which loses the fonts offline. So every link to a font host carries crossorigin, the preconnects included, so
+  // the connection they open is the one the request uses.
+  const html = readFileSync(path.join(root, "public", "page.html"), "utf8");
+  const links = [...html.matchAll(/<link\b[^>]*>/g)].map((m) => m[0]).filter((l) => FONT_HOSTS.some((h) => l.includes(`//${h}`)));
+  assert(links.some((l) => /rel="stylesheet"/.test(l)) && links.length === 3, `the font links are found: ${links.join(" ")}`);
+  for (const l of links) assert(/\scrossorigin[\s/>]/.test(l), `asked with CORS: ${l}`);
+});
+
 await close();

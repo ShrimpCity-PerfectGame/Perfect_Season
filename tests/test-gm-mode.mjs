@@ -1,14 +1,14 @@
 // GM mode: a player's salary is shown before selecting them, doesn't change based on which
 // slot (named or Flex) they'd fill, the "Lock in" button cost matches what was shown up front, and
 // the salary cap is enforced at BOTH doors into the draft - the Lock in button and the roster tile.
-import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, findButtonByText, assert, runTest, makeMockAuth, closeRules } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
   window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
-await click(findButtonByText(container, "Got it, let's draft"));
+await closeRules(container);
 await flush();
 await click([...container.querySelectorAll(".mode .mn")].find((e) => e.textContent === "GM mode").closest("button"));
 await flush();
@@ -48,8 +48,7 @@ await runTest("the roster tile enforces the salary cap, not just the Lock in but
   window.__ps_supabase__ = makeMockAuth();
   const { container } = await mount();
   await flush(3);
-  const howto = findButtonByText(container, "Got it, let's draft");
-  if (howto) { await click(howto); await flush(); }
+  if (await closeRules(container)) await flush();
   await click(findButtonByText(container.querySelector(".challenge"), "Draft these boards"));
   await flush(4);
 

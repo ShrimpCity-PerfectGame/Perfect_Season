@@ -157,6 +157,87 @@ await runTest("Back from any other screen returns to Modes, and only Modes leave
   assert(exited === 1, "Back from Modes leaves the app");
 });
 
+// Where the web view is in its history, which jsdom does not say. Capacitor's canGoBack is "is there an entry
+// behind this one", and history.length cannot answer that once Back has walked down past entries that are
+// still there in front - which is what a phantom stop is made of. So the position is kept here, the way a
+// browser keeps it: a push moves up and drops anything in front, back and go move within what exists.
+function trackPosition() {
+  const h = window.history;
+  let at = 0;
+  let length = h.length;
+  const push = h.pushState.bind(h), back = h.back.bind(h), go = h.go.bind(h);
+  h.pushState = (...args) => { push(...args); at++; length = at + 1; };
+  h.back = () => { if (at > 0) at--; back(); };
+  h.go = (n) => { if (at + n >= 0 && at + n < length) at += n; go(n); };
+  return { at: () => at, canGoBack: () => at > 0 };
+}
+// Back as the shell sends it, with canGoBack from that position rather than from history.length.
+async function backAt(position) {
+  const { act } = await import("react-dom/test-utils");
+  let exited = 0;
+  await act(async () => {
+    const asked = new window.CustomEvent(BACK_EVENT, { cancelable: true });
+    window.dispatchEvent(asked);
+    if (!asked.defaultPrevented) {
+      if (position.canGoBack()) window.history.back();
+      else exited++;
+    }
+  });
+  await flush(4);
+  return { exited };
+}
+async function until(cond, what) {
+  for (let i = 0; i < 40; i++) {
+    if (cond()) return;
+    await flush(1);
+  }
+  throw new Error(`timed out waiting for ${typeof what === "function" ? what() : what}`);
+}
+
+await runTest("Back to Modes goes past the screens the app pushed, so the next Back leaves the app", async () => {
+  const auth = makeMockAuth();
+  await auth.auth.signUp({ email: "walker@example.com", password: "Password1", options: { data: { username: "walker" } } });
+  const c = await open("http://localhost/", auth);
+  const position = trackPosition();
+  const profile = () => c.querySelector("section.profile");
+  const shop = () => c.querySelector("section.shop");
+  // Your profile, the Shop from its card, then the Leaderboard tab: each one pushes an entry, the last because
+  // it leaves a screen that owns one. Three entries above Modes.
+  await click(c.querySelector(".whoami"));
+  await until(() => profile()?.dataset.username === "walker", "your profile");
+  await click([...profile().querySelectorAll("button")].find((b) => b.textContent.trim() === "Shop"));
+  await until(() => shop(), "the shop from your card");
+  await click(tab(c, "Leaderboard"));
+  await until(() => onTab(c, "Leaderboard"), "the Leaderboard");
+  assert(position.at() === 3, `three entries pushed above Modes, at ${position.at()}`);
+
+  let { exited } = await backAt(position);
+  await until(() => onTab(c, "Modes"), () => `Modes, got: ${text(c).slice(0, 80)}`);
+  assert(!exited && !shop(), "Back goes to Modes, and not by way of the Shop");
+  assert(position.at() === 0, `and past every entry the app pushed, at ${position.at()}`);
+  ({ exited } = await backAt(position));
+  assert(exited === 1, `the next Back leaves the app, rather than walking into the Shop: ${text(c).slice(0, 80)}`);
+});
+
+await runTest("...and lands on Modes even when the page opened on another screen", async () => {
+  // The entry the page opened in is where that Back arrives. In the app it is always Modes; opened on the
+  // Leaderboard's own address it is not, and the press still meant Modes.
+  const auth = makeMockAuth();
+  await auth.auth.signUp({ email: "lander@example.com", password: "Password1", options: { data: { username: "lander" } } });
+  const c = await open("http://localhost/leaderboard", auth);
+  const position = trackPosition();
+  await until(() => onTab(c, "Leaderboard"), "the Leaderboard it opened on");
+  await click(c.querySelector(".whoami"));
+  await until(() => c.querySelector("section.profile")?.dataset.username === "lander", "your profile");
+  await click(tab(c, "Stats"));
+  await until(() => onTab(c, "Stats"), "Stats");
+  assert(position.at() === 2, `two entries above the one it opened in, at ${position.at()}`);
+  const { exited } = await backAt(position);
+  await until(() => onTab(c, "Modes"), () => `Modes, got: ${text(c).slice(0, 80)}`);
+  assert(!exited && window.location.pathname === "/", `on Modes at its own address, got ${window.location.pathname}`);
+  assert(window.history.state?.view === "home", `and the entry says so: ${JSON.stringify(window.history.state)}`);
+});
+
 await runTest("a profile takes Back through the entry it pushed, not straight to Modes", async () => {
   const c = await open("http://localhost/u/laddertest");
   await flush(4);

@@ -2,15 +2,14 @@
 // and walking away while the clock runs costs that round's life. Both used to be exploitable - the
 // saved progress pointed at the round just answered (answer it again for another point), and
 // leaving through the nav left the round, and its timer, running in the background.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, clickMode,
-} from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, clickMode, closeRules } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
 window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
-await click(findButtonByText(container, "Got it, let's draft"));
+await closeRules(container);
 
 const progress = () => {
   const key = Object.keys(window.storage.data).find((k) => k.startsWith("personal:ps-sou-wip:"));

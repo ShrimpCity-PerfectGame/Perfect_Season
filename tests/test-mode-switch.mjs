@@ -2,14 +2,14 @@
 // but switching from one variant to another must start a fresh draft in the newly-tapped
 // variant, not silently resume the old one under its old flags (a real bug: start Genius, back
 // out mid-draft, tap GM mode, and the old Genius board came back instead of a GM draft).
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, closeRules } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
 window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
-await click(findButtonByText(container, "Got it, let's draft"));
+await closeRules(container);
 await flush();
 
 function modeButton(name) {

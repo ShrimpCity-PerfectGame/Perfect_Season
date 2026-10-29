@@ -10,6 +10,8 @@
 // promises is the page that loads. Contract: CLAUDE.md, "Search engines".
 
 import { THEME } from "./theme.mjs";
+// The eras the rules name. game-logic.mjs imports nothing, so this brings no game data into build.mjs.
+import { WINDOWS } from "./game-logic.mjs";
 
 // The light scope's tokens, so the pages are painted in the same colors as the app.
 const T = THEME.light;
@@ -30,16 +32,33 @@ export function parseSitePath(pathname) {
 // A step's text, in pieces: a plain string, or one marked bold (`b`) and kept on one line (`nowrap`).
 const b = (text) => ({ text, b: true });
 
-// The rules, exactly as the How to play dialog shows them (perfect-season.jsx's HowTo).
+// Every era the boards are cut into, as the game names them - read from the eras themselves, not typed out.
+// The rules used to call them "five-year eras, like 1999–2005", which is the one era that is not: the data
+// starts in 1999, so the first takes in seven seasons. A statistics game read wrong by its own example.
+const ERAS = WINDOWS.map(([from, to]) => `${from}–${to}`);
+export const ERA_LIST = `${ERAS.slice(0, -1).join(", ")} and ${ERAS[ERAS.length - 1]}`;
+
+// The rules, in two parts. The three steps are all a newcomer needs before a first draft, and they are what
+// the How to play dialog opens with (perfect-season.jsx's HowTo). The finer points come after, one tap away in
+// the dialog - and the game brings each up by itself at the moment it starts to matter, in a newcomer's first
+// draft. /how-to-play carries both, in this order, so the rules still exist in one version.
+//
+// Seven steps and a note on grading used to stand between a first visit and a first board; a stranger had
+// read all of it, or skipped all of it, before ever seeing a player. (v2.23.0, from a player's feedback.)
 export const HOWTO_STEPS = [
-  ["Each round spins a ", b("team and a five-year era"), ", like “Rams, 1999–2005.” Draft one player from that board."],
-  ["Fill six spots: ", b("QB, RB, WR, TE, and two Flex"), ". A Flex can be any RB, WR, or TE — and it's graded on raw production rather than against his own position, so ", b("your best player is often worth more in Flex"), " than in his natural spot."],
-  ["Every player shows ", b("his best season"), " for that team in that era. The stats are real. The fantasy points are hidden."],
+  ["Each round spins a ", b("team and an era"), ", like “Patriots, 2006–2010.” Draft one player from that board."],
+  ["Fill six spots: ", b("QB, RB, WR, TE, and two Flex"), ". Every player shows ", b("his best season"), " for that team in that era. The stats are real; the fantasy points are hidden."],
+  ["Your six are graded, then play ", b("17 games against real NFL teams"), " and, if you're good enough, the playoffs. Win them all for a ", b("perfect "), { text: "20–0", b: true, nowrap: true }, b(" season"), "."],
+];
+export const HOWTO_MORE = [
+  ["A ", b("Flex"), " can be any RB, WR, or TE — and it's graded on raw production rather than against his own position, so ", b("your best player is often worth more in Flex"), " than in his natural spot."],
   ["You get ", b("one team re-spin and one era re-spin"), " per draft. Use them wisely."],
   ["Play ", b("unlimited"), " drafts any time, or take the ", b("daily"), " — one draft a day, the same boards for everyone."],
   ["Pick a ", b("scoring format"), " before you draft. ", b("Fantasy"), " is full PPR, where every catch is worth a point. ", b("Championship"), " is standard scoring, where catches count for nothing and only yards and touchdowns do — so volume receivers drop and big-play threats rise. Each has its own leaderboard and its own daily."],
-  ["Your six are graded, then your team plays ", b("17 games against real NFL teams"), " and, if you're good enough, the playoffs. Win them all for a ", b("perfect "), { text: "20–0", b: true, nowrap: true }, b(" season"), "."],
+  ["The eras are ", b(ERA_LIST), "."],
 ];
+// What the dialog's fold and the page's second list are both called.
+export const HOWTO_MORE_TITLE = "The finer points";
 export const HOWTO_NOTE = "Grades compare each season to the top players at that position in the same era, with a bump for efficiency (QB rating, completion %, yards per carry). Flex is graded on raw production instead, with no positional comparison. Your QB counts a little more than the others.";
 
 // What each leaderboard ranks. The numbers themselves are live in the app, never written into these pages -
@@ -56,7 +75,7 @@ const BOARDS = [
 // than a person's mailbox: it can be forwarded anywhere, and it doesn't put a personal address in front of
 // every crawler that reads this page.
 export const PRIVACY_CONTACT = "privacy@gridspin.app";
-export const PRIVACY_UPDATED = "5 October 2026";
+export const PRIVACY_UPDATED = "29 October 2026";
 
 // Who may play. Shared, because the privacy policy and the terms both state it and two live pages
 // disagreeing about it is worse than either alone.
@@ -122,7 +141,7 @@ const PRIVACY_SECTIONS = [
     "Nothing is sold, rented or handed to anyone else.",
   ]],
   ["What is kept on your device", [
-    "A draft in progress, a Century or Guess the Player game in progress, which dailies you have already played, the scoring format you last chose, whether you have seen the rules, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
+    "A draft in progress, a Century or Guess the Player game in progress, which dailies you have already played, the scoring format you last chose, whether you have seen the rules and a first draft's tips, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
   ]],
   ["Your choices", [
     `You can change or clear your bio, your picture and your favourite team whenever you like, from your profile. To close your account, use Close my account on your profile - or write to ${PRIVACY_CONTACT} from the address the account uses and it will be done for you.`,
@@ -219,13 +238,13 @@ export const SITE_PAGES = [
     id: "howto",
     path: HOWTO_PATH,
     file: "how-to-play.html",
-    updated: "2026-10-02",
+    updated: "2026-10-29",
     nav: "How to play",
     title: "How to play Gridspin – football draft game rules",
-    description: "How Gridspin works: spin a random NFL team and a five-year era, draft six real player seasons, then play 17 games and the playoffs. The rules, the scoring and the re-spins.",
+    description: "How Gridspin works: spin a random NFL team and an era, draft six real player seasons, then play 17 games and the playoffs. The rules, the scoring and the re-spins.",
     h1: "How to play Gridspin",
     intro: [
-      "Gridspin is a free football draft game. Each round spins a random NFL team and a five-year era, you draft one real player season from that board, and your six-man roster plays a full 17-game season and then the playoffs. Win all 20 and you have gone perfect.",
+      "Gridspin is a free football draft game. Each round spins a random NFL team and an era, you draft one real player season from that board, and your six-man roster plays a full 17-game season and then the playoffs. Win all 20 and you have gone perfect.",
       // Not "puts your best scores on the leaderboards": a season finished without an account is posted there
       // too (v1.17.0 - the site takes a guest account for it). What an account actually buys is permanence,
       // the daily and duels, both of which are refused to a guest in SQL. The first sentence is one of the two
@@ -233,6 +252,7 @@ export const SITE_PAGES = [
       "Nothing in Gridspin costs money, and you can play without an account. Signing up keeps your seasons for good, unlocks the daily and duels, and builds your streak.",
     ],
     steps: HOWTO_STEPS,
+    more: HOWTO_MORE,
     note: HOWTO_NOTE,
   },
   {
@@ -254,7 +274,7 @@ export const SITE_PAGES = [
     path: PRIVACY_PATH,
     file: "privacy.html",
     // PRIVACY_UPDATED in words, and this in the sitemap: change both together.
-    updated: "2026-10-05",
+    updated: "2026-10-29",
     nav: "Privacy",
     title: "Gridspin privacy policy - what the game keeps",
     description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. A visit counter and a crash report, both nameless. No adverts, no trackers, nothing sold.",
@@ -319,6 +339,10 @@ export function sitePageBody(page) {
   ];
   if (page.steps) {
     parts.push(`<ol class="spg-steps">${page.steps.map((s) => `<li>${segmentsHtml(s)}</li>`).join("")}</ol>`);
+    if (page.more) {
+      parts.push(`<h2 class="spg-h2">${esc(HOWTO_MORE_TITLE)}</h2>`);
+      parts.push(`<ul class="spg-steps">${page.more.map((s) => `<li>${segmentsHtml(s)}</li>`).join("")}</ul>`);
+    }
     parts.push(`<p class="spg-note">${esc(page.note)}</p>`);
   }
   if (page.sections) {

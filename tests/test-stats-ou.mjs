@@ -5,15 +5,14 @@
 // indefinitely), the intro screen gates the timer, running out of lives locks the day and
 // surfaces the leaderboard, and reopening afterward shows the same finished result rather than
 // letting you replay.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, clickMode,
-} from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, clickMode, closeRules } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
 window.__ps_supabase__ = makeMockAuth();
 const { container } = await mount();
 await flush();
-await click(findButtonByText(container, "Got it, let's draft"));
+await closeRules(container);
 await flush();
 await clickMode(container, "Over/Under");
 await flush();

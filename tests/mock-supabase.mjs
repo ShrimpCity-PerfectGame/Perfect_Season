@@ -325,6 +325,12 @@ export function makeMockAuth() {
         presenceListeners.forEach((cb) => cb());
       },
       presenceState() { return presence; },
+      // Test-only: as if `n` tabs were open, this one among them, and a sync arrived.
+      _setOnline(n) {
+        for (const k of Object.keys(presence)) delete presence[k];
+        for (let i = 0; i < n; i++) presence[i === 0 ? "mock-self" : `mock-other-${i}`] = [{}];
+        presenceListeners.forEach((cb) => cb());
+      },
       send({ event, payload }) {
         (broadcastListeners[event] || []).forEach((cb) => cb({ event, payload }));
         return Promise.resolve("ok");

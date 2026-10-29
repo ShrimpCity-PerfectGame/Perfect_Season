@@ -1,15 +1,40 @@
-# Handoff — 2026-09-30 (second session, after v2.18.2)
+# Handoff — 2026-10-29 (v2.23.0 on its branch, not yet on staging)
 
 Working notes for the next session. Not a contract document; delete it once absorbed.
 `CLAUDE.md` remains the authority on how this repo works — read it first, this only says where things
 stand and what is still open.
 
 Everything below marked **verified** was checked by running something during the session that wrote
-this, not recalled.
+this, not recalled. Sections 1–5 below that are dated earlier are kept where they are still true.
 
 ---
 
-## 1. Where things stand
+## 0. This session (2026-10-28/29): v2.23.0
+
+**Production runs 2.22.1, and so does staging.** v2.23.0 is committed on `claude/great-bohr-54owl6` and nowhere
+else: the session could push only to that branch. Promoting it is the usual staging-then-master path. It is client
+only, and CLAUDE.md's v2.23.0 Releasing line says what to click through on staging (use a **fresh private window**:
+everything new is first-visit behaviour, and a browser that has played will show none of it).
+
+It is two things in one release:
+
+- **A tester's feedback, forwarded by the owner.** The rules open on three steps with the finer points folded. The
+  first-visit dialog's button starts the first draft, and that draft teaches the finer points one line at a
+  time. Daily and Unlimited lead Modes, with the rest under "More ways to play". "1 online now" is hidden below
+  ten. The "five-year era, like 1999–2005" copy is fixed, since that era is seven seasons. CHANGELOG has the reasoning,
+  CLAUDE.md "The first visit" the rules. Measured: the first-visit dialog went from 1,233px to 609px on a 320x640
+  phone.
+- **Everything on the open list below that was still a bug**, re-verified against the code first: the profile
+  crown read aloud, Team colors silent for a player with no team, the service worker trusting an opaque font
+  stylesheet, and Android's Privacy/Terms and Back. Plus a test that had been red since 14 October by the
+  calendar alone (Day One). **The suite was 84/85 on arrival.** If the next session finds it red with nothing
+  changed, check for another date before suspecting the code.
+
+**Not changed, and worth a decision rather than a patch:** the Sitewide panel on Modes still shows a raw
+"Players" count beside "Drafts played" and "Perfect seasons". That is the same small-number problem the tester
+named for "online now", and it was left alone because the tester did not name it. Suggested to the owner instead.
+
+## 1. Where things stand (as of v2.21.4 — see section 0 for what has moved since)
 
 **Production runs 2.21.1. Staging is AHEAD of it** - the film work (the three TikTok cuts, the Guess grid
 fix, the Century pick order) is on `staging` and has never been promoted, because none of it is served to
@@ -91,12 +116,12 @@ to Sign In / Providers, where there is no toggle at all.
 
 | | |
 |---|---|
-| `package.json` | `2.21.1` |
-| Production - `www.gridspin.app` | **2.21.1** |
-| Staging | **2.21.1** |
-| `master` head | `706a440` |
-| `v2.21.1` tag | `6445a36` - the release commit, NOT a staging head |
-| `staging` head | ahead of master by the film commits; `git log master..staging` is the live answer |
+| `package.json` | `2.23.0` on `claude/great-bohr-54owl6`; `2.22.1` on `master` and `staging` |
+| Production - `www.gridspin.app` | **2.22.1** |
+| Staging | **2.22.1** |
+| `master` head | `6f48beb` - "2.22.1 to production" |
+| `v2.22.1` tag | `e661e6f` - the release commit, which is also the `staging` head |
+| `v2.23.0` | untagged until it is promoted; tag the release commit then, as every release before it |
 
 **Who is playing, and when:** paste `supabase/query-play-log.sql` into the Supabase SQL editor for
 either project. One row per completed game - account, game, UTC timestamp - across drafts, Century,
@@ -234,7 +259,10 @@ to leave it: it sits inside the "codes are the client's choice" gap CLAUDE.md al
 cannot be closed, and the prize is not worth changing five all-time grades for. **The guest daily DNF
 that sat here was fixed in v2.18.6.**
 
-### 3.5 `submit-run` and `match-pick` answer an unauthenticated POST with no `reason`
+### 3.5 `submit-run` and `match-pick` answer an unauthenticated POST with no `reason` — CLOSED, nothing to change
+
+**Re-checked 2026-10-28: both are already read correctly by the client.** `submitRun` classifies by STATUS since v2.21.5, so a 401 is `signed_out` whatever the body says, and `playMove` hands the body's `error` through when there is no `reason`, which `versus.jsx`'s ERRORS maps (`unauthorized` → "Sign in to play."). Adding a `reason` would need an Edge Function deploy to change no sentence a player sees. The note below is kept for the history.
+
 
 The two mini-game functions answer `{"error":"unauthorized","reason":"signed_out"}`; these two answer
 `{"error":"unauthorized"}` with no reason at all. CLAUDE.md's rule is that a code the client does not
@@ -341,7 +369,7 @@ devices, the way `builds.day` got one.
   A visitor who has never signed in taps Fantasy daily and plays it to the end. The season is held in `pending` and the result screen offers "Save this season". Instead of signing up they go back to Modes and play an Unlimited draft. `postAsGuest` takes a guest account for that second season - and the daily season is discarded: nothing in `daily_runs`, no `daily_last`, no streak. The player is now a guest, so the daily
   *Fix:* Do not let a second season overwrite a held one: keep `pending` as a short list, or refuse to replace a held DAILY trace. In `postAsGuest`, submit every held trace the new guest account is allowed to own, and - since a guest may not hold a daily - either do no
 
-- **[MEDIUM] "Reset draft" silently drops GM/Genius and the scoring format the draft was being played in, and getting back costs a second DNF**
+- **[FIXED in v2.18.11] "Reset draft" silently drops GM/Genius and the scoring format the draft was being played in, and getting back costs a second DNF**
   `perfect-season.jsx:3740`
   In GM mode with one pick made, tap "Reset draft" twice. The new draft is a plain Unlimited draft: the 💼GM mode chip is gone and the salary-cap row disappears. Tap GM mode from Modes to get back where you were and openFree's sameVariant check fails against the plain draft it just made, so abandonCurrent charges a SECOND DNF — for a zero-pick draft the player never asked for. Genius is worse to look at: Reset from Geni
   *Fix:* Have resetDraft pass the draft's own variant, the way runItBack already does: `restart({ format: mode.format, gm: !!mode.gm, genius: !!mode.genius })`. Better, make restart read them itself rather than relying on every caller — `startDraft({ kind: "free", code
@@ -392,7 +420,7 @@ devices, the way `builds.day` got one.
   Alice finishes today's Over/Under with 11. She logs out; Bob signs up on the same device and opens Over/Under from Mini games. He is shown "Your score: 11" - Alice's - and today's leaderboard, with no round to play and no way to play one until the local date rolls over.
   *Fix:* Key both Over/Under keys by account the way century.jsx and guess.jsx key theirs, and in `openSou` fall back to `fetchMySouRun` when the device has no record for THIS account. The `readDay` read of `SOU_DONE_KEY` (line 2567) needs the same account in its key a
 
-- **[PARTLY FIXED in v2.19.5] Team colors costs 2,000 coins and does nothing for a player with no favorite team, with no hint anywhere**
+- **[FIXED: price in v2.19.5, the hint in v2.23.0] Team colors costs 2,000 coins and does nothing for a player with no favorite team, with no hint anywhere**
   `shop.jsx`
   A new account (favorite_team is null by default) opens the shop, Card themes tab, and taps Team colors. The shop tile's thumbnail draws plain Navy, the display case draws plain Navy, and the "Preview" pill lights up saying something is being tried on. Buy → Confirm purchase → "Bought and equipped.", tile state becomes equipped, and the card is still byte-identical Navy. Driven in jsdom against the mock: the case's el
   *Fix:* Make the dependency visible in shop.jsx: when `!team` and item.id is frame-team or card-team, set `line` to something like "Pick a favorite team in Edit profile to see this" (it already renders as .sh-line on the tile and in the details row, so no new markup),
@@ -403,27 +431,28 @@ devices, the way `builds.day` got one.
   free and keeps the item either way. Asked on 2026-10-01, the owner said he is a close friend and would not
   care. Nothing was written to his wallet.
 
-- **[MEDIUM] Android app: the Privacy link reloads the whole app and lands on Modes — the policy is unreachable**
+- **[FIXED in v2.23.0, unverified on a device] Android app: the Privacy link reloads the whole app and lands on Modes — the policy is unreachable**
+  *Shipped as an absolute link to the live page, inside the app only (`sitePageHref`), which Capacitor hands to the phone's browser. Rendering the policy in-app was the other option and was not taken: the live page is always the current policy, and Terms had the same bug.*
   `perfect-season.jsx:4276-4280, site-pages.mjs:156, tools/app/build-app.mjs:62-66`
   In the Capacitor app, open Modes and tap "Privacy" in the .sitefoot footer. The privacy policy never appears: the web view does a full document navigation, Capacitor answers it with index.html, the whole app boots again and lands on Modes with the address rewritten back to "/". The player loses whatever screen state they were on, and there is no route in the app that can show the policy at all. A second consequence: 
   *Fix:* Give the app a route to the policy instead of a dead anchor. Cheapest: have openSitePage return true for "privacy" too and render the copy in-app (site-pages.mjs already exports PRIVACY_SECTIONS as data, the way HOWTO_STEPS is rendered as JSX). If it must stay
 
-- **[LOW] The shop's Name colors tab tells the player the colour is not on their card while the card above it is wearing it**
+- **[FIXED in v2.20.2] The shop's Name colors tab tells the player the colour is not on their card while the card above it is wearing it**
   `shop.jsx`
   Open the shop, Name colors tab. The note reads "Name colors show on the leaderboards and the Stats boards, not on your card." Tap name-blue: the display case immediately renders the name inside a span.cs-name with data-name-look="name-blue" and --cs-name-1: #8FB8FF, and the "Preview" pill lights up. Buy it (750 coins) and the card keeps the colour. Verified in jsdom: before selecting, the case has no .cs-name; while 
   *Fix:* Rewrite the note at shop.jsx:673-676 to what the code does: name colours show on the boards and on your player card, and a nameplate takes the letters while the colour moves to the plate's outer ring. Update SHOP.md 7.1's NameInk bullet and CLAUDE.md's "Name c
 
-- **[LOW] The #1 rank tile's crown emoji is read aloud as a word; every other emoji on the profile screen is hidden**
+- **[FIXED in v2.23.0] The #1 rank tile's crown emoji is read aloud as a word; every other emoji on the profile screen is hidden**
   `profile.jsx`
   Render ProfileScreen for a player ranked #1 in a format (rank={fantasy: 1}). The headline tile's text is "112.4Best Fantasy score, 👑 #1 sitewide" with no aria-hidden element anywhere inside it, so a screen reader announces "Best Fantasy score, crown, number 1 sitewide". Confirmed by walking .tiles .tile in jsdom: that tile is the only one on the screen containing an emoji, and it contains zero aria-hidden descendants
   *Fix:* Make rankNote return a node instead of a string — e.g. `(r) => r ? <>{", "}{r === 1 && <span aria-hidden="true">👑 </span>}{`#${num(r)} sitewide`}</> : null` — and build the tile label as `<>{`Best ${FORMAT_LABEL[f]} score`}{rankNote(rank?.[f])}</>` at profile.
 
-- **[LOW] Android Back moves the screen to Modes without consuming the history entry, so a later Back re-opens the screen you left**
+- **[FIXED in v2.23.0, unverified on a device] Android Back moves the screen to Modes without consuming the history entry, so a later Back re-opens the screen you left**
   `perfect-season.jsx:2794-2801`
   In the app, signed in: Modes → open the Shop → tap the Leaderboard tab → hardware Back → you land on Modes (correct) → hardware Back again → the Shop opens instead of the app exiting. It takes four presses to leave the app, with a stop in a screen the player already left twice. On the website the same route needs one Back (Leaderboard → Shop), so the app inserts a phantom Modes stop and then walks back into the Shop.
   *Fix:* When onAppBack decides a screen leaves for Modes, walk history rather than cancelling: if the entry below is one this app pushed, call history.back() (or go(-n) past the owned entries) instead of openTab("home") + preventDefault, so the stack and the screen st
 
-- **[LOW] The service worker stores an opaque FAILURE for the Google Fonts stylesheet and serves it first on the next load**
+- **[FIXED in v2.23.0] The service worker stores an opaque FAILURE for the Google Fonts stylesheet and serves it first on the next load**
   `service-worker.js:35-36`
   A proxy or regional filter answers https://fonts.googleapis.com/css2?family=Anton&... with a block page or a 403. Because <link rel="stylesheet"> is a no-cors request the response is opaque — status 0, ok false, type "opaque" — and worthStoring returns true for it, so store() writes that failure into Cache Storage under the stylesheet's URL. On the next page load fromStore returns the stored copy immediately, so the 
   *Fix:* Only store the font stylesheet when the response can be judged: either add crossorigin to the Google Fonts <link> in page.html so the response is a real CORS response and response.ok means something, or narrow the opaque arm to the gstatic font files (which ar

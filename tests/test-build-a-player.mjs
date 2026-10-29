@@ -3,8 +3,7 @@
 // attribute (graded F-A+ off his real stats) from him, repeat until every attribute is filled,
 // then roll a random real team-season (any year) and watch an animated sim of whether swapping
 // your build into their lineup would have helped them win it all.
-import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth, clickMode,
-} from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, waitForCrypto, makeMockAuth, clickMode, closeRules } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -12,7 +11,7 @@ const auth = makeMockAuth();
 window.__ps_supabase__ = auth;
 const { container } = await mount();
 await flush();
-await click(findButtonByText(container, "Got it, let's draft"));
+await closeRules(container);
 await flush();
 await clickMode(container, "Build-a-player");
 await flush();

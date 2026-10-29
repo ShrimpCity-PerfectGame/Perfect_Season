@@ -1,7 +1,9 @@
 // What the Android app has to do for itself, as plain functions with the native pieces passed in, so the
 // tests can drive them without Capacitor or a device (tests/test-app-shell.mjs). entry-app.jsx is the
-// wiring: it hands these @capacitor/app and @capacitor/share. Nothing here reaches the website - build.mjs
-// only bundles entry-app.jsx when tools/app/build-app.mjs asks for it.
+// wiring: it hands these @capacitor/app and @capacitor/share. No Capacitor reaches the website - build.mjs
+// only bundles entry-app.jsx when tools/app/build-app.mjs asks for it. The game itself imports the few
+// pieces it has to ask about (BACK_EVENT, inNativeApp, sitePageHref), so those plain values do ship in the
+// site's bundle, and on the website they answer as if there were no app.
 
 // The game hears every Back press first, through this event.
 export const BACK_EVENT = "ps:back";
@@ -21,6 +23,22 @@ export function goBack({ canGoBack } = {}, { win = window, exitApp } = {}) {
   }
   exitApp();
   return "exit";
+}
+
+// Whether the game is running inside the Android app. Capacitor's bridge puts itself on the page before the
+// bundle runs, and nothing on the website ever defines it - entry.jsx asks the same question before it
+// registers the service worker.
+export const inNativeApp = (win = window) => !!win?.Capacitor;
+
+// Where a footer link to one of the site's pages points (site-pages.mjs). The website follows /privacy and /terms
+// itself, and gets the page of words build.mjs wrote with no bundle in it. Inside the app the same addresses go
+// to the app's own little server, which answers ANY path without a file extension with the game's index.html -
+// so tapping Privacy reloaded the game onto Modes, and neither page could be read from the app at all. The app
+// sends those two to the live site instead: an address on another host is one Capacitor hands to the phone's
+// browser, which leaves the game exactly where it was and always shows the policy as it stands today. The pages
+// the game has a screen for keep their own path in both, because the game opens those in place.
+export function sitePageHref(page, { inApp = false, siteUrl = "" } = {}) {
+  return inApp && page.standalone && siteUrl ? `${siteUrl}${page.path}` : page.path;
 }
 
 // An Android web view has no navigator.share, so the game would quietly copy to the clipboard instead. This

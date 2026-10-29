@@ -154,6 +154,16 @@ await runTest("a veteran shows every section, in the contract's order", async ()
   assert(top.length === 3 && top.every((b) => card.textContent.includes(b.name)), "the card shows the three best badges: " + top.map((b) => b.name));
   const tiles = c.querySelector(".tiles").textContent;
   assert(tiles.includes("#3 sitewide") && tiles.includes("#1 sitewide"), "best score tiles carry the sitewide ranks, got: " + tiles);
+  // What a screen reader hears of a tile: its text, less anything inside aria-hidden. The crown on #1 was the
+  // one emoji on this screen written into a label as text, and it was read out as "crown, number 1 sitewide".
+  const heard = (el) => (el.nodeType === 3 ? el.textContent
+    : el.getAttribute?.("aria-hidden") === "true" ? "" : [...el.childNodes].map(heard).join(""));
+  const crowned = [...c.querySelectorAll(".tiles .tile")].find((t) => t.textContent.includes("#1 sitewide"));
+  assert(crowned?.querySelector("[aria-hidden='true']")?.textContent.includes("👑"), "the #1 tile still wears its crown, hidden: " + crowned?.innerHTML);
+  assert(heard(crowned).includes("Best Championship score, #1 sitewide"), "and is heard as words alone, got: " + heard(crowned));
+  for (const t of c.querySelectorAll(".tiles .tile")) {
+    assert(!/\p{Extended_Pictographic}/u.test(heard(t)), "no tile reads an emoji aloud, got: " + heard(t));
+  }
   assert(text(c).includes("Randy Moss") && text(c).includes("Most-drafted team"), "go-to players and the most-drafted team show");
   assert(text(c).includes("Daily ladder") && !/\bBank\b/.test(text(c)), "records show the ladder totals, not the bank");
   assert(!/shop/i.test(text(c)), "no shop explainer");

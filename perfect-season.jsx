@@ -39,7 +39,7 @@ import { AVATAR_CSS } from "./avatars.jsx";
 import { PICKER_CSS } from "./avatar-picker.jsx";
 import { MODERATION_CSS, ModerationQueue } from "./moderation.jsx";
 // The one definition of the event the Android shell asks Back with; the website never sends it.
-import { BACK_EVENT } from "./app-shell.mjs";
+import { BACK_EVENT, inNativeApp, sitePageHref } from "./app-shell.mjs";
 import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk, NameLink } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
@@ -52,7 +52,7 @@ import { GUESS_TRIES } from "./guess-logic.mjs";
 import { BADGE_BY_ID } from "./badges.mjs";
 import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
-import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, DATA_CREDIT, parseSitePath } from "./site-pages.mjs";
+import { HOWTO_STEPS, HOWTO_MORE, HOWTO_MORE_TITLE, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, DATA_CREDIT, parseSitePath } from "./site-pages.mjs";
 initGameData(gameData.players, gameData.opponents);
 // 1v1's defenses and kickers (VERSUS.md 6). Only versus.jsx reads them; single player never does.
 initVersusData(versusPool);
@@ -697,6 +697,14 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .fmtsub{font-family:'Inter',system-ui,sans-serif;font-weight:700;font-size:12px;text-transform:none;letter-spacing:0;opacity:.75}
 .fmtnote{flex-basis:100%;margin:2px 0 0;color:var(--muted);font-size:13.5px;max-width:66ch}
 .modes{display:grid;gap:14px;margin-bottom:24px}
+/* More ways to play: everything past the two drafts that lead, in a denser grid of smaller tiles - side by side
+   once there is room, so the group reads as one thing rather than five more decisions. Each tile keeps its own
+   colour; only its size steps down. The challenge box spans the row, since it carries a form. */
+.modes.more{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+.modes.more .mode{padding:14px 16px}
+.modes.more .mode .mn{font-size:24px}
+.modes.more .mode p{font-size:13.5px;margin:4px 0 10px}
+.modes.more .mode.static{grid-column:1/-1}
 .mode{display:block;width:100%;text-align:left;border:2px solid var(--ink);border-radius:18px;padding:16px 18px;color:var(--ink);background:var(--surface);
   box-shadow:4px 4px 0 var(--hard);transition:transform .14s ease,box-shadow .14s ease}
 @media (hover:hover){.mode:hover:not(.static){transform:translate(-1px,-3px) rotate(-.4deg);box-shadow:6px 8px 0 var(--hard)}}
@@ -831,6 +839,22 @@ p.gamecoins .earned{display:flex}
 .modal li{margin-bottom:9px;font-size:15px;line-height:1.45}
 .modal li b{color:var(--ink)}
 .modal .small{font-size:13px;color:var(--muted);margin:0 0 14px;line-height:1.45}
+/* The rules' finer points, folded under the three steps on a first visit. Marked the way the admin panel's fold
+   is, and named in the accent ink, the colour this app gives a thing you can open. */
+.howmore{margin:0 0 14px;border-top:2px solid var(--line);padding-top:6px}
+.howmore>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;color:var(--accent-ink);padding:6px 0}
+.howmore>summary::-webkit-details-marker{display:none}
+.howmore>summary::after{content:'▸';transition:transform .15s}
+.howmore[open]>summary::after{transform:rotate(90deg)}
+.howmore ul{margin:8px 0 12px;padding-left:22px}
+.howgo{gap:10px}
+/* One line of teaching in a newcomer's first draft (CoachTip). Dashed like the challenge tile: part of the
+   page, not a control, and never louder than the board it is about. */
+.coachtip{display:flex;gap:10px;align-items:baseline;margin:0 0 16px;padding:9px 12px;border:2px dashed var(--line2);border-radius:12px;
+  font-size:14px;line-height:1.45;color:var(--ink);max-width:66ch}
+.coachtip .ck{flex:none;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink)}
+.rerolls+.coachtip{margin-top:-10px}
+.drafts+.coachtip{margin:0 12px 12px}
 .sharebox{width:100%;min-height:150px;font:13px/1.45 ui-monospace,Menlo,monospace;background:var(--surface2);color:var(--ink);border:2px solid var(--line2);border-radius:10px;padding:10px;margin-top:10px}
 .flexnote{border-left:3px solid var(--accent-ink);padding-left:12px;margin-top:10px}
 
@@ -1317,6 +1341,7 @@ p.gamecoins .earned{display:flex}
   .datacredit a{position:relative}
   .datacredit a::after{content:'';position:absolute;left:-6px;right:-6px;top:50%;transform:translateY(-50%);height:44px}
   button.pill::after{content:'';position:absolute;left:-4px;right:-4px;top:-8px;bottom:-8px}
+  .howmore>summary{min-height:44px}
 }
 
 /* ===== reduced motion ===== */
@@ -1333,7 +1358,7 @@ p.gamecoins .earned{display:flex}
   /* Per selector, not by hiding the parent: the parent being display:none is what makes this invisible
      today, and that is the pattern the cosmetics test forbids for exactly this reason. */
   .confetti i{animation:none}
-  .adminpanel>summary::after{transition:none}
+  .adminpanel>summary::after,.howmore>summary::after{transition:none}
   .btn,.mode,.fmtbtn,.card,.tab{transition:none}
   .btn:hover:not(:disabled),.btn:active:not(:disabled),.mode:hover:not(.static),.mode:active:not(.static),.fmtbtn:hover,.card:hover:not(.off){transform:none}
 }
@@ -1567,11 +1592,17 @@ const VS_RETURN_GOOD_FOR = 10 * 60 * 1000;
 const NO_RANK = Object.fromEntries(FORMATS.map((f) => [f, null]));
 // History writes are best effort. A page opened from a file (the UI harness) can't change its path, so the
 // entry is then written at the address it already has, and Back and Forward still move between screens.
+//
+// Every entry also carries its depth: how many entries this app has pushed above the one the page opened in.
+// The Android app's Back reads it (onAppBack) to return to Modes PAST the screens it pushed, in one move.
 function writeHistory(method, state, url) {
+  let below = 0;
+  try { below = Number(window.history.state?.depth) || 0; } catch (e) { /* no history API */ }
+  const entry = { ...state, depth: method === "pushState" ? below + 1 : below };
   if (url != null) {
-    try { window.history[method](state, "", url); return; } catch (e) { /* this page can't take that address */ }
+    try { window.history[method](entry, "", url); return; } catch (e) { /* this page can't take that address */ }
   }
-  try { window.history[method](state, ""); } catch (e) { /* no history API */ }
+  try { window.history[method](entry, ""); } catch (e) { /* no history API */ }
 }
 
 // A plain "#rank — username — value" leaderboard, shared by every zero-frills Stats leaderboard
@@ -2243,6 +2274,16 @@ function PlayerName({ name, mine, guest }) {
   return <><NameLink name={name} guest={guest} />{mine && <span className="you">You</span>}</>;
 }
 const HOWTO_KEY = "ps-howto-seen";
+// Whether this device is coaching a newcomer through a first draft (CoachTip): "on" from a first visit until the
+// first season's result appears, "done" from then. Only ever switched on for a device that has never closed the
+// rules, so a player who was here before the tips existed is never shown one - and an account with drafts behind
+// it switches them off on any device it signs in on.
+const COACH_KEY = "ps-coach";
+// The "online now" pill appears from this many players up. It counts every open tab, the viewer's own among
+// them, so on a young site it read "1 online now" - telling a newcomer, before anything else, that nobody was
+// here. Below this the hero says nothing about it and the challenge does the selling; above it the number is
+// worth showing again, with no release needed. The count is still kept either way.
+const ONLINE_SHOWN_FROM = 10;
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
 // Century's own "today is played" hint, kept the same way Over/Under's is: a per-device key, so the Modes tile
 // can answer without a network read. It is a HINT, not the record - century_runs is, and the Century screen asks
@@ -2425,7 +2466,11 @@ function GridspinMark({ size = 38 }) {
   );
 }
 
-function HowTo({ onClose }) {
+// The rules. It opens on the three steps a newcomer needs, with the finer points folded under them: closed on a
+// first visit, where the next thing should be a board rather than more reading, and open when somebody asked
+// for the rules (the header's How to play, or /how-to-play). A first visit on Modes also gets `onStart`, which
+// starts the first draft from here - the draft explains itself from then on (CoachTip).
+function HowTo({ onClose, onStart = null, folded = false }) {
   const btn = useRef(null);
   const dialog = useRef(null);
   // Android's Back closes the rules the way Escape does, instead of leaving the screen behind them.
@@ -2436,27 +2481,40 @@ function HowTo({ onClose }) {
     btn.current && btn.current.focus({ preventScroll: true });
     // Escape is useCloseOnBack's, above - one register, so only the dialog on top answers.
   }, []);
+  // The steps are shared with the crawlable /how-to-play page (site-pages.mjs), so the rules can't drift into
+  // two versions. A piece marked nowrap keeps "20-0" on one line.
+  const words = (step) => step.map((part, j) => (typeof part === "string" ? part
+    : <b key={j}>{part.nowrap ? <span className="nowrap">{part.text}</span> : part.text}</b>));
   return (
     <div className="modal-bg" onClick={onClose}>
       <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="howto-title" tabIndex={-1}
         onKeyDown={(e) => keepFocusInside(e, dialog.current)} onClick={(e) => e.stopPropagation()}>
         <button type="button" className="modal-x" aria-label="Close" onClick={onClose}>×</button>
         <h2 id="howto-title">How to play</h2>
-        {/* The steps are shared with the crawlable /how-to-play page (site-pages.mjs), so the rules can't
-            drift into two versions. A piece marked nowrap keeps "20-0" on one line. */}
-        <ol>
-          {HOWTO_STEPS.map((step, i) => (
-            <li key={i}>
-              {step.map((part, j) => (typeof part === "string" ? part
-                : <b key={j}>{part.nowrap ? <span className="nowrap">{part.text}</span> : part.text}</b>))}
-            </li>
-          ))}
-        </ol>
-        <p className="small">{HOWTO_NOTE}</p>
-        <button ref={btn} className="btn solid" onClick={onClose}>Got it, let's draft</button>
+        <ol>{HOWTO_STEPS.map((step, i) => <li key={i}>{words(step)}</li>)}</ol>
+        <details className="howmore" open={!folded}>
+          <summary>{HOWTO_MORE_TITLE}</summary>
+          <ul>{HOWTO_MORE.map((step, i) => <li key={i}>{words(step)}</li>)}</ul>
+          <p className="small">{HOWTO_NOTE}</p>
+        </details>
+        {onStart ? (
+          <div className="frow howgo">
+            <button ref={btn} className="btn solid" onClick={onStart}>Start my first draft 🏈</button>
+            <button className="btn" onClick={onClose}>Look around first</button>
+          </div>
+        ) : <button ref={btn} className="btn solid" onClick={onClose}>Got it, let's draft</button>}
       </div>
     </div>
   );
+}
+
+// One line of teaching in a newcomer's first draft, at the moment the thing it explains starts to matter: the
+// re-spins on the first board, Flex when a player could go there, the scoring on the first result. They are
+// the How to play dialog's finer points, said where they apply instead of all at once before a first board.
+// Never on a veteran's screen - see `coaching`. "Tip" is a word rather than an emoji: the game's emoji
+// vocabulary (CLAUDE.md, Design system) has nothing for it, and this is not a big moment.
+function CoachTip({ children }) {
+  return <p className="coachtip"><b className="ck">Tip</b><span>{children}</span></p>;
 }
 
 export default function PerfectSeason() {
@@ -2541,6 +2599,11 @@ export default function PerfectSeason() {
   // they got there: a typed address, a link, or Back into one.
   const [pendingHowTo, setPendingHowTo] = useState(false);
   const atHowTo = useRef(openedAtHowTo);
+  // The rules opened BY the first visit, rather than asked for: folded to their three steps, and offering the
+  // first draft itself (HowTo's onStart).
+  const [howToFirst, setHowToFirst] = useState(false);
+  // A newcomer's first draft, which explains its finer points as they come up (CoachTip; COACH_KEY says when).
+  const [coaching, setCoaching] = useState(false);
   const [share, setShare] = useState({ state: "idle", text: "" });
   const [confirmReset, setConfirmReset] = useState(false);
   const [mode, setMode] = useState(null);           // { kind: "free"|"daily", code, date, seed, gm, genius, format }
@@ -2844,7 +2907,13 @@ export default function PerfectSeason() {
       refreshWip();
       setDraftReady(true);
       // Held rather than opened, so it can wait for a screen it belongs on - see the effect below.
-      if (!(await sget(HOWTO_KEY, false))) setPendingHowTo(true);
+      const seenRules = await sget(HOWTO_KEY, false);
+      if (!seenRules) setPendingHowTo(true);
+      // A first visit's first draft teaches as it goes. Switched on here, once, and only on a device that has
+      // never closed the rules - so nobody who was here before the tips existed is ever shown one.
+      let coach = await sget(COACH_KEY, false);
+      if (!seenRules && !coach) { coach = "on"; sset(COACH_KEY, coach, false); }
+      if (coach === "on") setCoaching(true);
     })();
     siteActivity.current = subscribeSiteActivity({
       onOnlineCount: setOnline,
@@ -3118,14 +3187,45 @@ export default function PerfectSeason() {
     if (view === "versus") { if (howTo) setHowTo(false); return; }
     if (!pendingHowTo) return;
     setPendingHowTo(false);
+    setHowToFirst(true);
     setHowTo(true);
   }, [pendingHowTo, view, howTo]);
+
+  // A newcomer is coached through one draft and its result. The result is recorded as the end the moment it
+  // appears - a reload from there on is not a first draft - and the tips go when the player moves on from it.
+  const coachedResult = useRef(false);
+  useEffect(() => {
+    if (!coaching) return;
+    if (result) {
+      if (!coachedResult.current) { coachedResult.current = true; sset(COACH_KEY, "done", false); }
+    } else if (coachedResult.current) setCoaching(false);
+  }, [coaching, result]);
+  // ...and an account with drafts behind it is no newcomer, whatever this device has or hasn't seen. Declared
+  // after the effect above on purpose: a first season's own result is recorded before the stats it moves can
+  // read as a veteran's.
+  useEffect(() => {
+    if (coaching && !coachedResult.current && stats && draftsOf(stats) > 0) {
+      setCoaching(false);
+      sset(COACH_KEY, "done", false);
+    }
+  }, [coaching, stats]);
 
   // Back and Forward put back the screen the entry describes, opening it the way its tab or tile would -
   // Over/Under and Build-a-player through their own openers, since leaving them dropped the round or build.
   const onHistoryMove = useRef(null);
+  // Set by the Android app's Back on its way to Modes past the entries it pushed (onAppBack, below).
+  const backToModes = useRef(false);
   onHistoryMove.current = (state) => {
     let s = screenOf(state, window.location.pathname);
+    // That Back lands on the entry the page opened in, which in the app is Modes. Were it anything else, the
+    // press still meant Modes - so Modes it is, and the entry says so.
+    if (backToModes.current) {
+      backToModes.current = false;
+      if (s.ps !== "view" || s.view !== "home") {
+        s = { ps: "view", view: "home" };
+        writeHistory("replaceState", s, pathFor(s));
+      }
+    }
     // A screen that isn't open to this player now - the Reports queue for someone who isn't a moderator, the
     // shop signed out - is Modes instead, and its entry says so. Decided before it's recorded as the current
     // screen, so opening Modes in its place doesn't count as leaving the shop and push an entry mid-traversal.
@@ -3186,7 +3286,18 @@ export default function PerfectSeason() {
     // the history effect pushed `home` on top, and the next Back walked into 1v1 again - round and round, with
     // exitApp unreachable and the app needing a force close.
     if (shownProfile || ownsEntry({ view })) return;
-    if (view !== "home") { openTab("home"); e.preventDefault(); }
+    if (view === "home") return;
+    e.preventDefault();
+    // To Modes, past every entry this app pushed. Opening Modes in place left them underneath it: your profile,
+    // the Shop from its card, then the Leaderboard tab, then Back - Modes, as it should be, and the next Back,
+    // which should have left the app, walked into the Shop instead. Four presses to leave, with a stop at a
+    // screen already left twice. Depth 0 means nothing is underneath, and in place is right.
+    let depth = 0;
+    try { depth = Number(window.history.state?.depth) || 0; } catch (err) { /* no history API */ }
+    if (depth > 0) {
+      backToModes.current = true;
+      window.history.go(-depth);
+    } else openTab("home");
   };
   useEffect(() => {
     const onBack = (e) => onAppBack.current(e);
@@ -4771,6 +4882,7 @@ export default function PerfectSeason() {
 
   function closeHowTo() {
     setHowTo(false);
+    setHowToFirst(false);
     sset(HOWTO_KEY, true, false);
     // Opened from /how-to-play: that address described the rules, so closing them puts the screen
     // underneath back in the address bar.
@@ -4779,6 +4891,12 @@ export default function PerfectSeason() {
       const s = historyScreen.current || { ps: "view", view: "home" };
       writeHistory("replaceState", s, pathFor(s));
     }
+  }
+  // The first visit's rules, answered with a board rather than more reading: the same draft the hero's Start my
+  // season starts, from the dialog that just explained it.
+  function startFirstDraft() {
+    closeHowTo();
+    playUnlimited();
   }
   // A footer link, opened in place: the rules over whatever is on screen, or the Leaderboard tab. False for
   // a page this build has no screen for, and then the browser just follows the link to it.
@@ -4994,6 +5112,11 @@ export default function PerfectSeason() {
   const modeDailyDone = mode && mode.kind === "daily" ? dailyDone[normFormat(mode.format)] : null;
   const otherFormat = mode && normFormat(mode.format) === "standard" ? "fantasy" : "standard";
   function skipPlayoffs() { setShown(result.games.length); setPo({ idx: 0, stage: "done" }); }
+  // The first visit's rules offer the first draft only where starting one takes nothing from anybody: on Modes,
+  // with no challenge card waiting (that visitor came for those boards) and nothing already in progress - and
+  // only to somebody for whom it IS a first draft, which an account signing in on a new device may not be.
+  const firstDraftOffer = howToFirst && view === "home" && !challenge && !freeInProgress
+    && !FORMATS.some((f) => dailyPicksFor(f) > 0) && !(stats && draftsOf(stats) > 0);
 
   // The Profile tab is lit on your own profile, its Reports queue and the shop (or a guest's login), not on someone else's.
   const tabOn = (k) => (k === "profile"
@@ -5052,7 +5175,7 @@ export default function PerfectSeason() {
             Cleared by the effect above when the screen or the draft changes, so it cannot outlive its subject. */}
         {saveError && <div className="panel"><p style={{ margin: 0 }}>{saveErrorText(saveError)}</p></div>}
         {notice && <div className="panel"><p style={{ margin: 0 }}>{notice}</p></div>}
-        {howTo && <HowTo onClose={closeHowTo} />}
+        {howTo && <HowTo onClose={closeHowTo} onStart={firstDraftOffer ? startFirstDraft : null} folded={howToFirst && !atHowTo.current} />}
         {needsName && <PickName email={needsName.email} onClaimed={onNameClaimed} onSignOut={logOut} />}
         {/* After PickName, so an account arriving with no profile is asked its name first - a reset cannot
             happen to such an account anyway (it has no password), but two dialogs at once would be a trap. */}
@@ -5131,7 +5254,7 @@ export default function PerfectSeason() {
                     {livePicks != null ? `🔥 ${livePicks.toLocaleString()} players drafted` : `🔥 ${livePlays.toLocaleString()} plays`}
                   </button>
                 )}
-                {online != null && <span className="pill">🟢 {online} online now</span>}
+                {online != null && online >= ONLINE_SHOWN_FROM && <span className="pill">🟢 {online} online now</span>}
                 {installOffer && <button className="pill install" onClick={install}>Install Gridspin</button>}
               </div>
             </header>
@@ -5153,8 +5276,10 @@ export default function PerfectSeason() {
               </p>
             </div>
 
-            {/* Two groups, not one list of nine tiles. The drafts are the game; the quick games sit behind one
-                tile of their own so the front screen stays short and says what this place is for. */}
+            {/* The two drafts that lead, on their own: the first decision on this screen is one of two, not one of
+                seven. Everything else is grouped below them, smaller, for whoever comes back wanting more. (v2.23.0,
+                from a player's feedback: "Unlimited and Daily should lead.") The quick games still sit behind one
+                tile of their own, as they have since v2.10.0. */}
             <h2 className="h">Drafts</h2>
             <div className="modes">
               {/* The only tile with two CTAs: both formats' dailies are live at once, each its
@@ -5189,7 +5314,10 @@ export default function PerfectSeason() {
                 <p>Draft as many teams as you like. Random boards every time, resets allowed.</p>
                 <span className="go">{freeInProgress ? "Back to your draft" : "Let's go"}</span>
               </button>
+            </div>
 
+            <h2 className="h">More ways to play</h2>
+            <div className="modes more">
               <button className="mode m-genius" onClick={() => openFree({ genius: true })}>
                 <div className="mt"><span className="icon" aria-hidden="true">🧠</span><span className="mn">Genius mode</span></div>
                 <p>Same draft, no stats shown. Just name, team, and year - know your football. Shares your Unlimited progress slot.</p>
@@ -5211,19 +5339,6 @@ export default function PerfectSeason() {
                 <span className="go">{user && !isGuest ? "Open a lobby" : "Sign in to play"}</span>
               </button>
 
-              <div className="mode static">
-                <div className="mt"><span className="icon" aria-hidden="true">🔗</span><span className="mn">Challenge a friend</span></div>
-                <p>Enter a code to draft the exact same boards someone else had.</p>
-                <div className="frow">
-                  <input className="inp" value={codeInput} maxLength={8} placeholder="e.g. K3F9QZ" aria-label="Challenge code"
-                    onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setCodeError(""); }} onKeyDown={(e) => e.key === "Enter" && startCode(codeInput)} />
-                  <button className="btn solid" disabled={codeInput.trim().length < 4} onClick={() => startCode(codeInput)}>Draft it</button>
-                </div>
-                {codeError && <p className="note" role="status">{codeError}</p>}
-              </div>
-            </div>
-
-            <div className="modes">
               <button className="mode m-mini" onClick={openMinigames}>
                 <div className="mt">
                   <span className="icon" aria-hidden="true">🎲</span>
@@ -5234,6 +5349,17 @@ export default function PerfectSeason() {
                   keep boards of their own and never touch your season stats.</p>
                 <span className="go">Open</span>
               </button>
+
+              <div className="mode static">
+                <div className="mt"><span className="icon" aria-hidden="true">🔗</span><span className="mn">Challenge a friend</span></div>
+                <p>Enter a code to draft the exact same boards someone else had.</p>
+                <div className="frow">
+                  <input className="inp" value={codeInput} maxLength={8} placeholder="e.g. K3F9QZ" aria-label="Challenge code"
+                    onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setCodeError(""); }} onKeyDown={(e) => e.key === "Enter" && startCode(codeInput)} />
+                  <button className="btn solid" disabled={codeInput.trim().length < 4} onClick={() => startCode(codeInput)}>Draft it</button>
+                </div>
+                {codeError && <p className="note" role="status">{codeError}</p>}
+              </div>
             </div>
 
             <div className="hometiles">
@@ -5409,6 +5535,11 @@ export default function PerfectSeason() {
                     </button>
                   )}
                 </div>
+                {/* The re-spins, on a newcomer's first board, while both are still there to spend. */}
+                {coaching && pickNo === 1 && !spinning && !noBoardLeft
+                  && rerolls.team === REROLL_BUDGET && rerolls.years === REROLL_BUDGET && (
+                  <CoachTip>Not feeling this board? Every draft gets one team re-spin and one era re-spin. Save them for a board with nobody you want.</CoachTip>
+                )}
                 <div ref={sentinel} aria-hidden="true" />
 
                 {/* Only a truly-done position (state 2) sinks to the bottom - a filled named
@@ -5487,6 +5618,12 @@ export default function PerfectSeason() {
                                 <button className="btn" onClick={() => setSelected(null)}>Cancel</button>
                               </div>
                             )}
+                            {/* Flex, the moment a newcomer is choosing between it and the player's own spot - until
+                                they have put somebody there and seen it for themselves. */}
+                            {isSel && coaching && !roster.FLEX1 && !roster.FLEX2
+                              && slotsFor.some((s) => s.startsWith("FLEX")) && slotsFor.some((s) => !s.startsWith("FLEX")) && (
+                              <CoachTip>Flex takes any RB, WR or TE, and grades him on raw production rather than against his own position, so your best player is often worth more there.</CoachTip>
+                            )}
                           </div>
                         );
                       })}
@@ -5545,6 +5682,13 @@ export default function PerfectSeason() {
                     <button className="btn" onClick={runItBack}>Run it back 🔁</button>
                     <button className="btn" onClick={ () => setView("board")}>See the leaderboard</button>
                   </div>
+                )}
+                {/* The scoring, once a newcomer has a graded season in front of them to read it against - the one
+                    finer point that is no use before there is a score. */}
+                {finished && coaching && (
+                  <CoachTip>{normFormat(result.format) === "standard"
+                    ? "This season was scored in Championship: yards and touchdowns only. Fantasy scoring adds a point for every catch, so volume receivers rise. Switch formats on Modes - each keeps its own leaderboard and daily."
+                    : "This season was scored in Fantasy: full PPR, a point for every catch. Championship scoring counts only yards and touchdowns, so big-play threats rise. Switch formats on Modes - each keeps its own leaderboard and daily."}</CoachTip>
                 )}
                 {finished && share.state === "manual" && (
                   <>
@@ -6375,7 +6519,7 @@ export default function PerfectSeason() {
             <p><b>Gridspin</b> is a free football draft game — spin an era, draft the greats, go <span className="nowrap">20–0</span>.</p>
             <p className="sitelinks">
               {SITE_PAGES.map((p) => (
-                <a key={p.id} className="btn sm" href={p.path}
+                <a key={p.id} className="btn sm" href={sitePageHref(p, { inApp: inNativeApp(), siteUrl: APP_SITE_URL })}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                     if (openSitePage(p.id)) e.preventDefault();

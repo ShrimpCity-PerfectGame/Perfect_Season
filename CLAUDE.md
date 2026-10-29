@@ -359,15 +359,37 @@ parts that are unlike every other mode:
   picks it could not replay. Take a farmed result back -
   delete the match row (its picks follow) and decrement `pvp_wins` / `pvp_losses` on the two profiles by hand.
 
-**Modes is two groups (v2.10.0).** The front screen is **Drafts** - the daily, Unlimited, Genius, GM, Duel and
-the challenge-code box - and one **Mini games** tile that opens a screen of its own holding **Guess the Player, Over/Under,
-Build-a-player and Century**. It had grown to nine tiles and read as a list rather than a shape. Duel stays with
-the drafts because it is one. Three things to know before moving a tile again: the Mini games tile carries an
-"N done today" pill, because the cost of hiding those modes is losing at a glance whether the day's Over/Under
-and Century are still to play; leaving any of the three returns to Mini games, not Modes, since that is now the
-only door to them; and `tests/helpers.mjs`'s **`clickMode` looks behind Mini games** for a tile that is not on
-Modes, which is what kept every existing test working - prefer it over clicking tile copy, as this file already
-asked.
+**Modes is two groups (v2.10.0, regrouped in v2.23.0).** **Drafts** holds the daily and Unlimited and nothing
+else. **More ways to play** sits under it in a denser grid of smaller tiles (`.modes.more`): Genius, GM, Duel, the
+**Mini games** tile (which opens a screen of its own holding **Guess the Player, Over/Under, Build-a-player and
+Century**) and the challenge-code box. It had grown to nine tiles in v2.10.0 and read as a list. v2.23.0 split it
+again because a tester's first decision was one of seven: "Unlimited and Daily should lead." Three things to know
+before moving a tile again. The Mini games tile carries an "N done today" pill, because the cost of hiding those
+modes is losing at a glance whether the day's Over/Under and Century are still to play. Leaving any of the three
+returns to Mini games, not Modes, since that is now the only door to them. And `tests/helpers.mjs`'s **`clickMode`
+looks behind Mini games** for a tile that is not on Modes, which is what kept every existing test working: prefer
+it over clicking tile copy, as this file already asked. `tests/test-first-visit.mjs` holds the two groups' order.
+
+**The first visit (v2.23.0), from the same tester's notes: "the gameplay communicates the appeal better than a
+lengthy explanation does."** Four pieces, and three of them only ever touch a newcomer.
+- **The rules are in two parts.** `HOWTO_STEPS` is three steps, which is everything needed before a first board.
+  `HOWTO_MORE` holds the finer points (Flex grading, re-spins, the two modes, the formats, the eras) under a fold
+  that is closed on a first visit and open when somebody asked: the header's How to play, or `/how-to-play`, which
+  carries both. The old dialog was 1,233px tall on a 320x640 phone. The new one is 609.
+- **The first-visit dialog starts the first draft.** `HowTo`'s `onStart` gives it **Start my first draft 🏈**
+  beside **Look around first**. `firstDraftOffer` is the rule: only on Modes, with no challenge card waiting,
+  nothing in progress, and never for an account with drafts behind it. Tests close the dialog with
+  **`closeRules(container)`**, its ×, because the button copy depends on how it was opened. Clicking "Got it,
+  let's draft" broke nine test files the day the first-visit copy changed.
+- **The first draft teaches as it goes** (`CoachTip`). The re-spins come up on the first board, Flex when a
+  player is choosing between his own spot and Flex, and the scoring on the first result. `COACH_KEY`
+  (`ps-coach`) is `"on"` from a first visit until the first result appears and `"done"` after. It is only ever
+  switched on for a device that had never closed the rules, so nobody who was here before tips existed sees
+  one, and an account with drafts behind it switches it off on any device. Keep tips to one line, at the moment
+  the thing they explain becomes a decision; a tip that shows before that is the old dialog again.
+- **"Online now" hides below `ONLINE_SHOWN_FROM` (10).** It counts every open tab, the viewer's own included, so
+  on a young site its message was that nobody else was here. The count is still kept, and the pill returns by
+  itself as the site grows.
 
 **Century (v2.9.0).** A mode of its own: seven slots (QB, two RB, two WR, TE, Flex), a random team each spin,
 **stats hidden while you pick**, and a goal of 100 combined passing, rushing and receiving touchdowns from one
@@ -585,6 +607,17 @@ functions in **`app-shell.mjs`** so the tests can drive them without a device (`
   topmost closes, exactly as Escape does). What the game doesn't take, Back does the ordinary way - a screen that
   pushed an entry of its own (a profile, the shop) goes back to where it was opened from, and Back from Modes
   leaves the app. Without this every Back press left the app, from the first-run rules dialog included.
+  **Going to Modes walks history; it does not open Modes in place** (v2.23.0). Every entry `writeHistory` makes
+  records its `depth`, meaning how many entries the game pushed above the first, and Back from a tab goes
+  `history.go(-depth)`. Opened in place, the pushed entries stayed underneath Modes: your profile, the Shop from
+  its card, the Leaderboard tab, then Back, Back, and the second Back opened the Shop instead of leaving.
+  `tests/test-app-shell.mjs` tracks the web view's real position to prove it, because `history.length` cannot
+  tell you whether there is anything behind you.
+- **Privacy and Terms point at the live site inside the app** (`sitePageHref`, v2.23.0). Capacitor's local
+  server answers every path without a file extension with the game's `index.html`, so a relative `/privacy`
+  reloaded the game onto Modes and the policy was unreachable. An address on another host is one Capacitor hands
+  to the phone's browser. The website's own links are untouched, and `inNativeApp` reads `window.Capacitor`, the
+  same question entry.jsx asks.
 - **The share sheet.** An Android web view has no `navigator.share`, so the game would quietly copy to the
   clipboard. `nativeShare` is the Web Share API over Android's sheet, and it keeps the part the game reads:
   closing the sheet is an `AbortError`, which shows no status. Swallowing it told players a season had been
@@ -694,6 +727,7 @@ node tests/test-sou-leave.mjs       # Over/Under can't be replayed or left runni
 node tests/test-sim-engine-independence.mjs  # the season sim rolls identically in every JS engine; pins a 2,000-season checksum
 node tests/test-build-seo.mjs      # runs build.mjs for production and staging: canonical, noindex, robots.txt, sitemap, structured data
 node tests/test-share.mjs          # the spoiler-free share card, challenge links in and out, and the challenge card on Modes
+node tests/test-first-visit.mjs    # a stranger's first visit: the three-step rules, Start my first draft, the tips and when they stop, Modes' two groups
 node tests/test-site-pages.mjs     # /how-to-play and /leaderboard: the addresses, the footer links, and the rules matching site-pages.mjs
 node tests/test-app-shell.mjs      # the Android app: Back closes a dialog, then leaves a screen, then the app; the share sheet's AbortError
 node tests/test-pwa.mjs            # installable and offline: what the service worker stores and never stores, the build's stamp, the install offer
@@ -1295,7 +1329,7 @@ shadow, and navy "scoreboard" moments.
   and tests see normal text. Playful wording goes on big moments only ("Start my season 🏈",
   "🔒 Lock in", "Run it back 🔁"); everyday controls like Refresh, Log in, Cancel and Reset stay
   plain. Tests open modes with `clickMode(container, name)` rather than clicking tile copy, because
-  that copy is meant to change.
+  that copy is meant to change - and close the rules with `closeRules(container)` for the same reason.
 - **Emoji vocabulary**, used deliberately rather than sprinkled: 🏆 championship/achievement ·
   🔥 streak · ⚡ high-impact · 😈 risky · 💀 disaster · 👑 #1 · 🚨 upset · 🏈 football · 📈 rising ·
   🧊 cold. Add emoji at display time only — outcome strings from `simulateSeason` are stored in runs
@@ -1410,6 +1444,13 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.23.0's (the first visit, and the open handoff list): client only. No migration, no Edge Function change.
+  The service worker is in it, since font answers are now judged rather than trusted, and every deploy ships that
+  anyway. On staging, check the first visit in a fresh private window rather than one that has played: the
+  three-step rules, Start my first draft, the re-spin tip on the first board, the Flex tip on placing a back or
+  receiver, and the scoring tip on the result. Then check that a second draft shows none of them. The Android
+  half (Privacy and Terms opening in the phone's browser, Back past pushed screens) waits for the next
+  `npm run app:sync`, and has still never run on a phone.
   v2.22.0's (the crash sink): run **`migration-client-errors.sql`**, then **deploy the Edge Functions**
   (`node deploy-function.mjs <env>` deploys **SIX** now), then the client. **The order is not optional
   here**: a client ahead of the function POSTs at a 404 and silently drops every report, which is

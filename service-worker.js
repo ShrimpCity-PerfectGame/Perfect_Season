@@ -30,10 +30,15 @@ self.addEventListener("activate", (event) => {
   })());
 });
 
-// Worth storing: our own files answered normally, and a font, which comes back opaque because the page asks
-// for it without CORS. Anything else - a 404, a redirect to a login, an error page - is passed on and forgotten.
-const worthStoring = (response, plan) =>
-  response && (response.ok || (plan === "font" && response.type === "opaque"));
+// Worth storing: an answer that says it worked. Anything else - a 404, a redirect to a login, an error page - is
+// passed on and forgotten.
+//
+// That includes an OPAQUE answer, which says nothing at all: status 0, ok false, whatever it really was. The font
+// stylesheet used to be one - page.html asked for it without CORS - and was stored on trust, so a 403 or a
+// filter's block page in its place was kept and then served FIRST on every load after (fonts come from the store
+// and refresh behind the player), with no way back until the next release emptied the store. page.html asks for
+// it with crossorigin now, so it is judged like everything else; the font files themselves always were.
+const worthStoring = (response) => !!response && response.ok === true;
 
 // A page is stored under its path with the query dropped (sw-rules.mjs's pageKey, which explains why);
 // everything else under the request it came from.
@@ -42,7 +47,7 @@ const keyFor = (request, plan) => (plan === "page" ? pageKey(request, self.locat
 // Storing happens on a copy and off to one side, through event.waitUntil, so the page is never kept waiting
 // for it and the browser doesn't stop the worker halfway through.
 async function store(request, response, plan) {
-  if (!worthStoring(response, plan)) return;
+  if (!worthStoring(response)) return;
   const cache = await caches.open(CACHE);
   await cache.put(keyFor(request, plan), response).catch(() => {});
 }

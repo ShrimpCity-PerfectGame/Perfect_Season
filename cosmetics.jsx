@@ -673,15 +673,19 @@ export const frameReach = (size) => Math.max(3, Math.floor(size / 10));
 // Ink stays today's quiet ring: 4px around the card's 84px picture, 1px in the 24px header.
 const inkReach = (size) => Math.max(1, Math.round(size / 21));
 
+// The items painted in the wearer's favorite team. Without a team they are worn as the plain default, so the
+// shop says so on their tiles (shop.jsx) - a free item that silently looks like Ink or Navy reads as broken.
+export const TEAM_ITEMS = new Set(["frame-team", "card-team"]);
+
 // The look a frame id is worn with: Team colors needs a team, and wears Ink without one.
 export function frameLook(frame, team) {
   const id = known(frame, "frame") || DEFAULT_ITEM.frame;
-  return id === "frame-team" && !teamOf(team) ? DEFAULT_ITEM.frame : id;
+  return TEAM_ITEMS.has(id) && !teamOf(team) ? DEFAULT_ITEM.frame : id;
 }
 // The look a card theme id is painted with: Team colors needs a team, and paints Navy without one.
 export function cardLook(theme, team) {
   const id = known(theme, "card") || DEFAULT_ITEM.card;
-  return id === "card-team" && !teamOf(team) ? DEFAULT_ITEM.card : id;
+  return TEAM_ITEMS.has(id) && !teamOf(team) ? DEFAULT_ITEM.card : id;
 }
 
 // The Undefeated frame's plate: "20-0" drawn as strokes (no font to wait for), lime on ink.

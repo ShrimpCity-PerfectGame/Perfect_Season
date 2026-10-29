@@ -5,9 +5,10 @@
 // two can never drift apart. tests/test-build-seo.mjs checks the built HTML itself.
 import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth } from "./helpers.mjs";
 import {
-  HOWTO_STEPS, HOWTO_NOTE, SITE_PAGES, parseSitePath, HOWTO_PATH, BOARD_PATH, PRIVACY_CONTACT,
+  HOWTO_STEPS, HOWTO_MORE, HOWTO_MORE_TITLE, HOWTO_NOTE, ERA_LIST, SITE_PAGES, parseSitePath, HOWTO_PATH, BOARD_PATH, PRIVACY_CONTACT,
   TERMS_PATH, TERMS_STATE, TERMS_AGE, TERMS_LAW_UNSET, SITE_PAGE_BY_ID, DATA_CREDIT, sitePageBody,
 } from "../site-pages.mjs";
+import { WINDOWS } from "../game-logic.mjs";
 import { readFileSync as readSrc } from "node:fs";
 
 let app = null;
@@ -19,13 +20,14 @@ async function close() {
   app = null;
 }
 // A fresh page at `url`, with How to play already seen - so an open dialog is the address's doing, not a
-// first visit's.
-async function open(url, storage = makeStorage()) {
+// first visit's. `before` runs on the new window ahead of the mount (the Android app's bridge, say).
+async function open(url, storage = makeStorage(), before = null) {
   await close();
   setupDom(url);
   storage.data["personal:ps-howto-seen"] = "true";
   window.storage = storage;
   window.__ps_supabase__ = makeMockAuth();
+  before?.(window);
   app = await mount();
   await flush(4);
   return app.container;
@@ -73,6 +75,45 @@ await runTest("the rules on screen are the rules the built page carries", async 
   // The bold pieces still render as <b>, and "20-0" still can't break across lines.
   assert(rules(c).querySelectorAll("ol li b").length >= HOWTO_STEPS.length, "each step still has its bold pieces");
   assert(rules(c).querySelector("ol li b .nowrap")?.textContent === "20–0", "20-0 stays on one line");
+
+  // The finer points (v2.23.0): the second half of the same rules, in a fold - OPEN here, because somebody who
+  // came to this address came to read the rules. A first visit's dialog folds them; test-first-visit.mjs.
+  const fold = rules(c).querySelector("details.howmore");
+  assert(fold?.open === true, "the finer points are open for somebody who asked for the rules");
+  assert(flat(fold.querySelector("summary").textContent) === HOWTO_MORE_TITLE, `the fold is called ${HOWTO_MORE_TITLE}`);
+  const more = [...fold.querySelectorAll("ul li")].map((li) => flat(li.textContent));
+  assert(more.length === HOWTO_MORE.length, `${HOWTO_MORE.length} finer points, got ${more.length}`);
+  HOWTO_MORE.forEach((step, i) => assert(more[i] === stepText(step), `finer point ${i + 1} matches the shared copy:\n  app  ${more[i]}\n  copy ${stepText(step)}`));
+
+  // And the built page carries both halves, in the same order, with nothing the dialog lacks.
+  const page = flat(sitePageBody(SITE_PAGE_BY_ID.howto).replace(/<[^>]+>/g, "").replace(/&amp;/g, "&"));
+  let at = 0;
+  for (const words of [...HOWTO_STEPS, ...HOWTO_MORE].map(stepText)) {
+    const found = page.indexOf(words, at);
+    assert(found >= 0, `the built page carries "${words.slice(0, 50)}..." after the step before it`);
+    at = found + words.length;
+  }
+  assert(page.includes(HOWTO_MORE_TITLE), "under the same heading");
+});
+
+await runTest("the rules say what the eras really are", async () => {
+  // They said "a five-year era, like Rams, 1999–2005" - and 1999–2005 is the one era that is NOT five years:
+  // the data begins in 1999, so the first takes in seven seasons. A player who checked the example caught the
+  // rules out, which in a game about statistics costs more than the sentence is worth.
+  const words = [...HOWTO_STEPS, ...HOWTO_MORE].map(stepText).join(" ");
+  for (const [from, to] of WINDOWS) assert(words.includes(`${from}–${to}`), `the rules name the ${from}–${to} era`);
+  assert(ERA_LIST === "1999–2005, 2006–2010, 2011–2015, 2016–2020 and 2021–2025", `read from the eras themselves: ${ERA_LIST}`);
+  // Every place a player or a crawler reads the pitch, not just the dialog.
+  const howto = SITE_PAGE_BY_ID.howto;
+  const shell = readSrc(new URL("../page.html", import.meta.url), "utf8");
+  for (const [where, said] of [["the rules", words], ["the page's description", howto.description],
+    ["the page's introduction", howto.intro.join(" ")], ["page.html", shell]]) {
+    assert(!/five[- ]year|5-year/i.test(said), `${where} no longer calls every era five years`);
+  }
+  // The example the first step gives has to be an era the game actually deals.
+  const example = /“\w+, (\d{4})–(\d{4})\.”/.exec(stepText(HOWTO_STEPS[0]));
+  assert(example && WINDOWS.some(([a, z]) => a === Number(example[1]) && z === Number(example[2])),
+    `the first step's example is a real era, got ${example && example[0]}`);
 });
 
 await runTest("/leaderboard opens the Leaderboard and keeps its address; leaving it returns to /", async () => {
@@ -139,10 +180,14 @@ await runTest("the privacy page is a page, not a screen: the app lets the browse
   assert(link && link.textContent === "Privacy", `the footer links it, got ${link && link.textContent}`);
 
   // Nothing in the app answers that address, so the click is the browser's to follow - unlike the rules and
-  // the Leaderboard, which the app takes and opens in place.
-  const clicked = new window.MouseEvent("click", { bubbles: true, cancelable: true });
-  link.dispatchEvent(clicked);
-  assert(!clicked.defaultPrevented, "the app doesn't take the click");
+  // the Leaderboard, which the app takes and opens in place. Read from the window, after React's own listener,
+  // and stopped there: jsdom cannot navigate, and its attempt fires later, in whichever test is running then.
+  let taken = null;
+  const watch = (e) => { taken = e.defaultPrevented; e.preventDefault(); };
+  window.addEventListener("click", watch);
+  link.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  window.removeEventListener("click", watch);
+  assert(taken === false, `the app doesn't take the click (taken: ${taken})`);
   assert(parseSitePath("/privacy") === null, "and no screen claims the address");
 
   const page = SITE_PAGES.find((p) => p.id === "privacy");
@@ -163,6 +208,39 @@ await runTest("the privacy page is a page, not a screen: the app lets the browse
   assert(/sets no cookie/i.test(words), "and what it does not do");
   assert(/no adverts/i.test(words) && /tracking pixels/i.test(words), "while the promises that ARE still true survive");
   // The BUILT proof of that last sentence lives in tests/test-build-seo.mjs, which is the test that builds.
+});
+
+await runTest("in the Android app the pages of words open on the live site, and the screens still open in place", async () => {
+  // In the app a relative /privacy goes to the app's own server, which answers every path without a file
+  // extension with the game's index.html: tapping Privacy reloaded the game onto Modes, and neither the policy
+  // nor the terms could be read from the app at all. An address on the live site is one Capacitor hands to
+  // the phone's browser instead. The website itself is unchanged - the test above holds it to plain paths.
+  const SITE = "https://gridspin.test"; // the test bundle's APP_SITE_URL (tests/helpers.mjs)
+  const c = await open("http://localhost/", makeStorage(), (w) => { w.Capacitor = { isNativePlatform: () => true }; });
+  await until(() => footer(c), () => `the footer, got: ${text(c).slice(-150)}`);
+  const linkFor = (p) => [...footer(c).querySelectorAll(".sitelinks a")].find((a) => a.textContent === p.nav);
+  const words = SITE_PAGES.filter((p) => p.standalone);
+  assert(words.map((p) => p.id).sort().join() === "privacy,terms", `the pages of words are the privacy policy and the terms, got ${words.map((p) => p.id)}`);
+  for (const p of words) {
+    const a = linkFor(p);
+    assert(a?.getAttribute("href") === `${SITE}${p.path}`, `${p.nav} points at the live page, got ${a?.getAttribute("href")}`);
+    // The web view follows it, and Capacitor sends it to the browser: the game must not take the click. Read
+    // from the window, after React's own listener has had it, and stopped there so jsdom (which cannot
+    // navigate) does not try to.
+    let taken = null;
+    const watch = (e) => { taken = e.defaultPrevented; e.preventDefault(); };
+    window.addEventListener("click", watch);
+    a.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    window.removeEventListener("click", watch);
+    assert(taken === false, `the game leaves ${p.nav} to the web view (taken: ${taken})`);
+  }
+  // The screens keep their own paths and still open in place, in the app as on the site.
+  for (const p of SITE_PAGES.filter((x) => !x.standalone)) {
+    assert(linkFor(p)?.getAttribute("href") === p.path, `${p.nav} keeps its path, got ${linkFor(p)?.getAttribute("href")}`);
+  }
+  await click(linkFor(SITE_PAGE_BY_ID.howto));
+  await until(() => rules(c), "the rules from the app's footer");
+  delete window.Capacitor;
 });
 
 
@@ -284,9 +362,14 @@ await runTest("the privacy page accounts for the crash sink in all three places"
   assert(/never your name|not your name|no name/i.test(sectionText), "it says a report carries no name");
   assert(/90 days/.test(sectionText), "and says how long one is kept");
 
-  // The page's own date moves with its copy - the file says to change these together.
-  assert(page.updated === "2026-10-05" && /5 October 2026/.test(sectionText + whole),
-    `the page's date was bumped with its copy: ${page.updated}`);
+  // The page's own date moves with its copy - the file says to change these together. Held to the crash sink's
+  // own release as a floor, and the two dates to EACH OTHER: this asserted the exact day 2026-10-05, so it went
+  // red the next time the policy changed for any other reason (v2.23.0), which is the moment it exists for.
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const said = /last updated on (\d{1,2}) (\w+) (\d{4})/.exec(sectionText);
+  const saidDay = said && `${said[3]}-${String(MONTHS.indexOf(said[2]) + 1).padStart(2, "0")}-${said[1].padStart(2, "0")}`;
+  assert(page.updated >= "2026-10-05", `the page's date is no older than the copy describing the crash sink: ${page.updated}`);
+  assert(saidDay === page.updated, `the date the page prints is the date it carries: "${said && said[0]}" vs ${page.updated}`);
 });
 
 console.log("test-site-pages.mjs done");

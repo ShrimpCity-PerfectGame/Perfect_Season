@@ -605,13 +605,16 @@ function ProfileEditor({ username, details, userId, onSaved, onClose }) {
 }
 
 function HeadlineTiles({ s, rank }) {
-  const rankNote = (r) => (r ? `, ${r === 1 ? "👑 " : ""}#${num(r)} sitewide` : "");
+  // The crown is a picture of "#1", which the words beside it already say, so it is hidden from a screen reader
+  // the way every other emoji on this screen is (Records, the badges). Written into the label as text, it was
+  // read out as "crown, number 1 sitewide" - the one tile on the screen that did.
+  const rankNote = (r) => (r ? <>, {r === 1 && <span aria-hidden="true">👑 </span>}#{num(r)} sitewide</> : null);
   const tiles = [
     { k: "drafts", n: num(draftsOf(s)), l: `Drafts${s.dnf ? `, ${num(s.dnf)} DNF` : ""}` },
     { k: "champs", n: num(s.champs), l: "Championships" },
     { k: "perfect", n: num(s.perfect), l: "Perfect seasons" },
     { k: "playoffs", n: s.runs ? `${Math.round((100 * (s.playoffs || 0)) / s.runs)}%` : "–", l: "Made the playoffs" },
-    ...FORMATS.filter((f) => scoreOf(s, f) != null).map((f) => ({ k: f, n: Number(scoreOf(s, f)).toFixed(1), l: `Best ${FORMAT_LABEL[f]} score${rankNote(rank?.[f])}` })),
+    ...FORMATS.filter((f) => scoreOf(s, f) != null).map((f) => ({ k: f, n: Number(scoreOf(s, f)).toFixed(1), l: <>Best {FORMAT_LABEL[f]} score{rankNote(rank?.[f])}</> })),
   ];
   return (
     <div className="tiles">

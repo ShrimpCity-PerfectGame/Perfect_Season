@@ -22,7 +22,7 @@
 //   screen=cosmetics[&team=KC]                     every frame (24, 40 and 84px, on cream, navy and black), card
 //                                                  theme (a sample player card), title and avatar pack; team=all
 //                                                  adds the Team colors frame and card for all 32 teams
-//   screen=shop&coins=N[&team=KC]                  ShopScreen on the mock, signed in with N coins (default 4,210), a
+//   screen=shop&coins=N[&team=KC|none]             ShopScreen on the mock, signed in with N coins (default 4,210), a
 //                                                  few items owned, a badge item owned through its badge, and a
 //                                                  badge earned but not yet paid (its item says it unlocks next season)
 //   screen=versus[&waiting=1][&done=1][&boom=1][&picks=N]   a duel on the mock: mid-board, from the other side, played
@@ -452,7 +452,8 @@ async function setUpShop() {
   // A veteran's career, so badges are earned: Undefeated is paid (its frame and title are owned), and Dynasty is
   // earned but not paid yet, so its card theme says it unlocks after the next finished season.
   Object.assign(mock._profiles.get(uid), profileFor(uid, username, 0), { champs: 12, perfect: 2, daily_streak: 6, daily_best_streak: 9 });
-  const team = TEAMS[params.get("team")] ? params.get("team") : "KC";
+  // team=none is a player who never picked one - the case the Team colors items have to explain themselves in.
+  const team = params.get("team") === "none" ? null : TEAMS[params.get("team")] ? params.get("team") : "KC";
   mock._profileDetails.set(uid, { user_id: uid, bio: BIOS[0], avatar_path: null, avatar_preset: "helmet", favorite_team: team,
     frame: "frame-lime", card_theme: "card-turf", title: "title-film-room", showcase: [], updated_at: new Date().toISOString() });
   const w = mock._wallet;

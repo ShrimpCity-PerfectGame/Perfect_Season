@@ -7,8 +7,7 @@
 // recovery session that comes back is real in every other way, so without the PASSWORD_RECOVERY branch the
 // player is silently signed in and never asked for the password they came to set.
 import {
-  setupDom, makeStorage, mount, flush, click, type, assert, runTest, findButtonByText, makeMockAuth,
-} from "./helpers.mjs";
+  setupDom, makeStorage, mount, flush, click, type, assert, runTest, findButtonByText, makeMockAuth, closeRules } from "./helpers.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -45,8 +44,7 @@ const openAccount = async () => {
 // The first-run rules dialog opens over everything the first time an account appears on a device, which is
 // correct and is also in the way here. Dismiss it the way a player does.
 const dismissHowTo = async () => {
-  const got = findButtonByText(container, "Got it, let's draft");
-  if (got) { await click(got); await flush(); }
+  if (await closeRules(container)) await flush();
 };
 // Both of these wait for the SCREEN to agree rather than for a fixed number of flushes: the signed-out
 // handler does a lot of state work (it clears every draft slot), so a count that is enough today is a flake

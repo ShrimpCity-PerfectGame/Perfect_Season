@@ -16,7 +16,7 @@ import { fetchShop, fetchWallet, fetchPlayerProfile, buyItem, equipItem, setShow
 import { SHOP_KINDS, KIND_LABEL, SHOP_ITEM_BY_ID, DEFAULT_ITEM, SHOWCASE_MAX, RARITY_LABEL, PACK_BY_ITEM } from "./shop-catalog.mjs";
 import { BADGES, BADGE_BY_ID, badgeProgress } from "./badges.mjs";
 import { Avatar } from "./avatars.jsx";
-import { FramedAvatar, CardTheme, TitleLine, NamePlate, Coins, ItemPreview, CARD_THEME_SCOPE, cardLook } from "./cosmetics.jsx";
+import { FramedAvatar, CardTheme, TitleLine, NamePlate, Coins, ItemPreview, CARD_THEME_SCOPE, cardLook, TEAM_ITEMS } from "./cosmetics.jsx";
 import { cardBadges } from "./profile.jsx";
 import { fmtDate } from "./ui-common.jsx";
 import { TEAMS } from "./game-logic.mjs";
@@ -397,6 +397,9 @@ export function ShopScreen({ userId, username, onBack, onDetailsSaved, onBalance
   const profile = mine?.profile || null;
   const details = profile?.details || null;
   const team = TEAMS[details?.favoriteTeam] ? details.favoriteTeam : null;
+  // Known to have no favorite team - not merely unread. A profile that failed to load says nothing about a team,
+  // and telling that player to go and pick one would be the failed read posing as a fact.
+  const teamless = mine?.status === "ok" && !team;
   const progress = profile ? badgeProgress({ stats: profile.stats, extra: profile.extra, details: profile.details, joined: profile.joined }) : [];
   const earned = new Set(progress.filter((p) => p.earned).map((p) => p.id));
   const earnedBadges = BADGES.filter((b) => earned.has(b.id));
@@ -569,6 +572,7 @@ const showDetails = (d) => setShop((s) => ({
     const line = state === "short" ? `${num(item.price - shop.balance)} more coins`
       : state === "locked" ? (item.rarity === "supporter" ? "Comes with the one-off Supporter unlock"
         : earned.has(item.badge) ? "Unlocks after your next finished season" : `Earn the ${badge?.name || item.badge} badge`)
+        : teamless && TEAM_ITEMS.has(item.id) ? "Pick a favorite team in Edit profile to see it"
         : null;
     const note = msg && msg.at === item.id ? msg : null;
     return (

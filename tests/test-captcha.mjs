@@ -9,8 +9,7 @@
 // and must be **completely inert** until a site key exists: no script, no request to Cloudflare, no token.
 // That is what the first test checks, and it is the one that matters.
 import {
-  setupDom, loadModule, assert, runTest, makeStorage, makeMockAuth, mount, flush, click, type, findButtonByText,
-} from "./helpers.mjs";
+  setupDom, loadModule, assert, runTest, makeStorage, makeMockAuth, mount, flush, click, type, findButtonByText, closeRules } from "./helpers.mjs";
 
 setupDom();
 const { captchaToken, captchaConfigured, captchaReasonForCode } = await loadModule("captcha.mjs");
@@ -100,8 +99,7 @@ const field = (label) => {
 };
 const openAccount = async () => {
   // The first-run rules dialog opens over everything; dismiss it the way a player does.
-  const got = findButtonByText(container, "Got it, let's draft");
-  if (got) { await click(got); await flush(); }
+  if (await closeRules(container)) await flush();
   const nav = findButtonByText(container, "Account");
   assert(nav, `the Account tab is reachable: ${container.textContent.replace(/\s+/g, " ").slice(-200)}`);
   await click(nav);
