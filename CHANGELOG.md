@@ -31,12 +31,19 @@ four things the game writes there: an Over/Under game in progress, a finished se
 (`ps-unsent-run`, which shipped in v2.22.1 with no word on the page), a duel invite held while you sign in, and
 the copy of the site's own files the service worker keeps for offline play. It names all of them now, and the
 new first-draft flag (`ps-coach`), and says that a game in progress is marked with the account it belongs to.
+It also says what the sign-in kept in your browser really is: not "the token" but the session, which holds your
+account's email address and, after a Google sign-in, what Google sent with it, such as your name and picture link.
+And it says the offline copy holds nothing about you, "not even the address a page was opened at", which was not
+true until this release (see Fixed).
+
 The page promises that every line is something the code does, so `tests/test-site-pages.mjs` now reads every
-`ps-` key in the shipped code and fails on one the page does not account for. The date is held to the words too:
-a digest of the policy's text is pinned beside the date it last changed on, so changing the words without moving
-the date fails. The pin it replaced held the date to exactly 5 October, which failed on any change at all, and
-the first fix for that held the date only to itself, which a reviewer showed would pass a policy edited with its
-old date left on it.
+`ps-` key in the shipped code, including one built at run time, and fails on one the page does not account for. It
+also fails on code anywhere but the storage shim that writes to the browser's storage directly, or anywhere but
+the service worker that uses Cache Storage, since the scan could not see either. The date is held to the words: a
+digest of the policy's text, every paragraph of it including the dated one with only the date taken out, is
+pinned beside the date it last changed on, so changing the words without moving the date fails. The pin it
+replaced held the date to exactly 5 October, which failed on any change at all, and the first fix for that held
+the date only to itself, which a reviewer showed would pass a policy edited with its old date left on it.
 
 **The font stylesheet's address changes on purpose** (`family=Inter...&family=Anton` instead of the other way
 round). A returning player's browser still runs the 2.22.x service worker on the first load after the deploy,
@@ -62,15 +69,21 @@ choosing among seven modes, under a pill announcing that one person was online. 
 - **The first draft is the first visit.** The first-visit dialog's own button is **Start my first draft 🏈**,
   which deals an Unlimited board straight away; **Look around first** closes it onto Modes as before. It is
   offered only where starting a draft takes nothing from anybody: on Modes, with no challenge card waiting (that
-  visitor came for those boards), nothing in progress, and never to an account with drafts behind it. It is not
-  offered on `/how-to-play` either, where the reader came for the rules.
+  visitor came for those boards), nothing in progress, and never to an account that has finished a season. It is
+  not offered on `/how-to-play` either, where the reader came for the rules.
 
   Whether to offer it depends on whose account this is, so a first visit's rules wait until the session and its
   profile have been read. Opened sooner, they offered a first draft to an account with twelve and took the offer
-  back when its profile landed. The dialog's main button is one element whose words follow the offer, so if the
-  offer does change (a profile that failed to load and is read later), the button with focus is never the one
-  taken away. Swapped for two new buttons, it left a keyboard or screen-reader visitor on `<body>`, outside the
-  modal, where Enter did nothing.
+  back when its profile landed. Waiting has rules of its own, each found the hard way. The rules wait behind a
+  name to pick or a password to set, which arrive with the session: opened after them, they sat under those
+  dialogs on screen and took their focus, so what the player typed went nowhere and Enter dealt a board behind a
+  dialog that cannot be closed. They never open over a game, since Modes works during the wait and a draft or a
+  timed Over/Under round may already be under way. Rules the player asked for meanwhile stay theirs rather than
+  turning into a first visit's, and closing any rules counts as seeing them. The dialog's main button is one
+  element whose words follow the offer, and it never takes focus from another dialog, so if the offer does change
+  (a profile that failed to load and is read later), the button with focus is never the one taken away. Swapped
+  for two new buttons, it left a keyboard or screen-reader visitor on `<body>`, outside the modal, where Enter did
+  nothing.
 
   That draft then teaches what the rules stopped front-loading, one line at a time and only when it applies.
   The re-spins come up on the first board, while both are still there to spend. Flex comes up when the player
@@ -80,9 +93,9 @@ choosing among seven modes, under a pill announcing that one person was online. 
   phone sizes. It stops once a Flex slot is filled. The scoring comes up on the first result, the one point
   where a format means something. Coaching ends at that result, which is recorded the moment it appears, so a
   reload afterwards is a veteran's. It never starts on a device that had closed the rules before this release,
-  or for an account with drafts behind it, on any device. That last is asked once per account: asked on every
-  change, a signed-in newcomer's own Reset on the coached draft, which charges a DNF, read as a veteran's history
-  and switched the tips off on the draft they were for. First-visit rules that a duel screen closes are held
+  or for an account that has finished a season, on any device. "Finished" is the point: a signed-in newcomer's
+  own Reset on the coached draft charges a DNF, and counted as "drafts behind it", that switched the tips off on
+  the draft they were for, on the same page and again after any reload. First-visit rules that a duel screen closes are held
   again and open on the next screen, as they are for somebody who arrives on a duel; before, they left their
   first-visit state behind, and the rules somebody asked for later opened folded, offering a first draft.
   `tests/test-first-visit.mjs` is new, and every rule in it was checked by breaking the code it guards.
@@ -109,13 +122,14 @@ choosing among seven modes, under a pill announcing that one person was online. 
   era, read from `WINDOWS` so the sentence cannot go stale. A test fails if any of the four says five-year
   again, or if the example stops being an era the game deals.
 
-- **Championship was said to count "only yards and touchdowns", and it also counts turnovers.** It drops the
-  point for a catch and nothing else, so an interception or a lost fumble costs two points in both formats.
-  Across the board's 185 heaviest turnover seasons (fifteen or more), Championship points sit 35 below what
-  yards and touchdowns alone would give, on average. The claim was in four places before this release (the rules, the note under the
-  format picker, the note under a graded roster) and this release's new scoring tip repeated it. All of them
-  say "no point for a catch, just yards, touchdowns and turnovers" now, and a test checks that against the data
-  and against every place the app says it.
+- **Championship was said to count "only yards and touchdowns".** It drops the point for a catch and nothing
+  else, so it also counts turnovers (two points off in both formats; across the board's 185 heaviest turnover
+  seasons, Championship points sit 35 below yards and touchdowns alone) and two-point conversions (two points
+  on, in at least 552 of the board's 3,124 seasons and about half of its quarterbacks'). The claim was in three places before this
+  release (the rules, the note under the format picker, the note under a graded roster) and this release's new
+  scoring tip repeated it; the first fix, "just yards, touchdowns and turnovers", was a closed list too, and the
+  data caught it out again. All of them say "everything Fantasy counts except the point for a catch" now, which is
+  how the code computes it, and a test checks that against every board season and every place the app says it.
 
 - **"Skip to the game" threw keyboard users to Modes.** Following its `#content` made a history entry with no
   state, the browser announced it as a move through history, and the handler that puts screens back for Back
@@ -140,6 +154,15 @@ choosing among seven modes, under a pill announcing that one person was online. 
   real Chromium: both faces load, the sheet's rules are readable as a CORS response, and the worker stores it
   as one. See above for why its address changes too.
 
+- **The offline store kept the address every page was opened at, sign-in tokens included.** Pages were already
+  stored under their path alone, but a stored Response keeps the URL it was fetched from, and Cache Storage writes
+  it to disk beside the page. So it held your profile's address, a challenge link's record, and the return from a
+  Google sign-in or a password-reset link, which this client's implicit flow brings back as
+  `/#access_token=...&refresh_token=...`. In Chromium those tokens were still on disk after the address bar had
+  dropped them, after signing out and after the browser was closed. A page is now stored as a fresh copy built
+  from its body, status and headers, which carries no address; offline it opens exactly as before (checked in
+  Chromium: no address, no token on disk, and `/u/someone` still opens the game with no network).
+
 - **Android: Privacy and Terms could not be opened from the app.** In the app, `/privacy` goes to Capacitor's
   local server, which answers every path without a file extension with the game itself, so the game reloaded
   onto Modes. Inside the app those two links now point at the live site, which Capacitor hands to the phone's
@@ -147,7 +170,7 @@ choosing among seven modes, under a pill announcing that one person was online. 
   present; the app has still never run on a phone.
 
 - **Android: Back walked into screens you had already left, and closed the app from a profile.** Three routes,
-  all fixed. Your profile, the Shop from its card, the Leaderboard tab, then Back: Modes, correctly, and the next
+  all fixed, and a fourth below that the website had too. Your profile, the Shop from its card, the Leaderboard tab, then Back: Modes, correctly, and the next
   Back opened the Shop instead of leaving the app. Every history entry now records how many entries the game
   pushed above the first, and Back from a tab goes to Modes past all of them at once. The same stops came back
   when Modes was reached by its own tab, which opens it on top of the screen it was tapped from; Back on Modes
@@ -155,6 +178,12 @@ choosing among seven modes, under a pill announcing that one person was online. 
   the Account tab turns that screen into your profile in the entry the app opened in, so Back there had nothing
   to walk back to and closed the app; it goes to Modes now. `tests/test-app-shell.mjs` drives the real `goBack`
   for all three.
+
+- **Back after Keep my seasons opened a player who no longer exists.** A guest's Account screen renamed itself to
+  the new name, the history read that as a new screen and pushed one, and Back (the browser's or the app's) then
+  opened the retired `Guest_` name: "There's no player with that name.", at the moment a guest became a real
+  account. Live on production as of 2.22.1. The entry is rewritten in place now, a screen that named the guest
+  outright follows the new name, and an older entry that still names it opens your own profile.
 
 - **The shop's tests had been red since 14 October because of the calendar alone.** The showcase test expected a
   brand-new account to have Day One, which is earned by joining before `DAY_ONE_BEFORE`. It pins the join date

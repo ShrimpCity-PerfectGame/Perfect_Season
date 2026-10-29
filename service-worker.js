@@ -44,12 +44,26 @@ const worthStoring = (response) => !!response && response.ok === true;
 // everything else under the request it came from.
 const keyFor = (request, plan) => (plan === "page" ? pageKey(request, self.location.origin) || "/" : request);
 
+// A page is stored as a copy of itself that carries no address. The KEY was already only its path (keyFor), but a
+// Response keeps the URL it was fetched from, and cache.put files that alongside the body - so the store held the
+// address every page was last opened at. That is a profile's /u/<name>, a challenge link's ?beat=, and worst, the
+// return from signing in with Google or following a password-reset link, which supabase-js's implicit flow brings
+// back as /#access_token=...&refresh_token=...&provider_token=... - written to disk in Cache Storage, where it
+// outlived the hash being cleared from the address bar, signing out, and closing the browser (measured in
+// Chromium). A Response built from the body, status and headers alone has no URL to keep, and serves offline
+// exactly as the original did. Everything else stored is the site's own files and Google's fonts, at addresses
+// that carry nothing about anybody.
+async function forStore(response, plan) {
+  if (plan !== "page") return response;
+  return new Response(await response.blob(), { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
 // Storing happens on a copy and off to one side, through event.waitUntil, so the page is never kept waiting
 // for it and the browser doesn't stop the worker halfway through.
 async function store(request, response, plan) {
   if (!worthStoring(response)) return;
   const cache = await caches.open(CACHE);
-  await cache.put(keyFor(request, plan), response).catch(() => {});
+  await cache.put(keyFor(request, plan), await forStore(response, plan)).catch(() => {});
 }
 
 // The network, with what's stored as the fallback. A page falls back to the shell as well, so a profile or a

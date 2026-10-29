@@ -4,7 +4,7 @@
 // first board, Flex when a player could go there, the scoring on the first result. Then it stops, for good. A
 // device that was here before the tips existed, or an account with drafts behind it, never sees one. And Modes
 // leads with the two drafts, with everything else grouped under them.
-import { setupDom, makeStorage, mount, flush, click, text, findButtonByText, assert, runTest, makeMockAuth, clickMode, closeRules } from "./helpers.mjs";
+import { setupDom, makeStorage, mount, flush, click, type, text, findButtonByText, assert, runTest, makeMockAuth, clickMode, closeRules } from "./helpers.mjs";
 import { HOWTO_STEPS, HOWTO_MORE } from "../site-pages.mjs";
 
 let app = null;
@@ -151,8 +151,8 @@ await runTest("Start my first draft deals a board, and the draft teaches as it g
   // The first result: the scoring, now there is a graded season to read it against.
   await finishSeason(c);
   await until(() => tipAbout(c, "This season was scored in Fantasy"), () => `the scoring on the first result, got ${tips(c)}`);
-  assert(!/only yards and touchdowns|yards and touchdowns only/i.test(tipAbout(c, "This season was scored in Fantasy")),
-    "and what it says of Championship is true: turnovers count there too");
+  assert(!/\b(only|just) yards\b|yards and touchdowns only|yards, touchdowns and turnovers/i.test(tipAbout(c, "This season was scored in Fantasy")),
+    "and what it says of Championship lists nothing the data can catch out");
   assert(stored(storage, "ps-coach") === '"done"', "the first result is the end of it, recorded as it appears");
 
   // And that is the end. The next draft is anybody's.
@@ -305,6 +305,117 @@ await runTest("a profile that answers late changes the offer without taking the 
   assert(focused.textContent === "Got it, let's draft", `now saying what it does, got ${focused.textContent}`);
 });
 
+// The session can take a round trip or two to settle, and the first-visit rules wait for it. Anything the session
+// itself brings - a name to pick, a password to set - and anything the player starts meanwhile has to come first.
+function holdSession(auth) {
+  let release = null;
+  const held = new Promise((r) => { release = r; });
+  const getSession = auth.auth.getSession.bind(auth.auth);
+  auth.auth.getSession = async () => { await held; return getSession(); };
+  return () => release();
+}
+const nameDialog = (c) => c.querySelector('[role="dialog"][aria-labelledby="pickname-title"]');
+const passwordDialog = (c) => [...c.querySelectorAll('[role="dialog"]')].find((d) => /Set a new password/i.test(d.textContent)) || null;
+
+await runTest("a name to pick comes before the rules, and keeps the player's focus", async () => {
+  // A Google account with no profile, on a device that never closed the rules: the name dialog arrives with the
+  // session, and the rules used to open after it - under it on screen, over it in focus - so what the player
+  // typed went nowhere and Enter dealt a board behind a dialog that cannot be closed.
+  const auth = makeMockAuth();
+  const release = holdSession(auth);
+  const c = await open({ auth });
+  const { act } = await import("react-dom/test-utils");
+  await act(async () => { auth._googleSignIn("brand-new@example.com"); });
+  await until(() => nameDialog(c), "the name to pick");
+  release();
+  await flush(8);
+  assert(!rules(c), "the rules wait while there is a name to pick");
+  const field = nameDialog(c).querySelector("input");
+  assert(document.activeElement === field, `the player is still typing their name, focus on ${document.activeElement?.tagName}`);
+  await type(field, "Fresh_Name");
+  await click(findButtonByText(nameDialog(c), "That's my name"));
+  await until(() => !nameDialog(c) && rules(c), "the rules, once the name is picked");
+  assert(buttonsIn(rules(c)).includes("Start my first draft 🏈"), `and they are a first visit's, for an account with no seasons: ${buttonsIn(rules(c))}`);
+  assert(rules(c).contains(document.activeElement), "with the focus theirs now");
+});
+
+await runTest("a password to set comes before the rules, and Escape closes the dialog in front", async () => {
+  const auth = makeMockAuth();
+  await auth.auth.signUp({ email: "forgetful@example.com", password: "Password1", options: { data: { username: "forgetful" } } });
+  await auth.auth.signOut();
+  const release = holdSession(auth);
+  const c = await open({ auth });
+  const { act } = await import("react-dom/test-utils");
+  await act(async () => { auth._followRecoveryLink("forgetful@example.com"); });
+  await until(() => passwordDialog(c), "the new password to set");
+  release();
+  await flush(8);
+  assert(!rules(c), "the rules wait while there is a password to set");
+  assert(passwordDialog(c).contains(document.activeElement), `focus stays on the password, got ${document.activeElement?.tagName}`);
+  await act(async () => { window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" })); });
+  await flush(4);
+  assert(!passwordDialog(c), "Escape closes the dialog the player is looking at");
+  await until(() => rules(c), "and the rules follow it");
+});
+
+await runTest("the rules never take the focus from another dialog, even when their offer changes", async () => {
+  // Defence in depth for the two tests above. In a browser a reset link's PASSWORD_RECOVERY arrives before the
+  // session settles, so the held rules wait for it. Here the rules are open first and the password dialog arrives
+  // over them; the account it brings has seasons, so the rules' offer of a first draft is withdrawn while the
+  // other dialog has the player's focus. Re-focusing on that change must not pull the focus back under it.
+  const auth = makeMockAuth();
+  const { data } = await auth.auth.signUp({ email: "seasoned@example.com", password: "Password1", options: { data: { username: "seasoned" } } });
+  Object.assign(auth._profiles.get(data.user.id), { runs: 9, wins: 90, losses: 63 });
+  await auth.auth.signOut();
+  const c = await open({ auth });
+  await until(() => rules(c), "a first visit's rules");
+  assert(buttonsIn(rules(c)).includes("Start my first draft 🏈"), "offering a first draft to nobody in particular");
+  const { act } = await import("react-dom/test-utils");
+  await act(async () => { auth._followRecoveryLink("seasoned@example.com"); });
+  await until(() => passwordDialog(c), "the new password to set");
+  await until(() => !buttonsIn(rules(c)).includes("Start my first draft 🏈"), () => `the offer withdrawn, got ${buttonsIn(rules(c))}`);
+  await flush(4);
+  assert(passwordDialog(c).contains(document.activeElement),
+    `the focus stays in the dialog in front, got ${document.activeElement?.tagName} "${document.activeElement?.textContent}"`);
+});
+
+await runTest("rules asked for while the session settles are the player's, and are not reopened once closed", async () => {
+  const auth = makeMockAuth();
+  await auth.auth.signUp({ email: "reader@example.com", password: "Password1", options: { data: { username: "reader" } } });
+  const storage = makeStorage();
+  const release = holdSession(auth);
+  const c = await open({ storage, auth });
+  assert(!rules(c), "held while the session settles");
+  await click(findButtonByText(c, "How to play"));
+  await until(() => rules(c), "the rules, asked for");
+  const button = findButtonByText(rules(c), "Got it, let's draft");
+  assert(button && rules(c).querySelector("details.howmore")?.open === true, "whole, with nothing offered");
+  release();
+  await flush(8);
+  // Converted into a first visit's, the fold closed under the reader and the focused "Got it" became "Start my
+  // first draft", so the press meant to close the rules dealt a board.
+  assert(rules(c).querySelector("details.howmore")?.open === true && button.textContent === "Got it, let's draft",
+    `still the rules they asked for: ${buttonsIn(rules(c))}`);
+  await click(button);
+  await flush(8);
+  assert(!rules(c) && !cards(c).length, `closed, and nothing dealt: ${!!rules(c)} ${cards(c).length}`);
+  assert(stored(storage, "ps-howto-seen") === "true", "and seen, so no first visit's rules follow them");
+});
+
+await runTest("a game started while the session settles is not covered by the first visit's rules", async () => {
+  const auth = makeMockAuth();
+  await auth.auth.signUp({ email: "quick@example.com", password: "Password1", options: { data: { username: "quickstart" } } });
+  const release = holdSession(auth);
+  const c = await open({ auth });
+  await clickMode(c, "Unlimited");
+  await boardDealt(c);
+  release();
+  await flush(10);
+  assert(!rules(c), "no rules dropped over the board they started");
+  await click(tab(c, "Modes"));
+  await until(() => rules(c), "the rules, on the next screen that is not a game");
+});
+
 await runTest("a signed-in newcomer who resets the first draft is still coached through the next one", async () => {
   // Reset charges a DNF, which moves an account's stats at once - and read as "an account with drafts behind
   // it", that switched the tips off for good on the very draft they were for. A signed-out newcomer kept them.
@@ -327,6 +438,14 @@ await runTest("a signed-in newcomer who resets the first draft is still coached 
   await flush(4);
   assert(tipAbout(c, "re-spin"), `the next first board is still coached, got ${tips(c)}`);
   assert(stored(storage, "ps-coach") === '"on"', `and the device is still coaching, got ${stored(storage, "ps-coach")}`);
+
+  // And after a reload. Asked once per PAGE, the account's DNF read as a veteran's history on the next load and the
+  // tips went for good - with no result ever shown. A newcomer is an account with no FINISHED season.
+  const again = await open({ storage, auth });
+  await clickMode(again, "Unlimited");
+  await boardDealt(again);
+  assert(tipAbout(again, "re-spin"), `still coached after a reload, got ${tips(again)}`);
+  assert(stored(storage, "ps-coach") === '"on"', `and still coaching, got ${stored(storage, "ps-coach")}`);
 });
 
 await runTest("first-visit rules a duel closed come back on the next screen, and rules asked for later are the whole rules", async () => {
@@ -353,24 +472,24 @@ await runTest("first-visit rules a duel closed come back on the next screen, and
   assert(JSON.stringify(buttonsIn(rules(c))) === JSON.stringify(["×", "Got it, let's draft"]), `and offer nothing but closing, got ${buttonsIn(rules(c))}`);
 });
 
-await runTest("Championship is described the way it is scored, turnovers and all", async () => {
-  // The data first. Championship takes the reception point away and nothing else, so an interception or a lost
-  // fumble costs two points in it exactly as it does in Fantasy: across the board's heaviest turnover seasons,
-  // Championship points sit far below what yards and touchdowns alone would give. Every sentence that said
-  // Championship counted "only yards and touchdowns" was therefore wrong, the new scoring tip among them.
+await runTest("Championship is described the way it is scored: everything Fantasy counts but the catch", async () => {
+  // The data first. Championship points are Fantasy points minus one per catch, on every board season, and nothing
+  // else differs - so any sentence that LISTS what Championship counts is a sentence the data can catch out. Two
+  // did, one after the other: "only yards and touchdowns" left out turnovers, which cost two points in both
+  // formats, and its replacement, "just yards, touchdowns and turnovers", left out two-point conversions, which
+  // score in a fifth of the board's seasons and half its quarterbacks'.
   const { initGameData, BOARDS } = await import("../game-logic.mjs");
   const fs = await import("node:fs");
   const data = JSON.parse(fs.readFileSync(new URL("../data/players.json", import.meta.url), "utf8"));
   initGameData(data.players, data.opponents);
-  const heavy = Object.values(BOARDS).flat().filter((p) => p.int + p.fl >= 15);
-  const yardsAndTds = (p) => p.py * 0.04 + p.ptd * 4 + (p.ry + p.rcy) * 0.1 + (p.rtd + p.rctd) * 6;
-  const below = heavy.reduce((a, p) => a + yardsAndTds(p) - p.stdPoints, 0) / heavy.length;
-  assert(heavy.length > 50 && below > 25,
-    `turnovers cost points in Championship: ${heavy.length} seasons, ${below.toFixed(1)} points below yards and touchdowns alone`);
+  const rows = Object.values(BOARDS).flat();
+  const off = rows.filter((p) => Math.abs(p.stdPoints - (p.ppr - p.rec)) > 1e-9);
+  assert(rows.length > 3000 && off.length === 0, `Championship is Fantasy without the catch, on all ${rows.length} seasons: ${off.length} differ`);
 
   const says = (t, where) => {
-    assert(t && /turnovers/.test(t), `${where} names turnovers: ${t}`);
-    assert(!/only yards and touchdowns|yards and touchdowns only/i.test(t), `${where} doesn't say yards and touchdowns are all that counts: ${t}`);
+    assert(t && /except the point for a (catch|reception)/.test(t), `${where} says it is Fantasy without the catch: ${t}`);
+    assert(!/\b(only|just) yards\b|yards and touchdowns only|yards, touchdowns and turnovers/i.test(t),
+      `${where} doesn't list what Championship counts, which the data has caught out twice: ${t}`);
   };
   const flat = (step) => step.map((part) => (typeof part === "string" ? part : part.text)).join("");
   says(flat(HOWTO_MORE.find((step) => flat(step).includes("scoring format")) || []), "the rules");

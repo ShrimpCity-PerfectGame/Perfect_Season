@@ -2288,11 +2288,19 @@ const HOWTO_KEY = "ps-howto-seen";
 // rules, so a player who was here before the tips existed is never shown one - and an account with drafts behind
 // it switches them off on any device it signs in on.
 const COACH_KEY = "ps-coach";
+// Who is still a newcomer: an account that has never FINISHED a season. Not one with no drafts at all - a newcomer's
+// own Reset on the coached draft is a DNF, which moves the stats at once, and read as "drafts behind it" it switched
+// the tips off on the draft they were for (on the same page until v2.23.0's review, and after any reload until its
+// second). A finished season is also exactly what coaching leads up to: its last tip is on the first result.
+const finishedSeasons = (stats) => (stats ? stats.runs || 0 : 0);
 // The "online now" pill appears from this many players up. It counts every open tab, the viewer's own among
 // them, so on a young site it read "1 online now" - telling a newcomer, before anything else, that nobody was
 // here. Below this the hero says nothing about it and the challenge does the selling; above it the number is
 // worth showing again, with no release needed. The count is still kept either way.
 const ONLINE_SHOWN_FROM = 10;
+// Screens with a game in progress on them, which a first visit's held rules never open over (1v1 has rules of its
+// own and is handled apart). A modal over Over/Under's real-time round costs a life.
+const GAME_VIEWS = new Set(["play", "statsou", "buildplayer", "century", "guess"]);
 const SOU_DONE_KEY = (d) => `ps-sou:${d}`;
 // Century's own "today is played" hint, kept the same way Over/Under's is: a per-device key, so the Modes tile
 // can answer without a network read. It is a HINT, not the record - century_runs is, and the Century screen asks
@@ -2491,7 +2499,11 @@ function HowTo({ onClose, onStart = null, folded = false }) {
     // keyboard or screen-reader user on <body>, outside the modal, where Enter did nothing.
     // preventScroll: focusing the button at the bottom otherwise opens the dialog scrolled past
     // steps 1-3 on a phone.
-    if (!dialog.current?.contains(document.activeElement)) btn.current?.focus({ preventScroll: true });
+    // Never from another dialog, though: one that has the player's focus is the one in front of them.
+    const active = document.activeElement;
+    const elsewhere = active?.closest?.('[role="dialog"]');
+    if (elsewhere && elsewhere !== dialog.current) return;
+    if (!dialog.current?.contains(active)) btn.current?.focus({ preventScroll: true });
     // Escape is useCloseOnBack's, above - one register, so only the dialog on top answers.
   }, [offering]);
   // The steps are shared with the crawlable /how-to-play page (site-pages.mjs), so the rules can't drift into
@@ -3209,13 +3221,24 @@ export default function PerfectSeason() {
       }
       return;
     }
-    // Held until the session is known as well: whether to offer a first draft depends on whose account this is,
-    // and offering it, then taking it away when the profile answers, swapped the buttons under the player's focus.
-    if (!pendingHowTo || !authReady) return;
+    if (!pendingHowTo) return;
+    // Rules already on screen - asked for from the header, a footer link or /how-to-play's own address - are the
+    // rules this player is reading, and closing them records them as seen. They are not converted into a first
+    // visit's: that closed the fold under somebody reading it, and turned the focused "Got it" into "Start my first
+    // draft", so the press meant to close the rules dealt a board instead.
+    if (howTo) { setPendingHowTo(false); return; }
+    // Held until the session is known: whether to offer a first draft depends on whose account this is, and
+    // offering it, then taking it away when the profile answered, swapped the buttons under the player's focus.
+    // Held behind the two dialogs a session can arrive with, too - a name to pick, a password to set - which
+    // otherwise opened FIRST, so the rules opened over them in the DOM and under them on screen, and took the
+    // focus: what the player typed went nowhere and Enter dealt a board behind a dialog that cannot be closed.
+    // And never over a game: the session can take a round trip or two, Modes works meanwhile, and a draft, a
+    // timed Over/Under round or one of the other games may already be under way - the rules wait until it is left.
+    if (!authReady || needsName || resetting || GAME_VIEWS.has(view)) return;
     setPendingHowTo(false);
     setHowToFirst(true);
     setHowTo(true);
-  }, [pendingHowTo, view, howTo, howToFirst, authReady]);
+  }, [pendingHowTo, view, howTo, howToFirst, authReady, needsName, resetting]);
 
   // A newcomer is coached through one draft and its result. The result is recorded as the end the moment it
   // appears - a reload from there on is not a first draft - and the tips go when the player moves on from it.
@@ -3226,28 +3249,31 @@ export default function PerfectSeason() {
       if (!coachedResult.current) { coachedResult.current = true; sset(COACH_KEY, "done", false); }
     } else if (coachedResult.current) setCoaching(false);
   }, [coaching, result]);
-  // ...and an account with drafts behind it is no newcomer, whatever this device has or hasn't seen. Asked ONCE
-  // per account, when its stats first arrive: asked on every change, a newcomer's own Reset on the first draft -
-  // a DNF, which moves the stats straight away - read as a veteran's history and switched the tips off for good,
-  // on the very draft they were for. Declared after the effect above on purpose: a first season's own result is
-  // recorded before the stats it moves could be asked about.
-  const coachAsked = useRef(undefined);
+  // ...and an account that has finished a season is no newcomer, whatever this device has or hasn't seen
+  // (finishedSeasons, above). Declared after the effect above on purpose: a first season's own result is recorded
+  // before the stats it moves are read here.
   useEffect(() => {
-    if (!coaching || coachedResult.current || !stats || coachAsked.current === userId) return;
-    coachAsked.current = userId;
-    if (draftsOf(stats) > 0) {
+    if (!coaching || coachedResult.current || !stats) return;
+    if (finishedSeasons(stats) > 0) {
       setCoaching(false);
       sset(COACH_KEY, "done", false);
     }
-  }, [coaching, stats, userId]);
+  }, [coaching, stats]);
 
   // Back and Forward put back the screen the entry describes, opening it the way its tab or tile would -
   // Over/Under and Build-a-player through their own openers, since leaving them dropped the round or build.
   const onHistoryMove = useRef(null);
   // Set by the Android app's Back on its way to Modes past the entries it pushed (onAppBack, below).
   const backToModes = useRef(false);
+  // Guest names this account traded for a real one (onSeasonsKept), lower-cased. Nobody holds them any more.
+  const retiredNames = useRef(new Set());
   onHistoryMove.current = (state) => {
     let s = screenOf(state, window.location.pathname);
+    // An entry from before the trade still names the guest. It meant your own profile then, and still does.
+    if (s.ps === "profile" && user && retiredNames.current.has(String(s.name).toLowerCase())) {
+      s = { ps: "profile", name: user };
+      writeHistory("replaceState", s, pathFor(s));
+    }
     // That Back lands on the entry the page opened in, which in the app is Modes. Were it anything else, the
     // press still meant Modes - so Modes it is, and the entry says so.
     if (backToModes.current) {
@@ -3770,7 +3796,23 @@ export default function PerfectSeason() {
   async function onSeasonsKept(username) {
     let fresh = null;
     try { fresh = userId ? await fetchProfile(userId) : null; } catch (e) { /* it has already happened */ }
-    setUser(fresh?.username || username);
+    const name = fresh?.username || username;
+    // The guest's own Account screen is the same screen under its new name, so its history entry is rewritten in
+    // place before `user` moves. Left to the history effect, it read a profile changing name as a new screen and
+    // pushed one, and Back - the browser's or the app's - then opened the retired Guest_ name, which belongs to
+    // nobody now: "There's no player with that name.", at the moment a guest became a real account.
+    const here = historyScreen.current;
+    if (here?.ps === "profile" && sameName(here.name, user)) {
+      const renamed = { ps: "profile", name };
+      historyScreen.current = renamed;
+      writeHistory("replaceState", renamed, pathFor(renamed));
+    }
+    // Reached by Back or Forward, the screen names the guest outright rather than meaning "your own", and kept
+    // showing that name after the trade.
+    if (profileOf && sameName(profileOf, user)) setProfileOf(null);
+    // Any older entry that still names it opens your profile instead (onHistoryMove).
+    if (user) retiredNames.current.add(user.toLowerCase());
+    setUser(name);
     // The trade-up is done - claim_username answered "ok" before this was called - so what it did is
     // applied from what we know, not from a re-read that may not arrive. Waiting on the read left the
     // account with `guest` still true under its new name, and the app gates the daily, the shop and
@@ -3782,8 +3824,8 @@ export default function PerfectSeason() {
     // season, and is only now a real one. `guest` is false by definition here: claim_username answered ok.
     const dailyRes = await flushPendingDaily(userId, false);
     setNotice(dailyRes?.ok
-      ? `Your seasons are yours, ${fresh?.username || username} - and the daily you were holding is on the board.`
-      : `Your seasons are yours, ${fresh?.username || username}.`);
+      ? `Your seasons are yours, ${name} - and the daily you were holding is on the board.`
+      : `Your seasons are yours, ${name}.`);
     loadLeaderboard();
     // ...and the Stats boards, which load once and then cache. Without this they kept showing the retired
     // Guest_XXXXX name, chip and all, under an account that no longer exists - until the player happened
@@ -4929,6 +4971,8 @@ export default function PerfectSeason() {
   function closeHowTo() {
     setHowTo(false);
     setHowToFirst(false);
+    // Closing any rules counts as having seen them, so none are left waiting to open again as a first visit's.
+    setPendingHowTo(false);
     sset(HOWTO_KEY, true, false);
     // Opened from /how-to-play: that address described the rules, so closing them puts the screen
     // underneath back in the address bar.
@@ -5164,7 +5208,7 @@ export default function PerfectSeason() {
   // Not on rules opened by /how-to-play either: that dialog is on screen from the first render, before the visit
   // is known to be a first one, so offering there means swapping its buttons under the reader's focus.
   const firstDraftOffer = howToFirst && view === "home" && !challenge && !freeInProgress && !atHowTo.current
-    && !FORMATS.some((f) => dailyPicksFor(f) > 0) && !(stats && draftsOf(stats) > 0);
+    && !FORMATS.some((f) => dailyPicksFor(f) > 0) && finishedSeasons(stats) === 0;
 
   // The Profile tab is lit on your own profile, its Reports queue and the shop (or a guest's login), not on someone else's.
   const tabOn = (k) => (k === "profile"
@@ -5328,7 +5372,7 @@ export default function PerfectSeason() {
               ))}
               <p className="fmtnote">
                 {format === "standard"
-                  ? "Championship scoring gives no point for a catch, just yards, touchdowns and turnovers - so high-volume possession receivers grade lower and big-play producers grade higher. Closer to what wins games than to what wins a fantasy league."
+                  ? "Championship scoring counts everything Fantasy does except the point for a catch - so high-volume possession receivers grade lower and big-play producers grade higher. Closer to what wins games than to what wins a fantasy league."
                   : "Fantasy scoring is full PPR: every reception is worth a point, so target volume counts as much as yardage."}
               </p>
             </div>
@@ -5746,7 +5790,7 @@ export default function PerfectSeason() {
                     finer point that is no use before there is a score. */}
                 {finished && coaching && (
                   <CoachTip>{normFormat(result.format) === "standard"
-                    ? "This season was scored in Championship: no point for a catch, just yards, touchdowns and turnovers. Fantasy scoring adds a point for every catch, so volume receivers rise. Switch formats on Modes - each keeps its own leaderboard and daily."
+                    ? "This season was scored in Championship: everything Fantasy counts except the point for a catch. Fantasy scoring adds that point back, so volume receivers rise. Switch formats on Modes - each keeps its own leaderboard and daily."
                     : "This season was scored in Fantasy: full PPR, a point for every catch. Championship scoring drops that point, so big-play threats rise. Switch formats on Modes - each keeps its own leaderboard and daily."}</CoachTip>
                 )}
                 {finished && share.state === "manual" && (
@@ -5809,7 +5853,7 @@ export default function PerfectSeason() {
                   <>
                     <h2 className="h">Your roster, graded</h2>
                     <RosterRows roster={SLOTS.map((s) => ({ slot: s, ...roster[s], rating: effectiveRating(s, roster[s], mode.format) }))} />
-                    <p className="note">Grades compare each season to the top finishers at that position in the same era, with 17-game seasons scaled to 16. {normFormat(mode.format) === "standard" ? "Championship scoring gives no point for a reception, just yards, touchdowns and turnovers - so volume receivers rate lower and big-play producers rate higher than they do in Fantasy scoring." : "Fantasy scoring is full PPR, so every reception is worth a point."} QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Team score averages the six, with the QB counting 1.25 times.</p>
+                    <p className="note">Grades compare each season to the top finishers at that position in the same era, with 17-game seasons scaled to 16. {normFormat(mode.format) === "standard" ? "Championship scoring counts everything Fantasy does except the point for a reception - so volume receivers rate lower and big-play producers rate higher than they do in Fantasy scoring." : "Fantasy scoring is full PPR, so every reception is worth a point."} QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Team score averages the six, with the QB counting 1.25 times.</p>
                     <p className="note flexnote"><b>Flex is graded differently, on purpose.</b> A named slot compares a player to others at his own position. Flex ignores position entirely and compares raw production across every RB, WR and TE of that era — so a tight end usually rates lower in Flex, and a high-volume back rates higher. Flex is also the only slot with no 130 ceiling: a named slot clips an all-time season at 130, Flex shows its full value. <b>That's why your best player often belongs in Flex rather than his own position.</b></p>
                     {history.length === 6 && (() => {
                       // Board players carry both formats' grades; show the one actually in play.

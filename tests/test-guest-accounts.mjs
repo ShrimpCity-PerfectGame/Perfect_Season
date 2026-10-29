@@ -215,6 +215,85 @@ await runTest("a guest keeps its seasons: same account, own name, everything car
   assert(!/Keep your seasons/i.test(text(c)), "and stops asking");
 });
 
+// Keeping your seasons renames the account on the screen you are looking at. The history effect used to read that
+// as a new screen and push one, so Back - the browser's, or the Android app's, which walks the same entry - opened
+// the retired Guest_ name: a name nobody holds, so "There's no player with that name.", at the very moment a guest
+// became a real account.
+async function keepSeasons(c, email, name) {
+  await until(() => findButtonByText(c, "Keep my seasons"), () => `the keep panel, got: ${text(c).slice(0, 200)}`);
+  const [emailIn, pw, username] = [...c.querySelectorAll(".panel input")];
+  await type(emailIn, email);
+  await type(pw, "Password1");
+  await type(username, name);
+  await click(findButtonByText(c, "Keep my seasons"));
+  await until(() => signedInAs(c) === name, () => `kept as ${name}, got ${signedInAs(c)}`);
+  await flush(4);
+}
+const deadEnd = (c) => /There's no player with that name/i.test(text(c));
+
+await runTest("Back after keeping your seasons goes where you came from, never to the retired guest name", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+  const guest = signedInAs(c);
+  await click(accountTab(c));
+  await until(() => window.location.pathname === `/u/${guest}`, () => `the Account tab at the guest's address, got ${window.location.pathname}`);
+  const entries = window.history.length;
+
+  await keepSeasons(c, "backer@example.com", "Back_Keeper");
+  assert(window.location.pathname === "/u/Back_Keeper", `the screen's address follows the new name, got ${window.location.pathname}`);
+  assert(window.history.length === entries, `in the same entry rather than a new one: ${entries} entries before, ${window.history.length} after`);
+  assert(!deadEnd(c), "and it shows the profile, not a missing player");
+
+  window.history.back();
+  await until(() => window.location.pathname !== "/u/Back_Keeper", "Back to move");
+  await flush(6);
+  assert(!deadEnd(c) && !window.location.pathname.includes(guest),
+    `Back leaves for the screen before, not the retired name: ${window.location.pathname} - ${text(c).slice(-160)}`);
+});
+
+await runTest("...and an older entry that still names the guest opens your own profile instead", async () => {
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+  const guest = signedInAs(c);
+  // Account, Leaderboard, Account again: an entry naming the guest is left two below the one renamed in place.
+  await click(accountTab(c));
+  await until(() => window.location.pathname === `/u/${guest}`, "the Account tab");
+  await click(tab(c, "Leaderboard"));
+  await until(() => window.location.pathname === "/leaderboard", "the Leaderboard");
+  await click(accountTab(c));
+  await until(() => window.location.pathname === `/u/${guest}`, "the Account tab again");
+
+  await keepSeasons(c, "older@example.com", "Old_Entry");
+  window.history.back();
+  await until(() => window.location.pathname === "/leaderboard", () => `the Leaderboard, got ${window.location.pathname}`);
+  window.history.back();
+  await until(() => window.location.pathname !== "/leaderboard", "Back again");
+  await until(() => c.querySelector("section.profile")?.dataset.username === "Old_Entry" || deadEnd(c),
+    () => `a profile, got: ${window.location.pathname} ${text(c).slice(-160)}`);
+  assert(!deadEnd(c), `the guest's old entry is your profile now, not a missing player: ${text(c).slice(-160)}`);
+  assert(window.location.pathname === "/u/Old_Entry", `and its address says so, got ${window.location.pathname}`);
+});
+
+await runTest("keeping your seasons on the guest's own address shows your profile, not the retired name", async () => {
+  // Reached by its address (or by Back and Forward), the screen names the guest outright, rather than meaning
+  // "your own" - and kept showing that name, which belongs to nobody, after the trade.
+  const c = await open();
+  await playUnlimited(c);
+  await until(() => signedInAs(c), "the guest");
+  const guest = signedInAs(c);
+  window.history.pushState({}, "", `/u/${guest}`);
+  window.dispatchEvent(new window.PopStateEvent("popstate", { state: {} }));
+  await until(() => window.location.pathname === `/u/${guest}`, "the guest's own address");
+
+  await keepSeasons(c, "addressed@example.com", "Addr_Keeper");
+  await until(() => c.querySelector("section.profile")?.dataset.username === "Addr_Keeper" || deadEnd(c),
+    () => `a profile, got: ${text(c).slice(-160)}`);
+  assert(!deadEnd(c), `the new name's profile, got: ${text(c).slice(-160)}`);
+  assert(window.location.pathname === "/u/Addr_Keeper", `at its own address, got ${window.location.pathname}`);
+});
+
 // A guest has `user` set, so the header's Log in chip, the result screen's save panel and the
 // profile's Log out are all hidden at once. That is fine until it is somebody who already HAS an
 // account and simply played a season before signing in - on a new phone, say - at which point the app

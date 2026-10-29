@@ -34,11 +34,15 @@ const isFile = (pathname) => pathname.slice(pathname.lastIndexOf("/") + 1).inclu
 
 // Where a page is kept in the store. Keyed by the request itself, as it was, two things went wrong.
 //
-// The serious one: signing in with Google comes back to "/?code=<authorization code>" - Supabase's PKCE flow -
-// and the worker wrote that address into Cache Storage, where it stayed until the next deploy threw the store
-// away. The code is single-use, short-lived, and in the address bar and the history anyway; it is still a
-// credential, and this site should not be the one filing a copy of it. The same goes for anything else that
-// ever arrives in a query.
+// The serious one: anything that arrives in a query was written into Cache Storage as part of the KEY, where it
+// stayed until the next deploy threw the store away. This was written (v2.0.0) about a sign-in's "?code=", which
+// is what Supabase's PKCE flow returns; it is in the address bar and the history anyway, but it is a credential,
+// and this site should not be the one filing a copy of it.
+//
+// Two corrections, both v2.23.0. This client runs supabase-js's DEFAULT flow, which is the implicit one: a
+// sign-in or a password-reset link comes back to "/#access_token=...&refresh_token=...", in the fragment rather
+// than a query. And the key was never the only copy of the address - the stored Response carries the URL it was
+// fetched from, fragment included. service-worker.js's forStore is what keeps that out of the store.
 //
 // The other: every distinct address was an entry of its own. Twenty shared challenge links meant twenty copies
 // of the same shell, and nothing ever removed one - the store is only emptied when a new release replaces it.

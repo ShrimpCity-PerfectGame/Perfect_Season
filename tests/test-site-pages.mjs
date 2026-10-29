@@ -388,7 +388,10 @@ await runTest("every key the game keeps on a device is one the privacy page name
   const root = new URL("../", import.meta.url);
   const shipped = readdirSync(root).filter((f) => /\.(m?js|jsx)$/.test(f) && f !== "build.mjs" && f !== "deploy-function.mjs");
   const found = new Set();
-  for (const f of shipped) for (const m of readSrc(new URL(f, root), "utf8").matchAll(/["'`](ps-[a-z0-9-]+)/g)) found.add(m[1]);
+  // The literal head of every string that starts "ps-". A key built at run time - `ps-${game}-wip` or "ps-" + game -
+  // has a head of just "ps-" (or one ending in a dash), which names no key below, so it fails until it is written
+  // out here by its shape and on the page by its meaning. Matched on the head alone, it passed unseen.
+  for (const f of shipped) for (const m of readSrc(new URL(f, root), "utf8").matchAll(/["'`](ps-[a-z0-9-]*)/g)) found.add(m[1]);
 
   // Each key, and the words on the page that account for it.
   const KEPT = {
@@ -415,11 +418,20 @@ await runTest("every key the game keeps on a device is one the privacy page name
   assert(device, "the privacy page has a section for what is kept on your device");
   const said = device[1].join("\n");
   for (const key of found) {
+    assert(!/-$/.test(key), `a ps- key built at run time ("${key}..."): name its shape in KEPT, and what it holds on /privacy`);
     assert(KEPT[key] || NOT_KEPT[key], `${key} is kept on the device and nothing here says what it is - add it to /privacy, then to this list`);
     if (KEPT[key]) assert(said.includes(KEPT[key]), `/privacy names ${key}: "${KEPT[key]}" is not on the page`);
   }
   for (const key of [...Object.keys(KEPT), ...Object.keys(NOT_KEPT)]) assert(found.has(key), `${key} is listed here and no longer in the code - take it out of the list, and off the page if it is there`);
   assert(!/sset\(OLD_PROFILE/.test(readSrc(new URL("perfect-season.jsx", root), "utf8")), "ps-profile is only ever read and deleted, which is why the page need not name it");
+
+  // Every ps- key goes through window.storage, whose one browser key holds them all (entry.jsx). Code that wrote to
+  // the browser's storage directly would keep something this scan cannot see, so nothing else may.
+  for (const f of shipped) {
+    const src = readSrc(new URL(f, root), "utf8");
+    if (f !== "entry.jsx") assert(!/\b(localStorage|sessionStorage|indexedDB)\s*\./.test(src), `${f} writes to the browser's storage directly - put it behind window.storage, and on /privacy`);
+    if (f !== "service-worker.js") assert(!/\bcaches\s*\.\s*(open|put|match|keys|delete|has)\b/.test(src), `${f} uses Cache Storage, which only the service worker may`);
+  }
 
   // And the store the service worker keeps, which is on the device too.
   assert(/caches\.open/.test(readSrc(new URL("service-worker.js", root), "utf8")) && said.includes("keeps a copy of its own files"),
@@ -433,10 +445,12 @@ await runTest("every key the game keeps on a device is one the privacy page name
 // nothing about which kind; its successor held the date to itself, which said nothing at all.)
 await runTest("the privacy page's date moves when its words do", async () => {
   const { createHash } = await import("node:crypto");
-  const POLICY = { updated: "2026-10-29", digest: "6d3b1164b4d1d95e" };
+  const POLICY = { updated: "2026-10-29", digest: "937957ff075edbd6" };
   const page = SITE_PAGES.find((p) => p.id === "privacy");
+  // Every word, including the paragraph that carries the date - with the date itself taken out, so moving it is not
+  // a change of words. Dropped whole, that paragraph's promises could be rewritten under the old date.
   const words = JSON.stringify([page.title, page.description, page.intro,
-    page.sections.map(([h, body]) => [h, body.filter((para) => !/last updated on/.test(para))])]);
+    page.sections.map(([h, body]) => [h, body.map((para) => para.replace(/last updated on [^.]*\./, "last updated on <date>."))])]);
   const digest = createHash("sha256").update(words).digest("hex").slice(0, 16);
   assert(digest === POLICY.digest,
     `/privacy's words have changed (digest ${digest}). Set PRIVACY_UPDATED and the page's updated to the day this ships, then put that date and this digest in POLICY here.`);

@@ -60,8 +60,10 @@ claim the address the click is the browser's to follow. **Google's consent scree
 External OAuth app needs a homepage and a privacy policy URL, which is what gates Google sign-in for anyone who
 isn't a listed test user. The address to write to is `PRIVACY_CONTACT` in site-pages.mjs; keep the page true to
 what the code actually does. Two tests hold it there (v2.23.0): every `ps-` key in the shipped code has to map to
-words in its device section, and a digest of its words is pinned beside its date, so a new key or an edit without
-a new date fails `tests/test-site-pages.mjs`. `site-pages.mjs` holds both addresses and all their
+words in its device section (a key built at run time, `ps-${x}`, fails until its shape is named; and only
+entry.jsx may touch the browser's storage directly, only the service worker Cache Storage), and a digest of every
+word of it, the dated paragraph included with only the date taken out, is pinned beside its date - so a new key
+or an edit without a new date fails `tests/test-site-pages.mjs`. `site-pages.mjs` holds both addresses and all their
 copy - including the How to play steps the dialog renders as JSX - so the rules can never exist in two versions;
 `build.mjs` writes `public/how-to-play.html` and `public/leaderboard.html` from the same shell as the app, swapping
 in each page's title, description, canonical, link preview and structured data (every swap asserted, so renaming a
@@ -118,10 +120,14 @@ submit-run call goes to Supabase on another origin and is passed straight throug
 any of them would be a stale leaderboard, a balance already spent, or a season saved twice.
 
 A page is stored under its **path**, with the query dropped and every address that is served the shell
-collapsed onto `/` (`pageKey`, v2.0.0). Keyed by the request itself, two things went wrong: signing in with
-Google comes back to `/?code=<authorization code>` and the worker filed that code in Cache Storage until the
-next deploy replaced the store, and every challenge link, profile and duel opened was an entry of its own in a
-store nothing ever prunes. `entry.jsx` registers the worker after load, and never inside the Android app, which
+collapsed onto `/` (`pageKey`, v2.0.0). Keyed by the request itself, two things went wrong: a sign-in's return
+address was filed in Cache Storage until the next deploy replaced the store, and every challenge link, profile and
+duel opened was an entry of its own in a store nothing ever prunes. **The key was not the only copy** (v2.23.0): a
+stored Response keeps the URL it was fetched from, so the store still held every address a page was opened at -
+and this client runs supabase-js's default IMPLICIT flow, so a Google sign-in or a reset link comes back as
+`/#access_token=...&refresh_token=...`, which sat on disk after the address bar, a sign-out and a browser restart
+had all let go of it. `forStore` in service-worker.js stores a page as a fresh Response built from its body, status
+and headers, which has no URL; `tests/test-pwa.mjs` holds it, and `/privacy` promises it. `entry.jsx` registers the worker after load, and never inside the Android app, which
 serves the same files from the phone already. The
 offer to install is the game's own: Chrome's `beforeinstallprompt` is held back and shown as an "Install Gridspin"
 pill beside the live counts (iOS has no such event - it installs by hand through Share > Add to Home Screen).
@@ -226,7 +232,10 @@ functions' own source, so a new code cannot arrive unmapped. PROFILES.md, "What 
 list. A guest stops being one from the Account
 tab (`KeepSeasons`): an email and password go onto the same account, then `claim_username` trades the given name
 for a real one and rewrites the name snapshots on the boards, the way a moderator's rename does - the one time
-that function is allowed to change an existing name. **`claim_username` is the gate, not that form** (v2.8.1):
+that function is allowed to change an existing name. **The screen is renamed in place** (v2.23.0):
+`onSeasonsKept` rewrites the current history entry before `user` moves, follows a `profileOf` that named the guest
+outright, and records the retired name so an older entry naming it opens your own profile - otherwise Back opened
+`Guest_XXXXX`, which nobody holds any more ("There's no player with that name"). **`claim_username` is the gate, not that form** (v2.8.1):
 clearing `guest` is what opens all of the above, so it refuses unless a credential is actually attached to the
 `auth.users` row - otherwise an anonymous session calls the RPC itself and gets a full account for one sign-in
 and one POST, over and over. The check is permissive on purpose (email, a pending email change, phone, or no
@@ -381,20 +390,25 @@ lengthy explanation does."** Four pieces, and three of them only ever touch a ne
   carries both. The old dialog was 1,233px tall on a 320x640 phone. The new one is 609.
 - **The first-visit dialog starts the first draft.** `HowTo`'s `onStart` gives it **Start my first draft 🏈**
   beside **Look around first**. `firstDraftOffer` is the rule: only on Modes, with no challenge card waiting,
-  nothing in progress, not on `/how-to-play`, and never for an account with drafts behind it. Because that last
-  depends on whose account it is, **the first-visit rules wait for `authReady`** (the session and its profile
-  read) before opening. And the dialog's main button is ONE element whose words follow the offer: an offer that
-  arrives or goes while the dialog is open must never remove the button that has focus, which is what left a
-  keyboard user on `<body>` outside the modal. Tests close the dialog with **`closeRules(container)`**, its ×,
+  nothing in progress, not on `/how-to-play`, and never for an account that has finished a season. Because that
+  last depends on whose account it is, **the held first-visit rules wait for `authReady`** (the session and its
+  profile read), and the wait has four rules of its own, each a bug found in review: they also wait behind
+  `needsName` and `resetting` (a name to pick, a password to set - opened after those, they took their focus from
+  under them); they never open over a game (`GAME_VIEWS`, since Modes works during the wait); rules already open
+  because somebody ASKED consume the held ones instead of being converted into a first visit's; and closing any
+  rules clears the held ones. The dialog's main button is ONE element whose words follow the offer, and HowTo
+  never takes focus from another open dialog: an offer that arrives or goes while the dialog is open must never
+  remove the button that has focus, which is what left a keyboard user on `<body>` outside the modal. Tests close the dialog with **`closeRules(container)`**, its ×,
   because the button copy depends on how it was opened. Clicking "Got it, let's draft" broke nine test files the
   day the first-visit copy changed.
 - **The first draft teaches as it goes** (`CoachTip`). The re-spins come up on the first board, Flex when a
   player is choosing between his own spot and Flex, and the scoring on the first result. `COACH_KEY`
   (`ps-coach`) is `"on"` from a first visit until the first result appears and `"done"` after. It is only ever
   switched on for a device that had never closed the rules, so nobody who was here before tips existed sees
-  one, and an account with drafts behind it switches it off on any device - **asked once per account**
-  (`coachAsked`), because a newcomer's own Reset on the coached draft is a DNF that moves the stats at once and
-  read as a veteran's history. Keep tips to one line, at the moment the thing they explain becomes a decision; a
+  one, and an account that has FINISHED a season switches it off on any device (`finishedSeasons`). Finished,
+  not "has drafts": a newcomer's own Reset on the coached draft is a DNF that moves the stats at once, and read as
+  a veteran's history it switched the tips off for good - on the same page, and once that was fixed, after any
+  reload. Keep tips to one line, at the moment the thing they explain becomes a decision; a
   tip that shows before that is the old dialog again. A tip that sits beside a choice goes ABOVE the choice's
   buttons: selecting a card scrolls the Lock in row to the foot of a phone's screen, so a tip under it is off
   screen at the moment it was for.
@@ -1465,8 +1479,8 @@ suite and still broke the live Leaderboard for every existing account.
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
   v2.23.0's (the first visit, and the open handoff list): client only. No migration, no Edge Function change.
-  The service worker is in it, since font answers are now judged rather than trusted, and every deploy ships that
-  anyway. On staging, check the first visit in a fresh private window rather than one that has played: the
+  The service worker is in it, since font answers are now judged rather than trusted and pages are stored without
+  the address they were opened at, and every deploy ships that anyway. On staging, check the first visit in a fresh private window rather than one that has played: the
   three-step rules, Start my first draft, the re-spin tip on the first board, the Flex tip on placing a back or
   receiver, and the scoring tip on the result. Then check that a second draft shows none of them. The Android
   half (Privacy and Terms opening in the phone's browser, Back past pushed screens, Back on Modes leaving)

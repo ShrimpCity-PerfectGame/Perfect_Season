@@ -31,7 +31,7 @@ It is two things in one release:
   changed, check for another date before suspecting the code.
 
 **Then it was reviewed, and the review earned its keep.** A workflow of five reviewers, each finding checked by two
-skeptics, confirmed thirteen problems in the branch's first commit (`eb8283b`), all fixed in the second. The ones
+skeptics, confirmed thirteen problems in the branch's first commit (`eb8283b`), all fixed in the second (`8855f53`). The ones
 worth knowing about, because each is a shape that will come back:
 
 - **A service worker already in strangers' browsers is part of the deploy.** Adding `crossorigin` to the font
@@ -56,6 +56,35 @@ worth knowing about, because each is a shape that will come back:
   seven sizes (no test here can lay a page out).
 
 Every new test was mutation-checked: the fix reverted, the test red, the fix restored.
+
+**A second review, of that fix batch, confirmed eight more - two of them regressions the batch itself made**, all
+fixed in the third commit:
+
+- **Holding the first-visit rules until the session settled made them open LATE** - after a Pick-your-name or
+  Set-a-new-password dialog that arrives with the session, under it on screen but holding the focus, so a keyboard
+  user's name went nowhere and Enter dealt a board. And Modes is usable during the wait, so rules the player had
+  already closed reopened, a draft they had started got the rules dropped over it, and rules they had ASKED for
+  turned into a first visit's mid-read. The wait now has rules of its own (CLAUDE.md "The first visit").
+- **`/privacy`'s new "They hold nothing about you" was false when written**: the offline store kept every page's
+  address beside it - including, through supabase-js's implicit flow, a Google sign-in's or a reset link's tokens,
+  on disk after a sign-out and a browser restart (measured in Chromium). Pages are stored with no address now
+  (`forStore`), so the sentence is true, and the page also says what the sign-in kept in the browser really holds.
+- **Back after Keep my seasons opened the retired `Guest_` name** ("There's no player with that name"), on the
+  website too - live on production since long before this release.
+- **The Reset fix did not survive a reload.** A newcomer is now an account that has never FINISHED a season.
+- **"Just yards, touchdowns and turnovers" was a closed list the data caught out** (two-point conversions). The
+  copy now says Championship is everything Fantasy counts except the point for a catch, which is the code's own
+  definition, and the test checks that against every board season.
+- **Both new privacy guards had a door open**: a key built at run time, and the dated paragraph left out of the
+  digest. Both closed, plus a check that nothing outside the storage shim writes to the browser's storage.
+
+One line is kept that no test can reach on its own: closing any rules clears the held ones, which the held rules
+already consume the moment any rules open. It stays as a second statement of "closed means seen".
+
+**Known and left alone**: logging out and back in on your own profile leaves two entries for it, so one Back press
+appears to do nothing. Pre-existing since 2.0, nothing lost, and the second reviewer refuted it as a finding
+against this release; worth a small ticket of its own (the sign-out branch of the history effect could replace
+in place, the way the sign-in branch does).
 
 **Not changed, and worth a decision rather than a patch:** the Sitewide panel on Modes still shows a raw
 "Players" count beside "Drafts played" and "Perfect seasons". That is the same small-number problem the tester

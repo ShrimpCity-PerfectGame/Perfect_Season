@@ -237,8 +237,13 @@ await runTest("the worker that ships files a page under its path, not the addres
       caches: null,
     },
     caches: { open: async () => cache, keys: async () => [], delete: async () => {}, match: async (r) => cache.match(r) },
-    fetch: async (req) => ({ ok: true, status: 200, type: "basic", url: keyOf(req), clone() { return this; } }),
-    URL, Set, Map, Promise, console,
+    // What the network answers: the shell, at whatever address it was asked for - the way a real Response
+    // remembers where it came from, which is the thing a stored page must not.
+    fetch: async (req) => ({
+      ok: true, status: 200, statusText: "OK", type: "basic", url: keyOf(req), headers: new Headers({ "content-type": "text/html" }),
+      blob: async () => new Blob(["<!doctype html><title>Gridspin</title>"], { type: "text/html" }), clone() { return this; },
+    }),
+    URL, Set, Map, Promise, console, Response, Blob, Headers,
   };
   sandbox.self.caches = sandbox.caches;
   vm.createContext(sandbox);
@@ -261,6 +266,18 @@ await runTest("the worker that ships files a page under its path, not the addres
   let keys = [...store.keys()];
   assert(keys.length === 1 && keys[0] === `${SITE}/`, `the shell is filed under "/" alone: ${keys.join(", ")}`);
   assert(!keys.some((k) => k.includes("SECRETCODE")), "and the authorization code is nowhere in the store");
+
+  // ...and the stored page keeps no address of its own either. A Response remembers the URL it was fetched from,
+  // and cache.put files that with it: the key was only ever the path, while the copy beside it held every address
+  // a page was opened at - a profile's name, a challenge's record, and the return from a Google sign-in or a
+  // password reset, which this client's implicit flow brings back with its tokens in the fragment. In Chromium
+  // that fragment was on disk in Cache Storage after the address bar, a sign-out and a browser restart had all
+  // let go of it.
+  await ask(`${SITE}/u/somebody?beat=17-3#access_token=JWTSECRET&refresh_token=REFRESHSECRET`);
+  const shell = await cache.match(`${SITE}/`);
+  assert(shell && !shell.url, `the stored page carries no address at all, got "${shell?.url}"`);
+  assert(await shell.text() === "<!doctype html><title>Gridspin</title>", "and is the page itself, to serve offline");
+  assert(shell.status === 200 && shell.headers.get("content-type") === "text/html", "with its status and headers");
 
   // Twenty shared links are one entry, not twenty - nothing prunes this store but the next release.
   for (const u of [`${SITE}/c/ABC123?beat=20-0`, `${SITE}/c/ZZZ999`, `${SITE}/u/somebody`, `${SITE}/vs/QWE456`]) await ask(u);
