@@ -80,7 +80,14 @@ await runTest("the rules on screen are the rules the built page carries", async 
   // came to this address came to read the rules. A first visit's dialog folds them; test-first-visit.mjs.
   const fold = rules(c).querySelector("details.howmore");
   assert(fold?.open === true, "the finer points are open for somebody who asked for the rules");
-  assert(flat(fold.querySelector("summary").textContent) === HOWTO_MORE_TITLE, `the fold is called ${HOWTO_MORE_TITLE}`);
+  // Called that, and nothing more, to a screen reader: the arrow is drawn but hidden from the name. As ::after
+  // content it was part of the name, and the fold was read out as "The finer points, black right-pointing
+  // small triangle".
+  const summary = fold.querySelector("summary").cloneNode(true);
+  const arrows = [...summary.querySelectorAll('[aria-hidden="true"]')];
+  arrows.forEach((el) => el.remove());
+  assert(flat(summary.textContent) === HOWTO_MORE_TITLE, `the fold is called ${HOWTO_MORE_TITLE}, got "${summary.textContent}"`);
+  assert(arrows.some((el) => el.textContent === "▸"), "its arrow is there to see, and hidden from the name");
   const more = [...fold.querySelectorAll("ul li")].map((li) => flat(li.textContent));
   assert(more.length === HOWTO_MORE.length, `${HOWTO_MORE.length} finer points, got ${more.length}`);
   HOWTO_MORE.forEach((step, i) => assert(more[i] === stepText(step), `finer point ${i + 1} matches the shared copy:\n  app  ${more[i]}\n  copy ${stepText(step)}`));
@@ -370,6 +377,70 @@ await runTest("the privacy page accounts for the crash sink in all three places"
   const saidDay = said && `${said[3]}-${String(MONTHS.indexOf(said[2]) + 1).padStart(2, "0")}-${said[1].padStart(2, "0")}`;
   assert(page.updated >= "2026-10-05", `the page's date is no older than the copy describing the crash sink: ${page.updated}`);
   assert(saidDay === page.updated, `the date the page prints is the date it carries: "${said && said[0]}" vs ${page.updated}`);
+});
+
+// /privacy promises that every line on it is something the code does, so a key the game keeps on a device and the
+// page never mentions makes that promise false. That is not hypothetical: v2.22.1 added the unsent season with no
+// word here, and v2.23.0 re-dated the page with it still missing, along with Over/Under's game in progress and the
+// held duel invite. This reads every "ps-" key in the code that ships and holds each one to the words it is under.
+await runTest("every key the game keeps on a device is one the privacy page names", async () => {
+  const { readdirSync } = await import("node:fs");
+  const root = new URL("../", import.meta.url);
+  const shipped = readdirSync(root).filter((f) => /\.(m?js|jsx)$/.test(f) && f !== "build.mjs" && f !== "deploy-function.mjs");
+  const found = new Set();
+  for (const f of shipped) for (const m of readSrc(new URL(f, root), "utf8").matchAll(/["'`](ps-[a-z0-9-]+)/g)) found.add(m[1]);
+
+  // Each key, and the words on the page that account for it.
+  const KEPT = {
+    "ps-draft": "A draft in progress", "ps-free-wip": "A draft in progress", "ps-daily-wip": "A draft in progress",
+    "ps-sou-wip": "an Over/Under, Century or Guess the Player game in progress",
+    "ps-century-wip": "an Over/Under, Century or Guess the Player game in progress",
+    "ps-guess-wip": "an Over/Under, Century or Guess the Player game in progress",
+    "ps-unsent-run": "a finished game while it is still waiting to be saved",
+    "ps-daily": "which dailies you have already played", "ps-sou": "which dailies you have already played",
+    "ps-century": "which dailies you have already played", "ps-guess": "which dailies you have already played",
+    "ps-century-done": "which dailies you have already played", "ps-guess-done": "which dailies you have already played",
+    "ps-format": "the scoring format you last chose",
+    "ps-howto-seen": "whether you have seen the rules", "ps-vs-howto-seen": "whether you have seen the rules",
+    "ps-coach": "a first draft's tips",
+    "ps-versus-return": "a duel invite you followed, held while you sign in",
+  };
+  // Strings that look like keys and are not kept.
+  const NOT_KEPT = {
+    "ps-crash": "the crash screen's class name (error-boundary.jsx)",
+    "ps-profile": "pre-account stats from long ago, read once and deleted - never written",
+  };
+  const page = SITE_PAGES.find((p) => p.id === "privacy");
+  const device = page.sections.find(([h]) => h === "What is kept on your device");
+  assert(device, "the privacy page has a section for what is kept on your device");
+  const said = device[1].join("\n");
+  for (const key of found) {
+    assert(KEPT[key] || NOT_KEPT[key], `${key} is kept on the device and nothing here says what it is - add it to /privacy, then to this list`);
+    if (KEPT[key]) assert(said.includes(KEPT[key]), `/privacy names ${key}: "${KEPT[key]}" is not on the page`);
+  }
+  for (const key of [...Object.keys(KEPT), ...Object.keys(NOT_KEPT)]) assert(found.has(key), `${key} is listed here and no longer in the code - take it out of the list, and off the page if it is there`);
+  assert(!/sset\(OLD_PROFILE/.test(readSrc(new URL("perfect-season.jsx", root), "utf8")), "ps-profile is only ever read and deleted, which is why the page need not name it");
+
+  // And the store the service worker keeps, which is on the device too.
+  assert(/caches\.open/.test(readSrc(new URL("service-worker.js", root), "utf8")) && said.includes("keeps a copy of its own files"),
+    "the page says the site keeps its own files for offline use");
+});
+
+// The page's date says when its words last changed - and a policy that changes without moving its date is one a
+// reader cannot trust to be current, which on this page is the whole of what it is for. So the words are pinned
+// here by a digest, beside the date they were last changed on. Change the policy and this fails until the date
+// moves with it. (The pin it replaced held the date to one exact day, which failed on ANY change and so said
+// nothing about which kind; its successor held the date to itself, which said nothing at all.)
+await runTest("the privacy page's date moves when its words do", async () => {
+  const { createHash } = await import("node:crypto");
+  const POLICY = { updated: "2026-10-29", digest: "6d3b1164b4d1d95e" };
+  const page = SITE_PAGES.find((p) => p.id === "privacy");
+  const words = JSON.stringify([page.title, page.description, page.intro,
+    page.sections.map(([h, body]) => [h, body.filter((para) => !/last updated on/.test(para))])]);
+  const digest = createHash("sha256").update(words).digest("hex").slice(0, 16);
+  assert(digest === POLICY.digest,
+    `/privacy's words have changed (digest ${digest}). Set PRIVACY_UPDATED and the page's updated to the day this ships, then put that date and this digest in POLICY here.`);
+  assert(page.updated === POLICY.updated, `the page carries the date its words were pinned on: ${page.updated} vs ${POLICY.updated}`);
 });
 
 console.log("test-site-pages.mjs done");

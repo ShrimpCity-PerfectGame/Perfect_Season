@@ -105,4 +105,30 @@ await runTest("a dead board survives a reload, and a re-spin is the way out of i
     `and it clears the dead board: ${text(app.container).slice(0, 300)}`);
 });
 
+await runTest("Skip to the game moves focus to the screen, and leaves the screen where it is", async () => {
+  // Followed as a link, #content was a new history entry with no state, which the Back/Forward handler reads as
+  // Modes: the skip link sent a keyboard user from Stats - or from an Over/Under round, at the cost of a life -
+  // to Modes instead of into the screen they were on.
+  setupDom();
+  const storage = makeStorage();
+  storage.data["personal:ps-howto-seen"] = "true";
+  window.storage = storage;
+  window.__ps_supabase__ = makeMockAuth();
+  const app = await mount();
+  await flush(4);
+  await click(findButtonByText(app.container, "Stats"));
+  await flush(3);
+  const onStats = () => [...app.container.querySelectorAll("nav .tab")].find((b) => b.textContent === "Stats")?.getAttribute("aria-current") === "page";
+  assert(onStats(), "on Stats");
+  const before = JSON.stringify(window.history.state);
+  const skip = app.container.querySelector("a.skip");
+  assert(skip && skip.getAttribute("href") === "#content", "the skip link is a real link");
+  await click(skip);
+  await flush(3);
+  assert(onStats(), `still on Stats, got: ${text(app.container).slice(0, 120)}`);
+  assert(document.activeElement === app.container.querySelector("main#content"), `focus is on the screen, got ${document.activeElement?.tagName}`);
+  assert(window.location.hash === "" && JSON.stringify(window.history.state) === before,
+    `and no history entry was made: ${window.location.hash} ${JSON.stringify(window.history.state)}`);
+});
+
 console.log("test-nav.mjs done");

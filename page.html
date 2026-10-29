@@ -40,10 +40,14 @@
 ]}
 </script>
 <!-- crossorigin on the stylesheet, so the service worker can tell a stylesheet from a block page and stores only
-     the first (service-worker.js); both preconnects carry it so the connection they open is the one used. -->
+     the first (service-worker.js); both preconnects carry it so the connection they open is the one used.
+     The families are listed Inter first ON PURPOSE, unlike every release before 2.23.0. A worker from those
+     releases still holds the old address as an opaque copy and answers from its store before the network - and an
+     opaque answer to a CORS request is a network error, so the first load after the deploy had no fonts at all.
+     It has never stored this address, so it fetches it. Changing the address back would bring that back. -->
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Anton&display=swap" crossorigin />
 <style>html,body{margin:0;background:#F7F4EA}body{overflow-x:hidden}</style>
 </head>
 <body>

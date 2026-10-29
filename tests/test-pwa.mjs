@@ -332,6 +332,16 @@ await runTest("a font is stored only when its answer says it worked, and the pag
   const links = [...html.matchAll(/<link\b[^>]*>/g)].map((m) => m[0]).filter((l) => FONT_HOSTS.some((h) => l.includes(`//${h}`)));
   assert(links.some((l) => /rel="stylesheet"/.test(l)) && links.length === 3, `the font links are found: ${links.join(" ")}`);
   for (const l of links) assert(/\scrossorigin[\s/>]/.test(l), `asked with CORS: ${l}`);
+
+  // And not at the address every release before 2.23.0 used. A worker from those releases holds that address as an
+  // opaque copy and answers from its store before the network; an opaque answer to a CORS request is a network
+  // error, so the first load after the deploy had no fonts at all (seen in Chrome, against a 2.22.1 worker). It has
+  // never stored any other address, so it fetches this one. A source check, and an honest one: what it guards is
+  // a worker already installed in strangers' browsers, which no test here can stand up.
+  const sheet = links.find((l) => /rel="stylesheet"/.test(l));
+  const OLD_SHEET = "https://fonts.googleapis.com/css2?family=Anton&amp;family=Inter:wght@400;500;600;700;800&amp;display=swap";
+  assert(!sheet.includes(OLD_SHEET) && !sheet.includes(OLD_SHEET.replace(/&amp;/g, "&")),
+    `the stylesheet is not at the address a 2.22.x worker holds an opaque copy of: ${sheet}`);
 });
 
 await close();

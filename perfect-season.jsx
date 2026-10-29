@@ -604,6 +604,9 @@ h3.h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-
 .skip{position:absolute;left:-9999px;top:0;z-index:70}
 .skip:focus{left:8px;top:8px;background:var(--accent);color:var(--on-accent);border:2px solid var(--ink);
   border-radius:10px;padding:8px 14px;font-weight:800;text-decoration:none;box-shadow:3px 3px 0 var(--hard)}
+/* Where the skip link puts focus. It is the start of the screen rather than a control, so no ring round all of it:
+   the next Tab goes to the screen's first control, which draws its own. */
+#content:focus{outline:none}
 .namelink{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit}
 /* Every name on a board, plain or coloured, in ONE weight - which is the weight a name colour needs to be
    visible at all. A look is a gradient clipped to the letters, so how much of it a reader sees is how much
@@ -697,14 +700,20 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .fmtsub{font-family:'Inter',system-ui,sans-serif;font-weight:700;font-size:12px;text-transform:none;letter-spacing:0;opacity:.75}
 .fmtnote{flex-basis:100%;margin:2px 0 0;color:var(--muted);font-size:13.5px;max-width:66ch}
 .modes{display:grid;gap:14px;margin-bottom:24px}
-/* More ways to play: everything past the two drafts that lead, in a denser grid of smaller tiles - side by side
-   once there is room, so the group reads as one thing rather than five more decisions. Each tile keeps its own
-   colour; only its size steps down. The challenge box spans the row, since it carries a form. */
-.modes.more{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
-.modes.more .mode{padding:14px 16px}
+/* More ways to play: everything past the two drafts that lead, in a denser grid of smaller tiles - two to a row
+   once there is room, so the group reads as one thing rather than five more decisions. Two, not as many as fit:
+   at desktop widths a fitted grid made three columns and left Mini games alone on a row of its own. Each tile
+   keeps its own colour; only its size steps down. Inside, the words sit at the top and the pill at the foot, so
+   tiles side by side line up - a button centres what it holds, and a row of tiles with different amounts of copy
+   put each heading and pill at a different height. The challenge box spans the row, since it carries a form. */
+.modes.more{grid-template-columns:repeat(2,minmax(0,1fr))}
+.modes.more .mode{padding:14px 16px;display:flex;flex-direction:column;align-items:flex-start}
+.modes.more .mode .mt,.modes.more .mode .frow{align-self:stretch}
 .modes.more .mode .mn{font-size:24px}
 .modes.more .mode p{font-size:13.5px;margin:4px 0 10px}
+.modes.more .mode .go{margin-top:auto}
 .modes.more .mode.static{grid-column:1/-1}
+@media (max-width:600px){.modes.more{grid-template-columns:1fr}}
 .mode{display:block;width:100%;text-align:left;border:2px solid var(--ink);border-radius:18px;padding:16px 18px;color:var(--ink);background:var(--surface);
   box-shadow:4px 4px 0 var(--hard);transition:transform .14s ease,box-shadow .14s ease}
 @media (hover:hover){.mode:hover:not(.static){transform:translate(-1px,-3px) rotate(-.4deg);box-shadow:6px 8px 0 var(--hard)}}
@@ -844,8 +853,8 @@ p.gamecoins .earned{display:flex}
 .howmore{margin:0 0 14px;border-top:2px solid var(--line);padding-top:6px}
 .howmore>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;color:var(--accent-ink);padding:6px 0}
 .howmore>summary::-webkit-details-marker{display:none}
-.howmore>summary::after{content:'▸';transition:transform .15s}
-.howmore[open]>summary::after{transform:rotate(90deg)}
+.howmore .hm-arrow{display:inline-block;transition:transform .15s}
+.howmore[open] .hm-arrow{transform:rotate(90deg)}
 .howmore ul{margin:8px 0 12px;padding-left:22px}
 .howgo{gap:10px}
 /* One line of teaching in a newcomer's first draft (CoachTip). Dashed like the challenge tile: part of the
@@ -854,7 +863,7 @@ p.gamecoins .earned{display:flex}
   font-size:14px;line-height:1.45;color:var(--ink);max-width:66ch}
 .coachtip .ck{flex:none;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink)}
 .rerolls+.coachtip{margin-top:-10px}
-.drafts+.coachtip{margin:0 12px 12px}
+.card>.coachtip{margin:0 12px 10px}
 .sharebox{width:100%;min-height:150px;font:13px/1.45 ui-monospace,Menlo,monospace;background:var(--surface2);color:var(--ink);border:2px solid var(--line2);border-radius:10px;padding:10px;margin-top:10px}
 .flexnote{border-left:3px solid var(--accent-ink);padding-left:12px;margin-top:10px}
 
@@ -1358,7 +1367,7 @@ p.gamecoins .earned{display:flex}
   /* Per selector, not by hiding the parent: the parent being display:none is what makes this invisible
      today, and that is the pattern the cosmetics test forbids for exactly this reason. */
   .confetti i{animation:none}
-  .adminpanel>summary::after,.howmore>summary::after{transition:none}
+  .adminpanel>summary::after,.howmore .hm-arrow{transition:none}
   .btn,.mode,.fmtbtn,.card,.tab{transition:none}
   .btn:hover:not(:disabled),.btn:active:not(:disabled),.mode:hover:not(.static),.mode:active:not(.static),.fmtbtn:hover,.card:hover:not(.off){transform:none}
 }
@@ -2475,12 +2484,16 @@ function HowTo({ onClose, onStart = null, folded = false }) {
   const dialog = useRef(null);
   // Android's Back closes the rules the way Escape does, instead of leaving the screen behind them.
   useCloseOnBack(onClose);
+  const offering = !!onStart;
   useEffect(() => {
+    // Focus the main button when the dialog opens - and again if the buttons ever change under it (the offer of a
+    // first draft arriving or going) and focus has fallen out of the dialog. Focused once, on mount, a swap left a
+    // keyboard or screen-reader user on <body>, outside the modal, where Enter did nothing.
     // preventScroll: focusing the button at the bottom otherwise opens the dialog scrolled past
     // steps 1-3 on a phone.
-    btn.current && btn.current.focus({ preventScroll: true });
+    if (!dialog.current?.contains(document.activeElement)) btn.current?.focus({ preventScroll: true });
     // Escape is useCloseOnBack's, above - one register, so only the dialog on top answers.
-  }, []);
+  }, [offering]);
   // The steps are shared with the crawlable /how-to-play page (site-pages.mjs), so the rules can't drift into
   // two versions. A piece marked nowrap keeps "20-0" on one line.
   const words = (step) => step.map((part, j) => (typeof part === "string" ? part
@@ -2493,16 +2506,17 @@ function HowTo({ onClose, onStart = null, folded = false }) {
         <h2 id="howto-title">How to play</h2>
         <ol>{HOWTO_STEPS.map((step, i) => <li key={i}>{words(step)}</li>)}</ol>
         <details className="howmore" open={!folded}>
-          <summary>{HOWTO_MORE_TITLE}</summary>
+          {/* The arrow is drawn, not said: as ::after content it was read out as part of the name. */}
+          <summary>{HOWTO_MORE_TITLE}<span className="hm-arrow" aria-hidden="true">▸</span></summary>
           <ul>{HOWTO_MORE.map((step, i) => <li key={i}>{words(step)}</li>)}</ul>
           <p className="small">{HOWTO_NOTE}</p>
         </details>
-        {onStart ? (
-          <div className="frow howgo">
-            <button ref={btn} className="btn solid" onClick={onStart}>Start my first draft 🏈</button>
-            <button className="btn" onClick={onClose}>Look around first</button>
-          </div>
-        ) : <button ref={btn} className="btn solid" onClick={onClose}>Got it, let's draft</button>}
+        {/* One main button, always the same element, whose words follow the offer - so whatever has focus is never
+            the thing that gets taken away. */}
+        <div className="frow howgo">
+          <button ref={btn} className="btn solid" onClick={onStart || onClose}>{onStart ? "Start my first draft 🏈" : "Got it, let's draft"}</button>
+          {onStart && <button className="btn" onClick={onClose}>Look around first</button>}
+        </div>
       </div>
     </div>
   );
@@ -3184,12 +3198,24 @@ export default function PerfectSeason() {
   useEffect(() => {
     // Never the game's rules on the 1v1 screen - not held back, not left open behind an arrival. That mode has
     // its own, under its board, and this dialog answers none of what it asks.
-    if (view === "versus") { if (howTo) setHowTo(false); return; }
-    if (!pendingHowTo) return;
+    if (view === "versus") {
+      if (howTo) {
+        setHowTo(false);
+        // A first visit's rules that the player never closed are held again, the way they are for somebody who
+        // ARRIVES on a duel: they open on the next screen, still a first visit's. Closed with nothing more, their
+        // first-visit state stayed behind, and the next rules somebody asked for opened folded, offering a first
+        // draft - while the device had still never recorded the rules as seen.
+        if (howToFirst) { setHowToFirst(false); setPendingHowTo(true); }
+      }
+      return;
+    }
+    // Held until the session is known as well: whether to offer a first draft depends on whose account this is,
+    // and offering it, then taking it away when the profile answers, swapped the buttons under the player's focus.
+    if (!pendingHowTo || !authReady) return;
     setPendingHowTo(false);
     setHowToFirst(true);
     setHowTo(true);
-  }, [pendingHowTo, view, howTo]);
+  }, [pendingHowTo, view, howTo, howToFirst, authReady]);
 
   // A newcomer is coached through one draft and its result. The result is recorded as the end the moment it
   // appears - a reload from there on is not a first draft - and the tips go when the player moves on from it.
@@ -3200,15 +3226,20 @@ export default function PerfectSeason() {
       if (!coachedResult.current) { coachedResult.current = true; sset(COACH_KEY, "done", false); }
     } else if (coachedResult.current) setCoaching(false);
   }, [coaching, result]);
-  // ...and an account with drafts behind it is no newcomer, whatever this device has or hasn't seen. Declared
-  // after the effect above on purpose: a first season's own result is recorded before the stats it moves can
-  // read as a veteran's.
+  // ...and an account with drafts behind it is no newcomer, whatever this device has or hasn't seen. Asked ONCE
+  // per account, when its stats first arrive: asked on every change, a newcomer's own Reset on the first draft -
+  // a DNF, which moves the stats straight away - read as a veteran's history and switched the tips off for good,
+  // on the very draft they were for. Declared after the effect above on purpose: a first season's own result is
+  // recorded before the stats it moves could be asked about.
+  const coachAsked = useRef(undefined);
   useEffect(() => {
-    if (coaching && !coachedResult.current && stats && draftsOf(stats) > 0) {
+    if (!coaching || coachedResult.current || !stats || coachAsked.current === userId) return;
+    coachAsked.current = userId;
+    if (draftsOf(stats) > 0) {
       setCoaching(false);
       sset(COACH_KEY, "done", false);
     }
-  }, [coaching, stats]);
+  }, [coaching, stats, userId]);
 
   // Back and Forward put back the screen the entry describes, opening it the way its tab or tile would -
   // Over/Under and Build-a-player through their own openers, since leaving them dropped the round or build.
@@ -3276,24 +3307,39 @@ export default function PerfectSeason() {
   // Android's Back button, asked before the app shell acts on it (app-shell.mjs; the website never sends
   // this). The rules or a report sheet close first, then any screen other than Modes goes back to Modes -
   // except the ones that pushed an entry of their own (ownsEntry: a profile, the shop, 1v1), which Back walks normally so
-  // it returns to the screen they were opened from, at the spot it was left. Nothing left to close or leave
-  // means Back leaves the app.
+  // it returns to the screen they were opened from, at the spot it was left. Back on Modes leaves the app.
   const onAppBack = useRef(null);
   onAppBack.current = (e) => {
     if (closeTopDialog()) { e.preventDefault(); return; }
+    // How many entries this app has pushed above the one the page opened in (writeHistory).
+    let depth = 0;
+    try { depth = Number(window.history.state?.depth) || 0; } catch (err) { /* no history API */ }
     // Read from ownsEntry rather than listing the screens again. Listed twice, they drifted: 1v1 was added to
     // ownsEntry and not here, so opening it pushed an entry that Back then refused to walk. Back went to Modes,
     // the history effect pushed `home` on top, and the next Back walked into 1v1 again - round and round, with
     // exitApp unreachable and the app needing a force close.
-    if (shownProfile || ownsEntry({ view })) return;
-    if (view === "home") return;
+    if (shownProfile || ownsEntry({ view })) {
+      if (depth > 0) return;
+      // ...unless it was never pushed: signing in on the Account tab turns that screen into your profile IN the
+      // entry the app opened in, so there is nothing under it to walk back to, and the shell closed the app from
+      // a profile. Every new player who signed in and pressed Back met it once.
+      e.preventDefault();
+      if (view === "versus") setVersusCode(null); // as leaveVersus does when there is no entry to go back to
+      openTab("home");
+      return;
+    }
+    // Modes leaves the app, whatever is underneath it. Its tab opens it in place on top of the screen it was
+    // tapped from, so from your profile, the Shop and then the Modes tab, the shell's own Back walked into the
+    // Shop and the profile again before it would close - the stops this was meant to have removed.
+    if (view === "home") {
+      if (e.detail) e.detail.leave = true;
+      return;
+    }
     e.preventDefault();
     // To Modes, past every entry this app pushed. Opening Modes in place left them underneath it: your profile,
     // the Shop from its card, then the Leaderboard tab, then Back - Modes, as it should be, and the next Back,
-    // which should have left the app, walked into the Shop instead. Four presses to leave, with a stop at a
-    // screen already left twice. Depth 0 means nothing is underneath, and in place is right.
-    let depth = 0;
-    try { depth = Number(window.history.state?.depth) || 0; } catch (err) { /* no history API */ }
+    // which should have left the app, walked into the Shop instead. Depth 0 means nothing is underneath, and in
+    // place is right.
     if (depth > 0) {
       backToModes.current = true;
       window.history.go(-depth);
@@ -5115,7 +5161,9 @@ export default function PerfectSeason() {
   // The first visit's rules offer the first draft only where starting one takes nothing from anybody: on Modes,
   // with no challenge card waiting (that visitor came for those boards) and nothing already in progress - and
   // only to somebody for whom it IS a first draft, which an account signing in on a new device may not be.
-  const firstDraftOffer = howToFirst && view === "home" && !challenge && !freeInProgress
+  // Not on rules opened by /how-to-play either: that dialog is on screen from the first render, before the visit
+  // is known to be a first one, so offering there means swapping its buttons under the reader's focus.
+  const firstDraftOffer = howToFirst && view === "home" && !challenge && !freeInProgress && !atHowTo.current
     && !FORMATS.some((f) => dailyPicksFor(f) > 0) && !(stats && draftsOf(stats) > 0);
 
   // The Profile tab is lit on your own profile, its Reports queue and the shop (or a guest's login), not on someone else's.
@@ -5129,8 +5177,17 @@ export default function PerfectSeason() {
     <div className={`ps${scope === "light" ? "" : ` ${scope}`}`}>
       <style>{APP_CSS}</style>
       <div className="wrap">
-        {/* First stop for a keyboard or a screen reader, and out of everyone else's way until it's focused. */}
-        <a className="skip" href="#content">Skip to the game</a>
+        {/* First stop for a keyboard or a screen reader, and out of everyone else's way until it's focused. It
+            moves focus itself rather than following its #content: following it makes a history entry with no
+            state, the browser announces that as popstate, and the handler that puts screens back for Back and
+            Forward read an entry with no state as Modes - so from Stats, a draft or an Over/Under round (where
+            leaving costs a life), skipping to the game threw the player to Modes instead. In the Android app the
+            stateless entry also reset the depth Back counts with. The href stays: without one an <a> is no link
+            at all, neither a Tab stop nor anything a screen reader calls a link. */}
+        <a className="skip" href="#content" onClick={(e) => {
+          e.preventDefault();
+          document.getElementById("content")?.focus();
+        }}>Skip to the game</a>
         {/* A guest reads "Account" too, not "Profile": a guest has no profile screen, and seven messages
             written specifically for guests - the shop, a bio, a picture, a report, the daily, the posted
             season - send them to "the Account tab". With `user ? ...` that tab said Profile and every one
@@ -5163,7 +5220,7 @@ export default function PerfectSeason() {
 
         {/* Everything that isn't the tab bar is one region, so nothing sits outside a landmark and a screen
             reader can move between the nav and the screen. */}
-        <main id="content">
+        <main id="content" tabIndex={-1}>
         {/* The worst way for a staging site to fail is quietly looking like the real one. */}
         {IS_STAGING && (
           <div className="stagebar">
@@ -5271,7 +5328,7 @@ export default function PerfectSeason() {
               ))}
               <p className="fmtnote">
                 {format === "standard"
-                  ? "Championship scoring counts yards and touchdowns only - a catch is worth nothing on its own, so high-volume possession receivers grade lower and big-play producers grade higher. Closer to what wins games than to what wins a fantasy league."
+                  ? "Championship scoring gives no point for a catch, just yards, touchdowns and turnovers - so high-volume possession receivers grade lower and big-play producers grade higher. Closer to what wins games than to what wins a fantasy league."
                   : "Fantasy scoring is full PPR: every reception is worth a point, so target volume counts as much as yardage."}
               </p>
             </div>
@@ -5602,6 +5659,14 @@ export default function PerfectSeason() {
                                 )}
                               </div>
                             </button>
+                            {/* Flex, the moment a newcomer is choosing between it and the player's own spot - until
+                                they have put somebody there and seen it for themselves. ABOVE the Lock in buttons: the
+                                selection scrolls those into view at the foot of a phone's screen, and a tip under them
+                                was below the edge at the one moment it was for. Above, it is read before the choice. */}
+                            {isSel && coaching && !roster.FLEX1 && !roster.FLEX2
+                              && slotsFor.some((s) => s.startsWith("FLEX")) && slotsFor.some((s) => !s.startsWith("FLEX")) && (
+                              <CoachTip>Flex takes any RB, WR or TE, and grades him on raw production rather than against his own position, so your best player is often worth more there.</CoachTip>
+                            )}
                             {isSel && (
                               <div className="drafts">
                                 {/* Both Flex slots are the same choice, so offer one Flex button (the
@@ -5617,12 +5682,6 @@ export default function PerfectSeason() {
                                 })}
                                 <button className="btn" onClick={() => setSelected(null)}>Cancel</button>
                               </div>
-                            )}
-                            {/* Flex, the moment a newcomer is choosing between it and the player's own spot - until
-                                they have put somebody there and seen it for themselves. */}
-                            {isSel && coaching && !roster.FLEX1 && !roster.FLEX2
-                              && slotsFor.some((s) => s.startsWith("FLEX")) && slotsFor.some((s) => !s.startsWith("FLEX")) && (
-                              <CoachTip>Flex takes any RB, WR or TE, and grades him on raw production rather than against his own position, so your best player is often worth more there.</CoachTip>
                             )}
                           </div>
                         );
@@ -5687,8 +5746,8 @@ export default function PerfectSeason() {
                     finer point that is no use before there is a score. */}
                 {finished && coaching && (
                   <CoachTip>{normFormat(result.format) === "standard"
-                    ? "This season was scored in Championship: yards and touchdowns only. Fantasy scoring adds a point for every catch, so volume receivers rise. Switch formats on Modes - each keeps its own leaderboard and daily."
-                    : "This season was scored in Fantasy: full PPR, a point for every catch. Championship scoring counts only yards and touchdowns, so big-play threats rise. Switch formats on Modes - each keeps its own leaderboard and daily."}</CoachTip>
+                    ? "This season was scored in Championship: no point for a catch, just yards, touchdowns and turnovers. Fantasy scoring adds a point for every catch, so volume receivers rise. Switch formats on Modes - each keeps its own leaderboard and daily."
+                    : "This season was scored in Fantasy: full PPR, a point for every catch. Championship scoring drops that point, so big-play threats rise. Switch formats on Modes - each keeps its own leaderboard and daily."}</CoachTip>
                 )}
                 {finished && share.state === "manual" && (
                   <>
@@ -5750,7 +5809,7 @@ export default function PerfectSeason() {
                   <>
                     <h2 className="h">Your roster, graded</h2>
                     <RosterRows roster={SLOTS.map((s) => ({ slot: s, ...roster[s], rating: effectiveRating(s, roster[s], mode.format) }))} />
-                    <p className="note">Grades compare each season to the top finishers at that position in the same era, with 17-game seasons scaled to 16. {normFormat(mode.format) === "standard" ? "Championship scoring counts yards and touchdowns only - receptions are worth nothing, so volume receivers rate lower and big-play producers rate higher than they do in Fantasy scoring." : "Fantasy scoring is full PPR, so every reception is worth a point."} QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Team score averages the six, with the QB counting 1.25 times.</p>
+                    <p className="note">Grades compare each season to the top finishers at that position in the same era, with 17-game seasons scaled to 16. {normFormat(mode.format) === "standard" ? "Championship scoring gives no point for a reception, just yards, touchdowns and turnovers - so volume receivers rate lower and big-play producers rate higher than they do in Fantasy scoring." : "Fantasy scoring is full PPR, so every reception is worth a point."} QBs also gain or lose for passer rating and completion percentage, and RBs for yards per carry, against their era's average. Team score averages the six, with the QB counting 1.25 times.</p>
                     <p className="note flexnote"><b>Flex is graded differently, on purpose.</b> A named slot compares a player to others at his own position. Flex ignores position entirely and compares raw production across every RB, WR and TE of that era — so a tight end usually rates lower in Flex, and a high-volume back rates higher. Flex is also the only slot with no 130 ceiling: a named slot clips an all-time season at 130, Flex shows its full value. <b>That's why your best player often belongs in Flex rather than his own position.</b></p>
                     {history.length === 6 && (() => {
                       // Board players carry both formats' grades; show the one actually in play.

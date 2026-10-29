@@ -54,7 +54,7 @@ export const HOWTO_MORE = [
   ["A ", b("Flex"), " can be any RB, WR, or TE — and it's graded on raw production rather than against his own position, so ", b("your best player is often worth more in Flex"), " than in his natural spot."],
   ["You get ", b("one team re-spin and one era re-spin"), " per draft. Use them wisely."],
   ["Play ", b("unlimited"), " drafts any time, or take the ", b("daily"), " — one draft a day, the same boards for everyone."],
-  ["Pick a ", b("scoring format"), " before you draft. ", b("Fantasy"), " is full PPR, where every catch is worth a point. ", b("Championship"), " is standard scoring, where catches count for nothing and only yards and touchdowns do — so volume receivers drop and big-play threats rise. Each has its own leaderboard and its own daily."],
+  ["Pick a ", b("scoring format"), " before you draft. ", b("Fantasy"), " is full PPR, where every catch is worth a point. ", b("Championship"), " is standard scoring: no point for a catch, just yards, touchdowns and turnovers — so volume receivers drop and big-play threats rise. Each has its own leaderboard and its own daily."],
   ["The eras are ", b(ERA_LIST), "."],
 ];
 // What the dialog's fold and the page's second list are both called.
@@ -140,8 +140,12 @@ const PRIVACY_SECTIONS = [
     "There are no adverts, no tracking pixels and nothing from an advertising network. Nothing else on the site is loaded from anywhere else.",
     "Nothing is sold, rented or handed to anyone else.",
   ]],
+  // Every key the game writes to the device is named here, and tests/test-site-pages.mjs fails on one that is
+  // not: it reads every "ps-" key in the shipped code and needs each to map to words below. v2.22.1 added the
+  // unsent season without a word here, and this list then went out re-dated in v2.23.0 still missing it.
   ["What is kept on your device", [
-    "A draft in progress, a Century or Guess the Player game in progress, which dailies you have already played, the scoring format you last chose, whether you have seen the rules and a first draft's tips, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
+    "A draft in progress; an Over/Under, Century or Guess the Player game in progress; a finished game while it is still waiting to be saved; which dailies you have already played and how they went; the scoring format you last chose; whether you have seen the rules and a first draft's tips; a duel invite you followed, held while you sign in; and - if you are signed in - the token that keeps you signed in. A game in progress, or one waiting to be saved, is marked with the account it belongs to. All of it lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
+    "The site also keeps a copy of its own files - the page, the game's code, its icons and its typefaces - so it can open without a signal. They hold nothing about you.",
   ]],
   ["Your choices", [
     `You can change or clear your bio, your picture and your favourite team whenever you like, from your profile. To close your account, use Close my account on your profile - or write to ${PRIVACY_CONTACT} from the address the account uses and it will be done for you.`,

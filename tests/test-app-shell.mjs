@@ -8,11 +8,12 @@ import { BACK_EVENT, barStyleFor, followSystemBars, goBack, nativeShare } from "
 // ---------- the shell on its own ----------
 
 // A window just big enough for goBack: the event, the listeners, and a history that records back().
-function fakeWindow({ handled = false } = {}) {
+// `leaving` is a game on Modes, which says the press leaves the app whatever is behind it.
+function fakeWindow({ handled = false, leaving = false } = {}) {
   const listeners = [];
   const win = {
     CustomEvent: class {
-      constructor(type, opts = {}) { this.type = type; this.cancelable = !!opts.cancelable; this.defaultPrevented = false; }
+      constructor(type, opts = {}) { this.type = type; this.cancelable = !!opts.cancelable; this.detail = opts.detail ?? null; this.defaultPrevented = false; }
       preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
     },
     addEventListener: (type, fn) => listeners.push([type, fn]),
@@ -20,6 +21,7 @@ function fakeWindow({ handled = false } = {}) {
     history: { backs: 0, back() { this.backs++; } },
   };
   if (handled) win.addEventListener(BACK_EVENT, (e) => e.preventDefault());
+  if (leaving) win.addEventListener(BACK_EVENT, (e) => { e.detail.leave = true; });
   return win;
 }
 
@@ -38,6 +40,12 @@ await runTest("Back asks the game first, then goes back, and only leaves the app
   const last = fakeWindow();
   assert(goBack({ canGoBack: false }, { win: last, exitApp }) === "exit", "nothing left leaves the app");
   assert(last.history.backs === 0 && exits === 1, "the app exits exactly once");
+
+  // Modes: entries behind it or not, Back there leaves. Its tab opens it on top of whatever it was tapped from,
+  // and walking back into those is the stop this exists to remove.
+  const home = fakeWindow({ leaving: true });
+  assert(goBack({ canGoBack: true }, { win: home, exitApp }) === "exit", "a game that says leave is left");
+  assert(home.history.backs === 0 && exits === 2, "without walking back first");
 });
 
 await runTest("the share sheet: sharing passes the season on, closing it is an AbortError", async () => {
@@ -110,19 +118,13 @@ async function open(url = "http://localhost/", auth = makeMockAuth()) {
   await flush(4);
   return app.container;
 }
-// Back as the shell sends it, with a window that records what it would have done next.
+// Back as the shell sends it - the real goBack, over jsdom's window - with the app's exit counted rather than
+// taken.
 async function back() {
   const { act } = await import("react-dom/test-utils");
   let exited = 0;
-  const before = window.history.length;
-  await act(async () => {
-    const asked = new window.CustomEvent(BACK_EVENT, { cancelable: true });
-    window.dispatchEvent(asked);
-    if (!asked.defaultPrevented) {
-      if (before > 1) window.history.back();
-      else exited++;
-    }
-  });
+  const canGoBack = window.history.length > 1;
+  await act(async () => { goBack({ canGoBack }, { win: window, exitApp: () => exited++ }); });
   await flush(3);
   return { exited };
 }
@@ -175,14 +177,7 @@ function trackPosition() {
 async function backAt(position) {
   const { act } = await import("react-dom/test-utils");
   let exited = 0;
-  await act(async () => {
-    const asked = new window.CustomEvent(BACK_EVENT, { cancelable: true });
-    window.dispatchEvent(asked);
-    if (!asked.defaultPrevented) {
-      if (position.canGoBack()) window.history.back();
-      else exited++;
-    }
-  });
+  await act(async () => { goBack({ canGoBack: position.canGoBack() }, { win: window, exitApp: () => exited++ }); });
   await flush(4);
   return { exited };
 }
@@ -239,14 +234,66 @@ await runTest("...and lands on Modes even when the page opened on another screen
 });
 
 await runTest("a profile takes Back through the entry it pushed, not straight to Modes", async () => {
-  const c = await open("http://localhost/u/laddertest");
-  await flush(4);
-  assert(window.location.pathname === "/u/laddertest", "the profile is on screen at its own address");
+  const auth = makeMockAuth();
+  await auth.auth.signUp({ email: "pusher@example.com", password: "Password1", options: { data: { username: "pusher" } } });
+  const c = await open("http://localhost/", auth);
+  await click(tab(c, "Leaderboard"));
+  await until(() => onTab(c, "Leaderboard"), "the Leaderboard");
+  await click(c.querySelector(".whoami"));
+  await until(() => c.querySelector("section.profile")?.dataset.username === "pusher", "your profile");
+  assert(window.location.pathname === "/u/pusher", "the profile is on screen at its own address");
   // Not cancelled: the shell's own history.back() is what returns to where the profile was opened from,
   // so Forward still works and the page comes back where it was left.
-  const asked = new window.CustomEvent(BACK_EVENT, { cancelable: true });
+  const asked = new window.CustomEvent(BACK_EVENT, { cancelable: true, detail: { leave: false } });
   window.dispatchEvent(asked);
-  assert(!asked.defaultPrevented, "the game leaves a profile to Back itself");
+  assert(!asked.defaultPrevented && !asked.detail.leave, "the game leaves a profile to Back itself");
+  await flush(4);
+  window.history.back();
+  await until(() => onTab(c, "Leaderboard"), () => `the Leaderboard it was opened from, got: ${text(c).slice(0, 80)}`);
+});
+
+await runTest("Modes is where Back leaves the app, however it was reached", async () => {
+  // The Modes TAB opens Modes in place, on top of the screen it was tapped from - here your profile and the
+  // Shop - so there are entries behind it that the shell's own Back would walk into.
+  const auth = makeMockAuth();
+  await auth.auth.signUp({ email: "tapper@example.com", password: "Password1", options: { data: { username: "tapper" } } });
+  const c = await open("http://localhost/", auth);
+  const position = trackPosition();
+  const profile = () => c.querySelector("section.profile");
+  await click(c.querySelector(".whoami"));
+  await until(() => profile()?.dataset.username === "tapper", "your profile");
+  await click([...profile().querySelectorAll("button")].find((b) => b.textContent.trim() === "Shop"));
+  await until(() => c.querySelector("section.shop"), "the shop from your card");
+  await click(tab(c, "Modes"));
+  await until(() => onTab(c, "Modes"), "Modes, from its tab");
+  assert(position.canGoBack(), `there are entries behind it (at ${position.at()}), which is the case this is about`);
+  const { exited } = await backAt(position);
+  assert(exited === 1, `Back on Modes leaves the app, got: ${text(c).slice(0, 80)}`);
+  assert(onTab(c, "Modes") && !c.querySelector("section.shop"), "rather than walking back into the Shop");
+});
+
+await runTest("a profile with nothing under it goes to Modes, rather than closing the app", async () => {
+  // Signing in on the Account tab turns that screen into your profile in the entry the app opened in. There is
+  // nothing under it, and the shell's Back used to close the app from there.
+  const auth = makeMockAuth();
+  await auth.auth.signUp({ email: "newcomer@example.com", password: "Password1", options: { data: { username: "newcomer" } } });
+  await auth.auth.signOut();
+  const c = await open("http://localhost/", auth);
+  const position = trackPosition();
+  await click(tab(c, "Account"));
+  await until(() => c.querySelector(".panel"), "the sign-in panel");
+  const panel = c.querySelector(".panel");
+  const [email, password] = [...panel.querySelectorAll("input")];
+  await type(email, "newcomer@example.com");
+  await type(password, "Password1");
+  await click([...panel.querySelectorAll("button")].find((b) => !b.hasAttribute("role") && b.textContent.includes("Log in")));
+  await until(() => c.querySelector("section.profile")?.dataset.username === "newcomer", () => `your profile, got: ${text(c).slice(0, 120)}`);
+  assert(position.at() === 0 && !position.canGoBack(), `the profile is the only entry, at ${position.at()}`);
+  let { exited } = await backAt(position);
+  assert(!exited, "Back on that profile doesn't close the app");
+  await until(() => onTab(c, "Modes"), () => `Modes, got: ${text(c).slice(0, 80)}`);
+  ({ exited } = await backAt(position));
+  assert(exited === 1, "and Back on Modes then does");
 });
 
 await runTest("Back closes a report sheet before the profile it opened over", async () => {

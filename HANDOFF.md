@@ -30,6 +30,33 @@ It is two things in one release:
   calendar alone (Day One). **The suite was 84/85 on arrival.** If the next session finds it red with nothing
   changed, check for another date before suspecting the code.
 
+**Then it was reviewed, and the review earned its keep.** A workflow of five reviewers, each finding checked by two
+skeptics, confirmed thirteen problems in the branch's first commit (`eb8283b`), all fixed in the second. The ones
+worth knowing about, because each is a shape that will come back:
+
+- **A service worker already in strangers' browsers is part of the deploy.** Adding `crossorigin` to the font
+  stylesheet was right, and the 2.22.x worker, still in control on the first load after the deploy, answered
+  the new CORS request with its stored OPAQUE copy, which the browser treats as a network error. No fonts on that
+  load, for every returning player. The fix is a different address (the family order); reproduced and then
+  cleared in Chromium against a real 2.22.1 worker. **Any change to how a stored asset is requested has to ask
+  what the previous worker will answer.**
+- **Android Back had two more routes to a stop already left**: Modes reached by its own TAB (which opens it in
+  place on top of the screen it was tapped from), and your profile right after signing in on the Account tab
+  (depth 0, nothing under it, so the shell closed the app). CLAUDE.md's Back paragraph now says all three.
+- **"Skip to the game" threw keyboard users to Modes, and has on production** (2.22.1, reproduced): a fragment is
+  a history entry with no state, and the game reads that as Modes. It cost a life mid Over/Under.
+- **Championship never counted "only yards and touchdowns"**: turnovers cost two points in both formats. Four
+  old places said it and the new scoring tip repeated it.
+- **`/privacy` still left out four things kept on the device**, one of them since v2.22.1, and the date test the
+  first commit rewrote could not catch a stale date. Both are tests now (`tests/test-site-pages.mjs`).
+- The first-visit dialog swapped its focused button out from under a keyboard user; the Flex tip sat below the
+  fold on phones; Reset on a signed-in newcomer's first draft ended the coaching; rules a duel closed stayed in
+  their first-visit state; the fold's arrow was read aloud; and More ways to play went three-wide on desktop with
+  Mini games stranded. All fixed and each held by a test, except the layout, which was measured in Chromium at
+  seven sizes (no test here can lay a page out).
+
+Every new test was mutation-checked: the fix reverted, the test red, the fix restored.
+
 **Not changed, and worth a decision rather than a patch:** the Sitewide panel on Modes still shows a raw
 "Players" count beside "Drafts played" and "Perfect seasons". That is the same small-number problem the tester
 named for "online now", and it was left alone because the tester did not name it. Suggested to the owner instead.
@@ -447,7 +474,7 @@ devices, the way `builds.day` got one.
   Render ProfileScreen for a player ranked #1 in a format (rank={fantasy: 1}). The headline tile's text is "112.4Best Fantasy score, 👑 #1 sitewide" with no aria-hidden element anywhere inside it, so a screen reader announces "Best Fantasy score, crown, number 1 sitewide". Confirmed by walking .tiles .tile in jsdom: that tile is the only one on the screen containing an emoji, and it contains zero aria-hidden descendants
   *Fix:* Make rankNote return a node instead of a string — e.g. `(r) => r ? <>{", "}{r === 1 && <span aria-hidden="true">👑 </span>}{`#${num(r)} sitewide`}</> : null` — and build the tile label as `<>{`Best ${FORMAT_LABEL[f]} score`}{rankNote(rank?.[f])}</>` at profile.
 
-- **[FIXED in v2.23.0, unverified on a device] Android Back moves the screen to Modes without consuming the history entry, so a later Back re-opens the screen you left**
+- **[FIXED in v2.23.0, all three routes, unverified on a device] Android Back moves the screen to Modes without consuming the history entry, so a later Back re-opens the screen you left**
   `perfect-season.jsx:2794-2801`
   In the app, signed in: Modes → open the Shop → tap the Leaderboard tab → hardware Back → you land on Modes (correct) → hardware Back again → the Shop opens instead of the app exiting. It takes four presses to leave the app, with a stop in a screen the player already left twice. On the website the same route needs one Back (Leaderboard → Shop), so the app inserts a phantom Modes stop and then walks back into the Shop.
   *Fix:* When onAppBack decides a screen leaves for Modes, walk history rather than cancelling: if the entry below is one this app pushed, call history.back() (or go(-n) past the owned entries) instead of openTab("home") + preventDefault, so the stack and the screen st

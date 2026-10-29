@@ -13,11 +13,16 @@ export const BACK_EVENT = "ps:back";
 // doesn't take, Back does the ordinary way - a screen that pushed a history entry of its own (a profile,
 // the shop) goes back to where it was opened from, and Back with nothing left leaves the app, which is what
 // Android expects. Returns what it did, for the tests.
+//
+// The game can also say the opposite: that this press leaves the app although there are entries behind it
+// (`detail.leave`). That is Modes. Its tab opens it in place, on top of whatever screen it was tapped from, so
+// "is there an entry behind this one" answered yes and Back from Modes walked back into the Shop and the
+// profile the player had already left - two stops before the app would close.
 export function goBack({ canGoBack } = {}, { win = window, exitApp } = {}) {
-  const asked = new win.CustomEvent(BACK_EVENT, { cancelable: true });
+  const asked = new win.CustomEvent(BACK_EVENT, { cancelable: true, detail: { leave: false } });
   win.dispatchEvent(asked);
   if (asked.defaultPrevented) return "handled";
-  if (canGoBack) {
+  if (canGoBack && !asked.detail?.leave) {
     win.history.back();
     return "back";
   }

@@ -59,7 +59,9 @@ off, which is what a policy should do; the Modes footer links it like the others
 claim the address the click is the browser's to follow. **Google's consent screen requires it**: publishing an
 External OAuth app needs a homepage and a privacy policy URL, which is what gates Google sign-in for anyone who
 isn't a listed test user. The address to write to is `PRIVACY_CONTACT` in site-pages.mjs; keep the page true to
-what the code actually does. `site-pages.mjs` holds both addresses and all their
+what the code actually does. Two tests hold it there (v2.23.0): every `ps-` key in the shipped code has to map to
+words in its device section, and a digest of its words is pinned beside its date, so a new key or an edit without
+a new date fails `tests/test-site-pages.mjs`. `site-pages.mjs` holds both addresses and all their
 copy - including the How to play steps the dialog renders as JSX - so the rules can never exist in two versions;
 `build.mjs` writes `public/how-to-play.html` and `public/leaderboard.html` from the same shell as the app, swapping
 in each page's title, description, canonical, link preview and structured data (every swap asserted, so renaming a
@@ -360,7 +362,8 @@ parts that are unlike every other mode:
   delete the match row (its picks follow) and decrement `pvp_wins` / `pvp_losses` on the two profiles by hand.
 
 **Modes is two groups (v2.10.0, regrouped in v2.23.0).** **Drafts** holds the daily and Unlimited and nothing
-else. **More ways to play** sits under it in a denser grid of smaller tiles (`.modes.more`): Genius, GM, Duel, the
+else. **More ways to play** sits under it in a denser grid of smaller tiles (`.modes.more`, at most two to a row and
+one below 600px - a fitted grid made three at desktop widths and stranded Mini games on a row alone): Genius, GM, Duel, the
 **Mini games** tile (which opens a screen of its own holding **Guess the Player, Over/Under, Build-a-player and
 Century**) and the challenge-code box. It had grown to nine tiles in v2.10.0 and read as a list. v2.23.0 split it
 again because a tester's first decision was one of seven: "Unlimited and Daily should lead." Three things to know
@@ -378,15 +381,23 @@ lengthy explanation does."** Four pieces, and three of them only ever touch a ne
   carries both. The old dialog was 1,233px tall on a 320x640 phone. The new one is 609.
 - **The first-visit dialog starts the first draft.** `HowTo`'s `onStart` gives it **Start my first draft 🏈**
   beside **Look around first**. `firstDraftOffer` is the rule: only on Modes, with no challenge card waiting,
-  nothing in progress, and never for an account with drafts behind it. Tests close the dialog with
-  **`closeRules(container)`**, its ×, because the button copy depends on how it was opened. Clicking "Got it,
-  let's draft" broke nine test files the day the first-visit copy changed.
+  nothing in progress, not on `/how-to-play`, and never for an account with drafts behind it. Because that last
+  depends on whose account it is, **the first-visit rules wait for `authReady`** (the session and its profile
+  read) before opening. And the dialog's main button is ONE element whose words follow the offer: an offer that
+  arrives or goes while the dialog is open must never remove the button that has focus, which is what left a
+  keyboard user on `<body>` outside the modal. Tests close the dialog with **`closeRules(container)`**, its ×,
+  because the button copy depends on how it was opened. Clicking "Got it, let's draft" broke nine test files the
+  day the first-visit copy changed.
 - **The first draft teaches as it goes** (`CoachTip`). The re-spins come up on the first board, Flex when a
   player is choosing between his own spot and Flex, and the scoring on the first result. `COACH_KEY`
   (`ps-coach`) is `"on"` from a first visit until the first result appears and `"done"` after. It is only ever
   switched on for a device that had never closed the rules, so nobody who was here before tips existed sees
-  one, and an account with drafts behind it switches it off on any device. Keep tips to one line, at the moment
-  the thing they explain becomes a decision; a tip that shows before that is the old dialog again.
+  one, and an account with drafts behind it switches it off on any device - **asked once per account**
+  (`coachAsked`), because a newcomer's own Reset on the coached draft is a DNF that moves the stats at once and
+  read as a veteran's history. Keep tips to one line, at the moment the thing they explain becomes a decision; a
+  tip that shows before that is the old dialog again. A tip that sits beside a choice goes ABOVE the choice's
+  buttons: selecting a card scrolls the Lock in row to the foot of a phone's screen, so a tip under it is off
+  screen at the moment it was for.
 - **"Online now" hides below `ONLINE_SHOWN_FROM` (10).** It counts every open tab, the viewer's own included, so
   on a young site its message was that nobody else was here. The count is still kept, and the pill returns by
   itself as the site grows.
@@ -607,12 +618,20 @@ functions in **`app-shell.mjs`** so the tests can drive them without a device (`
   topmost closes, exactly as Escape does). What the game doesn't take, Back does the ordinary way - a screen that
   pushed an entry of its own (a profile, the shop) goes back to where it was opened from, and Back from Modes
   leaves the app. Without this every Back press left the app, from the first-run rules dialog included.
-  **Going to Modes walks history; it does not open Modes in place** (v2.23.0). Every entry `writeHistory` makes
-  records its `depth`, meaning how many entries the game pushed above the first, and Back from a tab goes
-  `history.go(-depth)`. Opened in place, the pushed entries stayed underneath Modes: your profile, the Shop from
-  its card, the Leaderboard tab, then Back, Back, and the second Back opened the Shop instead of leaving.
-  `tests/test-app-shell.mjs` tracks the web view's real position to prove it, because `history.length` cannot
-  tell you whether there is anything behind you.
+  **Back counts the entries the game pushed** (v2.23.0). Every entry `writeHistory` makes records its `depth`,
+  meaning how many entries the game pushed above the first, and `onAppBack` reads it three ways. From a tab, Back
+  goes `history.go(-depth)`: opened in place, the pushed entries stayed underneath Modes - your profile, the Shop
+  from its card, the Leaderboard tab, then Back, Back, and the second Back opened the Shop instead of leaving. On
+  Modes, Back sets `detail.leave` on the event and `goBack` leaves the app however many entries are behind it,
+  because **the Modes TAB still opens Modes in place** on top of the screen it was tapped from (the website wants
+  that entry; only the app's Back must ignore it). And on a screen that owns an entry but sits at depth 0 - your
+  profile, right after signing in on the Account tab, which replaces the entry the app opened in - there is
+  nothing to walk back to, so Back opens Modes instead of letting the shell close the app.
+  `tests/test-app-shell.mjs` drives the real `goBack` and tracks the web view's real position to prove all three,
+  because `history.length` cannot tell you whether there is anything behind you. **A history entry with no state
+  reads as Modes** (`screenOf(null)`), which is why the skip link moves focus itself rather than following its
+  `#content`: following it made exactly such an entry, threw the player to Modes from any screen at "/", and
+  reset the depth.
 - **Privacy and Terms point at the live site inside the app** (`sitePageHref`, v2.23.0). Capacitor's local
   server answers every path without a file extension with the game's `index.html`, so a relative `/privacy`
   reloaded the game onto Modes and the policy was unreachable. An address on another host is one Capacitor hands
@@ -691,7 +710,7 @@ SUPABASE_URL=... SUPABASE_ANON_KEY=... node build.mjs
 # exercises the real server-side verification logic, not a bypassed shortcut
 node tests/test-accounts.mjs      # signup, login, stats persistence
 node tests/test-daily.mjs         # seeded boards, daily lock, challenge codes
-node tests/test-nav.mjs           # landing page, mode switching, draft resume
+node tests/test-nav.mjs           # landing page, mode switching, draft resume, and the skip link keeping its screen
 node tests/test-mode-switch.mjs   # switching Unlimited/Genius/GM mid-draft starts fresh, doesn't resume the wrong variant
 node tests/test-wip-race.mjs      # end-of-draft storage race (see pendingClears below)
 node tests/test-finish-race.mjs   # the same race through the four readers that write to the record: Run it back must not charge a DNF
@@ -728,7 +747,8 @@ node tests/test-sim-engine-independence.mjs  # the season sim rolls identically 
 node tests/test-build-seo.mjs      # runs build.mjs for production and staging: canonical, noindex, robots.txt, sitemap, structured data
 node tests/test-share.mjs          # the spoiler-free share card, challenge links in and out, and the challenge card on Modes
 node tests/test-first-visit.mjs    # a stranger's first visit: the three-step rules, Start my first draft, the tips and when they stop, Modes' two groups
-node tests/test-site-pages.mjs     # /how-to-play and /leaderboard: the addresses, the footer links, and the rules matching site-pages.mjs
+node tests/test-site-pages.mjs     # /how-to-play and /leaderboard: the addresses, the footer links, and the rules matching site-pages.mjs;
+                                   # /privacy naming every ps- key the code keeps, and its date pinned to a digest of its words
 node tests/test-app-shell.mjs      # the Android app: Back closes a dialog, then leaves a screen, then the app; the share sheet's AbortError
 node tests/test-pwa.mjs            # installable and offline: what the service worker stores and never stores, the build's stamp, the install offer
 node tests/test-error-boundary.mjs # the crash net: a crash shows a screen rather than a blank page, with no stylesheet and no personal data in the report
@@ -1449,8 +1469,12 @@ suite and still broke the live Leaderboard for every existing account.
   anyway. On staging, check the first visit in a fresh private window rather than one that has played: the
   three-step rules, Start my first draft, the re-spin tip on the first board, the Flex tip on placing a back or
   receiver, and the scoring tip on the result. Then check that a second draft shows none of them. The Android
-  half (Privacy and Terms opening in the phone's browser, Back past pushed screens) waits for the next
-  `npm run app:sync`, and has still never run on a phone.
+  half (Privacy and Terms opening in the phone's browser, Back past pushed screens, Back on Modes leaving)
+  waits for the next `npm run app:sync`, and has still never run on a phone. **The font stylesheet's address
+  changed on purpose** (the family order): a 2.22.x worker still in control on the first load after the deploy
+  holds the old address as an opaque copy, and an opaque answer to the new CORS request is a network error, so
+  that load had no fonts. Do not change it back. `/privacy` changed too (its device list and date), so this
+  release cannot skip the staging step.
   v2.22.0's (the crash sink): run **`migration-client-errors.sql`**, then **deploy the Edge Functions**
   (`node deploy-function.mjs <env>` deploys **SIX** now), then the client. **The order is not optional
   here**: a client ahead of the function POSTs at a 404 and silently drops every report, which is

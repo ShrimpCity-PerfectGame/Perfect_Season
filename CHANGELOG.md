@@ -23,12 +23,27 @@ CLAUDE.md.
 ## [2.23.0] - 2026-10-29
 
 Client only. No migration, no Edge Function change. The service worker changes too, and every deploy already
-ships that. Rebuild the Android app (`npm run app:sync`) whenever it is next built, since two fixes are its own.
-**`/privacy` changes by one phrase:** its list of what is kept on your device now names the new first-draft flag
-(`ps-coach`, beside "whether you have seen the rules"), and its date moves to 29 October. The page promises that
-every line is something the code does, so a new key the page did not mention would have made that promise false.
-`tests/test-site-pages.mjs` had pinned the page's date to exactly 5 October and went red on this. It now holds
-the printed date and the sitemap date to each other, and to no earlier than the crash sink's own release.
+ships that. Rebuild the Android app (`npm run app:sync`) whenever it is next built: its Back button and its
+Privacy and Terms links changed.
+
+**`/privacy` changes, and its date moves to 29 October.** Its list of what is kept on your device was missing
+four things the game writes there: an Over/Under game in progress, a finished season while it waits to be saved
+(`ps-unsent-run`, which shipped in v2.22.1 with no word on the page), a duel invite held while you sign in, and
+the copy of the site's own files the service worker keeps for offline play. It names all of them now, and the
+new first-draft flag (`ps-coach`), and says that a game in progress is marked with the account it belongs to.
+The page promises that every line is something the code does, so `tests/test-site-pages.mjs` now reads every
+`ps-` key in the shipped code and fails on one the page does not account for. The date is held to the words too:
+a digest of the policy's text is pinned beside the date it last changed on, so changing the words without moving
+the date fails. The pin it replaced held the date to exactly 5 October, which failed on any change at all, and
+the first fix for that held the date only to itself, which a reviewer showed would pass a policy edited with its
+old date left on it.
+
+**The font stylesheet's address changes on purpose** (`family=Inter...&family=Anton` instead of the other way
+round). A returning player's browser still runs the 2.22.x service worker on the first load after the deploy,
+and that worker holds the old address as an opaque copy. The new page asks for the stylesheet with CORS, an
+opaque answer to a CORS request is a network error, and the first load had no Anton or Inter at all. Reproduced
+in Chromium against a real 2.22.1 worker; with the new address the old worker fetches it instead and both faces
+load. `tests/test-pwa.mjs` fails if the address goes back.
 
 ### Changed - the first visit, from a player's feedback
 A tester's notes, forwarded by the owner, put it in one line: the gameplay communicates the appeal better than a
@@ -41,24 +56,44 @@ choosing among seven modes, under a pill announcing that one person was online. 
   header's How to play, or `/how-to-play`, which carries both halves so the rules still exist in one version.
   Measured in Chromium, the first-visit dialog is 609px tall on a 320x640 phone and 549px on a 375x667 one, so
   it fits on screen with its button in view. The old one was 1,233px and 1,005px on the same two phones, about
-  two screens of reading before the button.
+  two screens of reading before the button. The fold's arrow is drawn but not spoken: as CSS content it was
+  part of the fold's name, so a screen reader read the triangle's name out after "The finer points".
 
 - **The first draft is the first visit.** The first-visit dialog's own button is **Start my first draft 🏈**,
   which deals an Unlimited board straight away; **Look around first** closes it onto Modes as before. It is
   offered only where starting a draft takes nothing from anybody: on Modes, with no challenge card waiting (that
-  visitor came for those boards), nothing in progress, and never to an account with drafts behind it.
+  visitor came for those boards), nothing in progress, and never to an account with drafts behind it. It is not
+  offered on `/how-to-play` either, where the reader came for the rules.
+
+  Whether to offer it depends on whose account this is, so a first visit's rules wait until the session and its
+  profile have been read. Opened sooner, they offered a first draft to an account with twelve and took the offer
+  back when its profile landed. The dialog's main button is one element whose words follow the offer, so if the
+  offer does change (a profile that failed to load and is read later), the button with focus is never the one
+  taken away. Swapped for two new buttons, it left a keyboard or screen-reader visitor on `<body>`, outside the
+  modal, where Enter did nothing.
 
   That draft then teaches what the rules stopped front-loading, one line at a time and only when it applies.
   The re-spins come up on the first board, while both are still there to spend. Flex comes up when the player
-  is choosing between a player's own spot and Flex, and stops once a Flex slot is filled. The scoring comes up
-  on the first result, the one point where a format means something. Coaching ends at that result, which is
-  recorded the moment it appears, so a reload afterwards is a veteran's. It never starts on a device that had
-  closed the rules before this release, or for an account with drafts behind it, on any device.
-  `tests/test-first-visit.mjs` is new, and eight mutations of the coaching rules each turn it red.
+  is choosing between a player's own spot and Flex, above the Lock in buttons so it is read before the choice:
+  selecting a card scrolls those buttons to the foot of a phone's screen, and a tip under them was below the edge
+  (16 of its 103px showing at 375x667). Above them it was fully on screen in all twenty cases measured, at four
+  phone sizes. It stops once a Flex slot is filled. The scoring comes up on the first result, the one point
+  where a format means something. Coaching ends at that result, which is recorded the moment it appears, so a
+  reload afterwards is a veteran's. It never starts on a device that had closed the rules before this release,
+  or for an account with drafts behind it, on any device. That last is asked once per account: asked on every
+  change, a signed-in newcomer's own Reset on the coached draft, which charges a DNF, read as a veteran's history
+  and switched the tips off on the draft they were for. First-visit rules that a duel screen closes are held
+  again and open on the next screen, as they are for somebody who arrives on a duel; before, they left their
+  first-visit state behind, and the rules somebody asked for later opened folded, offering a first draft.
+  `tests/test-first-visit.mjs` is new, and every rule in it was checked by breaking the code it guards.
 
 - **Daily and Unlimited lead Modes.** They sit alone under Drafts, and Genius, GM, Duel, Mini games and the
-  challenge code moved into **More ways to play** below them: smaller tiles, two to a row once there is room.
-  Nothing is hidden. Every mode is still one tap away, and `clickMode` still finds every tile.
+  challenge code moved into **More ways to play** below them: smaller tiles, at most two to a row, one column
+  below 600px. A fitted grid made three columns at desktop widths and left Mini games alone on a row; and since a
+  button centres what it holds, tiles side by side put each heading and pill at a different height. The words
+  sit at the top of each tile and its pill at the foot now, and in Chromium every row lined up at 1280, 1024,
+  768, 667x375, 430, 375 and 320. Nothing is hidden. Every mode is still one tap away, and `clickMode` still
+  finds every tile.
 
 - **"1 online now" is gone until the number is worth showing.** The pill counts every open tab, the viewer's
   own included, so on a young site what it usually said was that nobody else was here. It appears from ten
@@ -73,6 +108,20 @@ choosing among seven modes, under a pill announcing that one person was online. 
   no-JavaScript text in `page.html`. The example is Patriots, 2006–2010 now, and the finer points list every
   era, read from `WINDOWS` so the sentence cannot go stale. A test fails if any of the four says five-year
   again, or if the example stops being an era the game deals.
+
+- **Championship was said to count "only yards and touchdowns", and it also counts turnovers.** It drops the
+  point for a catch and nothing else, so an interception or a lost fumble costs two points in both formats.
+  Across the board's 185 heaviest turnover seasons (fifteen or more), Championship points sit 35 below what
+  yards and touchdowns alone would give, on average. The claim was in four places before this release (the rules, the note under the
+  format picker, the note under a graded roster) and this release's new scoring tip repeated it. All of them
+  say "no point for a catch, just yards, touchdowns and turnovers" now, and a test checks that against the data
+  and against every place the app says it.
+
+- **"Skip to the game" threw keyboard users to Modes.** Following its `#content` made a history entry with no
+  state, the browser announced it as a move through history, and the handler that puts screens back for Back
+  and Forward read an entry with no state as Modes. From Stats, a draft or the Shop, the first Tab stop took the
+  player away from the screen they were on, and in an Over/Under round it cost a life. Live on production as of
+  2.22.1 (reproduced in Chromium on that build). It moves focus to the screen itself now, and makes no history entry.
 
 - **The profile's #1 crown was read aloud.** The best-score tile wrote "👑" into its label as text, so a screen
   reader said "crown, number 1 sitewide". It was the one emoji on the screen not hidden. It is `aria-hidden` now,
@@ -89,7 +138,7 @@ choosing among seven modes, under a pill announcing that one person was online. 
   release replaced the store. The stylesheet is asked for with `crossorigin` now, after checking that Google
   sends `access-control-allow-origin: *`, and the worker stores only answers that say they worked. Checked in
   real Chromium: both faces load, the sheet's rules are readable as a CORS response, and the worker stores it
-  as one.
+  as one. See above for why its address changes too.
 
 - **Android: Privacy and Terms could not be opened from the app.** In the app, `/privacy` goes to Capacitor's
   local server, which answers every path without a file extension with the game itself, so the game reloaded
@@ -97,10 +146,15 @@ choosing among seven modes, under a pill announcing that one person was online. 
   browser, leaving the game where it was. The website's links are unchanged. Exercised in jsdom with the bridge
   present; the app has still never run on a phone.
 
-- **Android: Back walked into a screen you had already left.** Your profile, the Shop from its card, the
-  Leaderboard tab, then Back: Modes, correctly, and the next Back opened the Shop instead of leaving the app. It
-  took four presses to leave. Every history entry now records how many entries the game pushed above the first,
-  and Back from a tab goes to Modes past all of them at once.
+- **Android: Back walked into screens you had already left, and closed the app from a profile.** Three routes,
+  all fixed. Your profile, the Shop from its card, the Leaderboard tab, then Back: Modes, correctly, and the next
+  Back opened the Shop instead of leaving the app. Every history entry now records how many entries the game
+  pushed above the first, and Back from a tab goes to Modes past all of them at once. The same stops came back
+  when Modes was reached by its own tab, which opens it on top of the screen it was tapped from; Back on Modes
+  now leaves the app however Modes was reached (`goBack` honours the game's `detail.leave`). And signing in on
+  the Account tab turns that screen into your profile in the entry the app opened in, so Back there had nothing
+  to walk back to and closed the app; it goes to Modes now. `tests/test-app-shell.mjs` drives the real `goBack`
+  for all three.
 
 - **The shop's tests had been red since 14 October because of the calendar alone.** The showcase test expected a
   brand-new account to have Day One, which is earned by joining before `DAY_ONE_BEFORE`. It pins the join date
