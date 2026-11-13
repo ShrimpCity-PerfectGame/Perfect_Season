@@ -512,6 +512,28 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
+**Cards (in progress, 2026-11-13).** A card-collecting and auto-battler mode is being built in five parts, and
+**only the first exists: the catalog and the rules.** There is no table, no Edge Function, no screen and no switch,
+and `data/cards.json` is not shipped to the site. **`CARDS.md` is the reference** and
+`docs/superpowers/specs/2026-11-13-card-collection-design.md` is the design - read both before touching any of it.
+The parts unlike everything else:
+
+- **`data/cards.json` is FROZEN.** Every other file in `data/` is regenerated from source; this one is only ever
+  appended to by `tools/data/build-card-catalog.mjs`, because a card is something a player will own. A card keeps
+  its id, its `pid` and its stats for ever, even when `data/players.json` is rebuilt and its row changes or leaves.
+  `players.json`'s own player `id` is a position in a name array and must never become an ownership key.
+- **`card-logic.mjs` owns every rule** - archetypes, defense traits, lineup legality, battle scoring - for the
+  reason game-logic.mjs and versus-logic.mjs do. It never calls `Math.random`: every draw comes from a `rand` the
+  caller passes, exactly two a card and twelve a battle, so the browser and Deno walk the generator in step.
+- **The bar rises with every win in a run**, and that is the owner's decision rather than a tuning choice. A bar
+  fixed per defense was measured and cannot work: a starter deck's best six add up to about 246 and the best
+  collection's to 780, so one bar is either unreachable for a new player or a walkover for everyone else.
+- **The numbers are tuned, not chosen.** `tests/test-card-balance.mjs` plays thousands of battles and holds the
+  luck spread, the bar and every counter and pair to bands; change a number and it prints the cost. Its bands are
+  the builder's reading of the design - nobody has played a battle yet.
+- **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not
+  used; the number on the card face is always the number in the battle.
+
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
 Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`
 only allows that for a provider - an email signup still brings its name and passes every check), and the game
@@ -742,6 +764,11 @@ node tests/test-guess-logic.mjs        # every rule and refusal, that five green
 node tests/test-guess-edge.mjs         # the real submit-guess, executed: who is asking, the daily's clock, the duplicate, and that the result is the server's
 node tests/test-guess-sql.mjs          # the migration in PGlite: nobody writes the table, the daily's unique index, both boards == the mock, a rename, the coin claim
 node tests/test-guess-screen.mjs       # the buttons: the tile, both variants, guesses typed, the colours IN WORDS, resume, the boards, the guest, the refusal map
+
+# Cards (in progress - rules only, 2026-11-13). See CARDS.md. card-logic.mjs is pure, so none of these needs a database or a browser.
+node tests/test-card-catalog.mjs       # data/cards.json: every pool row is a card, and a rebuild of players.json never rewrites one
+node tests/test-card-logic.mjs         # archetypes, defense traits, every lineup refusal, battle scoring, the daily showdown, a pinned checksum
+node tests/test-card-balance.mjs       # plays ~4,500 battles and PRINTS the balance the tuned numbers are held to (about 35 seconds)
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
