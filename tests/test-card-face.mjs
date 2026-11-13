@@ -1,0 +1,123 @@
+// A card, drawn: the recolouring arithmetic with no canvas, what the card says aloud, that every text colour on
+// it is readable, and - the part that matters when something goes wrong - that a card with no sprite is still a
+// card. The recolouring itself only RUNS in a real browser; tools/ui-harness (screen=cardface) is where to look.
+import { readFileSync } from "node:fs";
+import { setupDom, loadModule, renderComponent, flush, assert, runTest } from "./helpers.mjs";
+
+setupDom();
+const sprites = await loadModule("card-sprites.mjs");
+const face = await loadModule("card-face.jsx");
+const logic = await import("../card-logic.mjs");
+const { TEAMS } = await import("../game-logic.mjs");
+logic.initCardData(JSON.parse(readFileSync(new URL("../data/cards.json", import.meta.url), "utf8")));
+const all = [...logic.CARDS.values()];
+const find = (name, season) => all.find((c) => c.name === name && c.season === season);
+
+// The same WCAG math as tests/test-theme-contrast.mjs and tests/test-cosmetics.mjs.
+const lum = (hex) => {
+  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const hueOf = (r, g, b) => {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (mx === mn) return 0;
+  const d = mx - mn; const h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return h * 60;
+};
+
+await runTest("recolouring changes what a pixel is a shade OF, and nothing else", async () => {
+  // jersey blue (mid), jersey blue (a darker fold), helmet grey, skin tan, a white glove, a black outline, clear paper
+  const px = [[46, 102, 196, 255], [28, 64, 128, 255], [172, 172, 172, 255], [198, 140, 96, 255], [252, 252, 250, 255], [16, 16, 18, 255], [0, 0, 0, 0]];
+  const data = new Uint8ClampedArray(px.flat());
+  const out = sprites.recolourPixels(data, { jersey: "#4f2683", metal: "#ffc62f", skin: "#6f4329" });
+  const at = (i) => [...out.slice(i * 4, i * 4 + 4)];
+  assert(out !== data && data[0] === 46, "it returns a new array and leaves the one it was given alone");
+  const purple = hueOf(0x4f, 0x26, 0x83), gold = hueOf(0xff, 0xc6, 0x2f), brown = hueOf(0x6f, 0x43, 0x29);
+  assert(Math.abs(hueOf(...at(0)) - purple) < 3, "the jersey takes the jersey colour's hue: " + at(0));
+  assert(Math.abs(hueOf(...at(1)) - purple) < 3, "so does the fold in it");
+  const light = (p) => Math.max(p[0], p[1], p[2]) + Math.min(p[0], p[1], p[2]);
+  assert(light(at(1)) < light(at(0)), "and the fold is still darker than the cloth beside it");
+  assert(Math.abs(hueOf(...at(2)) - gold) < 4, "the helmet takes the second colour: " + at(2));
+  assert(Math.abs(hueOf(...at(3)) - brown) < 4, "the skin takes the skin tone: " + at(3));
+  assert(JSON.stringify(at(4)) === JSON.stringify(px[4]), "a white glove is left exactly as drawn");
+  assert(JSON.stringify(at(5)) === JSON.stringify(px[5]), "so is the outline");
+  assert(JSON.stringify(at(6)) === JSON.stringify(px[6]), "and clear paper stays clear");
+  for (let i = 0; i < px.length; i++) assert(out[i * 4 + 3] === px[i][3], "alpha is never touched");
+  assert(sprites.recolourPixels(new Uint8ClampedArray(0), { jersey: "#000000", metal: "#000000", skin: "#000000" }).length === 0, "an empty image is an empty image");
+});
+
+await runTest("a card's colours are its team's and its player's", async () => {
+  const peterson = find("Adrian Peterson", 2012);
+  const c = sprites.cardColours(peterson);
+  assert(c.jersey === TEAMS.MIN[2] && c.metal === TEAMS.MIN[3], "the team's two colours: " + JSON.stringify(c));
+  const skin = JSON.parse(readFileSync(new URL("../data/card-skin.json", import.meta.url), "utf8"));
+  assert(c.skin === skin.default, "and the default tone while the list is empty");
+  assert(Object.keys(skin.players).length === 0, "the list of players is empty for now - nobody has been given a tone by guesswork");
+  const withTone = { ...skin, players: { [peterson.pid]: "t4" } };
+  assert(sprites.cardColours(peterson, withTone).skin === skin.tones.t4, "a recorded tone is used");
+  assert(sprites.skinFor(peterson.pid, { ...skin, players: { [peterson.pid]: "nope" } }) === skin.default, "a tone key that does not exist falls back to the default");
+  assert(sprites.cardColours({ team: "XXX", pid: 1 }).jersey.startsWith("#"), "a team the game does not know still gets a colour");
+  assert(sprites.spriteFor(find("Tom Brady", 2007)) === "/cards/gunslinger.png", "a gunslinger's sprite");
+  assert(sprites.spriteFor(all.find((x) => x.archetype === "role")) === "/cards/role.png", "a role player's");
+  for (const a of logic.ARCHETYPES) assert(readFileSync(new URL(`../static/cards/${a.id}.png`, import.meta.url)).length > 1000, `there is a drawing for ${a.id}`);
+});
+
+await runTest("a card says who it is, in words", async () => {
+  const brady = find("Tom Brady", 2007);
+  const label = face.cardLabel(brady, "prism", 3);
+  for (const part of ["2007 Tom Brady", "New England Patriots", "quarterback", `rated ${Math.round(brady.rating)} plus 3`, "Gunslinger", "Prism finish", "passing yards", "touchdowns", "yards per attempt", "3 copies"]) {
+    assert(label.includes(part), `the label says "${part}": ${label}`);
+  }
+  assert(!face.cardLabel(brady, "base", 1).includes("plus") && !face.cardLabel(brady, "base", 1).includes("copies"), "a single Base card mentions neither a bonus nor copies");
+  const labels = { QB: "Yd/att", RB: "Yd/car", WR: "Yd/rec", TE: "Yd/rec" };
+  for (const pos of Object.keys(labels)) {
+    const stats = face.cardStats(all.find((c) => c.pos === pos));
+    assert(stats.length === 3 && stats[2][1] === labels[pos] && stats[1][1] === "TD", `${pos} shows yards, touchdowns and ${labels[pos]}`);
+  }
+  assert(face.cardStats({ pos: "RB", ry: 0, rtd: 0, car: 0 })[2][0] === "0.0", "no carries is 0.0 a carry, not NaN");
+});
+
+await runTest("the card on screen", async () => {
+  const brady = find("Tom Brady", 2007);
+  const { container, unmount } = await renderComponent(face.CardFace, { card: brady, finish: "gold", count: 3 });
+  await flush();
+  const el = container.querySelector("[data-card]");
+  assert(el && el.getAttribute("role") === "img" && el.getAttribute("aria-label") === face.cardLabel(brady, "gold", 3), "one image, with the label");
+  assert(el.dataset.card === String(brady.id) && el.dataset.finish === "gold" && el.classList.contains("cd-f-gold"), "it says which card and which finish");
+  assert(el.querySelector(".cd-ovr").textContent === `${Math.round(brady.rating)}+2`, "a Gold card shows its +2: " + el.querySelector(".cd-ovr").textContent);
+  assert(el.querySelector(".cd-count").textContent === "x3", "three copies shows x3");
+  assert(el.querySelector(".cd-fin").textContent === "Gold" && el.querySelector(".cd-arch").textContent === "Gunslinger", "the finish and the archetype are words on the card");
+  assert(el.querySelector(".cd-in").getAttribute("aria-hidden") === "true", "the printed card is hidden from a screen reader, which has the label");
+  // No canvas in jsdom, and no image ever loads: the card is on its neutral sprite, and it is a whole card.
+  const img = el.querySelector("img.cd-fig");
+  assert(img.getAttribute("src") === "/cards/gunslinger.png" && img.getAttribute("alt") === "", "the neutral sprite, decorative");
+  img.dispatchEvent(new window.Event("error"));
+  await flush();
+  assert(container.querySelector(".cd-nm").textContent.includes("Brady") && container.querySelector(".cd-st").textContent.includes("Pass yd"), "a sprite that fails to load leaves the name and the stats");
+  unmount?.();
+
+  const one = await renderComponent(face.CardFace, { card: all.find((c) => c.archetype === "role") });
+  await flush();
+  const plain = one.container.querySelector("[data-card]");
+  assert(plain.dataset.finish === "base" && !plain.querySelector(".cd-count") && !plain.querySelector(".cd-ovr small"), "a single Base card has no count badge and no bonus");
+  assert(plain.querySelector(".cd-arch").classList.contains("cd-role"), "a role player's label is the quiet one");
+  one.unmount?.();
+});
+
+await runTest("painting a sprite with no canvas answers null and never throws", async () => {
+  const none = sprites.paintSprite({ src: "http://localhost/cards/role.png", naturalWidth: 10, naturalHeight: 10 }, { jersey: "#000000", metal: "#111111", skin: "#222222" });
+  assert(none === null, "no canvas, no painted sprite: " + none);
+});
+
+await runTest("every piece of text on a card is readable", async () => {
+  assert(face.CARD_TEXT_PAIRS.length >= 12, "the card lists its text colours");
+  for (const [fg, bg, what] of face.CARD_TEXT_PAIRS) {
+    const ratio = contrast(fg, bg);
+    assert(ratio >= 4.5, `${what}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, under AA`);
+  }
+  // The pairs are only worth holding if the stylesheet is built from the same colours.
+  for (const colour of Object.values(face.CARD_PAINT)) assert(face.CARD_FACE_CSS.includes(colour), `${colour} from CARD_PAINT is in the stylesheet`);
+  assert(/prefers-reduced-motion:reduce\)\{[^}]*animation:none/.test(face.CARD_FACE_CSS), "the foil stops for reduced motion");
+  assert(!/transform:[^;]*(translate|rotate|scale)[^;]*;[^}]*animation/.test(face.CARD_FACE_CSS.replace(/translateX\(-50%\)/g, "")), "the finishes move a background, not the card");
+});
+
+console.log("test-card-face.mjs done");
