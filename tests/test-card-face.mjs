@@ -54,8 +54,15 @@ await runTest("a card's colours are its team's and its player's", async () => {
   const c = sprites.cardColours(peterson);
   assert(c.jersey === TEAMS.MIN[2] && c.metal === TEAMS.MIN[3], "the team's two colours: " + JSON.stringify(c));
   const skin = JSON.parse(readFileSync(new URL("../data/card-skin.json", import.meta.url), "utf8"));
-  assert(c.skin === skin.default, "and the default tone while the list is empty");
-  assert(Object.keys(skin.players).length === 0, "the list of players is empty for now - nobody has been given a tone by guesswork");
+  // The list is a first pass the owner corrects (tools/cards/build-card-skin.mjs). What is held here is that
+  // it can only say true things about the catalog: every key a real player, every tone a real tone.
+  const pids = new Set(all.map((card) => String(card.pid)));
+  const listed = Object.entries(skin.players);
+  assert(listed.every(([pid]) => pids.has(pid)), "every listed pid is a player in the catalog");
+  assert(listed.every(([, tone]) => Object.hasOwn(skin.tones, tone)), "every listed tone is one of the tones");
+  const unlisted = all.find((card) => !Object.hasOwn(skin.players, card.pid));
+  assert(unlisted && sprites.cardColours(unlisted).skin === skin.default, "a player nobody was sure of wears the default");
+  assert(sprites.cardColours(peterson, { ...skin, players: {} }).skin === skin.default, "and so does everyone when the list is empty");
   const withTone = { ...skin, players: { [peterson.pid]: "t4" } };
   assert(sprites.cardColours(peterson, withTone).skin === skin.tones.t4, "a recorded tone is used");
   assert(sprites.skinFor(peterson.pid, { ...skin, players: { [peterson.pid]: "nope" } }) === skin.default, "a tone key that does not exist falls back to the default");

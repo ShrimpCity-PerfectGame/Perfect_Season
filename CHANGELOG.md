@@ -20,6 +20,16 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.24.1] - 2026-11-13
+
+Test site only.
+
+- Cards: a first pass at each player's skin tone, for the owner to correct. 1,507 of the 1,639 players have
+  one; the 132 the drafter was not sure of keep the default. It is coarse on purpose - nearly everyone sits in
+  two of the five tones - and nothing was decided from a name. The list is built from names in
+  `tools/cards/build-card-skin.mjs`; correct it there and re-run. Client only: no migration, no Edge Function
+  change. Production still shows no cards, and the owner's review of this list is a gate before it does.
+
 ## [2.24.0] - 2026-11-13
 
 **On the test site only**, like 2.23.0: production builds have cards switched off.

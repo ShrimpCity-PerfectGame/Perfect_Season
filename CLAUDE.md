@@ -551,8 +551,11 @@ The parts unlike everything else:
 - **A read that failed is not an empty collection** - `fetchMyCards` has three answers and `cards.jsx` has an
   error state of its own. Collapsing them offers a player with fifty cards a starter deck they already opened.
 - **Sprites are recoloured in the browser**, so fourteen neutral PNGs serve every card and there is no file per
-  team. `data/card-skin.json`'s player list is EMPTY on purpose: every card wears one default tone until the list
-  is made by hand, because a wrong tone on a named real person is worse than a neutral one.
+  team. `data/card-skin.json`'s player list is a **first pass awaiting the owner's correction** (v2.24.1), and
+  that review is a launch gate for production. It is written by `tools/cards/build-card-skin.mjs` from lists
+  of NAMES in that file - correct it there and re-run, never in the JSON. Anybody the drafter was not sure of is
+  absent and wears the default, because a wrong tone on a named real person is worse than a neutral one; and it
+  was never decided from a name. It is deliberately coarse (nearly everyone in two of the five tones).
 - **What is in a pack is `card-packs.mjs`; what it costs is a `card_packs` row** (v2.24.0). The browser prints
   the odds from the module and `card-claim` rolls from the same module, so what is read is what is rolled - and
   **the client and the functions must ship together whenever it changes**. `buy_pack` does the stock, the coins

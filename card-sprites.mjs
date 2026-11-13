@@ -75,7 +75,8 @@ export function recolourPixels(data, colours) {
 }
 
 // A player's skin tone. data/card-skin.json maps a pid to one of a handful of tones; anybody not in it gets the
-// default. The list is filled in by hand and is EMPTY for now, so every card wears the default - a wrong tone
+// default. The list is a first pass awaiting the owner's correction (tools/cards/build-card-skin.mjs writes it
+// from lists of names); anybody nobody was sure of is absent and wears the default - a wrong tone
 // on a named real person is worse than a neutral one (the design, 3.2).
 export function skinFor(pid, data = skinData) {
   const tone = data.players?.[pid];

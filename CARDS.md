@@ -292,8 +292,12 @@ can see a half-erased number.
 
 `card-sprites.mjs` recolours a sprite in the browser on a canvas: jersey to the team's first colour, helmet
 and pants to its second (they are the same grey on the sheets, so they cannot differ), skin to the player's
-tone. `data/card-skin.json` maps a `pid` to one of five tones; **its player list is empty, so every card
-wears the default.** No canvas, or a sprite that will not load, leaves the neutral drawing or none - the card
+tone. `data/card-skin.json` maps a `pid` to one of five tones. **Its player list is a first pass the owner
+has not corrected yet** (1,507 of 1,639 players; the other 132 wear the default because the drafter was not
+sure). It is written by `node tools/cards/build-card-skin.mjs` from lists of names inside that file - move a
+name between lists there and re-run; `--review` also writes `build/card-skin-review.html`, everyone grouped
+by tone. The pass is coarse on purpose: nearly everyone is in t1 or t4, t5 is unused, and t3 is the default's
+own colour. The owner's review of it is a launch gate for production. No canvas, or a sprite that will not load, leaves the neutral drawing or none - the card
 still shows its name, rating and stats.
 
 `card-face.jsx`'s colours are data (`CARD_PAINT`), not theme tokens, because a card looks the same on every
