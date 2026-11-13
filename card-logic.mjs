@@ -156,3 +156,90 @@ export function lineupProblem(lineup, owned) {
   }
   return null;
 }
+
+// ---------- Battles ----------
+// Six cards against one defense. Each card plays its own game: its rating (plus its finish), a roll of luck, and
+// whatever the matchup does to it. The six totals add up against a bar the defense sets.
+//
+// THE NUMBERS BELOW ARE TUNED, NOT CHOSEN. tests/test-card-balance.mjs plays thousands of battles and holds them
+// to the design's promises - a starter deck wins sometimes, a stacked one can still lose, and the six highest
+// ratings are not the answer. Change a number here and that file says what it cost. The KEYS are the design:
+// which trait hurts which archetype, and who plays better beside whom.
+//
+// Luck is a triangular roll: two draws added, so most games land near the card's rating and a few land far from
+// it, never beyond +-LUCK_SPREAD. EXACTLY TWO DRAWS A CARD, TWELVE A BATTLE, ALWAYS, whatever the cards are.
+// The browser and the Edge Function run different JavaScript engines and have to walk the generator in step;
+// a draw that happened only for some cards would put them out of step for every card after it. Same reason
+// nothing here is ordered with a random comparator (game-logic.mjs's smallTimSort has the history).
+export const LUCK_SPREAD = 12;
+export const TARGET_BASE = 150;
+export const TARGET_SLOPE = 4.2;
+
+// trait -> archetype -> points. Negative is the defense taking something away; positive is an archetype that
+// is the ANSWER to that defense, which is what makes a lower-rated card the right pick.
+export const COUNTERS = {
+  stingy: { goalline: -8, redzone: -8 },
+  ballhawks: { gunslinger: -10, volume: -8, manager: 6 },
+  passrush: { volume: -8, gunslinger: -6, scrambler: 8, valve: 5, receiving: 5 },
+  strip: { workhorse: -8, homerun: -6, possession: 4 },
+  scoring: { volume: -6, manager: 6, workhorse: 4 },
+};
+// [archetype, archetype, points to EACH]. A pair fires once for a card however many partners it has: two deep
+// threats do not make a gunslinger twice as good, they each get their own lift from him.
+export const PAIRS = [
+  ["gunslinger", "deep", 7], ["gunslinger", "seam", 5], ["manager", "possession", 5], ["manager", "valve", 4],
+  ["scrambler", "homerun", 5], ["volume", "receiving", 5], ["volume", "possession", 4],
+];
+
+const round1 = (n) => Math.round(n * 10) / 10;
+export const battleTarget = (defense) => Math.round(TARGET_BASE + TARGET_SLOPE * defense.rating);
+
+// "142 yards, 2 TD": the card's real per-game line, scaled by how its game went. Display only, no draw.
+function playLine(card, base, total) {
+  const k = base > 0 ? Math.max(0, total) / base : 0;
+  const g = card.g > 0 ? card.g : 1;
+  const yards = card.pos === "QB" ? card.py : card.pos === "RB" ? card.ry : card.rcy;
+  const tds = card.pos === "QB" ? card.ptd + card.rtd : card.rtd + card.rctd;
+  return `${Math.round((yards / g) * k).toLocaleString("en-US")} yards, ${Math.round((tds / g) * k)} TD`;
+}
+
+// Only ever called with a lineup lineupProblem has passed and a defense out of DEFENSES - it trusts both.
+// rand is a () => [0, 1) generator; every draw this function makes comes from it.
+export function scoreBattle(lineup, defense, rand) {
+  const cards = SLOTS.map((slot) => ({ slot, entry: lineup[slot], card: CARDS.get(lineup[slot].id) }));
+  const fielded = new Set(cards.map((c) => c.card.archetype));
+  const plays = cards.map(({ slot, entry, card }) => {
+    const base = card.rating + FINISH_BONUS[entry.finish];
+    const roll = round1((rand() + rand() - 1) * LUCK_SPREAD);
+    const mods = [];
+    for (const trait of defense.traits) {
+      const pts = COUNTERS[trait]?.[card.archetype];
+      if (pts) mods.push({ key: `trait:${trait}`, label: `${traitLabel(trait)} vs ${archetypeLabel(card.archetype)}`, pts });
+    }
+    for (const [a, b, pts] of PAIRS) {
+      const partner = card.archetype === a ? b : card.archetype === b ? a : null;
+      if (partner && fielded.has(partner)) mods.push({ key: `pair:${a}+${b}`, label: `${archetypeLabel(a)} + ${archetypeLabel(b)}`, pts });
+    }
+    const total = round1(base + roll + mods.reduce((s, m) => s + m.pts, 0));
+    return { slot, id: card.id, finish: entry.finish, base, roll, mods, total, line: playLine(card, base, total) };
+  });
+  const offense = round1(plays.reduce((s, p) => s + p.total, 0));
+  const target = battleTarget(defense);
+  return { cards: plays, offense, target, win: offense >= target };
+}
+
+// ---------- The daily showdown ----------
+// One defense a day, the same for everyone, and ONE ROLL PER LINEUP: the generator is seeded from the day and
+// the lineup, so two people fielding the same six cards get the same score and the board rewards the lineup
+// rather than the roll. A different lineup - even one finish different - rolls differently.
+//
+// Accepted gap, the one every seeded daily in this game has: the bundle and the seed are public, so anybody
+// willing to run this file can find the day's best lineup offline. CARDS.md says so; it is not closeable here.
+export const showdownSeed = (date) => `showdown-${date}`;
+export const showdownDefense = (date) => DEFENSES[Math.floor(mulberry32(hashStr(showdownSeed(date)))() * DEFENSES.length)];
+export const showdownRand = (date, lineup) =>
+  mulberry32(hashStr(`${showdownSeed(date)}|${SLOTS.map((s) => `${lineup[s].id}:${lineup[s].finish}`).join(",")}`));
+export function showdownScore(date, lineup) {
+  const result = scoreBattle(lineup, showdownDefense(date), showdownRand(date, lineup));
+  return { ...result, score: result.offense };
+}

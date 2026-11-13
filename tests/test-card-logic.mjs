@@ -111,5 +111,85 @@ if (need("lineupProblem")) {
   for (const junk of [null, undefined, "x", 7, [], true]) eq(C.lineupProblem(junk, null), "malformed", `junk input ${JSON.stringify(junk)}`);
 }
 
+// ---------- 4. Scoring a battle ----------
+// Pinned once every other check here passed; it moves whenever a constant or a rule does, and it is what says
+// the browser and the Edge Function roll the same battle. Re-pin it deliberately, never to make a run green.
+const PINNED_CHECKSUM = 15426388;
+if (need("scoreBattle")) {
+  const mid = () => 0.5; // two draws of 0.5 are a roll of exactly zero
+  const rav = C.defenseByKey("2000|BAL");
+  const calm = C.DEFENSES.find((d) => d.traits.length === 0);
+  const r0 = C.scoreBattle(good, calm, mid);
+  eq(r0.cards.length, 6, "six plays");
+  eq(r0.cards.map((c) => c.slot).join(), SLOTS.join(), "in slot order");
+  ok(r0.cards.every((c) => c.roll === 0), "a 0.5 roll is no luck");
+  ok(r0.cards.every((c) => c.base === C.CARDS.get(c.id).rating), "a Base card's base is its printed rating");
+  eq(r0.target, C.battleTarget(calm), "the target is the defense's");
+  eq(r0.win, r0.offense >= r0.target, "win is offense against target");
+  eq(r0.offense, +r0.cards.reduce((s, c) => s + c.total, 0).toFixed(1), "offense is the six totals");
+  ok(C.battleTarget(rav) > C.battleTarget(C.DEFENSES.reduce((a, b) => (a.rating < b.rating ? a : b))), "a better defense is a higher bar");
+  for (const [finish, pts] of [["silver", 1], ["gold", 2], ["prism", 3]]) {
+    eq(+(C.scoreBattle({ ...good, QB: { ...good.QB, finish } }, calm, mid).offense - r0.offense).toFixed(1), pts, `${finish} is worth exactly ${pts}`);
+  }
+  // A pair lifts both cards, and only with the partner there.
+  const gun = byRating.find((c) => c.archetype === "gunslinger");
+  const deep = byRating.find((c) => c.archetype === "deep" && c.pid !== gun.pid);
+  const pairPts = C.PAIRS.find((p) => p[0] === "gunslinger" && p[1] === "deep")[2];
+  const withGun = { ...good, QB: { id: gun.id, finish: "base" } };
+  const paired = C.scoreBattle({ ...withGun, WR: { id: deep.id, finish: "base" } }, calm, mid);
+  ok(paired.cards[0].mods.some((m) => m.pts === pairPts) && paired.cards[2].mods.some((m) => m.pts === pairPts), "gunslinger and deep threat lift each other");
+  // Take every partner away and the gunslinger gets nothing for being one.
+  const noPartner = { ...withGun };
+  const taken = new Set(Object.values(noPartner).map((e) => C.CARDS.get(e.id).pid));
+  for (const slot of SLOTS.slice(1)) {
+    const c = byRating.find((x) => x.archetype === "role" && !taken.has(x.pid) && (slot.startsWith("FLEX") ? x.pos !== "QB" : x.pos === slot));
+    noPartner[slot] = { id: c.id, finish: "base" }; taken.add(c.pid);
+  }
+  eq(C.lineupProblem(noPartner, null), null, "the no-partner lineup is legal");
+  eq(C.scoreBattle(noPartner, calm, mid).cards[0].mods.length, 0, "no partner, no pair");
+  // Two deep threats still lift the quarterback once.
+  const deep2 = byRating.find((c) => c.archetype === "deep" && c.pid !== gun.pid && c.pid !== deep.pid);
+  const two = C.scoreBattle({ ...withGun, WR: { id: deep.id, finish: "base" }, FLEX1: { id: deep2.id, finish: "base" } }, calm, mid);
+  eq(two.cards[0].mods.filter((m) => m.key === "pair:gunslinger+deep").length, 1, "a pair fires once per card");
+  // A counter fires against the trait, and only against it.
+  const hawks = C.DEFENSES.find((d) => d.traits.join() === "ballhawks");
+  const hit = C.COUNTERS.ballhawks.gunslinger;
+  ok(hit < 0, "ball hawks are bad news for a gunslinger");
+  ok(C.scoreBattle(withGun, hawks, mid).cards[0].mods.some((m) => m.pts === hit && m.key === "trait:ballhawks"), "ball hawks punish a gunslinger");
+  ok(!C.scoreBattle(withGun, calm, mid).cards[0].mods.some((m) => m.key.startsWith("trait")), "a defense with no trait counters nothing");
+  ok(r0.cards.every((c) => c.mods.every((m) => typeof m.label === "string" && m.label.length > 3 && Number.isFinite(m.pts))), "every modifier can be read out");
+  ok(r0.cards.every((c) => /^\d[\d,]* yards, \d+ TD$/.test(c.line)), `a play reads as football (${r0.cards[0].line})`);
+  // Twelve draws, always - the browser and the server have to walk the generator in step.
+  for (const d of [calm, rav, hawks]) { let n = 0; C.scoreBattle(good, d, () => (n++, 0.5)); eq(n, 12, `exactly twelve draws against ${d.key}`); }
+  // The edges of the generator.
+  for (const edge of [0, 0.9999999999]) {
+    const r = C.scoreBattle(good, rav, () => edge);
+    ok(r.cards.every((c) => Number.isFinite(c.total) && Math.abs(c.roll) <= C.LUCK_SPREAD), `finite and inside the spread at rand=${edge}`);
+    ok(Number.isFinite(r.offense), `a finite offense at rand=${edge}`);
+  }
+  // Luck moves a result both ways around the no-luck one.
+  const spread = Array.from({ length: 400 }, (_, i) => C.scoreBattle(good, calm, mulberry32(i + 1)).offense);
+  ok(Math.min(...spread) < r0.offense && Math.max(...spread) > r0.offense, "luck lands on both sides of the no-luck score");
+
+  // The daily showdown: the day picks the defense, and one lineup scores the same for everybody.
+  const day = "2026-11-13";
+  eq(C.showdownSeed(day), "showdown-2026-11-13", "the day's seed");
+  eq(C.showdownDefense(day).key, C.showdownDefense(day).key, "one defense a day");
+  const s1 = C.showdownScore(day, good), s2 = C.showdownScore(day, good);
+  eq(s1.score, s2.score, "one lineup, one score");
+  eq(s1.score, s1.offense, "the score is the offense");
+  eq(s1.target, C.battleTarget(C.showdownDefense(day)), "against the day's defense");
+  const swapped = C.showdownScore(day, { ...good, QB: { ...good.QB, finish: "gold" } });
+  ok(swapped.cards.some((c, i) => c.roll !== s1.cards[i].roll), "a different lineup rolls differently");
+  const days = Array.from({ length: 200 }, (_, i) => C.showdownDefense(`2027-${String((i % 12) + 1).padStart(2, "0")}-${String((i % 28) + 1).padStart(2, "0")}x${i}`).key);
+  ok(new Set(days).size > 150, `days draw different defenses (${new Set(days).size} of 200)`);
+
+  // Engine independence: 2,000 seeded battles, one number.
+  let sum = 0;
+  for (let i = 0; i < 2000; i++) sum = (sum + Math.round(C.scoreBattle(good, C.DEFENSES[i % C.DEFENSES.length], mulberry32(i)).offense * 10)) >>> 0;
+  if (sum !== PINNED_CHECKSUM) console.log(`battle checksum is ${sum}`);
+  eq(sum, PINNED_CHECKSUM, "2,000 battles roll the same everywhere");
+}
+
 console.log(fails ? `\n${fails} FAILED` : "card logic: all checks passed");
 process.exit(fails ? 1 : 0);
