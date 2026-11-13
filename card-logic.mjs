@@ -161,9 +161,10 @@ export function lineupProblem(lineup, owned) {
 // Six cards against one defense. Each card plays its own game: its rating (plus its finish), a roll of luck, and
 // whatever the matchup does to it. The six totals add up against a bar the defense sets.
 //
-// THE NUMBERS BELOW ARE TUNED, NOT CHOSEN. tests/test-card-balance.mjs plays thousands of battles and holds them
-// to the design's promises - a starter deck wins sometimes, a stacked one can still lose, and the six highest
-// ratings are not the answer. Change a number here and that file says what it cost. The KEYS are the design:
+// THE NUMBERS BELOW ARE TUNED, NOT CHOSEN. tests/test-card-balance.mjs plays thousands of battles and holds the
+// GAME to the design's promises - a starter deck wins sometimes, a stacked one can still lose, and the six
+// highest ratings are not the answer. It holds the luck spread and the bar closely. It does NOT pin any single
+// counter or pair: those can be wrong one at a time without a band moving, and want a person playing. The KEYS are the design:
 // which trait hurts which archetype, and who plays better beside whom.
 //
 // Luck is a triangular roll: two draws added, so most games land near the card's rating and a few land far from

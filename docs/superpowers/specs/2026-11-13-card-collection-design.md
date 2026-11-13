@@ -164,9 +164,11 @@ number.
 ### 4.1 Daily showdown
 
 - **(owner)** One defense a day, the same for everyone; the result is a score for a board.
-- **(call)** One attempt per account per day. The day's randomness is shared: the roll is seeded
-  from the day and the lineup, so the same lineup scores the same for everyone and the board
-  rewards the lineup rather than the roll.
+- **(call)** One attempt per account per day. The day's randomness is shared: each card has one
+  roll for the day, seeded from the day and the card and nothing else, so the same lineup scores
+  the same for everyone, a better finish adds exactly its bonus, and the board rewards the lineup
+  rather than the roll. (Seeding from the whole lineup was tried and made the finish and the Flex
+  order a luck re-roll; review caught it.)
 - It has its own board inside the card area. It never appears on the Leaderboard or Stats screens.
 - Accepted gap, the same one every seeded daily here has: the bundle and the seed are public, so a
   determined player can compute the best lineup offline. Say so in the reference doc; do not try

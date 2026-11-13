@@ -19,9 +19,20 @@ the file: it reads what is there and only adds.
   not move a card.
 - A card whose row has left the pool stays. The new best season arrives as a new card beside it.
 - New cards take `max(id) + 1`, in a fixed order (team, season, name).
-- `pid` is the player. Eight pairs of players share a name (two Adrian Petersons, two Steve Smiths); `pid`
-  tells them apart, a name cannot. A new row inherits the `pid` of an existing card that the current build of
-  `players.json` puts under the same name index, otherwise it gets a new one.
+- `pid` is the player. Twelve names in the pool belong to more than one man (two Adrian Petersons, two Steve
+  Smiths, three Mike Williamses); `pid` tells them apart, a name cannot.
+
+**Who a new row belongs to**, in order: (1) an existing card of his is still in the pool under the same name
+index - that card's `pid`; (2) otherwise, exactly one existing player has his name and has no card left in the
+pool - he keeps that `pid`, and the builder prints the match for a human to check (818 players have exactly one
+card, so a best season moving orphans a man at a stroke); (3) otherwise he is new.
+
+**The builder refuses, rather than guesses, when:** two pool rows share a key; one name index carries two
+players' cards; a new row could be either of two orphaned namesakes; or a new card is from a season no newer
+than the catalog's latest. That last one is what stops a team code changing, or a name being respelled across
+the file, from appending a duplicate of every card it touched - `--allow-old` overrides it when it is really
+meant. It also prints how many cards have left the pool: a rebuild that only adds a season should report
+almost none. **A respelled name is the one thing it cannot see** - that player looks like a stranger.
 
 Why not point at `players.json`: its player `id` is a position in its own name array, good for one build. Keying
 ownership on it would hand every collection to different players the first time a season was added.
@@ -143,13 +154,23 @@ searches for the best no-luck score.
 | Starter deck (8 cards under 60): wins in an average run | 1.60 | 0.8 to 2.5 |
 | Starter deck: runs with no win at all | 7% | 2% to 30% |
 | 60 random cards: wins in an average run | 8.70 | 5 to 10 |
-| ...more than the six highest ratings manage | +0.38 wins | at least 0.3 |
-| ...reading the defense picks a different six | 82% of battles | at least 40% |
-| ...luck changes how long a run lasts | 29% of runs | 25% to 75% |
-| ...by this many wins on average | 0.33 | 0.2 to 1.0 |
-| ...a card rated under 70 is in the chosen lineup | 22% of battles | at least 15% |
+| ...more than the six highest ratings manage | +0.34 wins | at least 0.25 |
+| ...reading the defense picks a different six | 68% to 80% of battles | at least 40% |
+| ...luck changes how long a run lasts | 29% to 31% of runs | 20% to 75% |
+| ...by this many wins on average | 0.34 to 0.38 | 0.2 to 1.0 |
+| ...a card rated under 70 is in the chosen lineup | 16% to 24% of battles | at least 10% |
 | The 60 best cards: wins in an average run | 11.5 | 9 to 16 |
 | Runs that reach 40 wins | none | none |
+
+Ranges are across three different sets of collections and defenses (`node tests/test-card-balance.mjs 9000 13`
+plays another). The first version used twenty collections and two of three other seed sets failed a band; it
+uses fifty now.
+
+**What these bands do not hold.** Any single counter or pair: review deleted six of the seven pairs and zeroed
+every positive counter and one band moved, by less than seed noise. And the open question the numbers cannot
+answer: reading the defense is the better pick in most battles but is worth only about a third of a win per
+run, because one win is 55 points of bar and a good matchup is 10 to 25. Whether that is enough is for
+somebody playing it to say. The starter bands measure the bar alone - eight cards rarely offer a second lineup.
 
 What it does not tell you: whether this is fun. The bands are the builder's reading of the design, not the
 owner's numbers, and nobody has played a battle. A player is also not the search bot - a real person will find
@@ -161,9 +182,17 @@ about 9. Coin rewards per win and the daily cap on paid wins should be set from 
 ## 7. The daily showdown
 
 `showdownDefense(date)` picks one defense for the day from the seed `showdown-<date>`.
-`showdownScore(date, lineup)` scores the lineup with a generator seeded from the day **and the lineup**, so the
-same six cards score the same for everyone and the board rewards the lineup rather than the roll. A lineup one
-finish different rolls differently. The score is the offense; there is no step and no win or loss.
+`showdownScore(date, lineup)` gives **each card one roll for the day**, seeded from the day and the card's id and
+nothing else. 2007 Brady has the same game today in every lineup, slot and finish. So the same six cards score
+the same for everyone, a better finish adds exactly its bonus, and the board rewards the lineup rather than
+the roll. The score is the offense; there is no step and no win or loss.
+
+It was first seeded from the whole lineup, and review found what that did: swapping the two Flex cards or
+fielding a different copy re-rolled all six, so the same cards scored anywhere from 693 to 891. Seed nothing in
+the showdown from the slot, the finish or the other five cards.
+
+`showdownDefense` picks by position in `DEFENSES`, so adding a season to the pool re-deals every date.
+Whatever records a showdown must store the defense's key.
 
 **Accepted gap, and it cannot be closed here:** the bundle and the seed are public, so anybody willing to run
 `card-logic.mjs` can find the day's best lineup for their collection offline. It is the gap every seeded daily
@@ -181,5 +210,5 @@ order. The owner still owes one final sprite sheet and a licence check on the to
 ```bash
 node tests/test-card-catalog.mjs   # the catalog: every pool row is a card, and a rebuild never rewrites one
 node tests/test-card-logic.mjs     # archetypes, traits, lineup refusals, scoring, the showdown, a pinned checksum
-node tests/test-card-balance.mjs   # plays ~4,500 battles and PRINTS the balance table above (about 35 seconds)
+node tests/test-card-balance.mjs   # plays ~6,000 battles and PRINTS the balance table above (about 70 seconds)
 ```

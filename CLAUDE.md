@@ -521,15 +521,20 @@ The parts unlike everything else:
 - **`data/cards.json` is FROZEN.** Every other file in `data/` is regenerated from source; this one is only ever
   appended to by `tools/data/build-card-catalog.mjs`, because a card is something a player will own. A card keeps
   its id, its `pid` and its stats for ever, even when `data/players.json` is rebuilt and its row changes or leaves.
-  `players.json`'s own player `id` is a position in a name array and must never become an ownership key.
+  `players.json`'s own player `id` is a position in a name array and must never become an ownership key. The builder
+  REFUSES a rebuild that would corrupt it - old seasons re-keyed (a team code changing would duplicate every card it
+  touched), two players under one name index, a namesake it cannot place - and prints what left the pool.
+- **A card has one roll a day in the showdown**, seeded from the day and the card and nothing else. Seeding it from
+  the whole lineup made the finish and the Flex order a luck re-roll worth far more than the finish itself.
 - **`card-logic.mjs` owns every rule** - archetypes, defense traits, lineup legality, battle scoring - for the
   reason game-logic.mjs and versus-logic.mjs do. It never calls `Math.random`: every draw comes from a `rand` the
   caller passes, exactly two a card and twelve a battle, so the browser and Deno walk the generator in step.
 - **The bar rises with every win in a run**, and that is the owner's decision rather than a tuning choice. A bar
   fixed per defense was measured and cannot work: a starter deck's best six add up to about 246 and the best
   collection's to 780, so one bar is either unreachable for a new player or a walkover for everyone else.
-- **The numbers are tuned, not chosen.** `tests/test-card-balance.mjs` plays thousands of battles and holds the
-  luck spread, the bar and every counter and pair to bands; change a number and it prints the cost. Its bands are
+- **The numbers are tuned, not chosen - and only loosely held.** `tests/test-card-balance.mjs` plays thousands of battles and holds the
+  game as a whole to bands (run length, and whether reading the defense pays). It does NOT pin any single counter
+  or pair: review deleted six of seven pairs and one band moved, by less than seed noise. Its bands are
   the builder's reading of the design - nobody has played a battle yet.
 - **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not
   used; the number on the card face is always the number in the battle.
@@ -768,7 +773,7 @@ node tests/test-guess-screen.mjs       # the buttons: the tile, both variants, g
 # Cards (in progress - rules only, 2026-11-13). See CARDS.md. card-logic.mjs is pure, so none of these needs a database or a browser.
 node tests/test-card-catalog.mjs       # data/cards.json: every pool row is a card, and a rebuild of players.json never rewrites one
 node tests/test-card-logic.mjs         # archetypes, defense traits, every lineup refusal, battle scoring, the daily showdown, a pinned checksum
-node tests/test-card-balance.mjs       # plays ~4,500 battles and PRINTS the balance the tuned numbers are held to (about 35 seconds)
+node tests/test-card-balance.mjs       # plays ~6,000 battles and PRINTS the balance the game is held to (about 70 seconds; pass two seeds to try another draw)
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
