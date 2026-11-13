@@ -555,7 +555,8 @@ The parts unlike everything else:
   that review is a launch gate for production. It is written by `tools/cards/build-card-skin.mjs` from lists
   of NAMES in that file - correct it there and re-run, never in the JSON. Anybody the drafter was not sure of is
   absent and wears the default, because a wrong tone on a named real person is worse than a neutral one; and it
-  was never decided from a name. It is deliberately coarse (nearly everyone in two of the five tones).
+  was never decided from a name. 967 players were measured from their public Sleeper headshot (nothing of the
+  photo is kept); the other 588 are memory alone, listed as `FROM_MEMORY` in that file and the likeliest to be wrong.
 - **What is in a pack is `card-packs.mjs`; what it costs is a `card_packs` row** (v2.24.0). The browser prints
   the odds from the module and `card-claim` rolls from the same module, so what is read is what is rolled - and
   **the client and the functions must ship together whenever it changes**. `buy_pack` does the stock, the coins

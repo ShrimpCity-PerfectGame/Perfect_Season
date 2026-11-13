@@ -24,9 +24,10 @@ CLAUDE.md.
 
 Test site only.
 
-- Cards: a first pass at each player's skin tone, for the owner to correct. 1,507 of the 1,639 players have
-  one; the 132 the drafter was not sure of keep the default. It is coarse on purpose - nearly everyone sits in
-  two of the five tones - and nothing was decided from a name. The list is built from names in
+- Cards: a first pass at each player's skin tone, for the owner to correct. 1,555 of the 1,639 players have
+  one; the 84 nobody was sure of keep the default. 967 were measured from the headshot on the player's public
+  Sleeper profile (no photo is kept or shipped, only the tone); 588, mostly retired before about 2009, are
+  from memory alone. Nothing was decided from a name. The list is built from names in
   `tools/cards/build-card-skin.mjs`; correct it there and re-run. Client only: no migration, no Edge Function
   change. Production still shows no cards, and the owner's review of this list is a gate before it does.
 
