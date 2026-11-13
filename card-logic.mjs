@@ -122,7 +122,7 @@ export function initDefenses(versusPool) {
 // quarterback). A lineup is { [slot]: { id, finish } } - a card AND the finish of the copy being played, since
 // a Gold copy and a Base copy of one card are owned separately and score differently.
 export const FINISHES = ["base", "silver", "gold", "prism"];
-// What a finish adds to the card's rating in a battle. Small on purpose: a good matchup is worth about ten, so
+// What a finish adds to the card's rating in a battle. Small on purpose: a matchup is worth ten to twenty-five, so
 // a finish is a flex and a tiebreaker and never a substitute for the right lineup.
 export const FINISH_BONUS = { base: 0, silver: 1, gold: 2, prism: 3 };
 export const ownKey = (id, finish) => `${id}:${finish}`;
@@ -171,28 +171,49 @@ export function lineupProblem(lineup, owned) {
 // The browser and the Edge Function run different JavaScript engines and have to walk the generator in step;
 // a draw that happened only for some cards would put them out of step for every card after it. Same reason
 // nothing here is ordered with a random comparator (game-logic.mjs's smallTimSort has the history).
-export const LUCK_SPREAD = 12;
-export const TARGET_BASE = 150;
-export const TARGET_SLOPE = 4.2;
+export const LUCK_SPREAD = 26;
+
+// THE BAR RISES WITH EVERY WIN IN A RUN. It is the owner's call (2026-11-13) and it replaced a bar that was
+// fixed per defense, because the balance bot measured why that could not work: a starter deck's best six add up
+// to about 246, sixty random cards to about 641, and the sixty best cards in the game to 780. No single bar is
+// both clearable by the first and a test for the last - set for one, it was a 0.4% win rate for starters or a
+// walkover for everybody else. So the first battle of a run (step 0) is one almost anybody wins, each win
+// raises the next bar by BAR_STEP, and every run ends at a battle that is a real test for THAT collection.
+//
+// The defense still matters: BAR_DEFENSE points for each point its rating sits above or below BAR_PIVOT, which
+// is the median defense in the pool. Small beside BAR_STEP on purpose - a great defense is a harder draw, not a
+// wall - because what a defense mostly does to you is its TRAITS.
+//
+// The daily showdown has no step. It is a score, not a win or a loss; it reports the step-0 bar for reference.
+export const BAR_START = 190;
+export const BAR_STEP = 55;
+export const BAR_DEFENSE = 1.5;
+export const BAR_PIVOT = 65;
 
 // trait -> archetype -> points. Negative is the defense taking something away; positive is an archetype that
 // is the ANSWER to that defense, which is what makes a lower-rated card the right pick.
 export const COUNTERS = {
-  stingy: { goalline: -8, redzone: -8 },
-  ballhawks: { gunslinger: -10, volume: -8, manager: 6 },
-  passrush: { volume: -8, gunslinger: -6, scrambler: 8, valve: 5, receiving: 5 },
-  strip: { workhorse: -8, homerun: -6, possession: 4 },
-  scoring: { volume: -6, manager: 6, workhorse: 4 },
+  stingy: { goalline: -20, redzone: -20 },
+  ballhawks: { gunslinger: -25, volume: -20, manager: 15 },
+  passrush: { volume: -20, gunslinger: -15, scrambler: 20, valve: 13, receiving: 13 },
+  strip: { workhorse: -20, homerun: -15, possession: 10 },
+  scoring: { volume: -15, manager: 15, workhorse: 10 },
 };
 // [archetype, archetype, points to EACH]. A pair fires once for a card however many partners it has: two deep
 // threats do not make a gunslinger twice as good, they each get their own lift from him.
 export const PAIRS = [
-  ["gunslinger", "deep", 7], ["gunslinger", "seam", 5], ["manager", "possession", 5], ["manager", "valve", 4],
-  ["scrambler", "homerun", 5], ["volume", "receiving", 5], ["volume", "possession", 4],
+  ["gunslinger", "deep", 16], ["gunslinger", "seam", 12], ["manager", "possession", 12], ["manager", "valve", 10],
+  ["scrambler", "homerun", 12], ["volume", "receiving", 12], ["volume", "possession", 10],
 ];
 
 const round1 = (n) => Math.round(n * 10) / 10;
-export const battleTarget = (defense) => Math.round(TARGET_BASE + TARGET_SLOPE * defense.rating);
+// `step` is how many battles this run has already won. Anything that is not a whole number of wins - a
+// negative, a fraction, a word, nothing at all - is read as the nearest honest thing rather than refused: this
+// is arithmetic, and the Edge Function is what decides which step a run is really on.
+export function battleTarget(defense, step = 0) {
+  const wins = Number.isFinite(step) && step > 0 ? Math.floor(step) : 0;
+  return Math.round(BAR_START + BAR_STEP * wins + BAR_DEFENSE * (defense.rating - BAR_PIVOT));
+}
 
 // "142 yards, 2 TD": the card's real per-game line, scaled by how its game went. Display only, no draw.
 function playLine(card, base, total) {
@@ -205,7 +226,8 @@ function playLine(card, base, total) {
 
 // Only ever called with a lineup lineupProblem has passed and a defense out of DEFENSES - it trusts both.
 // rand is a () => [0, 1) generator; every draw this function makes comes from it.
-export function scoreBattle(lineup, defense, rand) {
+// step is the run's wins so far (see battleTarget); it moves the bar and never the cards.
+export function scoreBattle(lineup, defense, rand, step = 0) {
   const cards = SLOTS.map((slot) => ({ slot, entry: lineup[slot], card: CARDS.get(lineup[slot].id) }));
   const fielded = new Set(cards.map((c) => c.card.archetype));
   const plays = cards.map(({ slot, entry, card }) => {
@@ -224,7 +246,7 @@ export function scoreBattle(lineup, defense, rand) {
     return { slot, id: card.id, finish: entry.finish, base, roll, mods, total, line: playLine(card, base, total) };
   });
   const offense = round1(plays.reduce((s, p) => s + p.total, 0));
-  const target = battleTarget(defense);
+  const target = battleTarget(defense, step);
   return { cards: plays, offense, target, win: offense >= target };
 }
 

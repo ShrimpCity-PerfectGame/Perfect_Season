@@ -114,7 +114,7 @@ if (need("lineupProblem")) {
 // ---------- 4. Scoring a battle ----------
 // Pinned once every other check here passed; it moves whenever a constant or a rule does, and it is what says
 // the browser and the Edge Function roll the same battle. Re-pin it deliberately, never to make a run green.
-const PINNED_CHECKSUM = 15426388;
+const PINNED_CHECKSUM = 15165096;
 if (need("scoreBattle")) {
   const mid = () => 0.5; // two draws of 0.5 are a roll of exactly zero
   const rav = C.defenseByKey("2000|BAL");
@@ -128,6 +128,16 @@ if (need("scoreBattle")) {
   eq(r0.win, r0.offense >= r0.target, "win is offense against target");
   eq(r0.offense, +r0.cards.reduce((s, c) => s + c.total, 0).toFixed(1), "offense is the six totals");
   ok(C.battleTarget(rav) > C.battleTarget(C.DEFENSES.reduce((a, b) => (a.rating < b.rating ? a : b))), "a better defense is a higher bar");
+  // The bar RISES with every win in a run (the owner's call, 2026-11-13): the first battle is one almost anybody
+  // can win, and each win raises the next, so every run ends at a real test whatever the collection.
+  eq(C.battleTarget(calm), C.battleTarget(calm, 0), "no step is step zero");
+  for (let i = 0; i < 30; i++) ok(C.battleTarget(calm, i + 1) > C.battleTarget(calm, i), `step ${i + 1} is a higher bar than step ${i}`);
+  eq(C.battleTarget(calm, 3) - C.battleTarget(calm, 2), C.BAR_STEP, "by BAR_STEP a win");
+  for (const junk of [-4, NaN, "x", null, undefined, Infinity]) eq(C.battleTarget(calm, junk), C.battleTarget(calm, 0), `a step of ${junk} is step zero`);
+  eq(C.battleTarget(calm, 2.9), C.battleTarget(calm, 2), "a fractional step is the step below it");
+  eq(C.scoreBattle(good, calm, mid, 4).target, C.battleTarget(calm, 4), "a battle is scored against its own step");
+  eq(C.scoreBattle(good, calm, mid, 4).offense, r0.offense, "the step moves the bar, never the cards");
+  ok(!C.scoreBattle(good, calm, mid, 30).win, "even the best six in the game lose eventually");
   for (const [finish, pts] of [["silver", 1], ["gold", 2], ["prism", 3]]) {
     eq(+(C.scoreBattle({ ...good, QB: { ...good.QB, finish } }, calm, mid).offense - r0.offense).toFixed(1), pts, `${finish} is worth exactly ${pts}`);
   }

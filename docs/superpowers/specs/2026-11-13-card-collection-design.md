@@ -69,7 +69,7 @@ Anti-goals (it has failed if any of these is true, even if it works)
 - **Finish** is rolled separately from the player **(owner, from the reference game)**: Base,
   Silver, Gold, Prism. Any player can come in any finish. **(owner)** A better finish has a small
   battle effect "just to flex". **(call)** +0 / +1 / +2 / +3 rating points in battle, shown on the
-  card as "118 +2". A good archetype matchup is worth about ten, so finish must stay a tiebreaker.
+  card as "118 +2". A matchup is worth ten to twenty-five as tuned, so finish stays a tiebreaker.
 - Owning: an account owns a count of each (card, finish). **(call)** Duplicates stack.
 
 ### 3.1 Archetypes
@@ -178,6 +178,14 @@ number.
   strongest.
 - **(call)** A run is a streak: random defenses one after another until a loss. Each win pays a
   few coins, a longer streak pays more per win, and a new run can start at any time.
+- **(owner, 2026-11-13) The bar rises with every win in a run.** The first battle is one almost
+  anybody wins; each win raises the bar for the next, so every run ends at a battle that is a
+  real test for that collection. This replaced a bar fixed per defense, which the balance bot
+  showed cannot work: a starter deck's best six add up to about 246, sixty random cards to about
+  641 and the sixty best cards to 780, so one bar was either unreachable for a new player (0.4%
+  wins) or a walkover for everyone else. The defense still shifts the bar a little by its rating,
+  and matters mostly through its traits. As measured: a starter deck wins about 1.6 battles a
+  run, sixty random cards about 8.7, the best collection about 11.5, and no run goes on forever.
 - **(call)** Farming has a ceiling: a fixed number of paid wins per UTC day, in the spirit of
   `paidSeasonsPerDay`. Past it, runs still play and still count for the streak board.
 - **(call)** The lineup is chosen fresh for each defense, after seeing it; that choice is the game.
