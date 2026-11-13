@@ -63,3 +63,54 @@ export function initCardData(catalog) {
   }
   return { cards: CARDS.size, players: players.size };
 }
+
+// ---------- Defenses ----------
+// The opponent is always a real team defense from data/versus-pool.json, the file Duel already ships. A trait is
+// earned from the defense's own numbers, the way an archetype is earned from a card's.
+//
+// BEST FIVE OF ITS OWN SEASON, not best across the pool. Scoring, passing and sack rates moved a long way
+// between 1999 and 2025, so a raw cut would hand every Stingy to the early 2000s and every Pass rush to the
+// 2020s. Ranked within a season, a 2003 defense and a 2023 one are each judged against their own football, and
+// every season fields exactly five of each trait.
+//
+// Ties at the cut are broken by team code. That is arbitrary and it is deliberate: two teams level on
+// interceptions is ordinary, and an answer that depended on the order the file listed them in would differ
+// between a build of the file and the next.
+export const TRAITS = [
+  { id: "stingy", label: "Stingy", stat: "pa", best: "low" },
+  { id: "ballhawks", label: "Ball hawks", stat: "ints", best: "high" },
+  { id: "passrush", label: "Pass rush", stat: "sacks", best: "high" },
+  { id: "strip", label: "Strip artists", stat: "fum", best: "high" },
+  { id: "scoring", label: "Scoring defense", stat: "tds", best: "high" },
+];
+export const TRAITS_PER_SEASON = 5;
+const TRAIT_LABEL = Object.fromEntries(TRAITS.map((t) => [t.id, t.label]));
+export const traitLabel = (id) => TRAIT_LABEL[id] || id;
+
+export let DEFENSES = []; // sorted by key, so an index into it means the same thing on every engine
+let defenseIndex = new Map();
+export const defenseByKey = (key) => defenseIndex.get(key);
+
+export function initDefenses(versusPool) {
+  const cols = versusPool.columns.defenses;
+  const list = versusPool.defenses.map((row) => {
+    const d = {};
+    for (let i = 0; i < cols.length; i++) d[cols[i]] = row[i];
+    d.key = `${d.season}|${d.team}`;
+    d.traits = [];
+    return d;
+  });
+  const seasons = new Map();
+  for (const d of list) (seasons.get(d.season) || seasons.set(d.season, []).get(d.season)).push(d);
+  for (const t of TRAITS) {
+    const sign = t.best === "low" ? 1 : -1;
+    for (const teams of seasons.values()) {
+      const ranked = [...teams].sort((a, b) => sign * (a[t.stat] - b[t.stat]) || (a.team < b.team ? -1 : a.team > b.team ? 1 : 0));
+      for (const d of ranked.slice(0, TRAITS_PER_SEASON)) d.traits.push(t.id);
+    }
+  }
+  list.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  DEFENSES = list;
+  defenseIndex = new Map(list.map((d) => [d.key, d]));
+  return DEFENSES.length;
+}

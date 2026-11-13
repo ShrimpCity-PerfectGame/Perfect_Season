@@ -44,5 +44,31 @@ for (const pos of ["QB", "RB", "WR", "TE"]) {
   eq(C.cardArchetypes({ ...empty, pos }).length, 0, `and qualifies for nothing`);
 }
 
+// ---------- 2. Defenses and their traits ----------
+if (need("initDefenses")) {
+  const pool = read("data/versus-pool.json");
+  eq(C.initDefenses(pool), 859, "859 defenses");
+  eq(C.TRAITS.map((t) => t.id).join(), "stingy,ballhawks,passrush,strip,scoring", "the traits");
+  // Best five of its OWN season, so a 2003 defense and a 2023 one are judged against their own football.
+  for (const t of C.TRAITS) for (let y = 1999; y <= 2025; y++) {
+    eq(C.DEFENSES.filter((d) => d.season === y && d.traits.includes(t.id)).length, 5, `${y} has five ${t.id}`);
+  }
+  ok(C.defenseByKey("2000|BAL").traits.includes("stingy"), "the 2000 Ravens are stingy");
+  ok(C.defenseByKey("2002|TB").traits.includes("ballhawks"), "the 2002 Bucs are ball hawks");
+  ok(C.defenseByKey("2022|PHI").traits.includes("passrush"), "the 2022 Eagles rush the passer");
+  eq(C.defenseByKey("1066|XX"), undefined, "a defense that never was");
+  ok(C.DEFENSES.every((d) => d.traits.every((t, i) => i === 0 || C.TRAITS.findIndex((x) => x.id === t) > C.TRAITS.findIndex((x) => x.id === d.traits[i - 1]))), "a defense lists its traits in TRAITS order");
+  ok(C.DEFENSES.some((d) => d.traits.length === 0) && C.DEFENSES.some((d) => d.traits.length >= 3), "some defenses have no trait and some have several");
+  // Ties at the cut: the answer must not depend on the order the file lists teams in.
+  const before = C.DEFENSES.map((d) => `${d.key}:${d.traits.join(",")}`).sort();
+  C.initDefenses({ ...pool, defenses: [...pool.defenses].reverse() });
+  eq(JSON.stringify(C.DEFENSES.map((d) => `${d.key}:${d.traits.join(",")}`).sort()), JSON.stringify(before), "traits survive a reordered file");
+  eq(C.DEFENSES.map((d) => d.key).join(), [...C.DEFENSES.map((d) => d.key)].sort().join(), "and DEFENSES is always in key order");
+  // And the pool does contain such ties, or the check above proves nothing.
+  const tied = pool.defenses.some((a) => pool.defenses.some((b) => a !== b && a[0] === b[0] && a[4] === b[4]));
+  ok(tied, "the pool really has two teams level on interceptions in one season");
+  C.initDefenses(pool);
+}
+
 console.log(fails ? `\n${fails} FAILED` : "card logic: all checks passed");
 process.exit(fails ? 1 : 0);
