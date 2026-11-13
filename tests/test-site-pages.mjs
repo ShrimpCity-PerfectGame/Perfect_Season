@@ -255,7 +255,7 @@ await runTest("the data credit is on every page of words, with both links", asyn
 // URL on the NFL's own image CDN, and the builders deliberately drop it - which keeps the whole question
 // about facts rather than about marks.
 await runTest("no shipped data file carries an image URL, or any URL at all", async () => {
-  for (const file of ["players.json", "versus-pool.json", "season-2025.json", "guess-pool.json"]) {
+  for (const file of ["players.json", "versus-pool.json", "season-2025.json", "guess-pool.json", "cards.json", "card-defense.json", "card-skin.json"]) {
     const raw = readSrc(new URL(`../data/${file}`, import.meta.url), "utf8");
     const urls = raw.match(/https?:\/\//g) || [];
     assert(urls.length === 0, `data/${file} carries ${urls.length} URL(s) - a headshot link would be NFL imagery`);

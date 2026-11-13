@@ -1,8 +1,9 @@
 # CARDS.md - card collecting and card battles
 
-**Status: in progress. Only the catalog and the rules exist** (plan 1 of 5, built 2026-11-13). There is no
-table, no Edge Function, no screen and no switch yet, and nothing a player can see. `data/cards.json` is not
-shipped to the site.
+**Status: in progress, and on the test site only** (v2.23.0, plans 1 and 2 of 5). A player there can open a
+starter deck, earn a card a day from the daily draft, and see a collection. **Nothing plays a battle yet**, and
+there are no packs. Production has cards switched off: no tile, no catalog file, and the functions grant
+nothing. Sections 1 to 7 are the rules; section 8 is owning cards.
 
 The design is `docs/superpowers/specs/2026-11-13-card-collection-design.md`; read it for the why. This file is
 what the code does.
@@ -213,13 +214,102 @@ Whatever records a showdown must store the defense's key.
 `card-logic.mjs` can find the day's best lineup for their collection offline. It is the gap every seeded daily
 in this game has.
 
-## 8. Not built
+## 8. Owning cards (v2.23.0)
 
-Everything outside the rules: owning cards, the starter deck, the daily card, the collection screen, packs and
-their odds, the server side of battles and runs, the battle screen, sprites and recolouring, skin tones,
-badges, the profile's best card, boards, the hide setting, the build switch. The spec's section 8 lists the
-order. The owner still owes one final, consistent sprite sheet. The licence on the tool that made the sprites is
-cleared (owner, 2026-11-13).
+### 8.1 The database
+
+`supabase/migration-cards.sql`. Two tables, RLS on, **one select policy each (your own rows) and no write
+policy at all**:
+
+- `card_owned (user_id, card_id, finish, count, first_at)` - what a player holds. Copies stack in `count`.
+- `card_grants (user_id, kind, ref, card_id, finish)` - the ledger, unique on `(user_id, kind, ref)`.
+
+`card_id` is an id out of `data/cards.json`. There is no cards table and no foreign key: the Edge Functions
+choose the card, so they are what guarantee it is real.
+
+`grant_cards(p_user, p_kind, p_grants)` is the only writer, security definer, **service role only**.
+`p_grants` is a list of `{ ref, card, finish }`, at most twenty. Each is inserted into the ledger
+`on conflict do nothing` and only a row that really went in adds a card. It returns
+`{ granted: [...], duplicate }`, `duplicate` being true when something was asked for and none of it was new.
+It raises `no_profile`, `guest_not_allowed` or `bad_grant`, and checks everything before writing anything.
+
+The ref is what makes a grant happen once: a starter deck is `starter:0` to `starter:7`, a daily card is
+the date. `delete_account` erases both tables' rows for the account (cards are the person's, not a board's),
+through `to_regclass` + `EXECUTE` because migration-profiles.sql is re-run before this file exists.
+
+### 8.2 The switch
+
+Two switches, and both must be on for anything to be granted or shown.
+
+| Where | What | On when |
+|---|---|---|
+| Client | `cardsOn()` in `cards-switch.mjs`, from `CARDS_ON` baked in by build.mjs | `APP_ENV=staging`, or `CARDS_ON=1` |
+| Server | the secret `CARDS_ENABLED=1`, read per request by `card-claim` and `submit-run` | set on that Supabase project |
+
+With the client's off there is no tile and `data/cards.json` is not copied to the site. With the server's off
+`card-claim` answers `cards_off` before touching the database and `submit-run` chooses no card.
+`window.__ps_cards__` overrides the client switch (tests and the harness use it); forcing it on against a
+server that is off draws an empty card area and grants nothing.
+
+### 8.3 Getting cards
+
+- **Starter deck** - `POST card-claim { action: "starter" }`. Eight Base cards rated under 60, eight different
+  players, always a QB, RB, WR, TE and two more non-quarterbacks (`starterDeck` in card-logic.mjs), chosen with
+  `crypto.getRandomValues`. Answers in this order: 401 `signed_out`, 400 `malformed`, 403 `cards_off`,
+  500 `server` (profile read), 400 `no_profile`, 403 `guest_not_allowed`, 500 `server` (grant),
+  409 `duplicate`, 200 `{ ok, cards }`.
+- **Daily card** - `submit-run`, after a finished Daily is saved and paid. One card drawn at equal odds from
+  every card off the boards that day dealt (`dailyCard`), with a finish roll (Base 80%, Silver 16%, Gold 3.5%,
+  Prism 0.5%). The ref is the **date alone**, so the two scoring formats' dailies share one card a day. It is
+  in its own try/catch and answers `card: null` on any failure: **it can never cost a season.**
+- Guests cannot collect. `grant_cards` refuses one, and a guest's daily is refused long before the card.
+
+### 8.4 The browser
+
+- `storage-cards.js`: `fetchMyCards()` answers `ok` / `signed_out` / `error` - three answers, because a
+  read that failed is not an empty collection. `claimStarter()` answers a reason from `CARD_REFUSALS`, or
+  `offline` / `network` when the function could not be read.
+- `card-data.mjs`: the catalog is fetched from `/data/cards.json` when the card area opens. A failed load is
+  not remembered. The service worker fetches it network-first (`DATA` in sw-rules.mjs).
+- `cards.jsx`: one state on screen - loading, error, account, starter, collection. A card earned before the
+  starter deck is opened shows beside the starter offer. `SeasonCard` is the daily card on the result screen.
+- `ps-cards-hidden` hides the tile and the daily card's reveal on that device. Cards are still banked.
+
+### 8.5 Drawing a card
+
+`tools/cards/build-sprites.mjs` cuts the owner's sheets into `static/cards/<pose>.png`: paper cleared,
+painted number erased, still in the sheets' own blue, grey and tan. `tools/cards/poses.json` maps each
+archetype (and `role`) to a sheet cell. **Look at `build/card-sprites-check.png` after running it**; no test
+can see a half-erased number.
+
+`card-sprites.mjs` recolours a sprite in the browser on a canvas: jersey to the team's first colour, helmet
+and pants to its second (they are the same grey on the sheets, so they cannot differ), skin to the player's
+tone. `data/card-skin.json` maps a `pid` to one of five tones; **its player list is empty, so every card
+wears the default.** No canvas, or a sprite that will not load, leaves the neutral drawing or none - the card
+still shows its name, rating and stats.
+
+`card-face.jsx`'s colours are data (`CARD_PAINT`), not theme tokens, because a card looks the same on every
+surface. `CARD_TEXT_PAIRS` lists every text colour and what it sits on; the test holds each to AA.
+
+### 8.6 Runbook
+
+- **Switch cards on in an environment:** run `migration-cards.sql`, re-run `migration-profiles.sql`, set the
+  secret (`npx supabase secrets set CARDS_ENABLED=1 --project-ref <ref>`), deploy the functions, then deploy
+  a client built with `CARDS_ON=1` (staging has it by default).
+- **Switch them off:** unset the secret. Grants stop at once; redeploy the client with `CARDS_ON=` to remove
+  the tile. Nothing is deleted.
+- **Give a player a card** (SQL editor, which runs as the owner):
+  `select grant_cards('<user uuid>', 'daily', '[{"ref":"gift-1","card":412,"finish":"gold"}]'::jsonb);`
+  A ref that has been used for that player and kind grants nothing.
+- **See what someone owns:** `select card_id, finish, count from card_owned where user_id = '<uuid>';`
+
+## 8b. Not built
+
+Packs and their odds, the server side of battles and runs, the battle screen, badges, the profile's best card,
+boards, the real skin-tone list. `/privacy` and `/terms` do not mention cards yet; they change in the release
+that switches cards on for production. The owner's full 50-pose sprite set arrived at about 100x135 pixels a
+sprite and is wanted at full size; the sprites in use are cut from the first two sheets. The licence on the
+tool that made the sprites is cleared (owner, 2026-11-13).
 
 ## 9. Tests
 
@@ -227,4 +317,11 @@ cleared (owner, 2026-11-13).
 node tests/test-card-catalog.mjs   # the catalog: every pool row is a card, and a rebuild never rewrites one
 node tests/test-card-logic.mjs     # archetypes, traits, lineup refusals, scoring, the showdown, a pinned checksum
 node tests/test-card-balance.mjs   # plays ~6,000 battles and PRINTS the balance table above (about 70 seconds)
+node tests/test-cards-sql.mjs      # the migration in PGlite: nobody writes the tables, a grant happens once, SQL == mock
+node tests/test-cards-edge.mjs     # the real card-claim, executed: its order of refusals, eight cards, once
+node tests/test-cards-daily-edge.mjs # the real submit-run: a daily earns one card, and a failed grant never costs the season
+node tests/test-cards-client.mjs   # the switch, the catalog load, and a collection read with three answers
+node tests/test-card-sprites.mjs   # fourteen PNGs of the size a card draws
+node tests/test-card-face.mjs      # the recolouring maths, the spoken label, contrast, a card with no sprite
+node tests/test-cards-screen.mjs   # the tile, the starter deck, the collection, hiding it, the daily card on the result
 ```

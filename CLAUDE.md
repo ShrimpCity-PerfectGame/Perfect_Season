@@ -512,9 +512,11 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, 2026-11-13).** A card-collecting and auto-battler mode is being built in five parts, and
-**only the first exists: the catalog and the rules.** There is no table, no Edge Function, no screen and no switch,
-and `data/cards.json` is not shipped to the site. **`CARDS.md` is the reference** and
+**Cards (in progress, v2.23.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+five parts. **Two exist: the rules, and owning cards** - a starter deck, a card a day from the daily draft, and a
+collection screen. Nothing plays a battle yet and there are no packs. **Production has cards switched off** in two
+places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
+`card-claim` and `submit-run`). With either off nothing is granted and nothing is shown. **`CARDS.md` is the reference** and
 `docs/superpowers/specs/2026-11-13-card-collection-design.md` is the design - read both before touching any of it.
 The parts unlike everything else:
 
@@ -540,6 +542,16 @@ The parts unlike everything else:
   `data/card-defense.json` (`tools/data/build-card-defense.mjs`). It is NOT two more columns on
   `versus-pool.json`, because that file is carried by both the browser and `match-pick`, and rebuilding it for a
   trait Duel never reads would risk moving a rating under a live match.
+- **No browser writes a card.** `card_owned` and `card_grants` have an own-rows select and no write policy;
+  `grant_cards` is the only writer, service role only, and grants once per (player, kind, ref). A starter deck is
+  the refs `starter:0`-`starter:7`; a daily card's ref is the DATE ALONE, so the two scoring formats share one a day.
+- **The daily card can never cost a season.** `submit-run` chooses it after the season is saved and paid, in its
+  own try/catch, and answers `card: null` on any failure. Do not move it earlier or let it throw.
+- **A read that failed is not an empty collection** - `fetchMyCards` has three answers and `cards.jsx` has an
+  error state of its own. Collapsing them offers a player with fifty cards a starter deck they already opened.
+- **Sprites are recoloured in the browser**, so fourteen neutral PNGs serve every card and there is no file per
+  team. `data/card-skin.json`'s player list is EMPTY on purpose: every card wears one default tone until the list
+  is made by hand, because a wrong tone on a named real person is worse than a neutral one.
 - **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not
   used; the number on the card face is always the number in the battle.
 
@@ -778,6 +790,13 @@ node tests/test-guess-screen.mjs       # the buttons: the tile, both variants, g
 node tests/test-card-catalog.mjs       # data/cards.json: every pool row is a card, and a rebuild of players.json never rewrites one
 node tests/test-card-logic.mjs         # archetypes, defense traits, every lineup refusal, battle scoring, the daily showdown, a pinned checksum
 node tests/test-card-balance.mjs       # plays ~6,000 battles and PRINTS the balance the game is held to (about 70 seconds; pass two seeds to try another draw)
+node tests/test-cards-sql.mjs          # migration-cards.sql in PGlite: nobody writes the tables, a grant happens once, guests refused, SQL == mock
+node tests/test-cards-edge.mjs         # the real card-claim, executed: the order it refuses in, eight cards, and only once
+node tests/test-cards-daily-edge.mjs   # the real submit-run: a daily earns one card a day, and a failed grant never costs the season
+node tests/test-cards-client.mjs       # the switch, the catalog load that retries, and a collection read with three answers
+node tests/test-card-sprites.mjs       # the fourteen neutral sprites: one per archetype plus role, the size a card draws
+node tests/test-card-face.mjs          # the recolouring maths, a card's spoken label, every text colour at AA, a card with no sprite
+node tests/test-cards-screen.mjs       # the tile and the switch, the starter deck, the collection, hiding it, the daily card on the result
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -1446,6 +1465,15 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.23.0's (cards, on the test site): run **`migration-cards.sql`**, re-run **`migration-profiles.sql`**
+  (`delete_account` learns to erase cards), **set the secret `CARDS_ENABLED=1` on the STAGING project only**
+  (`npx supabase secrets set CARDS_ENABLED=1 --project-ref <staging ref>`), **deploy the Edge Functions**
+  (`node deploy-function.mjs <env>` deploys **SEVEN** now - `card-claim` is new, and `submit-run` changed), then
+  the client. Out of order: a client ahead of the function gets a 404 on the starter button; a function ahead
+  of the migration answers 500 `server`; a missing secret answers `cards_off`, which the screen says in words.
+  **Production takes the same migration and functions and stays off**: with no secret `card-claim` answers
+  before touching the database and `submit-run` chooses no card, and a production build carries no tile and
+  ships no catalog. Do NOT set the secret on production until `/privacy` and `/terms` say what cards store.
   v2.22.0's (the crash sink): run **`migration-client-errors.sql`**, then **deploy the Edge Functions**
   (`node deploy-function.mjs <env>` deploys **SIX** now), then the client. **The order is not optional
   here**: a client ahead of the function POSTs at a 404 and silently drops every report, which is

@@ -20,6 +20,39 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-11-13
+
+**On the test site only.** Production builds have cards switched off: no tile, no catalog file, and the two
+Edge Functions that grant cards do nothing without the `CARDS_ENABLED` secret. See CARDS.md.
+
+### Added
+- **Cards: a starter deck, a card a day, and a collection.** A Cards tile on Modes opens a card area of its
+  own, apart from the drafts. A signed-in player opens a starter deck - eight low-rated cards that always make
+  a playable lineup - and from then on finishing the daily draft earns one card off that day's boards, shown
+  on the result screen. The collection draws every card with the owner's toy sprites, recoloured in the
+  browser for the card's team, with a position filter. Anyone who does not want it can hide it, per device.
+- **Nobody can give themselves a card.** `card_owned` and `card_grants` have an own-rows read and no client
+  write policy. `grant_cards` is the only writer, only the service role may call it, and it grants once per
+  (player, kind, ref) - so two tabs claiming a starter deck leave eight cards, and the two scoring formats'
+  dailies share one card a day. `card-claim` is the seventh Edge Function.
+- **The daily card can never cost a season.** It is chosen after the season is saved and paid, in its own
+  try/catch: a grant that fails or throws answers `card: null` and nothing else changes.
+- **The card catalog and the battle rules** (built earlier, unreleased until now): 3,124 frozen cards,
+  thirteen archetypes, six defense traits including Run stopper, lineup rules, battle scoring with a bar that
+  rises with every win in a run, and a balance test that plays about 6,000 battles. Nothing plays a battle yet.
+
+### Fixed
+- **The shop's showcase test read the clock.** It expected a brand-new account to hold Day One, which is only
+  earned by joining in the first month, so it passed until 2026-10-14 and failed ever since with nothing in
+  the code changing. It states its join date now. The badge itself was always right.
+
+### Not done
+- Packs, battles, badges, the profile's best card and the boards are plans 3 to 5.
+- **Every card wears one default skin tone.** The per-player list is a manual job and is empty.
+- The sprites are cut from the owner's first two sheets (20 poses); the full 50-pose set arrived too small to
+  use and is wanted at full size.
+- `/privacy` and `/terms` are unchanged. They change in the release that switches cards on for production.
+
 ## [2.22.1] - 2026-10-06
 
 ### Fixed
