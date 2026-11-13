@@ -43,7 +43,7 @@ export const PACKS = [
     finish: { base: 0, silver: 0, gold: 0.85, prism: 0.15 },
     has: (card) => card.rating >= 100,
   },
-].map((p) => ({ ...p, art: `/cards/packs/${p.id}.png` }));
+].map((p) => ({ ...p, art: `/cards/packs/${p.id}.webp` }));
 export const PACK_BY_ID = Object.fromEntries(PACKS.map((p) => [p.id, p]));
 
 // The cards a pack can hold, in id order. Needs initCardData to have run. Worked out once per catalog.

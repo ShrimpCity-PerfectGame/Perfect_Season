@@ -123,7 +123,7 @@ Owner tasks the build depends on, none done:
   with blank jerseys - but as one 1024x683 JPEG, about 100x135 pixels a sprite, a third of the
   size a card needs. Wanted from the owner: the same poses at full size (ten to a sheet, as the
   first two were, PNG if the tool offers it), one player per cell.
-- **Pack art.** Three example pack wrappers supplied 2026-11-13 (`pack-example-*.jpg`): a silver
+- **Pack art.** Three example pack wrappers supplied 2026-11-13 (now `tools/cards/source/pack-*.jpg`, cut to `static/cards/packs/` by `tools/cards/build-pack-art.mjs`): a silver
   common, a blue-and-gold, and a purple-and-gold with a crown. They set the look for plan 3. Final
   pack art should carry no baked-in words (one says "Football Booster / Common Tier"); names and
   tiers are text the game draws, so they can change and be read aloud.

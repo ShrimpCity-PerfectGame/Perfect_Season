@@ -21,7 +21,7 @@ for (const p of PACKS) {
   eq(+FINISHES.reduce((s, f) => s + (p.finish[f] || 0), 0).toFixed(9), 1, `${p.id}'s finish odds add up to one`);
   ok(packCards(p).length >= p.size * 5, `${p.id} holds plenty of cards to pull from (${packCards(p).length})`);
   ok(packCards(p).every((c, i, a) => i === 0 || a[i - 1].id < c.id), `${p.id}'s cards come in id order`);
-  ok(typeof p.art === "string" && p.art.endsWith(`${p.id}.png`), `${p.id} names its art`);
+  ok(typeof p.art === "string" && p.art.endsWith(`${p.id}.webp`), `${p.id} names its art`);
 }
 eq(packCards(PACK_BY_ID["pack-standard"]).length, CARDS.size, "the Standard pack holds every card");
 ok(packCards(PACK_BY_ID["pack-legends"]).every((c) => c.rating >= 100), "Legends holds only cards rated 100 or more");
@@ -66,6 +66,15 @@ for (const f of FINISHES) ok(Math.abs(fin[f] / pulls - std.finish[f]) <= (f === 
 const leg = PACK_BY_ID["pack-legends"]; let cheap = 0;
 for (let i = 0; i < 5000; i++) for (const c of rollPack(leg, rand)) if (c.finish === "base" || c.finish === "silver") cheap++;
 eq(cheap, 0, "Legends never rolls Base or Silver");
+
+// ---------- 5. The art ----------
+// One picture a pack, cut from the owner's by tools/cards/build-pack-art.mjs. Held to shape, not content: look at them.
+for (const p of PACKS) {
+  let buf = null;
+  try { buf = readFileSync(new URL(`../static${p.art}`, import.meta.url)); } catch { buf = null; }
+  ok(buf && buf.subarray(0, 4).toString() === "RIFF" && buf.subarray(8, 12).toString() === "WEBP", `${p.id}: its picture exists and is a WebP`);
+  ok(buf && buf.length < 120000, `${p.id}: and is small enough to send to a phone (${buf?.length} bytes)`);
+}
 
 console.log(`  Standard: ${packCards(std).length} cards; a given pull is rated 100+ ${(100 * statedHigh).toFixed(2)}% of the time, 120+ ${(100 * packOdds(std).filter((o) => CARDS.get(o.id).rating >= 120).reduce((s, o) => s + o.chance, 0)).toFixed(2)}%`);
 console.log(fails ? `\n${fails} FAILED` : "card packs: all checks passed");
