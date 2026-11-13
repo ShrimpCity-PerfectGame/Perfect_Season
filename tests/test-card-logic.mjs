@@ -47,8 +47,32 @@ for (const pos of ["QB", "RB", "WR", "TE"]) {
 // ---------- 2. Defenses and their traits ----------
 if (need("initDefenses")) {
   const pool = read("data/versus-pool.json");
-  eq(C.initDefenses(pool), 859, "859 defenses");
-  eq(C.TRAITS.map((t) => t.id).join(), "stingy,ballhawks,passrush,strip,scoring", "the traits");
+  const allowed = read("data/card-defense.json");
+  eq(C.initDefenses(pool, allowed), 859, "859 defenses");
+  eq(C.TRAITS.map((t) => t.id).join(), "stingy,runstop,ballhawks,passrush,strip,scoring", "the traits");
+  // Yards allowed (data/card-defense.json): the one thing the duel's defense file does not hold, and what the
+  // Run stopper trait is read from. One row for every defense in the pool, no more and no fewer.
+  eq(allowed.columns.join(), "season,team,games,rush,pass", "the yards-allowed columns");
+  eq(allowed.defenses.length, 859, "a yards-allowed row for every defense");
+  eq(new Set(allowed.defenses.map((r) => r[0] + "|" + r[1])).size, 859, "each of them once");
+  ok(allowed.defenses.every((r) => C.defenseByKey(r[0] + "|" + r[1])), "and each one is a defense in the pool");
+  // 22 early defenses are averaged over fifteen games: the source is missing one of theirs (mostly the two
+  // broken Jaguars seasons' opponents). The builder refuses any defense missing more than one.
+  ok(allowed.defenses.every((r) => r[2] >= 15 && r[2] <= 17), "fifteen to seventeen regular-season games each");
+  ok(allowed.defenses.filter((r) => r[0] >= 2003 && r[0] !== 2022).every((r) => r[2] === (r[0] >= 2021 ? 17 : 16)), "and a full season for everybody from 2003 on (2022 lost one game for real)");
+  ok(C.DEFENSES.every((d) => d.rush > 55 && d.rush < 190 && d.pass > 130 && d.pass < 330), "every defense has plausible yards allowed a game");
+  ok(!/https?:/.test(JSON.stringify(allowed)), "no URL in the yards-allowed file");
+  // Pinned by hand against the record book: the 2000 Ravens allowed 970 rushing yards in sixteen games, still
+  // the fewest in a sixteen-game season.
+  eq(C.defenseByKey("2000|BAL").rush, 60.6, "the 2000 Ravens allowed 60.6 rushing yards a game");
+  ok(C.defenseByKey("2000|BAL").traits.includes("runstop"), "and are a Run stopper");
+  eq(C.traitLabel("runstop"), "Run stopper", "the trait's label");
+  eq([...C.DEFENSES].sort((a, b) => a.rush - b.rush)[0].key, "2000|BAL", "nobody in the pool allowed fewer");
+  // Without the yards-allowed file the trait is simply absent - never guessed, never a crash.
+  C.initDefenses(pool);
+  ok(C.DEFENSES.every((d) => !d.traits.includes("runstop") && d.rush === undefined), "no yards-allowed file, no Run stopper");
+  ok(C.DEFENSES.filter((d) => d.season === 2000 && d.traits.includes("stingy")).length === 5, "and the other traits are untouched");
+  C.initDefenses(pool, allowed);
   // Best five of its OWN season, so a 2003 defense and a 2023 one are judged against their own football.
   for (const t of C.TRAITS) for (let y = 1999; y <= 2025; y++) {
     eq(C.DEFENSES.filter((d) => d.season === y && d.traits.includes(t.id)).length, 5, `${y} has five ${t.id}`);
@@ -61,13 +85,13 @@ if (need("initDefenses")) {
   ok(C.DEFENSES.some((d) => d.traits.length === 0) && C.DEFENSES.some((d) => d.traits.length >= 3), "some defenses have no trait and some have several");
   // Ties at the cut: the answer must not depend on the order the file lists teams in.
   const before = C.DEFENSES.map((d) => `${d.key}:${d.traits.join(",")}`).sort();
-  C.initDefenses({ ...pool, defenses: [...pool.defenses].reverse() });
+  C.initDefenses({ ...pool, defenses: [...pool.defenses].reverse() }, { ...allowed, defenses: [...allowed.defenses].reverse() });
   eq(JSON.stringify(C.DEFENSES.map((d) => `${d.key}:${d.traits.join(",")}`).sort()), JSON.stringify(before), "traits survive a reordered file");
   eq(C.DEFENSES.map((d) => d.key).join(), [...C.DEFENSES.map((d) => d.key)].sort().join(), "and DEFENSES is always in key order");
   // And the pool does contain such ties, or the check above proves nothing.
   const tied = pool.defenses.some((a) => pool.defenses.some((b) => a !== b && a[0] === b[0] && a[4] === b[4]));
   ok(tied, "the pool really has two teams level on interceptions in one season");
-  C.initDefenses(pool);
+  C.initDefenses(pool, allowed);
 }
 
 // ---------- 3. What a legal lineup is ----------
@@ -114,7 +138,7 @@ if (need("lineupProblem")) {
 // ---------- 4. Scoring a battle ----------
 // Pinned once every other check here passed; it moves whenever a constant or a rule does, and it is what says
 // the browser and the Edge Function roll the same battle. Re-pin it deliberately, never to make a run green.
-const PINNED_CHECKSUM = 15165096;
+const PINNED_CHECKSUM = 15070896;
 if (need("scoreBattle")) {
   const mid = () => 0.5; // two draws of 0.5 are a roll of exactly zero
   const rav = C.defenseByKey("2000|BAL");
@@ -166,6 +190,14 @@ if (need("scoreBattle")) {
   const hit = C.COUNTERS.ballhawks.gunslinger;
   ok(hit < 0, "ball hawks are bad news for a gunslinger");
   ok(C.scoreBattle(withGun, hawks, mid).cards[0].mods.some((m) => m.pts === hit && m.key === "trait:ballhawks"), "ball hawks punish a gunslinger");
+  // The owner's own example: a Run stopper is bad news for a pure runner and no trouble to a back who catches.
+  const stopper = C.DEFENSES.find((d) => d.traits.join() === "runstop");
+  const horse = byRating.find((c) => c.archetype === "workhorse"), catcher = byRating.find((c) => c.archetype === "receiving");
+  const rbPlay = (card, d) => C.scoreBattle({ ...noPartner, RB: { id: card.id, finish: "base" } }, d, mid).cards[1];
+  ok(C.COUNTERS.runstop.workhorse < 0 && C.COUNTERS.runstop.goalline < 0 && C.COUNTERS.runstop.homerun < 0, "a Run stopper hurts every kind of pure runner");
+  eq(rbPlay(horse, stopper).total, +(horse.rating + C.COUNTERS.runstop.workhorse).toFixed(1), "a workhorse loses exactly the counter to a Run stopper");
+  ok(rbPlay(catcher, stopper).total >= catcher.rating, "a receiving back loses nothing to one");
+  eq(rbPlay(horse, calm).total, horse.rating, "and a workhorse loses nothing to a defense that is not one");
   ok(!C.scoreBattle(withGun, calm, mid).cards[0].mods.some((m) => m.key.startsWith("trait")), "a defense with no trait counters nothing");
   ok(r0.cards.every((c) => c.mods.every((m) => typeof m.label === "string" && m.label.length > 3 && Number.isFinite(m.pts))), "every modifier can be read out");
   ok(r0.cards.every((c) => /^\d[\d,]* yards, \d+ TD$/.test(c.line)), `a play reads as football (${r0.cards[0].line})`);

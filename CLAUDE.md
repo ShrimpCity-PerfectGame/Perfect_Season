@@ -536,6 +536,10 @@ The parts unlike everything else:
   game as a whole to bands (run length, and whether reading the defense pays). It does NOT pin any single counter
   or pair: review deleted six of seven pairs and one band moved, by less than seed noise. Its bands are
   the builder's reading of the design - nobody has played a battle yet.
+- **Defenses get one trait from a file that is not Duel's.** Run stopper reads rushing yards allowed from
+  `data/card-defense.json` (`tools/data/build-card-defense.mjs`). It is NOT two more columns on
+  `versus-pool.json`, because that file is carried by both the browser and `match-pick`, and rebuilding it for a
+  trait Duel never reads would risk moving a rating under a live match.
 - **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not
   used; the number on the card face is always the number in the battle.
 

@@ -73,6 +73,7 @@ The opponent is always a real team defense from `data/versus-pool.json`, the fil
 | id | Label | Stat |
 |---|---|---|
 | stingy | Stingy | fewest points allowed |
+| runstop | Run stopper | fewest rushing yards allowed a game (`data/card-defense.json`) |
 | ballhawks | Ball hawks | most interceptions |
 | passrush | Pass rush | most sacks |
 | strip | Strip artists | most fumbles (the pool's `fum` column) |
@@ -80,15 +81,27 @@ The opponent is always a real team defense from `data/versus-pool.json`, the fil
 
 **A defense has a trait when it is in the best five of its own season** for that stat, ties broken by team code.
 Within a season, not across the pool: scoring and sack rates moved so far between 1999 and 2025 that a raw cut
-would give every Stingy to the early 2000s. So every season has exactly five of each. 447 defenses have no
-trait, 231 have one, 181 have two or more.
+would give every Stingy to the early 2000s. So every season has exactly five of each. 411 defenses have no
+trait, 219 have one, 229 have two or more.
 
-**Run stopper is not built, and it can be.** The owner wants a trait that hurts pure runners. The season file
-`stats_team_reg_YYYY.csv` has no yards allowed. The weekly file `stats_team_week_YYYY.csv` has `team`,
-`opponent_team`, `rushing_yards` and `passing_yards`, so a defense's yards allowed is the sum of what each
-opponent gained against it. Checked 2026-11-13: the columns are present in the 1999 and 2024 files and the 2010
-file exists. Adding it means extending `tools/data/build-versus-pool.mjs` with that fourth source and two
-columns - and Duel reads the same file, so its tests have to stay green.
+**Run stopper has a data file of its own.** Duel's `versus-pool.json` has no yards allowed, and the season file
+it is built from has no such column. `tools/data/build-card-defense.mjs` writes `data/card-defense.json`
+(season, team, games, rushing and passing yards allowed a game) from nflverse's weekly team file, where each
+row is what one offence gained against a named opponent - so a defense's yards allowed is the sum of what its
+opponents gained. Regular season only.
+
+- **It is a separate file on purpose.** `versus-pool.json` is carried by both the browser and the `match-pick`
+  Edge Function, which must agree on every number in it, and rebuilding it re-fetches its sources. Adding two
+  columns there would risk moving a defense's rating under a live duel for a trait Duel never reads.
+- `initDefenses(versusPool, yardsAllowed)` takes it as an optional second argument. Without it a defense has
+  no `rush` and no Run stopper - absent, never guessed.
+- **22 defenses from 1999 to 2002 are averaged over fifteen games**, because the source is missing one of
+  theirs (mostly opponents of the two broken Jaguars seasons the pool already leaves out). The builder prints
+  them and refuses any defense missing more than one game. 2022's Bills and Bengals have sixteen for real.
+- Pinned by hand: the 2000 Ravens at 60.6 rushing yards a game (970 in sixteen), the fewest in the pool.
+- Passing yards allowed is in the file and nothing reads it yet.
+- Rebuild it when a season is added to `versus-pool.json`: `node tools/data/build-card-defense.mjs`. It
+  refuses to write a file that does not cover that pool exactly.
 
 ## 4. Lineups
 
@@ -133,6 +146,7 @@ Counters (trait, then archetype and points):
 | Trait | Hurts | Helps |
 |---|---|---|
 | Stingy | Goal-line back -20, Red-zone target -20 | |
+| Run stopper | Workhorse -20, Goal-line back -15, Home-run hitter -15 | Receiving back +10 |
 | Ball hawks | Gunslinger -25, Volume passer -20 | Game manager +15 |
 | Pass rush | Volume passer -20, Gunslinger -15 | Scrambler +20, Safety valve +13, Receiving back +13 |
 | Strip artists | Workhorse -20, Home-run hitter -15 | Possession +10 |
@@ -154,7 +168,7 @@ searches for the best no-luck score.
 | Starter deck (8 cards under 60): wins in an average run | 1.60 | 0.8 to 2.5 |
 | Starter deck: runs with no win at all | 7% | 2% to 30% |
 | 60 random cards: wins in an average run | 8.70 | 5 to 10 |
-| ...more than the six highest ratings manage | +0.34 wins | at least 0.25 |
+| ...more than the six highest ratings manage | +0.34 to +0.37 wins | at least 0.25 |
 | ...reading the defense picks a different six | 68% to 80% of battles | at least 40% |
 | ...luck changes how long a run lasts | 29% to 31% of runs | 20% to 75% |
 | ...by this many wins on average | 0.34 to 0.38 | 0.2 to 1.0 |
@@ -162,7 +176,8 @@ searches for the best no-luck score.
 | The 60 best cards: wins in an average run | 11.5 | 9 to 16 |
 | Runs that reach 40 wins | none | none |
 
-Ranges are across three different sets of collections and defenses (`node tests/test-card-balance.mjs 9000 13`
+Run stopper was added after these were first measured and moved them very little (the default seeds went from
++0.35 to +0.37 wins for reading the defense). Ranges are across three different sets of collections and defenses (`node tests/test-card-balance.mjs 9000 13`
 plays another). The first version used twenty collections and two of three other seed sets failed a band; it
 uses fifty now.
 

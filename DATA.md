@@ -15,6 +15,7 @@ Written 2026-10-01, when the repo recorded none of this.
 | `players.csv`, `draft_picks.csv`, `roster_<year>.csv`, `snap_counts_<year>.csv` | [nflverse/nflverse-data](https://github.com/nflverse/nflverse-data) | **CC BY 4.0** (`LICENSE.md`) | `data/guess-pool.json` — Guess the Player's pool |
 | `stats_team_reg_<year>.csv`, `stats_player_week_<year>.csv` | nflverse-data | **CC BY 4.0** | `data/versus-pool.json` — duel defenses and kickers |
 | nflverse-data season files | nflverse-data | **CC BY 4.0** | `data/season-2025.json` — Century's one-year pool |
+| `stats_team_week_<year>.csv` | nflverse-data | **CC BY 4.0** | `data/card-defense.json` — yards allowed, for the cards' Run stopper (not shipped yet) |
 | `games.csv` | [nflverse/nfldata](https://github.com/nflverse/nfldata) | **none stated** — see below | duel opponents: every game with both scores |
 | Play-by-play 1999–2025, corrected against Pro Football Reference season totals | nflverse play-by-play; PFR | mixed — see below | `data/players.json`, the main player pool |
 

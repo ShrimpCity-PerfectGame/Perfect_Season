@@ -80,6 +80,8 @@ export function initCardData(catalog) {
 // between a build of the file and the next.
 export const TRAITS = [
   { id: "stingy", label: "Stingy", stat: "pa", best: "low" },
+  // Read from data/card-defense.json (rushing yards allowed a game), which is not Duel's file - see initDefenses.
+  { id: "runstop", label: "Run stopper", stat: "rush", best: "low" },
   { id: "ballhawks", label: "Ball hawks", stat: "ints", best: "high" },
   { id: "passrush", label: "Pass rush", stat: "sacks", best: "high" },
   { id: "strip", label: "Strip artists", stat: "fum", best: "high" },
@@ -93,12 +95,27 @@ export let DEFENSES = []; // sorted by key, so an index into it means the same t
 let defenseIndex = new Map();
 export const defenseByKey = (key) => defenseIndex.get(key);
 
-export function initDefenses(versusPool) {
+// versusPool is data/versus-pool.json. yardsAllowed is data/card-defense.json and is OPTIONAL: it carries the
+// two numbers Duel's file does not (rushing and passing yards allowed a game), kept apart so that building them
+// never touches a file the match-pick Edge Function has to agree with. Without it a defense has no `rush` and
+// no Run stopper trait - absent, never guessed.
+export function initDefenses(versusPool, yardsAllowed = null) {
   const cols = versusPool.columns.defenses;
+  const extra = new Map();
+  if (yardsAllowed) {
+    const yc = yardsAllowed.columns;
+    for (const row of yardsAllowed.defenses) {
+      const y = {};
+      for (let i = 0; i < yc.length; i++) y[yc[i]] = row[i];
+      extra.set(`${y.season}|${y.team}`, y);
+    }
+  }
   const list = versusPool.defenses.map((row) => {
     const d = {};
     for (let i = 0; i < cols.length; i++) d[cols[i]] = row[i];
     d.key = `${d.season}|${d.team}`;
+    const y = extra.get(d.key);
+    if (y) { d.rush = y.rush; d.pass = y.pass; }
     d.traits = [];
     return d;
   });
@@ -106,7 +123,9 @@ export function initDefenses(versusPool) {
   for (const d of list) (seasons.get(d.season) || seasons.set(d.season, []).get(d.season)).push(d);
   for (const t of TRAITS) {
     const sign = t.best === "low" ? 1 : -1;
-    for (const teams of seasons.values()) {
+    for (const all of seasons.values()) {
+      // a defense with no number for this stat cannot be ranked on it, and is not handed the trait by default
+      const teams = all.filter((d) => Number.isFinite(d[t.stat]));
       const ranked = [...teams].sort((a, b) => sign * (a[t.stat] - b[t.stat]) || (a.team < b.team ? -1 : a.team > b.team ? 1 : 0));
       for (const d of ranked.slice(0, TRAITS_PER_SEASON)) d.traits.push(t.id);
     }
@@ -195,6 +214,9 @@ export const BAR_PIVOT = 65;
 // is the ANSWER to that defense, which is what makes a lower-rated card the right pick.
 export const COUNTERS = {
   stingy: { goalline: -20, redzone: -20 },
+  // The owner's own example of a matchup: a run stopper is bad news for a back who only runs, and no trouble at
+  // all to one who catches the ball out of the backfield.
+  runstop: { workhorse: -20, goalline: -15, homerun: -15, receiving: 10 },
   ballhawks: { gunslinger: -25, volume: -20, manager: 15 },
   passrush: { volume: -20, gunslinger: -15, scrambler: 20, valve: 13, receiving: 13 },
   strip: { workhorse: -20, homerun: -15, possession: 10 },

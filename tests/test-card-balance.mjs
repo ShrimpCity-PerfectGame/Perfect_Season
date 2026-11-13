@@ -28,7 +28,7 @@ import * as C from "../card-logic.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => JSON.parse(readFileSync(path.join(root, f), "utf8"));
 C.initCardData(read("data/cards.json"));
-C.initDefenses(read("data/versus-pool.json"));
+C.initDefenses(read("data/versus-pool.json"), read("data/card-defense.json"));
 const all = [...C.CARDS.values()].sort((a, b) => a.id - b.id);
 const mid = () => 0.5;
 

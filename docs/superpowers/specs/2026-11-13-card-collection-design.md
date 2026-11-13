@@ -141,10 +141,11 @@ number.
   traits before choosing a lineup.
 - **Defense traits** come from the defense's own real numbers. Available today: Stingy (points
   allowed), Ball hawks (interceptions), Pass rush (sacks), Strip artists (fumbles), Scoring
-  defense (defensive TDs). **(owner)** wants a Run stopper that hurts pure runners. That needs
-  rushing and passing yards allowed, which the file does not hold; `tools/data/build-versus-pool.mjs`
-  would have to be extended. Whether its sources carry those columns is **not verified**. If they
-  do not, ship the five. Man/zone coverage is in no data and is out.
+  defense (defensive TDs). **(owner)** wanted a Run stopper that hurts pure runners, and it is
+  built (2026-11-13): rushing yards allowed come from nflverse's weekly team file into a file of
+  the cards' own, `data/card-defense.json`, so Duel's `versus-pool.json` is never touched. It hurts
+  Workhorse, Goal-line and Home-run backs and slightly favours a Receiving back. Man/zone
+  coverage is in no data and is out.
 - **How a card scores.** Each card rolls a performance around its rating plus finish bonus
   **(owner: "a better graded card has a higher chance of more yards")**, shown as a football line
   ("142 yards, 2 TD"). Then modifiers land:
@@ -296,7 +297,8 @@ reason written down.
   and some countries restrict them. Not a blocker now; a lawyer question before the two coexist.
 - **Sprite licence and the final sheet** (section 3.2) are the owner's and gate the art.
 - **Skin tone data** (section 3.2): Claude drafts, the owner corrects. Not started.
-- **Run stopper** depends on unverified data (section 4).
+- **Run stopper** is built. 22 defenses from 1999-2002 are averaged over fifteen games because the
+  source is missing one of theirs.
 - **Balance is unproven.** Nothing here has been simulated. The first build task after the rules
   module should be a bot that plays thousands of battles and prints how often top-six-by-rating
   wins, how far a starter deck gets, and what a day of runs pays.
