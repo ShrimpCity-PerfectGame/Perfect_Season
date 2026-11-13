@@ -116,10 +116,19 @@ already used throughout the game.
   `background-position` only and stop under reduced motion, as cosmetics already do.
 
 Owner tasks the build depends on, none done:
-- **A final sprite sheet.** The two supplied do not quite match each other, and helmet and pants
-  are the same grey so they cannot be coloured apart. A final sheet should be one consistent set,
-  ideally with helmet, pants, jersey and skin each in its own flat marker colour.
-- **Confirm the licence** of the tool that generated the sprites allows commercial use.
+- **A final sprite sheet.** The two first supplied do not quite match each other, and helmet and
+  pants are the same grey so they cannot be coloured apart. A final sheet should be one consistent
+  set, ideally with helmet, pants, jersey and skin each in its own flat marker colour.
+  **Received 2026-11-13: a full 50-pose set** (`sprite-sheet-full-50.jpg`), consistent in style and
+  with blank jerseys - but as one 1024x683 JPEG, about 100x135 pixels a sprite, a third of the
+  size a card needs. Wanted from the owner: the same poses at full size (ten to a sheet, as the
+  first two were, PNG if the tool offers it), one player per cell.
+- **Pack art.** Three example pack wrappers supplied 2026-11-13 (`pack-example-*.jpg`): a silver
+  common, a blue-and-gold, and a purple-and-gold with a crown. They set the look for plan 3. Final
+  pack art should carry no baked-in words (one says "Football Booster / Common Tier"); names and
+  tiers are text the game draws, so they can change and be read aloud.
+- ~~Confirm the licence of the tool that generated the sprites allows commercial use.~~ **Done:
+  the owner confirmed it is cleared, 2026-11-13.**
 - **Skin tone per player** does not exist in any data the game has. It is a manual record for up
   to 1,639 players. **(call)** A small palette of about five tones, keyed on the card catalog's
   stable player id. A card with none recorded uses one neutral default tone, so the feature can
@@ -237,7 +246,7 @@ number.
   card, so there is no hidden backlog to explain on launch day. Migrations and functions may ship
   ahead of it as long as they are inert with the switch off.
 - **(call) Art does not gate building.** Build and review on staging against the two supplied
-  sheets. Production launch waits for the final sheet and the licence confirmation (3.2).
+  sheets. Production launch waits for the final sheet (3.2); the licence is cleared.
 - The daily card reveal on a Daily's result screen is one small skippable moment. It must not
   delay or cover the result.
 - **Profile (owner):** a best-card spot. **(call)** The owned card with the highest rating, finish
@@ -295,7 +304,8 @@ reason written down.
 - **Paid loot boxes.** The owner plans to sell coin packs for real money later. Once coins can be
   bought, random packs bought with coins are paid loot boxes: app stores require published odds
   and some countries restrict them. Not a blocker now; a lawyer question before the two coexist.
-- **Sprite licence and the final sheet** (section 3.2) are the owner's and gate the art.
+- **The final sprite sheet** (section 3.2) is the owner's and gates the art for production. The
+  sprite licence is cleared (owner, 2026-11-13).
 - **Skin tone data** (section 3.2): Claude drafts, the owner corrects. Not started.
 - **Run stopper** is built. 22 defenses from 1999-2002 are averaged over fifteen games because the
   source is missing one of theirs.

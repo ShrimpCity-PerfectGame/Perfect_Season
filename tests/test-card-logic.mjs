@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SLOTS, mulberry32 } from "../game-logic.mjs";
+import { SLOTS, mulberry32, initGameData, BOARDS } from "../game-logic.mjs";
 import * as C from "../card-logic.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -246,6 +246,57 @@ if (need("scoreBattle")) {
   for (let i = 0; i < 2000; i++) sum = (sum + Math.round(C.scoreBattle(good, C.DEFENSES[i % C.DEFENSES.length], mulberry32(i)).offense * 10)) >>> 0;
   if (sum !== PINNED_CHECKSUM) console.log(`battle checksum is ${sum}`);
   eq(sum, PINNED_CHECKSUM, "2,000 battles roll the same everywhere");
+}
+
+// ---------- 5. Getting cards: the starter deck and the daily card ----------
+if (need("starterDeck")) {
+  const lineupFrom = (deck) => {
+    const cards = deck.map((e) => C.CARDS.get(e.id)).sort((a, b) => b.rating - a.rating || a.id - b.id);
+    const lineup = {}; const men = new Set();
+    for (const slot of SLOTS) {
+      const c = cards.find((x) => !men.has(x.pid) && (slot.startsWith("FLEX") ? x.pos !== "QB" : x.pos === slot));
+      if (!c) return null;
+      lineup[slot] = { id: c.id, finish: "base" }; men.add(c.pid);
+    }
+    return lineup;
+  };
+  let bad = 0;
+  for (let i = 0; i < 500; i++) {
+    const deck = C.starterDeck(mulberry32(i + 1));
+    const cards = deck.map((e) => C.CARDS.get(e.id));
+    const lineup = lineupFrom(deck);
+    if (deck.length !== C.STARTER_SIZE || deck.some((e) => e.finish !== "base") || cards.some((c) => !c || c.rating >= C.STARTER_MAX_RATING)
+      || new Set(cards.map((c) => c.pid)).size !== deck.length || !lineup || C.lineupProblem(lineup, null) !== null) bad++;
+  }
+  eq(C.STARTER_SIZE, 8, "a starter deck is eight cards");
+  eq(bad, 0, "500 starter decks: eight Base cards under 60, eight different players, always a playable lineup");
+  eq(JSON.stringify(C.starterDeck(mulberry32(9))), JSON.stringify(C.starterDeck(mulberry32(9))), "the same generator deals the same deck");
+  ok(new Set(Array.from({ length: 40 }, (_, i) => C.starterDeck(mulberry32(i + 1)).map((e) => e.id).sort().join())).size > 35, "and different generators deal different decks");
+
+  eq(C.rollFinish(() => 0), "base", "the bottom of the roll is Base");
+  eq(C.rollFinish(() => 0.9999999), "prism", "the top of it is Prism");
+  eq(C.rollFinish(() => 0.80), "silver", "exactly at Base's edge is Silver");
+  eq(C.rollFinish(() => 0.5, { base: 0, silver: 0, gold: 0, prism: 1 }), "prism", "the odds are whatever it is handed");
+  const tally = { base: 0, silver: 0, gold: 0, prism: 0 }; const r = mulberry32(4242);
+  for (let i = 0; i < 20000; i++) tally[C.rollFinish(r)]++;
+  for (const f of C.FINISHES) ok(Math.abs(tally[f] / 20000 - C.DAILY_FINISH_ODDS[f]) <= (f === "prism" ? 0.003 : 0.01), `${f} comes up as often as its odds say (${(tally[f] / 200).toFixed(2)}%)`);
+  eq(+(Object.values(C.DAILY_FINISH_ODDS).reduce((a, b) => a + b, 0)).toFixed(6), 1, "the daily finish odds add up to one");
+
+  const pool = read("data/players.json"); initGameData(pool.players, pool.opponents);
+  eq(C.cardBoardKey(find("Tom Brady", 2007)), "NE|1", "2007 Brady came off the 2006-10 Patriots board");
+  ok(all.every((c) => BOARDS[C.cardBoardKey(c)]), "every card's board is a board the draft deals");
+  ok(all.every((c) => BOARDS[C.cardBoardKey(c)].some((p) => p.name === c.name && p.season === c.season)), "and the card's own row is on it");
+  let draws = 0; const counted = () => (draws++, 0.3);
+  const dc = C.dailyCard(["NE|1"], counted);
+  eq(C.cardBoardKey(C.CARDS.get(dc.id)), "NE|1", "a daily card comes off one of the day's boards");
+  eq(draws, 2, "in exactly two draws");
+  ok(C.FINISHES.includes(dc.finish), "with a finish");
+  eq(C.dailyCard([], mulberry32(1)), null, "no boards, no card");
+  eq(C.dailyCard(["XX|9"], mulberry32(1)), null, "a board that is not one, no card");
+  eq(C.dailyCard(null, mulberry32(1)), null, "nothing at all, no card");
+  eq(JSON.stringify(C.dailyCard(["NE|1", "KC|0"], mulberry32(5))), JSON.stringify(C.dailyCard(["KC|0", "NE|1"], mulberry32(5))), "the order the boards are listed in does not matter");
+  const seen = new Set(Array.from({ length: 300 }, (_, i) => C.dailyCard(["NE|1", "KC|0"], mulberry32(i + 1)).id));
+  ok(seen.size > 15 && [...seen].every((id) => ["NE|1", "KC|0"].includes(C.cardBoardKey(C.CARDS.get(id)))), "any card on those boards can come up, and no other");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "card logic: all checks passed");

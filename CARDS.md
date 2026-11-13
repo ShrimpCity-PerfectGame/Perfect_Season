@@ -218,7 +218,8 @@ in this game has.
 Everything outside the rules: owning cards, the starter deck, the daily card, the collection screen, packs and
 their odds, the server side of battles and runs, the battle screen, sprites and recolouring, skin tones,
 badges, the profile's best card, boards, the hide setting, the build switch. The spec's section 8 lists the
-order. The owner still owes one final sprite sheet and a licence check on the tool that made the sprites.
+order. The owner still owes one final, consistent sprite sheet. The licence on the tool that made the sprites is
+cleared (owner, 2026-11-13).
 
 ## 9. Tests
 

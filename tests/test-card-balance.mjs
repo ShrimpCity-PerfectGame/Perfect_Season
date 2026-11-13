@@ -81,11 +81,8 @@ function byFit(collection, defense, flat, per = 4, flexPer = 5) {
 
 // ---------- The three collections ----------
 const draw = (rand, from, n) => { const pool = [...from]; const out = []; while (out.length < n && pool.length) out.push(pool.splice(Math.floor(rand() * pool.length), 1)[0]); return out; };
-const lowRated = all.filter((c) => c.rating < 60);
-function starter(seed) {            // the spec's starter deck: eight Base cards from the lower-rated pool, playable
-  const rand = mulberry32(seed);
-  for (;;) { const deck = draw(rand, lowRated, 8); if (byRating(deck)) return deck; }
-}
+// the real starter deck, dealt by the rule the server deals it with
+const starter = (seed) => C.starterDeck(mulberry32(seed)).map((e) => C.CARDS.get(e.id));
 const middling = (seed) => draw(mulberry32(seed), all, 60);
 const stacked = () => [...all].sort((a, b) => b.rating - a.rating || a.id - b.id).slice(0, 60);
 

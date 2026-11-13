@@ -11,7 +11,7 @@
 //
 // The reference is CARDS.md; the design is docs/superpowers/specs/2026-11-13-card-collection-design.md.
 
-import { SLOTS, fits, hashStr, mulberry32 } from "./game-logic.mjs";
+import { SLOTS, WINDOWS, fits, hashStr, mulberry32 } from "./game-logic.mjs";
 
 // ---------- Cards ----------
 export let CARDS = new Map(); // id -> card
@@ -305,4 +305,59 @@ export function showdownRand(date, lineup) {
 export function showdownScore(date, lineup) {
   const result = scoreBattle(lineup, showdownDefense(date), showdownRand(date, lineup));
   return { ...result, score: result.offense };
+}
+
+// ---------- Getting cards ----------
+// The rules for which cards a player is handed. The CHOOSING happens on the server - the card-claim Edge
+// Function for a starter deck, submit-run for the daily card - with a cryptographic `rand`; these functions
+// only say what a legal choice is, so the tests can deal ten thousand of them with a seeded one.
+
+// A starter deck: enough to play a battle the moment the card area is opened, and no more. Eight Base cards
+// from the lower-rated pool, eight different men, and always a quarterback, a back, a receiver and a tight end
+// with two more non-quarterbacks beside them - so a legal lineup exists in every deck ever dealt, rather than
+// in most of them. tests/test-card-balance.mjs measures how far these get (about 1.6 wins a run).
+export const STARTER_SIZE = 8;
+export const STARTER_MAX_RATING = 60;
+const STARTER_SHAPE = ["QB", "RB", "WR", "TE", "FLEX", "FLEX", "ANY", "ANY"];
+export function starterDeck(rand) {
+  const pool = [...CARDS.values()].filter((c) => c.rating < STARTER_MAX_RATING).sort((a, b) => a.id - b.id);
+  const men = new Set();
+  const deck = [];
+  for (const want of STARTER_SHAPE) {
+    const able = pool.filter((c) => !men.has(c.pid) && (want === "ANY" || (want === "FLEX" ? c.pos !== "QB" : c.pos === want)));
+    const card = able[Math.floor(rand() * able.length)];
+    men.add(card.pid);
+    deck.push({ id: card.id, finish: "base" });
+  }
+  return deck;
+}
+
+// The finish is rolled separately from the player, so any card can come in any finish. One draw.
+// These are the daily card's odds; a pack will bring its own (they are data, not rules).
+export const DAILY_FINISH_ODDS = { base: 0.80, silver: 0.16, gold: 0.035, prism: 0.005 };
+export function rollFinish(rand, odds = DAILY_FINISH_ODDS) {
+  const x = rand();
+  let edge = 0;
+  for (const finish of FINISHES) {
+    edge += odds[finish] || 0;
+    if (x < edge) return finish;
+  }
+  return FINISHES[FINISHES.length - 1]; // a roll at the very top, or odds that rounding left a hair short of one
+}
+
+// The draft board a card came off: "<team>|<era index>", the same key game-logic.mjs's BOARDS uses.
+export function cardBoardKey(card) {
+  const w = WINDOWS.findIndex(([from, to]) => card.season >= from && card.season <= to);
+  return `${card.team}|${w}`;
+}
+
+// The card a finished daily draft earns: any card off any of the boards that day dealt, at equal odds, then a
+// finish. Exactly two draws when it returns a card. null when the boards hold no card - which a real daily's
+// never do, and which the caller treats as "no card today" rather than as an error.
+export function dailyCard(boardKeys, rand) {
+  const keys = new Set(Array.isArray(boardKeys) ? boardKeys : []);
+  const able = [...CARDS.values()].filter((c) => keys.has(cardBoardKey(c))).sort((a, b) => a.id - b.id);
+  if (!able.length) return null;
+  const card = able[Math.floor(rand() * able.length)];
+  return { id: card.id, finish: rollFinish(rand) };
 }
