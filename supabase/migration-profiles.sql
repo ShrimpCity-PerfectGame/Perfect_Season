@@ -733,6 +733,14 @@ begin
   delete from public.finished_codes where user_id = v_uid;
   delete from public.supporters     where user_id = v_uid;
   delete from public.moderators     where user_id = v_uid;
+  -- Cards (migration-cards.sql). They are the person's, not a board's: nobody else's game is made of them, so
+  -- they are erased rather than kept under the tombstone. Through to_regclass + EXECUTE because this file is
+  -- re-run BEFORE migration-cards.sql exists on a database being brought up to v2.23.0, and a plain statement
+  -- naming a missing table would fail every account closure in that gap.
+  if to_regclass('public.card_owned') is not null then
+    execute 'delete from public.card_owned where user_id = $1' using v_uid;
+    execute 'delete from public.card_grants where user_id = $1' using v_uid;
+  end if;
   -- Reports they filed and reports about them: both name a person, and a closed account cannot answer one.
   delete from public.reports where reporter_id = v_uid or target_id = v_uid;
 

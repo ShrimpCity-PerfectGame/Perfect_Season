@@ -42,6 +42,9 @@ const ORDER = [
   "migration-moderation.sql",
   "migration-wallet.sql",
   "migration-shop.sql",
+  // Cards: reads public.profiles and nothing else, and no `language sql` function reads its tables, so it
+  // depends on profiles alone. delete_account (profiles) reaches its tables through to_regclass + EXECUTE.
+  "migration-cards.sql",
   "migration-versus.sql",
   // The crash sink. References nothing and nothing references it, so it is safe anywhere in this list.
   "migration-client-errors.sql",
