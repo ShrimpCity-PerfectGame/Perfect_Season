@@ -9,7 +9,13 @@
 import { starterDeck, CARDS } from "../card-logic.mjs";
 
 const FINISHES = ["base", "silver", "gold", "prism"];
-const KINDS = ["starter", "daily", "gift"];
+const KINDS = ["starter", "daily", "gift", "pack"];
+// The card_packs seed, as supabase/migration-cards.sql writes it. tests/test-cards-sql.mjs holds the two level.
+const PACK_SEED = [
+  { id: "pack-standard", price: 150, size: 3, active: true, stock_total: null, stock_left: null, sort: 10 },
+  { id: "pack-air-raid", price: 250, size: 3, active: true, stock_total: null, stock_left: null, sort: 20 },
+  { id: "pack-legends", price: 1500, size: 1, active: true, stock_total: 5000, stock_left: 5000, sort: 30 },
+];
 
 // The shape functions-js hands back for a non-2xx: the reason is in the response body, reached through context.
 export function cardHttpError(reason, status, message = reason) {
@@ -18,11 +24,44 @@ export function cardHttpError(reason, status, message = reason) {
 
 // state: { profiles: Map<id, { guest }>, currentUserId: () => id | null }. `enabled` is the server's own switch
 // (the CARDS_ENABLED secret); tests turn it off to stand in for an environment that never had it set.
-export function makeCards(state) {
+// wallet: tests/mock-wallet.mjs's makeWallet(state), for the pack shop - buy_pack moves coins through it the way
+// the SQL moves them through wallet_lock and wallet_apply. Without one, buying a pack is a server error.
+export function makeCards(state, { wallet = null } = {}) {
   const owned = [];  // { user_id, card_id, finish, count }
   const grants = []; // { user_id, kind, ref, card_id, finish }
+  const packs = new Map(PACK_SEED.map((p) => [p.id, { ...p }]));
   const api = {
     enabled: true,
+    packs,
+    packsReadFail: false, // makes a client select on card_packs answer with an error
+
+    // public.buy_pack, raise for raise and in its order.
+    buyPack(userId, packId, open, cards) {
+      const profile = state.profiles.get(userId);
+      if (!profile) throw new Error("no_profile");
+      if (profile.guest) throw new Error("guest_not_allowed");
+      if (typeof open !== "string" || !/^[A-Za-z0-9-]{8,36}$/.test(open)) throw new Error("bad_open");
+      wallet.lock(userId);
+      const balance = wallet.balanceOf(userId);
+      if (wallet.tables.wallet_ledger.has(`${userId}|pack|${open}`)) {
+        const before = grants.filter((g) => g.user_id === userId && g.kind === "pack" && g.ref.startsWith(`${open}:`))
+          .sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0)).map((g) => ({ card: g.card_id, finish: g.finish }));
+        return { duplicate: true, cards: before, balance, stock_left: packs.get(packId)?.stock_left ?? null, price: null };
+      }
+      const pack = packs.get(packId);
+      if (!pack || !pack.active) throw new Error("unavailable");
+      if (!Array.isArray(cards) || cards.length !== pack.size) throw new Error("bad_grant");
+      for (const e of cards) {
+        const good = e && typeof e === "object" && !Array.isArray(e) && typeof e.card === "number" && Number.isInteger(e.card) && e.card >= 1 && e.card <= 999999999 && FINISHES.includes(e.finish);
+        if (!good) throw new Error("bad_grant");
+      }
+      if (pack.stock_left != null && pack.stock_left <= 0) throw new Error("sold_out");
+      if (balance < pack.price) throw new Error("not_enough");
+      if (pack.stock_left != null) pack.stock_left -= 1;
+      if (wallet.apply(userId, -pack.price, "pack", open) !== -pack.price) throw new Error("purchase_conflict");
+      api.grantCards(userId, "pack", cards.map((c, i) => ({ ref: `${open}:${i}`, card: c.card, finish: c.finish })));
+      return { duplicate: false, cards: cards.map((c) => ({ card: c.card, finish: c.finish })), balance: wallet.balanceOf(userId), stock_left: pack.stock_left, price: pack.price };
+    },
     readFails: false, // makes a client select on either table answer with an error
     tables: { card_owned: owned, card_grants: grants },
 

@@ -158,7 +158,7 @@ export function makeMockAuth() {
   // Cards (v2.23.0): two tables with an own-rows-only select and no client write, one grant function only the
   // service role may call, and the card-claim Edge Function. Their reads are per-user, which no other table
   // here is, so `from` hands them to cardsFrom below rather than to fromStore.
-  const cards = makeCards(state);
+  const cards = makeCards(state, { wallet });
   const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables, ...century.tables, ...guess.tables };
   // These have no client write policy at all - the app changes them only through database functions -
   // so a direct write gets the error RLS would give.

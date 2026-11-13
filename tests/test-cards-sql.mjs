@@ -7,6 +7,8 @@
 import { assert, runTest } from "./helpers.mjs";
 import { freshDb, addAccount, addGuestAccount, asUser, asAnon, uuid } from "./pg-fixture.mjs";
 import { makeCards } from "./mock-cards.mjs";
+import { makeWallet } from "./mock-wallet.mjs";
+import { PACK_BY_ID, PACKS } from "../card-packs.mjs";
 
 const db = await freshDb();
 const ALICE = uuid(1), BOB = uuid(2), GUEST = uuid(3), NOBODY = uuid(99), GOING = uuid(5);
@@ -115,7 +117,7 @@ await runTest("who and what grant_cards refuses, with nothing written", async ()
   ]) {
     assert((await grant(ALICE, "starter", grants)).error === "bad_grant", `bad_grant for ${why}`);
   }
-  assert((await grant(ALICE, "pack", [{ ref: "a", card: 1, finish: "base" }])).error === "bad_grant", "a kind that does not exist");
+  assert((await grant(ALICE, "trade", [{ ref: "a", card: 1, finish: "base" }])).error === "bad_grant", "a kind that does not exist");
   // A gift is its own kind (the runbook's "give a player a card"), so a hand-out never has to pose as a daily
   // card and take that day's ref. Found in review: the only kinds were starter and daily.
   const gift = await grant(BOB, "gift", [{ ref: "gift-1", card: 412, finish: "gold" }]);
@@ -173,6 +175,154 @@ await runTest("the mock grants cards the way the database does", async () => {
   const sqlOwned = (await fresh.query("select card_id, finish, count from card_owned where user_id = $1 order by card_id, finish", [A])).rows;
   const mockOwned = mock.owned(A).map((r) => ({ card_id: r.card_id, finish: r.finish, count: r.count })).sort((p, q) => p.card_id - q.card_id || (p.finish < q.finish ? -1 : 1));
   assert(!differs(sqlOwned, mockOwned), "and the two end up owning the same cards: " + differs(sqlOwned, mockOwned));
+});
+
+// ---------- packs: one transaction for the stock, the coins and the cards ----------
+const RICH = uuid(21), POOR = uuid(22), PGUEST = uuid(23);
+await addAccount(db, { id: RICH, username: "rich" });
+await addAccount(db, { id: POOR, username: "poor" });
+await addGuestAccount(db, PGUEST);
+await owner("select wallet_apply($1, 9750, 'season', 'seed')", [RICH]); // 250 welcome + 9,750 = 10,000
+const balanceOf = async (u) => Number((await owner("select balance from wallets where user_id = $1", [u]))[0]?.balance ?? 0);
+const stockOf = async (id) => (await owner("select stock_left from card_packs where id = $1", [id]))[0]?.stock_left;
+const packLedger = async (u) => (await owner("select amount, ref from wallet_ledger where user_id = $1 and kind = 'pack' order by id", [u])).map((r) => ({ amount: Number(r.amount), ref: r.ref }));
+const three = (base) => [{ card: base, finish: "base" }, { card: base + 1, finish: "silver" }, { card: base + 2, finish: "base" }];
+async function buy(user, pack, open, cards) {
+  try { return { data: (await owner("select buy_pack($1, $2, $3, $4::jsonb) as r", [user, pack, open, JSON.stringify(cards)]))[0].r }; }
+  catch (e) { return { error: String(e?.message || e).replace(/^.*?([a-z_]+)$/s, "$1") }; }
+}
+
+await runTest("the pack table: anyone reads it, nobody writes it, and it agrees with card-packs.mjs", async () => {
+  const rows = await owner("select id, price, size, active, stock_total, stock_left from card_packs order by sort");
+  assert(rows.map((r) => r.id).join() === PACKS.map((p) => p.id).join(), "the seed is the module's three packs, in order: " + rows.map((r) => r.id));
+  for (const r of rows) assert(r.size === PACK_BY_ID[r.id].size, `${r.id}'s size is the module's (${r.size} vs ${PACK_BY_ID[r.id].size})`);
+  assert(rows[0].price === 150 && rows[1].price === 250 && rows[2].price === 1500, "the stated prices: " + rows.map((r) => r.price));
+  assert(rows[2].stock_total === 5000 && rows[2].stock_left === 5000 && rows[0].stock_left === null, "only Legends has stock");
+  for (const who of [ALICE, null]) {
+    const read = await attempt(who, "select id from card_packs");
+    assert(read.rows?.length === 3, (who ? "a player" : "a visitor") + " can read the packs");
+    for (const statement of ["update card_packs set price = 1", "delete from card_packs", "insert into card_packs (id, price, size) values ('pack-free', 1, 3)"]) {
+      const r = await attempt(who, statement);
+      assert(r.error || r.affected === 0, (who ? "a player" : "a visitor") + " cannot: " + statement);
+    }
+    const b = await attempt(who, "select buy_pack($1, 'pack-standard', 'aaaaaaaa-0000', '[]'::jsonb)", [ALICE]);
+    assert(/permission denied/i.test(b.error || ""), (who ? "a player" : "a visitor") + " cannot call buy_pack");
+  }
+  assert((await owner("select price from card_packs where id = 'pack-standard'"))[0].price === 150, "and nothing moved");
+});
+
+await runTest("buying a pack: the coins, the cards and the ledger move together", async () => {
+  const before = await balanceOf(RICH);
+  const res = await buy(RICH, "pack-standard", "open-0001", three(10));
+  assert(res.data?.duplicate === false && res.data.price === 150 && res.data.balance === before - 150, "charged the row's price: " + JSON.stringify(res));
+  assert(JSON.stringify(res.data.cards) === JSON.stringify(three(10)), "and handed back the cards it was given");
+  assert((await balanceOf(RICH)) === before - 150, "the wallet is down 150");
+  assert((await ownedBy(RICH)).reduce((n, r) => n + r.count, 0) === 3, "three cards owned");
+  assert(JSON.stringify(await packLedger(RICH)) === JSON.stringify([{ amount: -150, ref: "open-0001" }]), "one ledger row, under the open id");
+  assert((await grantsOf(RICH)).filter((g) => g.kind === "pack").map((g) => g.ref).join() === "open-0001:0,open-0001:1,open-0001:2", "granted under the open id");
+});
+
+await runTest("the same purchase again charges nothing and hands back the same cards", async () => {
+  const before = await balanceOf(RICH);
+  const again = await buy(RICH, "pack-standard", "open-0001", three(500));
+  assert(again.data?.duplicate === true, "it is a duplicate: " + JSON.stringify(again));
+  assert(JSON.stringify(again.data.cards) === JSON.stringify(three(10)), "with the ORIGINAL cards, not the new ones: " + JSON.stringify(again.data.cards));
+  assert((await balanceOf(RICH)) === before && again.data.balance === before, "no second charge");
+  assert((await ownedBy(RICH)).reduce((n, r) => n + r.count, 0) === 3 && (await packLedger(RICH)).length === 1, "and nothing else moved");
+});
+
+await runTest("the price is the row's, at the moment of purchase", async () => {
+  await owner("update card_packs set price = 999 where id = 'pack-air-raid'");
+  const before = await balanceOf(RICH);
+  const res = await buy(RICH, "pack-air-raid", "open-0002", three(40));
+  assert(res.data?.price === 999 && (await balanceOf(RICH)) === before - 999, "charged 999, whatever a screen showed: " + JSON.stringify(res));
+  await owner("update card_packs set price = 250 where id = 'pack-air-raid'");
+});
+
+await runTest("not enough coins takes nothing", async () => {
+  const b = await balanceOf(POOR), s = await stockOf("pack-legends");
+  assert(b === 250, "poor has the welcome coins");
+  const res = await buy(POOR, "pack-legends", "open-0003", [{ card: 7, finish: "gold" }]);
+  assert(res.error === "not_enough", "refused: " + JSON.stringify(res));
+  assert((await balanceOf(POOR)) === b && (await stockOf("pack-legends")) === s && (await ownedBy(POOR)).length === 0 && (await packLedger(POOR)).length === 0, "no coins, no stock, no cards, no ledger row");
+  await owner("update card_packs set price = 251 where id = 'pack-standard'");
+  assert((await buy(POOR, "pack-standard", "open-0004", three(60))).error === "not_enough", "one coin short is short");
+  await owner("update card_packs set price = 150 where id = 'pack-standard'");
+});
+
+await runTest("the last one of a limited pack goes to one buyer", async () => {
+  // PGlite is one connection, so these two run one after the other. In real Postgres they can overlap, and
+  // what makes them take turns is `select ... for update` on the pack's row at the top of buy_pack: the second
+  // waits for the first to commit and then reads stock_left = 0.
+  await owner("update card_packs set stock_left = 1 where id = 'pack-legends'");
+  const [a, b] = await Promise.all([buy(RICH, "pack-legends", "open-0005", [{ card: 7, finish: "gold" }]), buy(RICH, "pack-legends", "open-0006", [{ card: 8, finish: "prism" }])]);
+  const won = [a, b].filter((r) => r.data), lost = [a, b].filter((r) => r.error);
+  assert(won.length === 1 && lost.length === 1 && lost[0].error === "sold_out", "one buys it, the other is told it sold out: " + JSON.stringify([a, b]));
+  assert((await stockOf("pack-legends")) === 0, "stock is zero, not below it");
+  assert((await packLedger(RICH)).filter((l) => l.amount === -1500).length === 1, "and exactly one of them was charged");
+  assert((await buy(RICH, "pack-legends", "open-0007", [{ card: 9, finish: "gold" }])).error === "sold_out", "and it stays sold out");
+  await owner("update card_packs set stock_left = 5000 where id = 'pack-legends'");
+});
+
+await runTest("who and what buy_pack refuses, with nothing taken", async () => {
+  const before = JSON.stringify([await balanceOf(RICH), await ownedBy(RICH), await packLedger(RICH), await stockOf("pack-legends")]);
+  assert((await buy(PGUEST, "pack-standard", "open-0010", three(1))).error === "guest_not_allowed", "a guest");
+  assert((await buy(NOBODY, "pack-standard", "open-0011", three(1))).error === "no_profile", "no profile");
+  assert((await buy(RICH, "pack-nope", "open-0012", three(1))).error === "unavailable", "a pack with no row");
+  await owner("update card_packs set active = false where id = 'pack-air-raid'");
+  assert((await buy(RICH, "pack-air-raid", "open-0013", three(1))).error === "unavailable", "a pack taken off sale");
+  await owner("update card_packs set active = true where id = 'pack-air-raid'");
+  for (const [why, open] of [["too short", "x"], ["a space", "open 0014"], ["too long", "o".repeat(37)], ["a wildcard", "open-%%%%"], ["nothing", null]]) {
+    assert((await buy(RICH, "pack-standard", open, three(1))).error === "bad_open", "an open id that is " + why);
+  }
+  for (const [why, cards] of [["two cards for a pack of three", three(1).slice(0, 2)], ["four", [...three(1), { card: 4, finish: "base" }]], ["a bad finish", [{ card: 1, finish: "nope" }, ...three(1).slice(1)]],
+    ["a card id of zero", [{ card: 0, finish: "base" }, ...three(1).slice(1)]], ["not a list", { card: 1 }]]) {
+    assert((await buy(RICH, "pack-standard", "open-0015", cards)).error === "bad_grant", "bad_grant for " + why);
+  }
+  assert(JSON.stringify([await balanceOf(RICH), await ownedBy(RICH), await packLedger(RICH), await stockOf("pack-legends")]) === before, "and none of it moved a coin, a card or the stock");
+});
+
+await runTest("re-running the migration keeps a price changed by hand", async () => {
+  const { sql } = await import("./pg-fixture.mjs");
+  await owner("update card_packs set price = 175 where id = 'pack-standard'");
+  await db.exec(sql("migration-cards.sql"));
+  assert((await owner("select price from card_packs where id = 'pack-standard'"))[0].price === 175, "the seed adds missing rows and overwrites none");
+  await owner("update card_packs set price = 150 where id = 'pack-standard'");
+});
+
+await runTest("the mock buys a pack the way the database does", async () => {
+  const fresh = await freshDb();
+  const A = uuid(31), G = uuid(32);
+  await addAccount(fresh, { id: A, username: "ann" });
+  await addGuestAccount(fresh, G);
+  await fresh.query("select wallet_apply($1, 1000, 'season', 'seed')", [A]);
+  const profiles = new Map([[A, { id: A, username: "ann", guest: false }], [G, { id: G, username: "Guest_1", guest: true }]]);
+  const state = { profiles, currentUserId: () => A };
+  const wallet = makeWallet(state);
+  wallet.welcome(A); wallet.apply(A, 1000, "season", "seed");
+  const mock = makeCards(state, { wallet });
+  const viaSql = async (...args) => {
+    try { return { data: (await fresh.query("select buy_pack($1, $2, $3, $4::jsonb) as r", [args[0], args[1], args[2], JSON.stringify(args[3])])).rows[0].r }; }
+    catch (e) { return { error: String(e?.message || e).replace(/^.*?([a-z_]+)$/s, "$1") }; }
+  };
+  const viaMock = (...args) => { try { return { data: mock.buyPack(...args) }; } catch (e) { return { error: e.message }; } };
+  const one = [{ card: 7, finish: "gold" }];
+  const steps = [
+    [A, "pack-standard", "open-1001", three(10)], [A, "pack-standard", "open-1001", three(99)], [A, "pack-air-raid", "open-1002", three(20)],
+    [A, "pack-legends", "open-1003", one], [A, "pack-standard", "open-1004", three(30)], [A, "pack-standard", "open-1005", three(40)],
+    [A, "pack-standard", "open-1006", three(50)], [A, "pack-standard", "open-1007", three(60)], [A, "pack-air-raid", "open-1008", three(70)],
+    [G, "pack-standard", "open-1009", three(1)], [A, "pack-nope", "open-1010", three(1)], [A, "pack-standard", "x", three(1)],
+    [A, "pack-standard", "open-1011", three(1).slice(1)], [A, "pack-standard", "open-1003", three(1)],
+  ];
+  for (const step of steps) {
+    const s = await viaSql(...step), m = viaMock(...step);
+    const d = differs(s, m);
+    assert(!d, `buy_pack(${step[1]}, ${step[2]}): ${d}`);
+  }
+  const sqlBal = Number((await fresh.query("select balance from wallets where user_id = $1", [A])).rows[0].balance);
+  assert(sqlBal === wallet.balanceOf(A), `the two wallets end level (${sqlBal} vs ${wallet.balanceOf(A)})`);
+  const sqlStock = (await fresh.query("select stock_left from card_packs where id = 'pack-legends'")).rows[0].stock_left;
+  assert(sqlStock === mock.packs.get("pack-legends").stock_left, "and so does the Legends stock");
 });
 
 console.log("test-cards-sql.mjs done");
