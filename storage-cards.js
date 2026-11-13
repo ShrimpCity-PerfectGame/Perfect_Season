@@ -7,6 +7,7 @@ import { getClient } from "./storage-core.js";
 
 // Every reason card-claim can answer with. tests/test-cards-edge.mjs reads the function's source and fails on
 // one that is not here - a reason this list does not know is a rule that would read as "check your connection".
+const CARD_PAGE = 1000; // PostgREST's default ceiling on one select
 export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "cards_off", "duplicate", "malformed", "server"];
 
 // A player's collection, and whether they have claimed their starter deck.
@@ -21,14 +22,27 @@ export async function fetchMyCards() {
     const { data: sessionData } = await client.auth.getSession();
     const uid = sessionData?.session?.user?.id;
     if (!uid) return { status: "signed_out" };
-    const [owned, starter] = await Promise.all([
-      client.from("card_owned").select("card_id, finish, count").eq("user_id", uid),
+    // PAGED. PostgREST answers a select with at most 1,000 rows however many match, and a collection can hold
+    // up to 3,124 cards in four finishes - so one unpaged read would silently truncate a large collection and
+    // still call itself ok. Ordered, so the pages are pages of one list; the starter question rides with the first.
+    const page = (from) => client.from("card_owned").select("card_id, finish, count").eq("user_id", uid)
+      .order("card_id").order("finish").range(from, from + CARD_PAGE - 1);
+    const [first, starter] = await Promise.all([
+      page(0),
       client.from("card_grants").select("ref").eq("user_id", uid).eq("kind", "starter").limit(1),
     ]);
-    if (owned.error || starter.error || !Array.isArray(owned.data) || !Array.isArray(starter.data)) return { status: "error" };
+    if (first.error || starter.error || !Array.isArray(first.data) || !Array.isArray(starter.data)) return { status: "error" };
+    const rows = first.data.slice();
+    for (let from = CARD_PAGE, last = first.data; last.length === CARD_PAGE && from < CARD_PAGE * 20; from += CARD_PAGE) {
+      const next = await page(from);
+      // A page that fails makes the whole read a failure. Half a collection is not a collection.
+      if (next.error || !Array.isArray(next.data)) return { status: "error" };
+      rows.push(...next.data);
+      last = next.data;
+    }
     return {
       status: "ok",
-      cards: owned.data.map((r) => ({ id: r.card_id, finish: r.finish, count: r.count })),
+      cards: rows.map((r) => ({ id: r.card_id, finish: r.finish, count: r.count })),
       starter: starter.data.length > 0,
     };
   } catch {

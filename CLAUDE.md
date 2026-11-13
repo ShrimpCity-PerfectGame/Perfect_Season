@@ -516,7 +516,8 @@ parts unlike everything else:
 five parts. **Two exist: the rules, and owning cards** - a starter deck, a card a day from the daily draft, and a
 collection screen. Nothing plays a battle yet and there are no packs. **Production has cards switched off** in two
 places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
-`card-claim` and `submit-run`). With either off nothing is granted and nothing is shown. **`CARDS.md` is the reference** and
+`card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
+with the client off banks daily cards nobody can see, which is a launch order and not a state to leave things in. **`CARDS.md` is the reference** and
 `docs/superpowers/specs/2026-11-13-card-collection-design.md` is the design - read both before touching any of it.
 The parts unlike everything else:
 

@@ -38,6 +38,10 @@ await runTest("recolouring changes what a pixel is a shade OF, and nothing else"
   assert(light(at(1)) < light(at(0)), "and the fold is still darker than the cloth beside it");
   assert(Math.abs(hueOf(...at(2)) - gold) < 4, "the helmet takes the second colour: " + at(2));
   assert(Math.abs(hueOf(...at(3)) - brown) < 4, "the skin takes the skin tone: " + at(3));
+  // Hue alone would pass with the shading thrown away, or with every colour at full saturation. The mid-tone
+  // pixel of each region has to land ON the target colour, since it is that region's middle.
+  const near = (got, want) => got.slice(0, 3).every((v, i) => Math.abs(v - want[i]) <= 6);
+  assert(near(at(3), [0x6f, 0x43, 0x29]), "the only skin pixel is the skin tone itself: " + at(3));
   assert(JSON.stringify(at(4)) === JSON.stringify(px[4]), "a white glove is left exactly as drawn");
   assert(JSON.stringify(at(5)) === JSON.stringify(px[5]), "so is the outline");
   assert(JSON.stringify(at(6)) === JSON.stringify(px[6]), "and clear paper stays clear");
@@ -92,6 +96,7 @@ await runTest("the card on screen", async () => {
   assert(img.getAttribute("src") === "/cards/gunslinger.png" && img.getAttribute("alt") === "", "the neutral sprite, decorative");
   img.dispatchEvent(new window.Event("error"));
   await flush();
+  assert(img.hidden === true, "a sprite that fails to load is taken away rather than left as a broken image");
   assert(container.querySelector(".cd-nm").textContent.includes("Brady") && container.querySelector(".cd-st").textContent.includes("Pass yd"), "a sprite that fails to load leaves the name and the stats");
   unmount?.();
 
@@ -103,8 +108,39 @@ await runTest("the card on screen", async () => {
   one.unmount?.();
 });
 
+await runTest("in a browser that can paint: the sprite is recoloured once, and remembered", async () => {
+  // jsdom loads no image and has no canvas, so the path a real browser takes - new Image, onload, paint, swap -
+  // ran in no test until review pointed it out. Both are stubbed here, just far enough to walk it.
+  let images = 0;
+  const RealImage = window.Image, realGet = window.HTMLCanvasElement.prototype.getContext, realUrl = window.HTMLCanvasElement.prototype.toDataURL;
+  window.Image = globalThis.Image = class { constructor() { images++; this.naturalWidth = 2; this.naturalHeight = 2; } set src(v) { this._src = v; queueMicrotask(() => this.onload?.()); } get src() { return this._src; } };
+  window.HTMLCanvasElement.prototype.getContext = () => ({ drawImage() {}, getImageData: () => ({ data: new Uint8ClampedArray(16) }), putImageData() {} });
+  window.HTMLCanvasElement.prototype.toDataURL = () => "data:image/png;base64,PAINTED";
+  try {
+    const card = find("Antonio Gates", 2005);
+    const a = await renderComponent(face.CardFace, { card });
+    await flush();
+    const img = a.container.querySelector("img.cd-fig");
+    assert(img.getAttribute("src") === "data:image/png;base64,PAINTED", "the sprite was painted and swapped in: " + img.getAttribute("src").slice(0, 40));
+    assert(images === 1, "from one image load");
+    a.unmount?.();
+    // The same card again - a filter flipped, a second copy on screen. It must START painted, with no second
+    // load: starting on the neutral sprite made every card flash blue each time the grid re-drew.
+    const b = await renderComponent(face.CardFace, { card });
+    assert(b.container.querySelector("img.cd-fig").getAttribute("src") === "data:image/png;base64,PAINTED", "a card painted before starts painted");
+    await flush();
+    assert(images === 1, `and loads nothing again (${images} image loads)`);
+    // The store of painted sprites is bounded: thousands of cards across 32 teams must not grow it for ever.
+    for (let i = 0; i < sprites.PAINT_CACHE_MAX + 40; i++) sprites.paintSprite(new window.Image(), { jersey: "#" + String(100000 + i), metal: "#111111", skin: "#222222" }, "/cards/role.png");
+    assert(sprites.paintedCount() <= sprites.PAINT_CACHE_MAX, `the paint store stops at ${sprites.PAINT_CACHE_MAX} (${sprites.paintedCount()})`);
+    b.unmount?.();
+  } finally {
+    window.Image = globalThis.Image = RealImage; window.HTMLCanvasElement.prototype.getContext = realGet; window.HTMLCanvasElement.prototype.toDataURL = realUrl;
+  }
+});
+
 await runTest("painting a sprite with no canvas answers null and never throws", async () => {
-  const none = sprites.paintSprite({ src: "http://localhost/cards/role.png", naturalWidth: 10, naturalHeight: 10 }, { jersey: "#000000", metal: "#111111", skin: "#222222" });
+  const none = sprites.paintSprite({ src: "http://localhost/cards/role.png", naturalWidth: 10, naturalHeight: 10 }, { jersey: "#0a0b0c", metal: "#111111", skin: "#222222" }, "/cards/nocanvas.png");
   assert(none === null, "no canvas, no painted sprite: " + none);
 });
 

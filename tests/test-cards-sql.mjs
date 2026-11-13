@@ -116,6 +116,14 @@ await runTest("who and what grant_cards refuses, with nothing written", async ()
     assert((await grant(ALICE, "starter", grants)).error === "bad_grant", `bad_grant for ${why}`);
   }
   assert((await grant(ALICE, "pack", [{ ref: "a", card: 1, finish: "base" }])).error === "bad_grant", "a kind that does not exist");
+  // A gift is its own kind (the runbook's "give a player a card"), so a hand-out never has to pose as a daily
+  // card and take that day's ref. Found in review: the only kinds were starter and daily.
+  const gift = await grant(BOB, "gift", [{ ref: "gift-1", card: 412, finish: "gold" }]);
+  assert(gift.data?.granted.length === 1, "a gift is granted: " + JSON.stringify(gift));
+  // The kind check is NAMED, and the migration drops and re-adds it: `create table if not exists` leaves an
+  // existing table's checks alone, so an unnamed one could never learn a new kind (packs are next).
+  const named = await owner("select conname from pg_constraint where conrelid = 'public.card_grants'::regclass and conname = 'card_grants_kind_check'");
+  assert(named.length === 1, "card_grants' kind check has a name the migration can replace");
   assert((await grant(ALICE, "starter", { ref: "a" })).error === "bad_grant", "grants that are not a list");
   assert(JSON.stringify(await ownedBy(ALICE)) === before, "and not one of those wrote a row - the good grant beside the bad one included");
   assert((await ownedBy(GUEST)).length === 0, "the guest owns nothing");
@@ -153,6 +161,7 @@ await runTest("the mock grants cards the way the database does", async () => {
     [X, "starter", [{ ref: "starter:0", card: 5, finish: "base" }]],
     [A, "starter", [{ ref: "ok", card: 1, finish: "base" }, { ref: "bad", card: 1, finish: "nope" }]],
     [A, "pack", [{ ref: "a", card: 1, finish: "base" }]],
+    [A, "gift", [{ ref: "gift-1", card: 3, finish: "silver" }]],
     [A, "starter", [{ ref: "a", card: 0, finish: "base" }]],
     [A, "starter", { ref: "a" }],
   ];

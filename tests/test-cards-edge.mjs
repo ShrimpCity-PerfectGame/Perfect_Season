@@ -57,6 +57,14 @@ await runTest("with the server's switch off it grants nothing and says why", asy
   const res = await claim(ME);
   assert(res.status === 403 && res.body.reason === "cards_off", "cards_off: " + JSON.stringify(res));
   assert(s.cards.owned(ME).length === 0 && s.cards.grants(ME).length === 0, "not a card, not a ledger row");
+  // INERT means it does not reach the database at all - which is what makes deploying this to production ahead
+  // of the feature safe. So a guest and an account with no profile are told cards_off too, not their own
+  // reason: answering those would mean the profile had been read. And no rpc was made.
+  assert((await claim(GUEST)).body.reason === "cards_off", "a guest is told cards_off, so the profile was never read");
+  assert((await claim(NAMELESS)).body.reason === "cards_off", "so is an account with no profile");
+  s.readFails.profiles = true;
+  assert((await claim(ME)).body.reason === "cards_off", "and a database that cannot be read is never even asked");
+  assert(granted(s) === 0 && s.rpcCalls.length === 0, "not one rpc was made");
 });
 
 await runTest("a starter deck: eight Base cards that make a lineup, once", async () => {

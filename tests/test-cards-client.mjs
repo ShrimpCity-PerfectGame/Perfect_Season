@@ -64,6 +64,20 @@ await runTest("reading a collection has three answers", async () => {
   auth._cards.readFails = false;
 });
 
+await runTest("a collection bigger than one page of rows comes back whole", async () => {
+  // PostgREST answers a select with at most 1,000 rows unless asked for a range, and the mock now does the
+  // same. Found in review: one unpaged read would have truncated a large collection silently, with status ok.
+  const uid = await signUp("big@example.test", "biggie");
+  for (let from = 1; from <= 2400; from += 20) {
+    auth._cards.grantCards(uid, "daily", Array.from({ length: 20 }, (_, i) => ({ ref: `d${from + i}`, card: from + i, finish: "base" })));
+  }
+  const all = await fetchMyCards();
+  assert(all.status === "ok" && all.cards.length === 2400, "all 2,400 rows, not the first thousand: " + all.cards?.length);
+  assert(new Set(all.cards.map((c) => c.id)).size === 2400, "and each once");
+  await auth.auth.signOut();
+  await auth.auth.signInWithPassword({ email: "ann@example.test", password: "Password1" });
+});
+
 await runTest("claiming a starter deck, and every way it is refused", async () => {
   const won = await claimStarter();
   assert(won.ok === true && won.cards.length === 8, "eight cards: " + JSON.stringify(won).slice(0, 120));

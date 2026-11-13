@@ -222,7 +222,8 @@ in this game has.
 policy at all**:
 
 - `card_owned (user_id, card_id, finish, count, first_at)` - what a player holds. Copies stack in `count`.
-- `card_grants (user_id, kind, ref, card_id, finish)` - the ledger, unique on `(user_id, kind, ref)`.
+- `card_grants (user_id, kind, ref, card_id, finish)` - the ledger, unique on `(user_id, kind, ref)`. Kinds:
+  `starter`, `daily`, `gift`.
 
 `card_id` is an id out of `data/cards.json`. There is no cards table and no foreign key: the Edge Functions
 choose the card, so they are what guarantee it is real.
@@ -239,7 +240,7 @@ through `to_regclass` + `EXECUTE` because migration-profiles.sql is re-run befor
 
 ### 8.2 The switch
 
-Two switches, and both must be on for anything to be granted or shown.
+Two switches. **Showing** needs the client's; **granting** follows the server's alone.
 
 | Where | What | On when |
 |---|---|---|
@@ -248,8 +249,14 @@ Two switches, and both must be on for anything to be granted or shown.
 
 With the client's off there is no tile and `data/cards.json` is not copied to the site. With the server's off
 `card-claim` answers `cards_off` before touching the database and `submit-run` chooses no card.
-`window.__ps_cards__` overrides the client switch (tests and the harness use it); forcing it on against a
-server that is off draws an empty card area and grants nothing.
+
+- **Server on, client off banks cards nobody can see**: every finished daily is granted its card. That is the
+  order a launch turns them on in, not a state to leave an environment in.
+- `window.__ps_cards__` overrides the client switch (tests and the harness use it). Forced on in a build
+  without the catalog, the card area says "Couldn't load your cards"; nothing is granted.
+- **What a production build still carries with cards off:** the fourteen sprites under `/cards/` (about
+  1.4 MB, copied with the rest of `static/`, fetched by nobody) and the card code inside the bundle. Only the
+  catalog and the tile are withheld.
 
 ### 8.3 Getting cards
 
@@ -261,13 +268,14 @@ server that is off draws an empty card area and grants nothing.
 - **Daily card** - `submit-run`, after a finished Daily is saved and paid. One card drawn at equal odds from
   every card off the boards that day dealt (`dailyCard`), with a finish roll (Base 80%, Silver 16%, Gold 3.5%,
   Prism 0.5%). The ref is the **date alone**, so the two scoring formats' dailies share one card a day. It is
-  in its own try/catch and answers `card: null` on any failure: **it can never cost a season.**
+  in its own try/catch, raced against a 2.5 second timer, and answers `card: null` on any failure: **it can
+  never cost a season.** A grant that fails loses that day's card - there is no retry.
 - Guests cannot collect. `grant_cards` refuses one, and a guest's daily is refused long before the card.
 
 ### 8.4 The browser
 
 - `storage-cards.js`: `fetchMyCards()` answers `ok` / `signed_out` / `error` - three answers, because a
-  read that failed is not an empty collection. `claimStarter()` answers a reason from `CARD_REFUSALS`, or
+  read that failed is not an empty collection. It reads in pages of 1,000 (PostgREST's ceiling on one select). `claimStarter()` answers a reason from `CARD_REFUSALS`, or
   `offline` / `network` when the function could not be read.
 - `card-data.mjs`: the catalog is fetched from `/data/cards.json` when the card area opens. A failed load is
   not remembered. The service worker fetches it network-first (`DATA` in sw-rules.mjs).
@@ -299,8 +307,11 @@ surface. `CARD_TEXT_PAIRS` lists every text colour and what it sits on; the test
 - **Switch them off:** unset the secret. Grants stop at once; redeploy the client with `CARDS_ON=` to remove
   the tile. Nothing is deleted.
 - **Give a player a card** (SQL editor, which runs as the owner):
-  `select grant_cards('<user uuid>', 'daily', '[{"ref":"gift-1","card":412,"finish":"gold"}]'::jsonb);`
-  A ref that has been used for that player and kind grants nothing.
+  `select grant_cards('<user uuid>', 'gift', '[{"ref":"gift-1","card":412,"finish":"gold"}]'::jsonb);`
+  `gift` is a kind of its own, so a hand-out never takes a day's daily card. A ref already used for that
+  player and kind grants nothing.
+- **A new kind of grant** (packs are next) is two edits in `migration-cards.sql`: the named constraint
+  `card_grants_kind_check`, which the file drops and re-adds, and the list inside `grant_cards`.
 - **See what someone owns:** `select card_id, finish, count from card_owned where user_id = '<uuid>';`
 
 ## 8b. Not built

@@ -90,11 +90,24 @@ export function cardColours(card, data = skinData) {
 const spriteBase = () => (typeof window !== "undefined" && window.__ps_card_base__) || "/cards";
 export const spriteFor = (card) => `${spriteBase()}/${card.archetype || ROLE_PLAYER}.png`;
 
-// Paint a loaded neutral sprite in a card's colours: a data URL, or null if this browser cannot do it (no
-// canvas, or a canvas that will not hand its pixels back). One paint per pose and colour set, remembered.
+// Painted sprites, remembered by pose and colours: a team's gunslinger is painted once however many cards wear
+// it, and a card that has been painted before starts painted (card-face.jsx asks paintedSprite first) instead
+// of flashing the neutral blue every time a grid re-draws.
+//
+// BOUNDED, oldest out first. Each entry is a data URL of 100 KB or so, and there are fourteen poses times
+// thirty-two teams times a handful of skin tones of them to be had; a collection screen scrolled for an evening
+// must not hold them all.
+export const PAINT_CACHE_MAX = 160;
 const painted = new Map();
-export function paintSprite(img, colours) {
-  const key = `${img.src}|${colours.jersey}|${colours.metal}|${colours.skin}`;
+const paintKey = (path, colours) => `${path}|${colours.jersey}|${colours.metal}|${colours.skin}`;
+export const paintedSprite = (path, colours) => painted.get(paintKey(path, colours)) || null;
+export const paintedCount = () => painted.size;
+
+// Paint a loaded neutral sprite in a card's colours: a data URL, or null if this browser cannot do it (no
+// canvas, or a canvas that will not hand its pixels back). `path` is the sprite's own address as spriteFor gave
+// it - the key must not be img.src, which the browser has made absolute and paintedSprite cannot reproduce.
+export function paintSprite(img, colours, path = img.src) {
+  const key = paintKey(path, colours);
   if (painted.has(key)) return painted.get(key);
   let url = null;
   try {
@@ -109,6 +122,9 @@ export function paintSprite(img, colours) {
   } catch {
     url = null;
   }
-  if (url) painted.set(key, url);
+  if (url) {
+    painted.set(key, url);
+    while (painted.size > PAINT_CACHE_MAX) painted.delete(painted.keys().next().value);
+  }
   return url;
 }

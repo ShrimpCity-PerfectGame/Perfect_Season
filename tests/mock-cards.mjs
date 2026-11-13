@@ -9,7 +9,7 @@
 import { starterDeck, CARDS } from "../card-logic.mjs";
 
 const FINISHES = ["base", "silver", "gold", "prism"];
-const KINDS = ["starter", "daily"];
+const KINDS = ["starter", "daily", "gift"];
 
 // The shape functions-js hands back for a non-2xx: the reason is in the response body, reached through context.
 export function cardHttpError(reason, status, message = reason) {

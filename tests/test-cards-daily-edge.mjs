@@ -114,6 +114,16 @@ await runTest("a card that cannot be granted never costs the season", async () =
   }
 });
 
+await runTest("a grant that never answers does not hold the season's answer", async () => {
+  const s = store();
+  s.rpcs.grant_cards = () => new Promise(() => {}); // the database took the call and never came back
+  const started = Date.now();
+  const res = await Promise.race([daily("fantasy").send(), new Promise((r) => setTimeout(() => r({ status: 0, body: { hung: true } }), 9000))]);
+  assert(!res.body.hung, "the function answered rather than waiting for ever");
+  assert(res.status === 200 && res.body.ok === true && res.body.coins && res.body.card === null, "saved and paid, with no card: " + JSON.stringify(res.body).slice(0, 140));
+  assert(Date.now() - started < 6000, `and within a few seconds (${Date.now() - started} ms)`);
+});
+
 await runTest("with the server's switch off no card is chosen at all", async () => {
   const s = store({ on: false });
   const res = await daily("fantasy").send();

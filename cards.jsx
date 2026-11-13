@@ -11,7 +11,7 @@
 //   collection   the cards
 // `error` is its own state on purpose. A read that failed is not an empty collection: collapsing the two would
 // offer a player with fifty cards a starter deck they opened last week (storage-cards.js says the same).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchMyCards, claimStarter, CARD_REFUSALS } from "./storage.js";
 import { loadCardData } from "./card-data.mjs";
 import { CARDS } from "./card-logic.mjs";
@@ -49,21 +49,32 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [pos, setPos] = useState("All");
+  const [stale, setStale] = useState(false); // an owned card this page's catalog does not know
 
+  // ONLY THE LATEST LOAD MAY SPEAK. Whether an account is a guest arrives a beat after its id does, so a load
+  // can start as "not a guest", be superseded by one that knows better, and then finish - and without this it
+  // came back and offered a guest a starter deck over the top of "cards are for accounts". Each load takes a
+  // number and checks it is still the newest before it sets anything; unmounting retires them all.
+  const latest = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++latest.current;
+    const current = () => latest.current === mine;
     if (!userId || isGuest) { setPhase("account"); return; }
     setPhase("loading");
     try {
-      const [, mine] = await Promise.all([loadCardData(), fetchMyCards()]);
-      if (mine.status === "signed_out") { setPhase("account"); return; }
-      if (mine.status !== "ok") { setPhase("error"); return; }
-      setOwned(toCards(mine.cards));
-      setPhase(mine.starter ? "collection" : "starter");
+      const [, got] = await Promise.all([loadCardData(), fetchMyCards()]);
+      if (!current()) return;
+      if (got.status === "signed_out") { setPhase("account"); return; }
+      if (got.status !== "ok") { setPhase("error"); return; }
+      const cards = toCards(got.cards);
+      setOwned(cards);
+      setStale(cards.length < got.cards.length);
+      setPhase(got.starter ? "collection" : "starter");
     } catch {
-      setPhase("error");
+      if (current()) setPhase("error");
     }
   }, [userId, isGuest]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); return () => { latest.current++; }; }, [load]);
 
   async function openStarter() {
     if (busy) return;
@@ -91,6 +102,11 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
       </div>
 
       {phase === "loading" && <p className="note" role="status">Loading your cards…</p>}
+      {/* A card this page's catalog does not know is one a newer build added. Say so: silently leaving it out
+          reads as a card that went missing, and with nothing else owned it would read as "No cards yet". */}
+      {stale && (phase === "collection" || phase === "starter") && (
+        <p className="note" role="status">Some of your cards can't be shown because this page is out of date. Reload to see them all.</p>
+      )}
 
       {phase === "error" && (
         <div className="panel" role="alert">
@@ -139,7 +155,7 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
               ))}
             </div>
             {shown.length === 0
-              ? <p className="note">{owned.length === 0 ? "No cards yet. Finish today's daily draft to earn one." : `No ${pos} cards yet.`}</p>
+              ? <p className="note">{owned.length === 0 ? (stale ? "Reload the page to see your cards." : "No cards yet. Finish today's daily draft to earn one.") : `No ${pos} cards yet.`}</p>
               : (
                 <div className="cd-grid">
                   {shown.map((r) => <CardFace key={`${r.id}:${r.finish}`} card={r.card} finish={r.finish} count={r.count} />)}

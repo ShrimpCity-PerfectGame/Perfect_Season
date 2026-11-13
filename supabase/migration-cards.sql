@@ -36,13 +36,23 @@ create table if not exists public.card_owned (
 create table if not exists public.card_grants (
   id         bigint generated always as identity primary key,
   user_id    uuid not null references auth.users (id) on delete cascade,
-  kind       text not null check (kind in ('starter', 'daily')),
+  kind       text not null,
   ref        text not null check (char_length(ref) between 1 and 40),
   card_id    integer not null check (card_id > 0),
   finish     text not null check (finish in ('base', 'silver', 'gold', 'prism')),
   created_at timestamptz not null default now(),
   unique (user_id, kind, ref)
 );
+
+-- The kinds a card can be granted under. A NAMED constraint, dropped and re-added on every run, because
+-- `create table if not exists` leaves an existing table's checks exactly as they were: an inline check here
+-- could never learn a new kind, and the next plan adds one (packs). The same trap shop_items.kind and
+-- guess_runs.tries each fell into once.
+--   starter  the eight cards of a starter deck (refs starter:0 .. starter:7)
+--   daily    the card a finished daily draft earns (ref: the date)
+--   gift     handed out by hand, from the SQL editor (ref: anything unique for that player) - see CARDS.md 8.6
+alter table public.card_grants drop constraint if exists card_grants_kind_check;
+alter table public.card_grants add constraint card_grants_kind_check check (kind in ('starter', 'daily', 'gift'));
 
 alter table public.card_owned enable row level security;
 alter table public.card_grants enable row level security;
@@ -78,6 +88,12 @@ revoke all on sequence public.card_grants_id_seq from anon, authenticated;
 --   guest_not_allowed  a guest account. Cards are for accounts, like the shop: a guest costs nothing to make
 --   bad_grant          anything malformed - not a list, too long, a bad ref, card or finish, an unknown kind
 --
+-- EXACTLY ONCE, UNDER REAL CONCURRENCY. Two transactions granting the same (user, kind, ref) at the same moment:
+-- the second's `insert ... on conflict do nothing` waits on the first's uncommitted row, then inserts nothing
+-- and returns no id, so it adds no card; the count's own upsert is row-locked. Refs are walked in the order
+-- given and every caller gives a starter deck's in the same order, so two claims cannot deadlock.
+-- tests/test-cards-sql.mjs cannot show this - PGlite is one connection - so it is argued here.
+--
 -- EVERYTHING IS CHECKED BEFORE ANYTHING IS WRITTEN, and a raise rolls back the call, so a list with one bad
 -- entry in it grants nothing. The Edge Functions build these lists themselves and never send a bad one; the
 -- checks are here because this function is the boundary and they are not.
@@ -101,7 +117,7 @@ begin
   if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
   if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
 
-  if p_kind is null or p_kind not in ('starter', 'daily')
+  if p_kind is null or p_kind not in ('starter', 'daily', 'gift')
      or p_grants is null or jsonb_typeof(p_grants) <> 'array' or jsonb_array_length(p_grants) > 20 then
     raise exception 'bad_grant' using errcode = 'P0001';
   end if;

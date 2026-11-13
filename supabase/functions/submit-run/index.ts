@@ -28,7 +28,14 @@ import gameData from "../../../data/players.json" with { type: "json" };
 import cardCatalog from "../../../data/cards.json" with { type: "json" };
 
 GL.initGameData(gameData.players, gameData.opponents);
-initCardData(cardCatalog);
+// The card catalog is loaded for ONE optional thing, the daily card - so a catalog that will not load must cost
+// that and nothing else. Unguarded, a bad data/cards.json would throw at module load and take every season on
+// the site down with it, for the sake of a feature that is switched off in production.
+let cardsReady = false;
+try { initCardData(cardCatalog); cardsReady = true; } catch (e) { console.error("card catalog failed to load:", e); }
+// How long a finished season's answer will wait for its card. The season is saved and paid by then; a database
+// call that hangs must not leave the player looking at a result that never confirms.
+const CARD_GRANT_MS = 2500;
 // Cards (CARDS.md). Read per request, so a secret set after a deploy is seen without a second one. With it
 // unset this function chooses no card and calls nothing: shipping it ahead of the feature is inert.
 const cardsEnabled = () => Deno.env.get("CARDS_ENABLED") === "1";
@@ -460,13 +467,18 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   // share one card a day - grant_cards answers the second with nothing new, and that is `card: null` too.
   // A guest never reaches here (a guest's daily is refused far above), and grant_cards refuses one anyway.
   let card: unknown = null;
-  if (mode.kind === "daily" && cardsEnabled()) {
+  if (mode.kind === "daily" && cardsEnabled() && cardsReady) {
     try {
       const pick = dailyCard(history.map((h: any) => h.key), secureRand);
       if (pick) {
-        const { data: granted, error: grantError } = await service.rpc("grant_cards", {
+        // Raced against a short timer. If the timer wins the grant may still land a moment later - then the
+        // card is in the collection and this answer simply did not show it, which is the right way round.
+        const grant = service.rpc("grant_cards", {
           p_user: user.id, p_kind: "daily", p_grants: [{ ref: mode.date, card: pick.id, finish: pick.finish }],
         });
+        let timer: number | undefined;
+        const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("grant_cards: timed out")), CARD_GRANT_MS); });
+        const { data: granted, error: grantError } = await Promise.race([grant, late]).finally(() => clearTimeout(timer));
         if (grantError) throw new Error(`grant_cards: ${grantError.message}`);
         const got = Array.isArray(granted?.granted) ? granted.granted[0] : null;
         if (got) card = { id: got.card, finish: got.finish };

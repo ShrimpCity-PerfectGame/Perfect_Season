@@ -124,6 +124,7 @@ await runTest("a card the catalog does not know is skipped, and the rest still s
   await remount(); await openCards();
   assert(cardsOnScreen().length === 8, "eight real cards are drawn");
   assert(container.querySelector("#cd-coll-h").textContent === "8 cards", "and counted - the unknown one is not");
+  assert(/out of date/i.test(container.querySelector(".cd-area").textContent), "and the screen says the page is out of date, rather than leaving a card silently missing");
   auth._cards.tables.card_owned.pop();
 });
 
@@ -186,6 +187,34 @@ await runTest("leaving the card area goes back to Modes", async () => {
   await openCards();
   await click(button("All modes")); await flush();
   assert(!container.querySelector(".cd-area") && tile(), "All modes returns to Modes");
+});
+
+await runTest("a slow load cannot overwrite what the screen has since learned", async () => {
+  // Found in review. Whether an account is a guest arrives a beat after its id does, so the screen can start
+  // loading as "not a guest", be told it IS one, and then have the first load finish and offer a starter deck.
+  const { loadModule } = await import("./helpers.mjs");
+  const { CardsScreen } = await loadModule("cards.jsx"); // its own copy, with a catalog not yet loaded
+  const React = (await import("react")).default;
+  const { createRoot } = await import("react-dom/client");
+  const { act } = await import("react-dom/test-utils");
+  await auth.auth.signOut(); await flush();
+  const { data } = await auth.auth.signUp({ email: "race@cards.test", password: "Password1", options: { data: { username: "racer" } } });
+  let release; const gate = new Promise((r) => { release = r; });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = window.fetch = async () => { await gate; return { ok: true, status: 200, json: async () => catalog }; };
+  const host = document.createElement("div"); document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => { root.render(React.createElement(CardsScreen, { userId: data.user.id, isGuest: false, onBack() {} })); });
+    await act(async () => { root.render(React.createElement(CardsScreen, { userId: data.user.id, isGuest: true, onBack() {} })); });
+    assert(host.textContent.includes("Cards are for accounts"), "told it is a guest, the screen says cards are for accounts");
+    await act(async () => { release(); await new Promise((r) => setTimeout(r, 20)); });
+    await flush();
+    assert(host.textContent.includes("Cards are for accounts") && !findButtonByText(host, "Open your starter deck"), "and the load that started first does not come back and offer a deck: " + host.textContent.slice(0, 120));
+  } finally {
+    await act(async () => { root.unmount(); }); host.remove();
+    globalThis.fetch = window.fetch = realFetch;
+  }
 });
 
 // ---------- the daily card on the result screen ----------

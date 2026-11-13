@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { TEAMS } from "./game-logic.mjs";
 import { FINISH_BONUS, archetypeLabel, ROLE_PLAYER } from "./card-logic.mjs";
-import { cardColours, spriteFor, paintSprite } from "./card-sprites.mjs";
+import { cardColours, spriteFor, paintSprite, paintedSprite } from "./card-sprites.mjs";
 
 export const CARD_PAINT = {
   paper: "#f4efe2", ink: "#14213d", muted: "#4d566d", line: "#c9c2b0",
@@ -28,7 +28,10 @@ export const CARD_TEXT_PAIRS = [
   [P.ink, P.artLo, "rating and team on the art panel's darker end"],
   [P.muted, P.artLo, "the season on the art panel's darker end"],
   [P.ink, P.goldLo, "rating and team on a Gold card's art panel"],
-  [P.muted, P.goldHi, "the season on a Gold card's art panel"],
+  // The season sits at the BOTTOM of the art panel's gradient - its dark end - so that is what it is measured
+  // against. It was first checked against the light end (6.75:1) while really sitting on 3.85:1; review caught it.
+  // On a Gold card the muted grey cannot clear AA there, so the season is ink.
+  [P.ink, P.goldLo, "the season on a Gold card's art panel (the gradient's dark end)"],
   [P.cream, P.black, "name and stats on a Prism card"],
   [P.prismMuted, P.black, "first name and stat labels on a Prism card"],
   [P.lime, P.black, "rating on a Prism card"],
@@ -58,16 +61,18 @@ export function cardLabel(card, finish = "base", count = 1) {
 
 export function CardFace({ card, finish = "base", count = 1 }) {
   const neutral = spriteFor(card);
-  const [src, setSrc] = useState(neutral);
   const colours = cardColours(card);
+  // A sprite painted before starts painted: no second load, and no flash of the neutral blue when a grid re-draws.
+  const [src, setSrc] = useState(() => paintedSprite(neutral, colours) || neutral);
   useEffect(() => {
     let live = true;
-    setSrc(neutral);
-    if (typeof Image === "undefined") return undefined;
+    const ready = paintedSprite(neutral, colours);
+    setSrc(ready || neutral);
+    if (ready || typeof Image === "undefined") return undefined;
     const img = new Image();
     // A sprite that fails to load, or a canvas that will not paint it, leaves the card on the neutral drawing
     // (or on none) - the name, rating and stats do not depend on it.
-    img.onload = () => { const url = paintSprite(img, colours); if (live && url) setSrc(url); };
+    img.onload = () => { const url = paintSprite(img, colours, neutral); if (live && url) setSrc(url); };
     img.onerror = () => {};
     img.src = neutral;
     return () => { live = false; };
@@ -124,6 +129,7 @@ export const CARD_FACE_CSS = `
 .cd-card.cd-f-silver{--cd-edge:linear-gradient(135deg,#e9eef3,#9aa7b4 35%,#f7fafc 50%,#8b98a6 70%,#dde4ea)}
 .cd-card.cd-f-gold{--cd-edge:linear-gradient(135deg,#f9e7a0,#c9952b 35%,#fff4c4 50%,#bd8c26 70%,#f2d675)}
 .cd-card.cd-f-gold .cd-art{background:linear-gradient(160deg,${P.goldHi},${P.goldLo})}
+.cd-card.cd-f-gold .cd-yr{color:${P.ink}}
 .cd-card.cd-f-silver .cd-in::after,.cd-card.cd-f-gold .cd-in::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 38%,rgba(255,255,255,.45) 50%,transparent 62%);background-size:250% 100%;animation:cd-sheen 3.2s linear infinite;pointer-events:none}
 .cd-card.cd-f-prism{--cd-edge:linear-gradient(135deg,#ff5fa2,#ffd166,#c6f432,#4cc9f0,#b388ff,#ff5fa2);background-size:300% 300%;animation:cd-prism 6s linear infinite}
 .cd-card.cd-f-prism .cd-in{background:${P.black};color:${P.cream}}

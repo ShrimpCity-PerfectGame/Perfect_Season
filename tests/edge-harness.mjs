@@ -104,7 +104,9 @@ export function createClient(url, key, opts) {
     if (!fn) throw new Error("the edge stub has no function " + name);
     if (store.rpcFails?.[name]) return { data: null, error: { message: name + " failed" } };
     store.rpcCalls?.push({ name, args, opts: rpcOpts });
-    return { data: fn(args), error: null };
+    // awaited, so a store function may be async - including one that never answers, which is how a hung
+    // database call is modelled
+    return { data: await fn(args), error: null };
   };
   return { auth, from, rpc };
 }

@@ -180,17 +180,23 @@ export function makeMockAuth() {
 
   function cardsFrom(table) {
     const filters = [];
-    let limit = null;
+    const orders = [];
+    let limit = null, range = null;
     const rows = () => {
       const res = cards.select(table, state.currentUserId());
       if (res.error) return res;
       let out = res.data.filter((r) => filters.every((f) => f(r)));
-      if (limit != null) out = out.slice(0, limit);
+      for (const col of [...orders].reverse()) out = out.slice().sort((a, b) => (a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0));
+      // PostgREST's own ceiling: a select answers at most 1,000 rows however many match, unless a range asks
+      // for a different window. Modelled because the bug it guards is silent - a truncated read is still "ok".
+      if (range) out = out.slice(range[0], range[1] + 1);
+      out = out.slice(0, Math.min(limit ?? 1000, 1000));
       return { data: out, error: null };
     };
     const query = {
       eq(col, val) { filters.push((r) => r[col] === val); return query; },
-      order: () => query,
+      order(col) { orders.push(col); return query; },
+      range(from, to) { range = [from, to]; return query; },
       limit(n) { limit = n; return query; },
       maybeSingle: () => Promise.resolve(rows()).then((r) => (r.error ? r : { data: r.data[0] ?? null, error: null })),
       then: (resolve, reject) => Promise.resolve(rows()).then(resolve, reject),
