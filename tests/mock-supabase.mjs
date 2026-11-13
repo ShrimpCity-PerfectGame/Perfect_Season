@@ -204,7 +204,22 @@ export function makeMockAuth() {
     return { select: () => query, insert: rlsDenied, upsert: rlsDenied, update: () => ({ eq: rlsDenied }), delete: () => ({ eq: rlsDenied }) };
   }
 
+  // card_packs: public select, no write. Every row, ordered as asked.
+  function packsFrom() {
+    const orders = [];
+    const rows = () => {
+      const res = cards.packRows();
+      if (res.error) return res;
+      let out = res.data;
+      for (const col of [...orders].reverse()) out = out.slice().sort((a, b) => (a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0));
+      return { data: out, error: null };
+    };
+    const query = { order(col) { orders.push(col); return query; }, then: (resolve, reject) => Promise.resolve(rows()).then(resolve, reject) };
+    return { select: () => query, insert: rlsDenied, upsert: rlsDenied, update: () => ({ eq: rlsDenied }), delete: () => ({ eq: rlsDenied }) };
+  }
+
   function from(table) {
+    if (table === "card_packs") return packsFrom();
     if (cards.tables[table]) return cardsFrom(table);
     const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : table === "builds" ? builds : table === "runs" ? runs : extraTables[table] || dailyRuns;
     if (extraTables[table]) {

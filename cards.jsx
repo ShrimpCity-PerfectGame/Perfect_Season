@@ -29,6 +29,11 @@ export const CARD_SENTENCES = {
   server: "Something went wrong on our side and your deck wasn't opened. Try again in a moment.",
   offline: "Couldn't reach the server, so your deck wasn't opened. Check your connection and try again.",
   network: "That didn't go through. Reload the page and try again.",
+  unknown_pack: "That pack isn't one this version of the game knows. Reload the page and look again.",
+  bad_open: "That didn't go through. Reload the page and try again.",
+  unavailable: "That pack isn't on sale right now. Nothing was charged.",
+  sold_out: "That pack has sold out. Nothing was charged.",
+  not_enough: "You don't have enough coins for that pack. Nothing was charged.",
 };
 export const CARD_SENTENCE_KEYS = [...CARD_REFUSALS, "offline", "network"];
 

@@ -1,14 +1,15 @@
 // Cards: what the browser reads and asks for. See CARDS.md.
 //
 // The browser never writes a card. card_owned and card_grants have an own-rows-only select and no write policy
-// (supabase/migration-cards.sql); the card-claim Edge Function and submit-run grant them. So this module is two
-// reads and one request.
+// (supabase/migration-cards.sql); the card-claim Edge Function and submit-run grant them. So this module is
+// reads and requests: the collection, the starter deck, and since v2.24.0 the pack shop.
 import { getClient } from "./storage-core.js";
 
 // Every reason card-claim can answer with. tests/test-cards-edge.mjs reads the function's source and fails on
 // one that is not here - a reason this list does not know is a rule that would read as "check your connection".
 const CARD_PAGE = 1000; // PostgREST's default ceiling on one select
-export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "cards_off", "duplicate", "malformed", "server"];
+export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "cards_off", "duplicate", "malformed", "server",
+  "unknown_pack", "bad_open", "unavailable", "sold_out", "not_enough"];
 
 // A player's collection, and whether they have claimed their starter deck.
 //   { status: "ok", cards: [{ id, finish, count }], starter: boolean }
@@ -54,19 +55,63 @@ export async function fetchMyCards() {
 // A reason is one of CARD_REFUSALS, or - when the function was never reached or its answer cannot be read -
 // "offline" (nothing came back) or "network" (something did, and it names no reason this client knows).
 export async function claimStarter() {
+  const res = await callClaim({ action: "starter" });
+  return res.ok ? { ok: true, cards: res.data.cards } : res;
+}
+
+// One request to card-claim, and the three kinds of failure told apart: { ok: true, data } or { ok: false, reason }.
+async function callClaim(body) {
   const failed = (reason) => ({ ok: false, reason });
   try {
-    const { data, error } = await getClient().functions.invoke("card-claim", { body: { action: "starter" } });
+    const { data, error } = await getClient().functions.invoke("card-claim", { body });
     if (error) {
-      let body = null;
-      try { body = await error.context?.json?.(); } catch { body = null; }
-      if (!body) return failed("offline");
-      if (CARD_REFUSALS.includes(body.reason)) return failed(body.reason);
-      return failed(body.reason ? "network" : "server");
+      let said = null;
+      try { said = await error.context?.json?.(); } catch { said = null; }
+      if (!said) return failed("offline");
+      if (CARD_REFUSALS.includes(said.reason)) return failed(said.reason);
+      return failed(said.reason ? "network" : "server");
     }
-    if (data?.ok === true && Array.isArray(data.cards)) return { ok: true, cards: data.cards };
+    if (data?.ok === true && Array.isArray(data.cards)) return { ok: true, data };
     return failed("server");
   } catch {
     return failed("offline");
   }
+}
+
+// What the pack shop is selling: { status: "ok", packs: [{ id, price, size, active, stockTotal, stockLeft }] }
+// in shelf order, or { status: "error" }. Prices are public, so this works signed out. What is IN a pack is not
+// here - that is card-packs.mjs, which the screen already holds.
+export async function fetchPacks() {
+  try {
+    const { data, error } = await getClient().from("card_packs")
+      .select("id, price, size, active, stock_total, stock_left, sort").order("sort").order("id");
+    if (error || !Array.isArray(data)) return { status: "error" };
+    return {
+      status: "ok",
+      packs: data.map((r) => ({ id: r.id, price: r.price, size: r.size, active: r.active === true, stockTotal: r.stock_total ?? null, stockLeft: r.stock_left ?? null })),
+    };
+  } catch {
+    return { status: "error" };
+  }
+}
+
+// An id for ONE purchase. The screen makes it when the player confirms and keeps it until the purchase is
+// answered, so asking again after a dropped response re-sends the same id - and buy_pack answers a repeat with
+// the cards from the first time and charges nothing. A fresh id per attempt would turn a retry into a second pack.
+export function newOpenId() {
+  try { if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID(); } catch { /* fall through */ }
+  let out = "";
+  for (let i = 0; i < 32; i++) out += Math.floor(Math.random() * 16).toString(16);
+  return out;
+}
+
+// Buy and open a pack: { ok: true, cards: [{ id, finish }], balance, stockLeft, duplicate } or { ok: false, reason }.
+// "offline" and "network" mean the answer is UNKNOWN, not no: the purchase may have gone through. Ask again with
+// the same openId to find out.
+export async function openPack(packId, openId) {
+  const res = await callClaim({ action: "open_pack", pack: packId, open: openId });
+  if (!res.ok) return res;
+  const d = res.data;
+  if (typeof d.balance !== "number") return { ok: false, reason: "server" };
+  return { ok: true, cards: d.cards, balance: d.balance, stockLeft: d.stockLeft ?? null, duplicate: d.duplicate === true };
 }

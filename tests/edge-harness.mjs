@@ -106,7 +106,11 @@ export function createClient(url, key, opts) {
     store.rpcCalls?.push({ name, args, opts: rpcOpts });
     // awaited, so a store function may be async - including one that never answers, which is how a hung
     // database call is modelled
-    return { data: await fn(args), error: null };
+    // A store function answers { __rpcError: { message } } for a database function that RAISED - which the real
+    // client reports as an error object rather than by throwing.
+    const out = await fn(args);
+    if (out && out.__rpcError) return { data: null, error: out.__rpcError };
+    return { data: out, error: null };
   };
   return { auth, from, rpc };
 }

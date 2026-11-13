@@ -7,6 +7,7 @@
 // card catalog is therefore whatever card-logic.mjs has been initialised with - tests/helpers.mjs does it for
 // the jsdom suites, and in the harness the app's own loadCardData does.
 import { starterDeck, CARDS } from "../card-logic.mjs";
+import { PACK_BY_ID, rollPack } from "../card-packs.mjs";
 
 const FINISHES = ["base", "silver", "gold", "prism"];
 const KINDS = ["starter", "daily", "gift", "pack"];
@@ -63,6 +64,13 @@ export function makeCards(state, { wallet = null } = {}) {
       return { duplicate: false, cards: cards.map((c) => ({ card: c.card, finish: c.finish })), balance: wallet.balanceOf(userId), stock_left: pack.stock_left, price: pack.price };
     },
     readFails: false, // makes a client select on either table answer with an error
+    openFails: false, // the next pack purchase goes through and its answer is lost on the way back
+    nextPull: null,   // [{ id, finish }] the next opened pack holds, instead of a roll - for a test that needs to know
+    // What anyone's select on card_packs returns: every row, in the order asked for by the caller.
+    packRows() {
+      if (api.packsReadFail) return { data: null, error: { message: "mock: the read failed", code: "XX000" } };
+      return { data: [...packs.values()].map((p) => ({ ...p })), error: null };
+    },
     tables: { card_owned: owned, card_grants: grants },
 
     // public.grant_cards. Throws an Error whose message is the reason, the way the mock's rpc layer expects.
@@ -105,12 +113,29 @@ export function makeCards(state, { wallet = null } = {}) {
     async claimStarter(body) {
       const uid = state.currentUserId();
       if (!uid) return cardHttpError("signed_out", 401);
-      if (!body || body.action !== "starter") return cardHttpError("malformed", 400);
+      if (!body || (body.action !== "starter" && body.action !== "open_pack")) return cardHttpError("malformed", 400);
+      if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string")) return cardHttpError("malformed", 400);
       if (!api.enabled) return cardHttpError("cards_off", 403);
       const profile = state.profiles.get(uid);
       if (!profile) return cardHttpError("no_profile", 400);
       if (profile.guest) return cardHttpError("guest_not_allowed", 403);
       if (!CARDS.size) { console.error("mock-cards: card-logic.mjs has no catalog - call initCardData first"); return cardHttpError("server", 500); }
+      if (body.action === "open_pack") {
+        const pack = Object.hasOwn(PACK_BY_ID, body.pack) ? PACK_BY_ID[body.pack] : null;
+        if (!pack) return cardHttpError("unknown_pack", 400);
+        if (!/^[A-Za-z0-9-]{8,36}$/.test(body.open)) return cardHttpError("bad_open", 400);
+        // openFails: the purchase HAPPENS and the answer is lost - the case the open id exists for.
+        const pulled = api.nextPull || rollPack(pack, Math.random);
+        api.nextPull = null;
+        let bought;
+        try { bought = api.buyPack(uid, pack.id, body.open, pulled.map((c) => ({ card: c.id, finish: c.finish }))); }
+        catch (e) {
+          const status = { unavailable: 409, sold_out: 409, not_enough: 409, bad_open: 400, no_profile: 400, guest_not_allowed: 403 }[e?.message];
+          return status ? cardHttpError(e.message, status) : cardHttpError("server", 500);
+        }
+        if (api.openFails) { api.openFails = false; return { data: null, error: { name: "FunctionsFetchError", message: "Failed to send" } }; }
+        return { data: { ok: true, cards: bought.cards.map((c) => ({ id: c.card, finish: c.finish })), balance: bought.balance, stockLeft: bought.stock_left ?? null, duplicate: bought.duplicate }, error: null };
+      }
       const deck = starterDeck(Math.random);
       let res;
       try { res = api.grantCards(uid, "starter", deck.map((c, i) => ({ ref: `starter:${i}`, card: c.id, finish: c.finish }))); }
