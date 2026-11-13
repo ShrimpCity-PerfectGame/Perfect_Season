@@ -189,8 +189,23 @@ if (need("scoreBattle")) {
   eq(s1.score, s2.score, "one lineup, one score");
   eq(s1.score, s1.offense, "the score is the offense");
   eq(s1.target, C.battleTarget(C.showdownDefense(day)), "against the day's defense");
-  const swapped = C.showdownScore(day, { ...good, QB: { ...good.QB, finish: "gold" } });
-  ok(swapped.cards.some((c, i) => c.roll !== s1.cards[i].roll), "a different lineup rolls differently");
+  // A CARD has one roll a day, whoever fields it, wherever, in whatever finish. Seeding the roll from the whole
+  // lineup (as this first shipped) made the finish and the Flex order a luck re-roll: the same six cards scored
+  // 781.8 or 807 by swapping the Flexes, and anywhere from 693 to 891 across finish combinations - so the best
+  // play was grinding copies offline, and a Base could beat a Prism by dozens. Found in review, 2026-11-13.
+  const rollOf = (res, id) => res.cards.find((c) => c.id === id).roll;
+  const flipped = C.showdownScore(day, { ...good, FLEX1: good.FLEX2, FLEX2: good.FLEX1 });
+  eq(flipped.score, s1.score, "swapping the two Flex cards changes nothing");
+  for (const [finish, pts] of [["silver", 1], ["gold", 2], ["prism", 3]]) {
+    const up = C.showdownScore(day, { ...good, QB: { ...good.QB, finish } });
+    eq(+(up.score - s1.score).toFixed(1), pts, `in the showdown ${finish} is worth exactly ${pts}, never a re-roll`);
+  }
+  const otherRb = byRating.find((c) => c.pos === "RB" && !Object.values(good).some((e) => C.CARDS.get(e.id).pid === c.pid));
+  const subbed = C.showdownScore(day, { ...good, RB: { id: otherRb.id, finish: "base" } });
+  ok(SLOTS.filter((s) => s !== "RB").every((s) => rollOf(subbed, good[s].id) === rollOf(s1, good[s].id)), "changing one card leaves the other five rolls alone");
+  ok(new Set(s1.cards.map((c) => c.roll)).size > 3, "the six cards do not all roll alike");
+  ok(rollOf(C.showdownScore("2026-11-14", good), good.QB.id) !== rollOf(s1, good.QB.id) || rollOf(C.showdownScore("2026-11-15", good), good.QB.id) !== rollOf(s1, good.QB.id), "and a card's roll changes from day to day");
+  { let n = 0; const r = C.showdownRand(day, good); for (let i = 0; i < 12; i++) { const v = r(); if (v >= 0 && v < 1) n++; } eq(n, 12, "the showdown hands scoreBattle its twelve draws"); }
   const days = Array.from({ length: 200 }, (_, i) => C.showdownDefense(`2027-${String((i % 12) + 1).padStart(2, "0")}-${String((i % 28) + 1).padStart(2, "0")}x${i}`).key);
   ok(new Set(days).size > 150, `days draw different defenses (${new Set(days).size} of 200)`);
 

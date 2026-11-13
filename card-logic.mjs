@@ -251,16 +251,34 @@ export function scoreBattle(lineup, defense, rand, step = 0) {
 }
 
 // ---------- The daily showdown ----------
-// One defense a day, the same for everyone, and ONE ROLL PER LINEUP: the generator is seeded from the day and
-// the lineup, so two people fielding the same six cards get the same score and the board rewards the lineup
-// rather than the roll. A different lineup - even one finish different - rolls differently.
+// One defense a day, the same for everyone, and ONE ROLL PER CARD PER DAY: 2007 Brady has the same game today
+// in every lineup that fields him, in any slot, in any finish. So two people with the same six cards get the
+// same score, a better finish adds exactly its bonus, and the board rewards the lineup rather than the roll.
+//
+// It first shipped seeded from the WHOLE lineup, and review caught what that did: swapping the two Flex cards
+// or fielding a different copy re-rolled all six, so the same cards scored anywhere from 693 to 891 and the
+// best play was to grind copies offline - a Base could beat a Prism by dozens. Seed nothing here from the slot,
+// the finish or the other five cards.
+//
+// The generator below hands scoreBattle the twelve draws it asks for, two a card in slot order, each pair cut
+// from that card's own seed.
 //
 // Accepted gap, the one every seeded daily in this game has: the bundle and the seed are public, so anybody
 // willing to run this file can find the day's best lineup offline. CARDS.md says so; it is not closeable here.
+//
+// showdownDefense indexes DEFENSES by position, so adding a season to the pool re-deals every date. Whatever
+// records a showdown must store the defense's KEY, never trust this to say what a past day's defense was.
 export const showdownSeed = (date) => `showdown-${date}`;
 export const showdownDefense = (date) => DEFENSES[Math.floor(mulberry32(hashStr(showdownSeed(date)))() * DEFENSES.length)];
-export const showdownRand = (date, lineup) =>
-  mulberry32(hashStr(`${showdownSeed(date)}|${SLOTS.map((s) => `${lineup[s].id}:${lineup[s].finish}`).join(",")}`));
+export function showdownRand(date, lineup) {
+  const draws = [];
+  for (const slot of SLOTS) {
+    const own = mulberry32(hashStr(`${showdownSeed(date)}|card${lineup[slot].id}`));
+    draws.push(own(), own());
+  }
+  let i = 0;
+  return () => draws[i++];
+}
 export function showdownScore(date, lineup) {
   const result = scoreBattle(lineup, showdownDefense(date), showdownRand(date, lineup));
   return { ...result, score: result.offense };

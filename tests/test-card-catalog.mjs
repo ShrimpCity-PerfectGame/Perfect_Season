@@ -64,6 +64,35 @@ const same = mergeCatalog(cat, rows);
 eq(same.added, 0, "an unchanged pool adds nothing");
 eq(JSON.stringify(same.cards), JSON.stringify(cat.cards), "and leaves the file as it was");
 
+// ---------- 3. The rebuilds that would quietly corrupt it (found in review, 2026-11-13) ----------
+const pidOf = (res, name, season) => res.cards.find((c) => c[at.name] === name && c[at.season] === season)[at.pid];
+const refuses = (fn) => { try { fn(); return false; } catch { return true; } };
+// A real rebuild renumbers the name array. Every index shifts; nobody's pid may.
+const shifted = mergeCatalog(cat, [...rows.map((r) => ({ ...r, id: r.id + 7 })), { ...src, id: src.id + 7, season: 2026 }]);
+eq(shifted.added, 1, "a renumbered pool adds only the new season");
+eq(shifted.cards.at(-1)[at.pid], byKey.get(keyOf(src.name, src.season, src.team))[at.pid], "and the new season still finds its player");
+// A man with ONE card whose best season moves: his old row leaves, a new one arrives. Still one man.
+const solo = rows.find((r) => rows.filter((o) => o.id === r.id).length === 1 && rows.filter((o) => o.name === r.name).length === 1);
+const soloPid = byKey.get(keyOf(solo.name, solo.season, solo.team))[at.pid];
+const movedOn = mergeCatalog(cat, [...rows.filter((r) => r !== solo), { ...solo, season: 2026 }]);
+eq(pidOf(movedOn, solo.name, 2026), soloPid, `${solo.name}'s only card moving season keeps his pid`);
+eq(movedOn.left, 1, "and the rebuild reports the row that left");
+eq(movedOn.byName.length, 1, "and reports that it matched him by name, for a human to check");
+// A new man with the name of a player who is still in the pool is NOT that player.
+const pinned = rows.find((r) => rows.filter((o) => o.name === r.name).length >= 1 && r.name === solo.name);
+const stillHere = mergeCatalog(cat, [...rows, { ...pinned, id: 999997, season: 2026, team: pinned.team === "DAL" ? "NYG" : "DAL" }]);
+ok(stillHere.cards.at(-1)[at.pid] !== soloPid, "a namesake of a player still in the pool is a new player");
+// Two orphaned men with one name: nothing can tell which the new row is. Refuse rather than guess.
+const twins = rows.filter((r) => r.name === "Adrian Peterson");
+ok(refuses(() => mergeCatalog(cat, [...rows.filter((r) => !twins.includes(r)), { ...twins[0], id: 999996, season: 2026 }])), "an ambiguous namesake refuses to build");
+// One name index carrying two players' cards means the pool merged two men. Refuse.
+ok(refuses(() => mergeCatalog(cat, rows.map((r) => (r.name === "Adrian Peterson" ? { ...r, id: 424242 } : r)))), "two players under one index refuses to build");
+// A team code changing, or any systematic respelling, would re-add every card it touches as a duplicate.
+// New cards may only be NEWER than the catalog unless the builder is told otherwise.
+ok(refuses(() => mergeCatalog(cat, rows.map((r) => (r.team === "LV" ? { ...r, team: "OAK" } : r)))), "re-keying old seasons refuses to build");
+const forced = mergeCatalog(cat, rows.map((r) => (r.team === "LV" ? { ...r, team: "OAK" } : r)), { allowOld: true });
+ok(forced.added > 50 && forced.left === forced.added, "...unless told to, and then it says how many left and arrived");
+
 let threw = false;
 try { mergeCatalog(cat, [...rows, rows[3]]); } catch { threw = true; }
 ok(threw, "a duplicate key refuses to build");
