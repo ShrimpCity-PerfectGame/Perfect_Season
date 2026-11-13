@@ -70,5 +70,46 @@ if (need("initDefenses")) {
   C.initDefenses(pool);
 }
 
+// ---------- 3. What a legal lineup is ----------
+// The best card at each named slot, then the two best non-quarterbacks left whose player is not already in.
+const byRating = [...all].sort((a, b) => b.rating - a.rating || a.id - b.id);
+const good = {};
+const usedPids = new Set();
+for (const slot of SLOTS) {
+  const c = byRating.find((x) => !usedPids.has(x.pid) && (slot.startsWith("FLEX") ? x.pos !== "QB" : x.pos === slot));
+  good[slot] = { id: c.id, finish: "base" };
+  usedPids.add(c.pid);
+}
+if (need("lineupProblem")) {
+  const owning = (lineup) => new Map(Object.values(lineup).map((e) => [C.ownKey(e.id, e.finish), 1]));
+  eq(C.FINISHES.join(), "base,silver,gold,prism", "the four finishes");
+  eq(JSON.stringify(C.FINISH_BONUS), JSON.stringify({ base: 0, silver: 1, gold: 2, prism: 3 }), "what each is worth");
+  eq(C.ownKey(412, "gold"), "412:gold", "an ownership key");
+  eq(C.lineupProblem(good, null), null, "a legal lineup passes");
+  eq(C.lineupProblem(good, owning(good)), null, "and passes when owned");
+  eq(C.lineupProblem(good, new Map()), "not_owned", "an empty collection owns nothing");
+  eq(C.lineupProblem(good, new Map([...owning(good)].map(([k]) => [k, 0]))), "not_owned", "a count of zero is not owning it");
+  // Owning the Base copy is not owning the Gold one.
+  eq(C.lineupProblem({ ...good, QB: { ...good.QB, finish: "gold" } }, owning(good)), "not_owned", "finish is part of what you own");
+  const { QB: _qb, ...noQb } = good;
+  eq(C.lineupProblem(noQb, null), "incomplete", "a missing slot");
+  eq(C.lineupProblem({ ...good, QB: undefined }, null), "incomplete", "a slot set to nothing");
+  eq(C.lineupProblem({ ...good, FLEX1: good.QB }, null), "bad_slot", "a quarterback cannot play Flex");
+  eq(C.lineupProblem({ ...good, WR: good.TE, TE: good.WR }, null), "bad_slot", "a tight end is not a receiver");
+  eq(C.lineupProblem({ ...good, FLEX2: { ...good.RB } }, null), "same_player", "one card, one slot");
+  // Two different seasons of one man are still one man.
+  const twice = all.find((c) => c.pos === "RB" && all.some((o) => o.pid === c.pid && o.id !== c.id && o.pos === "RB"));
+  const other = all.find((o) => o.pid === twice.pid && o.id !== twice.id && o.pos === "RB");
+  eq(C.lineupProblem({ ...good, RB: { id: twice.id, finish: "base" }, FLEX1: { id: other.id, finish: "base" } }, null), "same_player", "two seasons of one man");
+  // Things only a modified client would send. None of them may throw.
+  eq(C.lineupProblem({ ...good, RB: { id: 999999, finish: "base" } }, null), "unknown_card", "an id that is not a card");
+  eq(C.lineupProblem({ ...good, RB: { id: "7", finish: "base" } }, null), "unknown_card", "an id that is a string");
+  eq(C.lineupProblem({ ...good, RB: { ...good.RB, finish: "diamond" } }, null), "bad_finish", "a finish that does not exist");
+  eq(C.lineupProblem({ ...good, RB: { ...good.RB, finish: "constructor" } }, null), "bad_finish", "a finish that is an object property");
+  eq(C.lineupProblem({ ...good, RB: "x" }, null), "malformed", "an entry that is not an object");
+  eq(C.lineupProblem({ ...good, K: good.RB }, null), "malformed", "a slot that does not exist");
+  for (const junk of [null, undefined, "x", 7, [], true]) eq(C.lineupProblem(junk, null), "malformed", `junk input ${JSON.stringify(junk)}`);
+}
+
 console.log(fails ? `\n${fails} FAILED` : "card logic: all checks passed");
 process.exit(fails ? 1 : 0);

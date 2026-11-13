@@ -11,6 +11,8 @@
 //
 // The reference is CARDS.md; the design is docs/superpowers/specs/2026-11-13-card-collection-design.md.
 
+import { SLOTS, fits, hashStr, mulberry32 } from "./game-logic.mjs";
+
 // ---------- Cards ----------
 export let CARDS = new Map(); // id -> card
 
@@ -113,4 +115,44 @@ export function initDefenses(versusPool) {
   DEFENSES = list;
   defenseIndex = new Map(list.map((d) => [d.key, d]));
   return DEFENSES.length;
+}
+
+// ---------- Lineups ----------
+// The draft's own six slots, so nobody learns a second shape: QB, RB, WR, TE and two Flex (anyone but a
+// quarterback). A lineup is { [slot]: { id, finish } } - a card AND the finish of the copy being played, since
+// a Gold copy and a Base copy of one card are owned separately and score differently.
+export const FINISHES = ["base", "silver", "gold", "prism"];
+// What a finish adds to the card's rating in a battle. Small on purpose: a good matchup is worth about ten, so
+// a finish is a flex and a tiebreaker and never a substitute for the right lineup.
+export const FINISH_BONUS = { base: 0, silver: 1, gold: 2, prism: 3 };
+export const ownKey = (id, finish) => `${id}:${finish}`;
+
+// null when the lineup may be played, otherwise the reason it may not. The first reason found wins, in the
+// order below, and every one of them is a string the caller can map to a sentence.
+//
+// `owned` is a Map of ownKey -> count, or null to skip the ownership question (the tests and a bot building a
+// lineup out of a known collection have no use for it).
+//
+// THIS MUST NEVER THROW. It is the door a modified browser knocks on, so every shape it could be handed -
+// null, a string, an array, an id that is a word, a finish named "constructor" - has to come back as a reason.
+// scoreBattle below trusts its input completely and is only ever called with a lineup this has passed.
+export function lineupProblem(lineup, owned) {
+  if (lineup === null || typeof lineup !== "object" || Array.isArray(lineup)) return "malformed";
+  for (const key of Object.keys(lineup)) if (!SLOTS.includes(key)) return "malformed";
+  for (const slot of SLOTS) if (lineup[slot] == null) return "incomplete";
+  for (const slot of SLOTS) if (typeof lineup[slot] !== "object" || Array.isArray(lineup[slot])) return "malformed";
+  for (const slot of SLOTS) if (!CARDS.has(lineup[slot].id)) return "unknown_card";
+  for (const slot of SLOTS) if (!FINISHES.includes(lineup[slot].finish)) return "bad_finish";
+  for (const slot of SLOTS) if (!fits(CARDS.get(lineup[slot].id).pos, slot)) return "bad_slot";
+  // One MAN, one slot - by pid, so two seasons of the same player cannot both start.
+  const men = new Set();
+  for (const slot of SLOTS) {
+    const pid = CARDS.get(lineup[slot].id).pid;
+    if (men.has(pid)) return "same_player";
+    men.add(pid);
+  }
+  if (owned) {
+    for (const slot of SLOTS) if (!(owned.get(ownKey(lineup[slot].id, lineup[slot].finish)) >= 1)) return "not_owned";
+  }
+  return null;
 }
