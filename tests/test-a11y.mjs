@@ -73,6 +73,9 @@ const SCREENS = [
   // Cards (CARDS.md): the collection - a grid of cards that are each one labelled image - and the starter panel.
   ["the card collection", "?screen=cards", null],
   ["the card area before a starter deck", "?screen=cards&starter=0", null],
+  // The pack shop, with a pack's contents open: three tables of odds, and a pack nobody can afford.
+  ["the pack shop", "?screen=cards&tab=packs&inside=1&coins=300", null],
+  ["the pack shop with a pack sold out", "?screen=cards&tab=packs&soldout=1&coins=9000", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {

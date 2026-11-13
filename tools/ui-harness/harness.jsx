@@ -744,9 +744,11 @@ async function setUpGuess(howMany, finish) {
 }
 
 // ---------- screen=cards: the card area ----------
+// &tab=packs is the pack shop (&coins=N for the wallet, &inside=1 with a pack's odds open, &soldout=1).
 // ?starter=0 is an account that has not opened its deck (the starter panel); the default is a collection with
 // a starter deck and one showpiece in each finish, so every edge and the count badge are on screen at once.
 function CardsPreview({ userId }) {
+  const [balance, setBalance] = useState(Number(params.get("coins") ?? 2000));
   return (
     <div className="ps">
       <style>{APP_CSS}</style>
@@ -754,7 +756,8 @@ function CardsPreview({ userId }) {
         <div className="wrap">
           <h1 className="vh">Cards</h1>
           <CardsScreen userId={userId} isGuest={false} onBack={() => console.log("back")}
-            onNeedsAccount={(why) => console.log("needs account", why)} onHide={() => console.log("hide")} />
+            onNeedsAccount={(why) => console.log("needs account", why)} onHide={() => console.log("hide")}
+            balance={balance} onBalance={setBalance} initialTab={params.get("tab") || "collection"} />
         </div>
       </main>
     </div>
@@ -763,6 +766,10 @@ function CardsPreview({ userId }) {
 async function setUpCards(withDeck) {
   const { data } = await mock.auth.signUp({ email: "cards@harness.test", password: "harness-only", options: { data: { username: "shrimpcity" } } });
   const uid = data.user.id;
+  // &coins=N: what the wallet holds for the pack shop (default 2,000). The account arrives with 250.
+  const extra = Math.max(0, Math.floor(Number(params.get("coins") ?? 2000)) || 0) - mock._wallet.balanceOf(uid);
+  if (extra > 0) mock._wallet.apply(uid, extra, "season", "HARNESS-CARDS");
+  if (params.get("soldout") === "1") mock._cards.packs.get("pack-legends").stock_left = 0;
   if (withDeck) {
     const seeded = (() => { let a = 20261113; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();
     mock._cards.grantCards(uid, "starter", CL.starterDeck(seeded).map((c, i) => ({ ref: `starter:${i}`, card: c.id, finish: c.finish })));
@@ -779,6 +786,8 @@ async function setUpCards(withDeck) {
   if (params.get("screen") === "cards") {
     const uid = await setUpCards(params.get("starter") !== "0");
     createRoot(document.getElementById("root")).render(<CardsPreview userId={uid} />);
+    // &tab=packs&inside=1 also opens the first pack's contents, so the odds tables are on screen.
+    if (params.get("inside") === "1") setTimeout(() => [...document.querySelectorAll(".cd-pack .linkbtn")][0]?.click(), 900);
     return;
   }
   if (params.get("screen") === "guess") {

@@ -89,6 +89,9 @@ export function cardColours(card, data = skinData) {
 // that for the UI harness, which serves the repo itself and so finds them under /static/cards.
 const spriteBase = () => (typeof window !== "undefined" && window.__ps_card_base__) || "/cards";
 export const spriteFor = (card) => `${spriteBase()}/${card.archetype || ROLE_PLAYER}.png`;
+// A pack's picture. card-packs.mjs names it from the site root (/cards/packs/<id>.webp); this is that address
+// with the same movable base the sprites have, so the harness finds it too.
+export const packArt = (pack) => `${spriteBase()}${pack.art.replace(/^\/cards/, "")}`;
 
 // Painted sprites, remembered by pose and colours: a team's gunslinger is painted once however many cards wear
 // it, and a card that has been painted before starts painted (card-face.jsx asks paintedSprite first) instead

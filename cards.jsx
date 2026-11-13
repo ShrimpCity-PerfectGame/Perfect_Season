@@ -1,4 +1,4 @@
-// The card area: your starter deck and your collection. See CARDS.md.
+// The card area: your starter deck, your collection, and the pack shop. See CARDS.md.
 //
 // A screen in its own file, like century.jsx and shop.jsx: it styles only its own cd- prefix (the card face's
 // stylesheet rides along), reuses the app's .btn / .note / .panel, and never imports perfect-season.jsx back.
@@ -9,12 +9,17 @@
 //   account      signed out, or a guest: cards are for accounts
 //   starter      an account that has not opened its starter deck
 //   collection   the cards
+// An account also gets two tabs, Collection and Packs. The pack shop (PackShop, below) has the same three-way
+// honesty about its own read: loading, could-not-load, and the shelf.
 // `error` is its own state on purpose. A read that failed is not an empty collection: collapsing the two would
 // offer a player with fifty cards a starter deck they opened last week (storage-cards.js says the same).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMyCards, claimStarter, CARD_REFUSALS } from "./storage.js";
+import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId } from "./storage.js";
 import { loadCardData } from "./card-data.mjs";
-import { CARDS } from "./card-logic.mjs";
+import { CARDS, FINISHES } from "./card-logic.mjs";
+import { PACKS, packCards, packOdds } from "./card-packs.mjs";
+import { Coins } from "./cosmetics.jsx";
+import { packArt } from "./card-sprites.mjs";
 import { CardFace, CARD_FACE_CSS } from "./card-face.jsx";
 
 // Every reason claimStarter can answer with, as a sentence. A reason missing from here would reach the player
@@ -38,6 +43,204 @@ export const CARD_SENTENCES = {
 };
 export const CARD_SENTENCE_KEYS = [...CARD_REFUSALS, "offline", "network"];
 
+// The same reasons, as the PACK SHOP says them. Most are CARD_SENTENCES' own; the ones below are about a deck
+// there and a purchase here. Three of them - offline, network and server - mean the answer is UNKNOWN, not no:
+// the pack may have been bought and its answer lost. The screen keeps that purchase's open id, so trying again
+// asks about the SAME purchase, and the sentence may promise "never charged twice" because buy_pack keeps it.
+const UNKNOWN_OUTCOME = "We couldn't confirm that purchase. Try again: if the pack was already bought you'll get those same cards, and you are never charged twice.";
+export const PACK_SENTENCES = {
+  ...CARD_SENTENCES,
+  signed_out: "You've been signed out. Sign in again to open packs. Nothing was charged.",
+  no_profile: "This account hasn't picked a name yet. Pick one and the pack shop opens. Nothing was charged.",
+  guest_not_allowed: "Packs are for accounts. Keep your seasons from the Account tab and they open up.",
+  duplicate: "That pack was already opened.",
+  server: UNKNOWN_OUTCOME,
+  offline: UNKNOWN_OUTCOME,
+  network: UNKNOWN_OUTCOME,
+};
+const OUTCOME_UNKNOWN = ["server", "offline", "network"];
+
+const FINISH_NAME = { base: "Base", silver: "Silver", gold: "Gold", prism: "Prism" };
+// A chance as a player reads it: "12%", "1.4%", "0.046%". Two figures below one percent, so a rare card never
+// rounds to a zero it is not.
+export function chanceText(chance) {
+  const pct = chance * 100;
+  if (pct >= 10) return `${Math.round(pct)}%`;
+  if (pct >= 1) return `${pct.toFixed(1)}%`;
+  if (pct <= 0) return "0%";
+  return `${Number(pct.toPrecision(2))}%`;
+}
+const BANDS = [[120, "Rated 120 or better"], [100, "Rated 100 to 119"], [80, "Rated 80 to 99"], [60, "Rated 60 to 79"], [-Infinity, "Rated under 60"]];
+// What "Who is inside" prints for a pack: the chance of each finish, the chance of each rating band, and every
+// card with its own chance, most likely LAST - the list opens on the cards people are hoping for.
+function packContents(pack) {
+  const odds = packOdds(pack);
+  const bands = BANDS.map(([min, label], i) => {
+    const max = i === 0 ? Infinity : BANDS[i - 1][0];
+    const inBand = odds.filter((o) => { const r = CARDS.get(o.id).rating; return r >= min && r < max; });
+    return { label, count: inBand.length, chance: inBand.reduce((s, o) => s + o.chance, 0) };
+  }).filter((b) => b.count > 0);
+  const cards = odds.map((o) => ({ ...o, card: CARDS.get(o.id) })).sort((a, b) => b.card.rating - a.card.rating || a.id - b.id);
+  return { bands, cards, finishes: FINISHES.filter((f) => pack.finish[f] > 0).map((f) => ({ name: FINISH_NAME[f], chance: pack.finish[f] })) };
+}
+const SHOWN_FIRST = 12;
+
+// The pack shop. `balance` is the wallet the app already holds (null while unknown); `onBalance` hands back the
+// balance a purchase answered with; `onOpened` tells the card area its collection has grown.
+export function PackShop({ balance, onBalance, onOpened }) {
+  const [shelf, setShelf] = useState(null); // null: loading. "error". Or [{ id, price, ... }]
+  const [inside, setInside] = useState(null); // the pack whose contents are open
+  const [all, setAll] = useState(false); // every card listed, rather than the first few
+  const [asking, setAsking] = useState(null); // the pack waiting on Confirm
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(null); // { pack, text }
+  const [pulled, setPulled] = useState(null); // { pack, cards, again }
+  // The purchase that has been sent and not yet answered for certain: { pack, id, price }. Kept across a failed
+  // attempt so the next one asks about the same purchase instead of making a second.
+  const pending = useRef(null);
+  const pulledRef = useRef(null);
+  const live = useRef(true);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+
+  const loadShelf = useCallback(async () => {
+    setShelf(null);
+    const got = await fetchPacks();
+    if (!live.current) return;
+    setShelf(got.status === "ok" ? got.packs : "error");
+  }, []);
+  useEffect(() => { loadShelf(); }, [loadShelf]);
+  useEffect(() => { if (pulled) pulledRef.current?.focus(); }, [pulled]);
+
+  async function buy(pack, row) {
+    if (busy) return;
+    if (!pending.current || pending.current.pack !== pack.id) pending.current = { pack: pack.id, id: newOpenId(), price: row.price };
+    const mine = pending.current;
+    setBusy(true); setNotice(null);
+    const res = await openPack(mine.pack, mine.id, mine.price);
+    if (!live.current) return;
+    setBusy(false);
+    if (res.ok) {
+      pending.current = null;
+      setAsking(null);
+      setPulled({ pack, cards: toCards(res.cards.map((c) => ({ ...c, count: 1 }))), again: res.duplicate });
+      setShelf((s) => (Array.isArray(s) ? s.map((r) => (r.id === pack.id ? { ...r, stockLeft: res.stockLeft } : r)) : s));
+      onBalance?.(res.balance);
+      onOpened?.();
+      return;
+    }
+    // A definite no ends this purchase; an unknown keeps its id for the next press.
+    if (!OUTCOME_UNKNOWN.includes(res.reason)) { pending.current = null; setAsking(null); }
+    setNotice({ pack: pack.id, text: PACK_SENTENCES[res.reason] || UNKNOWN_OUTCOME });
+    // The shelf is what was wrong about these three: read it again so the screen stops offering what it cannot sell.
+    if (["price_changed", "sold_out", "unavailable"].includes(res.reason)) {
+      const got = await fetchPacks();
+      if (live.current && got.status === "ok") setShelf(got.packs);
+    }
+  }
+
+  if (shelf === null) return <p className="note" role="status">Loading the pack shop…</p>;
+  if (shelf === "error") {
+    return (
+      <div className="panel" role="alert">
+        <p><b>Couldn't load the pack shop.</b> This is a connection problem — nothing has been bought.</p>
+        <button className="btn" onClick={loadShelf}>Try again</button>
+      </div>
+    );
+  }
+  const rows = new Map(shelf.map((r) => [r.id, r]));
+  const onSale = PACKS.filter((p) => rows.get(p.id)?.active);
+
+  return (
+    <div className="cd-shop">
+      <h2 className="cd-h cd-shop-h">Pack shop</h2>
+      {balance != null && <p className="cd-bal"><span>Your coins</span> <Coins amount={balance} size={18} /></p>}
+      {pulled && (
+        <section className="cd-fresh" aria-labelledby="cd-pulled-h">
+          <h2 className="cd-h" id="cd-pulled-h" tabIndex={-1} ref={pulledRef}>You pulled</h2>
+          {pulled.again && <p className="note">This pack was already bought — here are its cards again. You weren't charged twice.</p>}
+          <div className="cd-grid">
+            {pulled.cards.map((r) => <CardFace key={`p${r.id}:${r.finish}`} card={r.card} finish={r.finish} />)}
+          </div>
+        </section>
+      )}
+      {onSale.length === 0 && <p className="note">No packs are on sale right now.</p>}
+      <ul className="cd-packs">
+        {onSale.map((pack) => {
+          const row = rows.get(pack.id);
+          const soldOut = row.stockLeft != null && row.stockLeft <= 0;
+          const short = balance != null && balance < row.price ? row.price - balance : 0;
+          const isAsking = asking === pack.id;
+          const open = inside === pack.id;
+          const contents = open ? packContents(pack) : null;
+          return (
+            <li key={pack.id} className="cd-pack" data-pack={pack.id}>
+              <img className="cd-pack-art" src={packArt(pack)} alt="" width="122" height="200" loading="lazy" />
+              <div className="cd-pack-body">
+                <h3 className="cd-pack-h">{pack.name}</h3>
+                <p className="cd-pack-blurb">{pack.blurb}</p>
+                <p className="cd-pack-price"><Coins amount={row.price} size={16} />
+                  <span className="cd-pack-size"> · {pack.size} {pack.size === 1 ? "card" : "cards"}</span></p>
+                {row.stockLeft != null && (
+                  <p className="cd-pack-stock">{soldOut ? "Sold out" : `${row.stockLeft.toLocaleString("en-US")} of ${row.stockTotal.toLocaleString("en-US")} left`}</p>
+                )}
+                <div className="cd-pack-acts">
+                  {!isAsking && (
+                    <button className="btn solid" disabled={soldOut || short > 0 || busy} onClick={() => { setAsking(pack.id); setNotice(null); }}>
+                      {soldOut ? "Sold out" : "Open"}
+                    </button>
+                  )}
+                  {isAsking && (
+                    <>
+                      <button className="btn solid" disabled={busy} onClick={() => buy(pack, row)}>
+                        {busy ? "Opening…" : (pending.current?.pack === pack.id ? "Try again" : `Confirm: ${row.price.toLocaleString("en-US")} coins`)}
+                      </button>
+                      <button className="btn" disabled={busy} onClick={() => { setAsking(null); if (pending.current?.pack !== pack.id) setNotice(null); }}>Cancel</button>
+                    </>
+                  )}
+                  <button className="linkbtn" aria-expanded={open} aria-controls={open ? `cd-in-${pack.id}` : undefined}
+                    onClick={() => { setInside(open ? null : pack.id); setAll(false); }}>Who is inside</button>
+                </div>
+                {short > 0 && !soldOut && <p className="note">You need {short.toLocaleString("en-US")} more coins.</p>}
+                {notice?.pack === pack.id && <p className="note" role="alert">{notice.text}</p>}
+              </div>
+              {open && (
+                <div className="cd-inside" id={`cd-in-${pack.id}`}>
+                  <p className="cd-inside-lead">{contents.cards.length.toLocaleString("en-US")} cards can come out of this pack. Each card in it is drawn on its own,
+                    and its finish is rolled separately. No two cards in one pack are the same.</p>
+                  <div className="cd-odds">
+                    <table>
+                      <caption>Finish of each card</caption>
+                      <thead><tr><th scope="col">Finish</th><th scope="col">Chance</th></tr></thead>
+                      <tbody>{contents.finishes.map((f) => <tr key={f.name}><th scope="row">{f.name}</th><td>{chanceText(f.chance)}</td></tr>)}</tbody>
+                    </table>
+                    <table>
+                      <caption>Rating of each card</caption>
+                      <thead><tr><th scope="col">Cards</th><th scope="col">Chance</th></tr></thead>
+                      <tbody>{contents.bands.map((b) => <tr key={b.label}><th scope="row">{b.label} <span className="cd-n">({b.count.toLocaleString("en-US")})</span></th><td>{chanceText(b.chance)}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                  <table className="cd-list">
+                    <caption>Every card, best first — the chance that any one card in the pack is this one</caption>
+                    <thead><tr><th scope="col">Card</th><th scope="col">Rating</th><th scope="col">Chance</th></tr></thead>
+                    <tbody>
+                      {(all ? contents.cards : contents.cards.slice(0, SHOWN_FIRST)).map((o) => (
+                        <tr key={o.id}><th scope="row">{o.card.name} <span className="cd-n">{o.card.season} {o.card.team} {o.card.pos}</span></th><td>{Math.round(o.card.rating)}</td><td>{chanceText(o.chance)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!all && contents.cards.length > SHOWN_FIRST && (
+                    <button className="linkbtn" onClick={() => setAll(true)}>Show all {contents.cards.length.toLocaleString("en-US")} cards</button>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 const POSITIONS = ["All", "QB", "RB", "WR", "TE"];
 const FINISH_ORDER = { prism: 0, gold: 1, silver: 2, base: 3 };
 // Owned rows as cards to draw: best first. A row whose card is not in the catalog this browser loaded is
@@ -48,8 +251,10 @@ function toCards(rows) {
     .sort((a, b) => b.card.rating - a.card.rating || FINISH_ORDER[a.finish] - FINISH_ORDER[b.finish] || a.id - b.id);
 }
 
-export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide }) {
+// initialTab is the UI harness's, so the pack shop can be looked at and audited without a click.
+export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, balance = null, onBalance, initialTab = "collection" }) {
   const [phase, setPhase] = useState("loading");
+  const [tab, setTab] = useState(initialTab === "packs" ? "packs" : "collection"); // "collection" | "packs"
   const [owned, setOwned] = useState([]);
   const [fresh, setFresh] = useState(null); // the eight just dealt, shown once above the collection
   const [busy, setBusy] = useState(false);
@@ -62,10 +267,22 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
   // came back and offered a guest a starter deck over the top of "cards are for accounts". Each load takes a
   // number and checks it is still the newest before it sets anything; unmounting retires them all.
   const latest = useRef(0);
-  const load = useCallback(async () => {
+  // `quiet` re-reads the collection WITHOUT passing through "loading" - for after a pack is opened, when the
+  // shop is on screen and must stay there. A quiet read that fails changes nothing: what is shown is still true.
+  const load = useCallback(async (quiet = false) => {
     const mine = ++latest.current;
     const current = () => latest.current === mine;
     if (!userId || isGuest) { setPhase("account"); return; }
+    if (quiet === true) {
+      try {
+        const got = await fetchMyCards();
+        if (!current() || got.status !== "ok") return;
+        const cards = toCards(got.cards);
+        setOwned(cards); setStale(cards.length < got.cards.length);
+        setPhase(got.starter ? "collection" : "starter");
+      } catch { /* what is on screen stays */ }
+      return;
+    }
     setPhase("loading");
     try {
       const [, got] = await Promise.all([loadCardData(), fetchMyCards()]);
@@ -117,8 +334,18 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
       {phase === "error" && (
         <div className="panel" role="alert">
           <p><b>Couldn't load your cards.</b> Nothing is lost — this is a connection problem, not an empty collection.</p>
-          <button className="btn" onClick={load}>Try again</button>
+          <button className="btn" onClick={() => load()}>Try again</button>
         </div>
+      )}
+
+      {(phase === "collection" || phase === "starter") && (
+        <div className="cd-tabs" role="group" aria-label="Cards">
+          <button className="cd-chip" aria-pressed={tab === "collection"} onClick={() => setTab("collection")}>Collection</button>
+          <button className="cd-chip" aria-pressed={tab === "packs"} onClick={() => setTab("packs")}>Packs</button>
+        </div>
+      )}
+      {(phase === "collection" || phase === "starter") && tab === "packs" && (
+        <PackShop balance={balance} onBalance={onBalance} onOpened={() => load(true)} />
       )}
 
       {phase === "account" && (
@@ -131,7 +358,7 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
         </div>
       )}
 
-      {phase === "starter" && (
+      {phase === "starter" && tab === "collection" && (
         <div className="panel cd-starter">
           <h2 className="cd-h">Your starter deck</h2>
           <p>Eight cards to get you going: a quarterback, a back, a receiver, a tight end and four more. After that, finishing
@@ -143,7 +370,7 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
 
       {/* The collection also shows under the starter panel when there is anything in it: a player can earn a
           daily card before ever opening the deck, and a card they were just shown must not then be missing. */}
-      {(phase === "collection" || (phase === "starter" && owned.length > 0)) && (
+      {tab === "collection" && (phase === "collection" || (phase === "starter" && owned.length > 0)) && (
         <>
           {fresh && fresh.length > 0 && (
             <section className="cd-fresh" aria-labelledby="cd-fresh-h">
@@ -211,7 +438,37 @@ export const CARDS_CSS = CARD_FACE_CSS + `
 .cd-earned{display:grid;justify-items:center;gap:10px;margin:18px 0 6px}
 .cd-earned-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:18px;margin:0;color:var(--ink)}
 .cd-earned .cd-card{--cd-w:150px}
+.cd-tabs{display:flex;gap:8px}
+/* "You pulled" takes focus so a screen reader lands on what just happened; it is not a control, so no ring. */
+.cd-h[tabindex="-1"]:focus{outline:none}
+.cd-shop{display:grid;gap:18px}
+.cd-shop-h{margin:0}
+.cd-bal{margin:0;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px}
+.cd-bal span{font-weight:600;color:var(--muted)}
+.cd-packs{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.cd-pack{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 16px;align-items:start;border-top:2px solid var(--line);padding-top:16px}
+.cd-pack-art{width:122px;height:auto;display:block}
+.cd-pack-body{display:grid;gap:6px;min-width:0}
+.cd-pack-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.02em;font-size:22px;line-height:1.1;margin:0;color:var(--ink)}
+.cd-pack-blurb,.cd-pack-price,.cd-pack-stock{margin:0;color:var(--ink)}
+.cd-pack-blurb{color:var(--muted);font-size:14px;line-height:1.4}
+.cd-pack-price{font-weight:800;display:flex;align-items:center;flex-wrap:wrap}
+.cd-pack-size{font-weight:600;color:var(--muted);white-space:pre}
+.cd-pack-stock{font-size:13px;font-weight:700}
+.cd-pack-acts{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:4px}
+.cd-pack .note{margin:0}
+.cd-inside{grid-column:1 / -1;display:grid;gap:14px;padding:12px 0 4px;min-width:0}
+.cd-inside-lead{margin:0;font-size:14px;line-height:1.45;color:var(--muted)}
+.cd-odds{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px 24px}
+.cd-inside table{border-collapse:collapse;width:100%;font-size:14px;color:var(--ink)}
+.cd-inside caption{text-align:left;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.04em;padding-bottom:6px;color:var(--ink)}
+.cd-inside th,.cd-inside td{text-align:left;padding:5px 0;border-top:1px solid var(--line);font-weight:500;vertical-align:baseline}
+.cd-inside thead th{font-size:12px;font-weight:700;color:var(--muted);border-top:0}
+.cd-inside td{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:12px}
+.cd-inside thead th:not(:first-child){text-align:right;padding-left:12px}
+.cd-n{color:var(--muted);font-size:12px;white-space:nowrap}
 @media (max-width:400px){
+  .cd-pack-art{width:88px}
   .cd-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 8px}
   .cd-grid .cd-card{--cd-w:min(150px,calc((100vw - 48px) / 2))}
 }

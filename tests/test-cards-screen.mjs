@@ -280,5 +280,134 @@ await runTest("an Unlimited season shows no card", async () => {
   assert(!earned() && auth._cards.owned(uid).length === 0, "no card block and no card");
 });
 
+// ---------- The pack shop ----------
+const shopTab = () => [...container.querySelectorAll(".cd-tabs .cd-chip")].find((b) => b.textContent === "Packs");
+const packEl = (id) => container.querySelector(`[data-pack="${id}"]`);
+const packBtn = (id, needle) => [...packEl(id).querySelectorAll("button")].find((b) => b.textContent.includes(needle));
+const packAlert = (id) => packEl(id)?.querySelector("[role='alert']")?.textContent || "";
+async function openShop() { await openCards(); assert(shopTab(), "an account sees a Packs tab"); await click(shopTab()); await settle(); }
+let pat;
+
+await runTest("the pack shop: three packs, their prices, and exactly what is inside", async () => {
+  window.storage = makeStorage(); await remount();
+  pat = await signUp("pat@cards.test", "pat");
+  auth._wallet.apply(pat, 750, "season", "test"); // 1,000 with the welcome coins
+  await remount();
+  await openShop();
+  assert([...container.querySelectorAll("[data-pack]")].map((el) => el.dataset.pack).join() === "pack-standard,pack-air-raid,pack-legends", "the three packs, in shelf order");
+  assert(container.querySelector(".cd-bal")?.textContent.replace(/\s+/g, " ").includes("1,000"), "the balance is on the shelf: " + container.querySelector(".cd-bal")?.textContent);
+  assert(packEl("pack-standard").textContent.includes("150") && packEl("pack-standard").textContent.includes("3 cards"), "Standard: 150 for three cards");
+  assert(packEl("pack-legends").textContent.includes("5,000 of 5,000 left"), "the limited pack says how many are left");
+  assert(packEl("pack-standard").querySelector("img").getAttribute("alt") === "", "the picture is decoration: the name beside it is what is read");
+  assert(packBtn("pack-legends", "Open").disabled && packEl("pack-legends").textContent.includes("You need 500 more coins"), "a pack the wallet cannot reach says how far short it is");
+  assert(!button("Open your starter deck"), "the shop is its own tab: the starter panel is on the other one");
+
+  const who = packBtn("pack-standard", "Who is inside");
+  assert(who.getAttribute("aria-expanded") === "false" && !who.hasAttribute("aria-controls"), "closed to begin with, and pointing at nothing that is not there");
+  await click(who); await flush();
+  const inside = packEl("pack-standard").querySelector(".cd-inside");
+  assert(who.getAttribute("aria-expanded") === "true" && inside && inside.id === who.getAttribute("aria-controls"), "it opens, and the button says what it controls");
+  const text = inside.textContent;
+  assert(text.includes("3,124 cards can come out"), "how many cards: " + text.slice(0, 60));
+  for (const want of ["Base70%", "Silver22%", "Gold7.0%", "Prism1.0%"]) assert(text.replace(/\s+/g, "").includes(want), "the finish odds are printed: " + want);
+  assert(/Rated 120 or better \(78\)/.test(text) && /Rated under 60/.test(text), "and the odds by rating");
+  assert(inside.querySelectorAll(".cd-list tbody tr").length === 12, "the twelve best cards first");
+  await click([...inside.querySelectorAll("button")].find((b) => b.textContent.includes("Show all"))); await flush();
+  assert(packEl("pack-standard").querySelectorAll(".cd-list tbody tr").length === 3124, "and every card on request - the odds are published in full");
+  await click(who); await flush();
+  assert(!packEl("pack-standard").querySelector(".cd-inside"), "and it closes again");
+
+  const { chanceText } = await (await import("./helpers.mjs")).loadModule("cards.jsx");
+  assert(chanceText(0.7) === "70%" && chanceText(0.07) === "7.0%" && chanceText(0.000025) === "0.0025%" && chanceText(0) === "0%", "a rare chance never rounds to a zero it is not");
+});
+
+await runTest("opening a pack: confirm first, then the cards, the coins and the collection", async () => {
+  await click(packBtn("pack-standard", "Open")); await flush();
+  assert(auth._wallet.balanceOf(pat) === 1000 && auth._cards.owned(pat).length === 0, "Open alone buys nothing");
+  assert(packBtn("pack-standard", "Confirm: 150 coins") && packBtn("pack-standard", "Cancel"), "it asks first, with the price in the button");
+  await click(packBtn("pack-standard", "Cancel")); await flush();
+  assert(packBtn("pack-standard", "Open") && auth._wallet.balanceOf(pat) === 1000, "and Cancel is a real way out");
+
+  await click(packBtn("pack-standard", "Open")); await flush();
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
+  assert(auth._wallet.balanceOf(pat) === 850, "150 coins left the wallet");
+  assert(container.querySelector("#cd-pulled-h")?.textContent === "You pulled" && container.querySelectorAll(".cd-fresh [data-card]").length === 3, "the three pulled are shown");
+  assert(document.activeElement === container.querySelector("#cd-pulled-h"), "and focus lands on them, so a screen reader hears what happened");
+  assert(container.querySelector(".cd-bal").textContent.includes("850"), "the shelf's balance moved: " + container.querySelector(".cd-bal").textContent);
+  assert(packBtn("pack-standard", "Open") && !packBtn("pack-standard", "Confirm"), "and the pack is back to Open, not left on Confirm");
+  await click([...container.querySelectorAll(".cd-tabs .cd-chip")].find((b) => b.textContent === "Collection")); await settle();
+  assert(container.querySelector("#cd-coll-h")?.textContent === "3 cards", "the collection has them without a reload: " + container.querySelector("#cd-coll-h")?.textContent);
+  assert(button("Open your starter deck"), "and buying a pack did not cost the starter deck");
+});
+
+await runTest("a purchase whose answer is lost is the same purchase when tried again", async () => {
+  await click(shopTab()); await settle();
+  auth._cards.openFails = true;
+  await click(packBtn("pack-standard", "Open")); await flush();
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
+  assert(auth._wallet.balanceOf(pat) === 700, "the pack WAS bought - only the answer was lost");
+  assert(/never charged twice/.test(packAlert("pack-standard")) && !/Nothing was charged/.test(packAlert("pack-standard")), "the screen says it does not know, and never claims nothing was charged: " + packAlert("pack-standard"));
+  assert(packBtn("pack-standard", "Try again"), "and offers to try again");
+  await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
+  assert(auth._wallet.balanceOf(pat) === 700, "trying again charged nothing more");
+  assert(container.querySelectorAll(".cd-fresh [data-card]").length === 3 && container.querySelector(".cd-fresh").textContent.includes("weren't charged twice"), "and handed over that pack's cards, saying so");
+  assert(auth._cards.owned(pat).reduce((n, o) => n + o.count, 0) === 6, "two packs' cards in all - not three");
+});
+
+await runTest("what the shop refuses, in words, and what it does next", async () => {
+  // The price went up after the shelf was read: refused, said, and the new price shown.
+  auth._cards.packs.get("pack-standard").price = 200;
+  await click(packBtn("pack-standard", "Open")); await flush();
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
+  assert(auth._wallet.balanceOf(pat) === 700, "nothing charged at a price nobody agreed to");
+  assert(/price has gone up/.test(packAlert("pack-standard")), "it says why: " + packAlert("pack-standard"));
+  assert(packEl("pack-standard").querySelector(".cd-pack-price").textContent.includes("200"), "and the shelf now shows the new price");
+  auth._cards.packs.get("pack-standard").price = 150;
+
+  // Sold out between looking and buying.
+  auth._wallet.apply(pat, 5000, "season", "test2"); await remount(); await openShop();
+  auth._cards.packs.get("pack-legends").stock_left = 0;
+  await click(packBtn("pack-legends", "Open")); await flush();
+  await click(packBtn("pack-legends", "Confirm")); await settle(); await settle();
+  assert(/sold out/i.test(packAlert("pack-legends")) && auth._wallet.balanceOf(pat) === 5700, "sold out, in a sentence, with nothing charged: " + packAlert("pack-legends"));
+  assert(packBtn("pack-legends", "Sold out")?.disabled, "and the button now says so and is off");
+  auth._cards.packs.get("pack-legends").stock_left = 5000;
+
+  // A pack taken off sale is not on the shelf at all.
+  auth._cards.packs.get("pack-air-raid").active = false;
+  await remount(); await openShop();
+  assert(!packEl("pack-air-raid") && packEl("pack-standard"), "an off-sale pack is not offered");
+  auth._cards.packs.get("pack-air-raid").active = true;
+
+  // The shelf that could not be read is not an empty shop.
+  auth._cards.packsReadFail = true;
+  await remount(); await openShop();
+  assert(/Couldn't load the pack shop/.test(container.querySelector(".cd-area [role='alert']")?.textContent || "") && !container.querySelector("[data-pack]"), "a failed read says so");
+  auth._cards.packsReadFail = false;
+  await click(button("Try again")); await settle();
+  assert(container.querySelectorAll("[data-pack]").length === 3, "and Try again brings the shelf");
+
+  // The server's switch off.
+  auth._cards.enabled = false;
+  await click(packBtn("pack-standard", "Open")); await flush();
+  await click(packBtn("pack-standard", "Confirm")); await settle();
+  assert(/aren't switched on/.test(packAlert("pack-standard")), "cards_off is a sentence here too: " + packAlert("pack-standard"));
+  auth._cards.enabled = true;
+});
+
+await runTest("every pack refusal has a sentence, and none blames the connection for a rule", async () => {
+  const { PACK_SENTENCES } = await (await import("./helpers.mjs")).loadModule("cards.jsx");
+  for (const key of [...CARD_REFUSALS, "offline", "network"]) assert(typeof PACK_SENTENCES[key] === "string" && PACK_SENTENCES[key].length > 15, `"${key}" has a pack sentence`);
+  for (const key of ["not_enough", "sold_out", "unavailable", "price_changed", "guest_not_allowed", "cards_off"]) assert(!/connection|try again/i.test(PACK_SENTENCES[key]), `"${key}" is a rule, not a fault to retry`);
+  // The three whose outcome is unknown must never say nothing was charged: something may have been.
+  for (const key of ["offline", "network", "server"]) assert(!/nothing was charged|wasn't charged/i.test(PACK_SENTENCES[key]) && /never charged twice/.test(PACK_SENTENCES[key]), `"${key}" does not claim to know`);
+});
+
+await runTest("a guest and a signed-out visitor get no pack shop", async () => {
+  await auth.auth.signOut(); await flush(); await remount();
+  await openCards();
+  assert(!shopTab() && !container.querySelector("[data-pack]"), "signed out: no Packs tab");
+});
+
 void cardBoardKey;
 console.log("test-cards-screen.mjs done");

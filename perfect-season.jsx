@@ -5815,6 +5815,7 @@ export default function PerfectSeason() {
             <CardsScreen
               key={userId || "anon"} userId={userId} isGuest={!!stats?.guest}
               onBack={() => openTab("home")} onHide={() => hideCards(true)}
+              balance={wallet?.balance ?? null} onBalance={onShopBalance}
               onNeedsAccount={(why) => {
                 setNotice(why === "guest"
                   ? "Cards are for accounts - a guest can be made again and again. Keep your seasons and they open up."
