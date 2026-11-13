@@ -54,6 +54,20 @@ import * as C from "../../century-logic.mjs";
 import { GuessScreen, GUESS_WIP } from "../../guess.jsx";
 import * as G from "../../guess-logic.mjs";
 import guessPool from "../../data/guess-pool.json";
+import { CardsScreen } from "../../cards.jsx";
+import * as CL from "../../card-logic.mjs";
+import cardCatalog from "../../data/cards.json";
+// Cards (CARDS.md). The app FETCHES the catalog and loads its sprites from /cards; the harness has neither a
+// /data nor a /cards, so the fetch is answered from the import and the sprites are found beside the repo's own
+// static/ folder. The recolouring needs a canvas it can read back, which a file:// page will not give - open
+// the harness over http (the "harness" entry in .claude/launch.json) to see cards in their team colours.
+CL.initCardData(cardCatalog);
+window.__ps_cards__ = true;
+window.__ps_card_base__ = "../../static/cards";
+const realFetch = window.fetch ? window.fetch.bind(window) : null;
+window.fetch = (url, opts) => (String(url).endsWith("/data/cards.json")
+  ? Promise.resolve({ ok: true, status: 200, json: async () => cardCatalog })
+  : realFetch(url, opts));
 // The app FETCHES this file in the browser (guess-pool.mjs); the harness is opened over file:// and has no
 // server to fetch it from, so it is imported and initialised here before anything mounts. Everything downstream
 // - the menu, the grid, tests/test-a11y.mjs's three entries - then sees a pool that is already there, which is
@@ -729,7 +743,44 @@ async function setUpGuess(howMany, finish) {
   return { uid: data.user.id, username: "shrimpcity", answer };
 }
 
+// ---------- screen=cards: the card area ----------
+// ?starter=0 is an account that has not opened its deck (the starter panel); the default is a collection with
+// a starter deck and one showpiece in each finish, so every edge and the count badge are on screen at once.
+function CardsPreview({ userId }) {
+  return (
+    <div className="ps">
+      <style>{APP_CSS}</style>
+      <main id="content">
+        <div className="wrap">
+          <h1 className="vh">Cards</h1>
+          <CardsScreen userId={userId} isGuest={false} onBack={() => console.log("back")}
+            onNeedsAccount={(why) => console.log("needs account", why)} onHide={() => console.log("hide")} />
+        </div>
+      </main>
+    </div>
+  );
+}
+async function setUpCards(withDeck) {
+  const { data } = await mock.auth.signUp({ email: "cards@harness.test", password: "harness-only", options: { data: { username: "shrimpcity" } } });
+  const uid = data.user.id;
+  if (withDeck) {
+    const seeded = (() => { let a = 20261113; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();
+    mock._cards.grantCards(uid, "starter", CL.starterDeck(seeded).map((c, i) => ({ ref: `starter:${i}`, card: c.id, finish: c.finish })));
+    const all = [...CL.CARDS.values()];
+    const pick = (name, season) => all.find((c) => c.name === name && c.season === season);
+    const show = [[pick("Tom Brady", 2007), "prism"], [pick("Adrian Peterson", 2012), "gold"], [pick("Antonio Gates", 2005), "silver"],
+      [pick("Devery Henderson", 2011), "base"], [pick("Devery Henderson", 2011), "base"], [pick("Devery Henderson", 2011), "base"]];
+    show.forEach(([card, finish], i) => card && mock._cards.grantCards(uid, "daily", [{ ref: `2026-10-${String(i + 1).padStart(2, "0")}`, card: card.id, finish }]));
+  }
+  return uid;
+}
+
 (async () => {
+  if (params.get("screen") === "cards") {
+    const uid = await setUpCards(params.get("starter") !== "0");
+    createRoot(document.getElementById("root")).render(<CardsPreview userId={uid} />);
+    return;
+  }
   if (params.get("screen") === "guess") {
     const finish = params.get("finish") === "1";
     const { uid, username, answer } = await setUpGuess(Number(params.get("guesses") || 4), finish);

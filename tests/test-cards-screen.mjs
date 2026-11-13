@@ -1,0 +1,192 @@
+// The card area, in the real app on the mock: the tile and the switch that hides it, the starter deck, the
+// collection, and the three things the screen must never get wrong - a read that failed shown as an empty
+// collection, a card the catalog does not know breaking the rest, and a switched-off server read as "check
+// your connection".
+import { readFileSync } from "node:fs";
+import {
+  setupDom, makeStorage, makeMockAuth, mount, flush, click, type, clickMode, findButtonByText, assert, runTest, waitForCrypto,
+} from "./helpers.mjs";
+import { CARD_REFUSALS } from "../storage-cards.js";
+import { CARDS, cardBoardKey } from "../card-logic.mjs";
+
+setupDom();
+window.storage = makeStorage();
+const auth = makeMockAuth();
+window.__ps_supabase__ = auth;
+window.__ps_cards__ = true;
+// The app fetches the catalog; in a test that is a file read.
+const catalog = JSON.parse(readFileSync(new URL("../data/cards.json", import.meta.url), "utf8"));
+let fetchFails = false;
+globalThis.fetch = window.fetch = async (url) => {
+  if (String(url).endsWith("/data/cards.json")) { if (fetchFails) throw new Error("offline"); return { ok: true, status: 200, json: async () => catalog }; }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
+
+let { container, reactRoot } = await mount();
+await flush();
+const remount = async () => { reactRoot.unmount(); ({ container, reactRoot } = await mount()); await flush(); };
+const button = (needle) => findButtonByText(container, needle);
+const cardsOnScreen = () => [...container.querySelectorAll("[data-card]")];
+const tile = () => [...container.querySelectorAll("button.mode")].find((b) => b.classList.contains("m-cards"));
+const settle = async () => { await flush(); await flush(); };
+
+// Signing up through the Account panel, exactly as tests/test-century-screen.mjs does.
+const panel = () => container.querySelector(".panel");
+const submit = (label) => [...panel().querySelectorAll("button")].find((b) => !b.hasAttribute("role") && b.textContent.includes(label));
+async function openAccount() { await click(findButtonByText(container, "Account") || findButtonByText(container, "Profile")); await flush(); }
+async function signUp(email, username) {
+  await auth.auth.signOut(); await flush();
+  await openAccount();
+  const create = findButtonByText(panel(), "Create account");
+  if (create?.hasAttribute("role")) { await click(create); await flush(); }
+  const [e, u, p, p2] = [...panel().querySelectorAll("input")];
+  await type(e, email); await type(u, username); await type(p, "Password1"); await type(p2, "Password1");
+  await click(submit("Create account")); await waitForCrypto(); await flush();
+  const { data } = await auth.auth.getSession();
+  assert(data?.session?.user?.id, "signed up as " + username);
+  return data.session.user.id;
+}
+async function goHome() { const b = [...container.querySelectorAll("button")].find((x) => x.textContent.trim() === "Modes"); if (b) { await click(b); await flush(); } }
+async function openCards() { await goHome(); assert(tile(), "the Cards tile is on Modes"); await click(tile()); await settle(); }
+
+await runTest("the tile follows the switch", async () => {
+  window.__ps_cards__ = false; await remount();
+  assert(!tile(), "with cards off there is no Cards tile");
+  window.__ps_cards__ = true; await remount();
+  assert(tile() && tile().textContent.includes("Cards"), "with cards on there is");
+  await clickMode(container, "Cards"); await settle();
+  assert(container.querySelector("h1.vh")?.textContent === "Cards", "and it opens the card area, which names itself");
+});
+
+await runTest("signed out, cards are for accounts", async () => {
+  await auth.auth.signOut(); await flush();
+  await openCards();
+  assert(container.textContent.includes("Cards are for accounts"), "it says so");
+  assert(!button("Open your starter deck") && cardsOnScreen().length === 0, "and offers no deck");
+  assert(button("Sign in"), "but a way to sign in");
+});
+
+let ann;
+await runTest("a new account opens a starter deck, once", async () => {
+  ann = await signUp("ann@cards.test", "ann");
+  await openCards();
+  const open = button("Open your starter deck");
+  assert(open, "the starter button is there: " + container.querySelector(".cd-area")?.textContent.slice(0, 120));
+  await click(open); await settle(); await settle();
+  assert(container.querySelector("#cd-fresh-h")?.textContent === "Your starter deck", "the eight just dealt are shown under their own heading");
+  assert(container.querySelectorAll(".cd-fresh [data-card]").length === 8, "all eight of them");
+  assert(container.querySelector("#cd-coll-h")?.textContent === "8 cards", "and the collection says 8 cards: " + container.querySelector("#cd-coll-h")?.textContent);
+  assert(auth._cards.owned(ann).reduce((n, o) => n + o.count, 0) === 8, "the account owns eight");
+  await remount(); await openCards();
+  assert(!button("Open your starter deck") && container.querySelector("#cd-coll-h")?.textContent === "8 cards", "coming back shows the collection, not the button");
+  assert(!container.querySelector(".cd-fresh"), "and the just-dealt section was for the moment it was dealt");
+  const ratings = [...container.querySelectorAll("section[aria-labelledby='cd-coll-h'] [data-card]")].map((el) => CARDS.get(Number(el.dataset.card)).rating);
+  assert(ratings.every((r, i) => i === 0 || ratings[i - 1] >= r), "best card first");
+});
+
+await runTest("the position filter", async () => {
+  const chip = (name) => [...container.querySelectorAll(".cd-chip")].find((b) => b.textContent === name);
+  assert(chip("All").getAttribute("aria-pressed") === "true", "All is pressed to begin with");
+  await click(chip("QB")); await flush();
+  const shown = cardsOnScreen();
+  assert(shown.length >= 1 && shown.every((el) => CARDS.get(Number(el.dataset.card)).pos === "QB"), "QB shows only quarterbacks");
+  assert(shown.every((el) => el.getAttribute("aria-label").includes("quarterback")), "and each one says so aloud");
+  assert(chip("QB").getAttribute("aria-pressed") === "true" && chip("All").getAttribute("aria-pressed") === "false", "the pressed state moved");
+  assert(container.querySelector("#cd-coll-h").textContent === "8 cards", "the count is the collection's, not the filter's");
+  await click(chip("All")); await flush();
+});
+
+await runTest("a read that failed is not an empty collection", async () => {
+  auth._cards.readFails = true;
+  await remount(); await openCards();
+  assert(container.textContent.includes("Couldn't load your cards."), "it says the load failed");
+  assert(button("Try again"), "and offers to try again");
+  assert(!button("Open your starter deck"), "it does NOT offer a starter deck to somebody who has one");
+  assert(!container.querySelector("#cd-coll-h") && cardsOnScreen().length === 0, "and does not claim a count");
+  auth._cards.readFails = false;
+  await click(button("Try again")); await settle();
+  assert(container.querySelector("#cd-coll-h")?.textContent === "8 cards", "Try again loads the collection");
+});
+
+await runTest("a catalog that will not load is the same honest failure", async () => {
+  const { _resetCardData } = await import("../card-data.mjs").catch(() => ({}));
+  // the app's own copy of card-data.mjs has already loaded the catalog for this page, as it would in a browser;
+  // a fresh page with the network down is what this models
+  fetchFails = true; _resetCardData?.();
+  await remount(); await openCards();
+  const failed = container.textContent.includes("Couldn't load your cards.");
+  fetchFails = false;
+  assert(failed || container.querySelector("#cd-coll-h"), "either it loaded from the page's memory or it said it could not - never a blank");
+});
+
+await runTest("a card the catalog does not know is skipped, and the rest still show", async () => {
+  auth._cards.tables.card_owned.push({ user_id: ann, card_id: 999999, finish: "gold", count: 1 });
+  await remount(); await openCards();
+  assert(cardsOnScreen().length === 8, "eight real cards are drawn");
+  assert(container.querySelector("#cd-coll-h").textContent === "8 cards", "and counted - the unknown one is not");
+  auth._cards.tables.card_owned.pop();
+});
+
+await runTest("copies stack and say how many", async () => {
+  const first = auth._cards.owned(ann)[0];
+  auth._cards.grantCards(ann, "daily", [{ ref: "2026-11-01", card: first.card_id, finish: first.finish }]);
+  await remount(); await openCards();
+  const el = container.querySelector(`[data-card="${first.card_id}"]`);
+  assert(el.querySelector(".cd-count")?.textContent === "x2" && el.getAttribute("aria-label").includes("2 copies"), "two copies show x2 and say so");
+  assert(container.querySelector("#cd-coll-h").textContent === "9 cards", "and count as two");
+});
+
+await runTest("a server that has cards switched off says so, in a sentence", async () => {
+  await signUp("bob@cards.test", "bob");
+  auth._cards.enabled = false;
+  await openCards();
+  await click(button("Open your starter deck")); await settle();
+  const alert = container.querySelector(".cd-starter [role='alert']");
+  assert(alert && /aren't switched on/.test(alert.textContent), "the reason is shown: " + alert?.textContent);
+  assert(!/connection/i.test(alert.textContent), "and it does not blame the connection");
+  assert(button("Open your starter deck") && !button("Open your starter deck").disabled, "the button is live again");
+  auth._cards.enabled = true;
+  await click(button("Open your starter deck")); await settle(); await settle();
+  assert(container.querySelector("#cd-coll-h")?.textContent === "8 cards", "and once it is on, the same button works");
+});
+
+await runTest("every refusal has a sentence", async () => {
+  const { CARD_SENTENCES, CARD_SENTENCE_KEYS } = await (await import("./helpers.mjs")).loadModule("cards.jsx");
+  for (const key of [...CARD_REFUSALS, "offline", "network"]) {
+    assert(CARD_SENTENCE_KEYS.includes(key) && typeof CARD_SENTENCES[key] === "string" && CARD_SENTENCES[key].length > 15, `"${key}" has a sentence`);
+  }
+  assert(!/connection/i.test(CARD_SENTENCES.cards_off + CARD_SENTENCES.guest_not_allowed + CARD_SENTENCES.server), "a rule is never worded as a fault in your connection");
+});
+
+await runTest("a guest is told cards are for accounts", async () => {
+  await auth.auth.signOut(); await flush();
+  await auth.auth.signInAnonymously(); await flush(); await remount();
+  await openCards();
+  assert(container.textContent.includes("Cards are for accounts") && button("Keep my seasons"), "the guest's own wording and way out");
+  assert(!button("Open your starter deck"), "and no deck");
+});
+
+await runTest("hiding the card area, and bringing it back", async () => {
+  await auth.auth.signOut(); await flush(); await remount();
+  await openCards();
+  await click(button("Hide cards")); await flush();
+  assert(!container.querySelector(".cd-area"), "hiding leaves the card area");
+  assert(!tile(), "the tile is gone from Modes");
+  const show = button("Show cards");
+  assert(show, "and the footer says how to bring it back");
+  await remount();
+  assert(!tile() && button("Show cards"), "the choice survives a reload");
+  await click(button("Show cards")); await flush();
+  assert(tile() && !button("Show cards"), "Show cards brings the tile back");
+  await remount();
+  assert(tile(), "and that survives a reload too");
+});
+
+await runTest("leaving the card area goes back to Modes", async () => {
+  await openCards();
+  await click(button("All modes")); await flush();
+  assert(!container.querySelector(".cd-area") && tile(), "All modes returns to Modes");
+});
+
+void cardBoardKey;
+console.log("test-cards-screen.mjs done");

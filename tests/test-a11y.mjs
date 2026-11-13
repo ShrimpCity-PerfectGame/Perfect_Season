@@ -70,6 +70,9 @@ const SCREENS = [
   ["Guess the Player", "?as=player", { tile: "Guess the Player" }],
   ["the Guess the Player grid", "?screen=guess", null],
   ["the Guess the Player result", "?screen=guess&finish=1", null],
+  // Cards (CARDS.md): the collection - a grid of cards that are each one labelled image - and the starter panel.
+  ["the card collection", "?screen=cards", null],
+  ["the card area before a starter deck", "?screen=cards&starter=0", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {
