@@ -129,7 +129,9 @@ export async function loadEdgeFunction(name) {
 
   let handler = null;
   globalThis.Deno = {
-    env: { get: (k) => ({ SUPABASE_URL: "http://edge.test", SUPABASE_ANON_KEY: "anon-key", SUPABASE_SERVICE_ROLE_KEY: "service-role-key" })[k] },
+    // globalThis.__edge_env__ adds to these per test, read at the moment of the call - which is how a function
+    // behind a secret (CARDS_ENABLED) is run with it set and with it missing.
+    env: { get: (k) => ({ SUPABASE_URL: "http://edge.test", SUPABASE_ANON_KEY: "anon-key", SUPABASE_SERVICE_ROLE_KEY: "service-role-key", ...(globalThis.__edge_env__ || {}) })[k] },
     serve: (h) => { handler = h; },
   };
   // A fresh module each time, so initGameData and Deno.serve run against this test's globals.

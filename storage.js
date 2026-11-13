@@ -583,6 +583,7 @@ export * from "./storage-versus.js";
 // ---------- Century (v2.9.0) ----------
 // The mode's rules are in century-logic.mjs; this is only the two boards and the submission.
 export * from "./storage-century.js";
+export * from "./storage-cards.js";
 // ---------- Guess the Player (v2.13.0) ----------
 // Rules in guess-logic.mjs; this is the two boards and the submission.
 export * from "./storage-guess.js";
