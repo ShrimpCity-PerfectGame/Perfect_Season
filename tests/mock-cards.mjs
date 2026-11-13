@@ -37,7 +37,7 @@ export function makeCards(state, { wallet = null } = {}) {
     packsReadFail: false, // makes a client select on card_packs answer with an error
 
     // public.buy_pack, raise for raise and in its order.
-    buyPack(userId, packId, open, cards) {
+    buyPack(userId, packId, open, cards, shownPrice = null) {
       const profile = state.profiles.get(userId);
       if (!profile) throw new Error("no_profile");
       if (profile.guest) throw new Error("guest_not_allowed");
@@ -57,6 +57,7 @@ export function makeCards(state, { wallet = null } = {}) {
         if (!good) throw new Error("bad_grant");
       }
       if (pack.stock_left != null && pack.stock_left <= 0) throw new Error("sold_out");
+      if (shownPrice != null && pack.price > shownPrice) throw new Error("price_changed");
       if (balance < pack.price) throw new Error("not_enough");
       if (pack.stock_left != null) pack.stock_left -= 1;
       if (wallet.apply(userId, -pack.price, "pack", open) !== -pack.price) throw new Error("purchase_conflict");
@@ -114,7 +115,7 @@ export function makeCards(state, { wallet = null } = {}) {
       const uid = state.currentUserId();
       if (!uid) return cardHttpError("signed_out", 401);
       if (!body || (body.action !== "starter" && body.action !== "open_pack")) return cardHttpError("malformed", 400);
-      if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string")) return cardHttpError("malformed", 400);
+      if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1)) return cardHttpError("malformed", 400);
       if (!api.enabled) return cardHttpError("cards_off", 403);
       const profile = state.profiles.get(uid);
       if (!profile) return cardHttpError("no_profile", 400);
@@ -128,9 +129,9 @@ export function makeCards(state, { wallet = null } = {}) {
         const pulled = api.nextPull || rollPack(pack, Math.random);
         api.nextPull = null;
         let bought;
-        try { bought = api.buyPack(uid, pack.id, body.open, pulled.map((c) => ({ card: c.id, finish: c.finish }))); }
+        try { bought = api.buyPack(uid, pack.id, body.open, pulled.map((c) => ({ card: c.id, finish: c.finish })), body.price); }
         catch (e) {
-          const status = { unavailable: 409, sold_out: 409, not_enough: 409, bad_open: 400, no_profile: 400, guest_not_allowed: 403 }[e?.message];
+          const status = { unavailable: 409, sold_out: 409, price_changed: 409, not_enough: 409, bad_open: 400, no_profile: 400, guest_not_allowed: 403 }[e?.message];
           return status ? cardHttpError(e.message, status) : cardHttpError("server", 500);
         }
         if (api.openFails) { api.openFails = false; return { data: null, error: { name: "FunctionsFetchError", message: "Failed to send" } }; }

@@ -17,11 +17,12 @@
 //   409 duplicate           the deck was already claimed. grant_cards is what knows: the eight refs are taken
 //   200 { ok, cards }       eight { id, finish }
 //
-// OPENING A PACK ({ action: "open_pack", pack, open }) answers the first six the same way, then:
+// OPENING A PACK ({ action: "open_pack", pack, open, price }) answers the first six the same way, then:
 //   400 unknown_pack        no pack by that id in card-packs.mjs
 //   400 bad_open            the open id is not one (8-36 letters, digits and hyphens)
 //   409 unavailable         the pack is off sale, or has no row
 //   409 sold_out            a limited pack with none left
+//   409 price_changed       the pack costs more now than `price`, which is what the buyer's screen showed
 //   409 not_enough          the wallet does not hold the price
 //   500 server              anything else buy_pack raised - logged, because it means this function has a bug
 //   200 { ok, cards, balance, stockLeft, duplicate }
@@ -89,8 +90,8 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "invalid JSON", reason: "malformed" }, 400); }
   if (body?.action !== "starter" && body?.action !== "open_pack") return json({ error: "unknown action", reason: "malformed" }, 400);
-  if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string")) {
-    return json({ error: "a pack and an open id are both needed", reason: "malformed" }, 400);
+  if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1)) {
+    return json({ error: "a pack, an open id and the price shown are all needed", reason: "malformed" }, 400);
   }
 
   if (!cardsEnabled()) return json({ error: "cards are not switched on here", reason: "cards_off" }, 403);
@@ -124,7 +125,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
 }
 // What buy_pack may refuse a purchase for, and the status each travels under. Anything it raises that is not
 // here (bad_grant, purchase_conflict) is this function's fault rather than the player's, and is a 500.
-const PACK_REFUSALS: Record<string, number> = { unavailable: 409, sold_out: 409, not_enough: 409, bad_open: 400, no_profile: 400, guest_not_allowed: 403 };
+const PACK_REFUSALS: Record<string, number> = { unavailable: 409, sold_out: 409, price_changed: 409, not_enough: 409, bad_open: 400, no_profile: 400, guest_not_allowed: 403 };
 
 async function openPack(service: any, userId: string, body: any, json: (body: unknown, status?: number) => Response) {
   // hasOwn, not a plain lookup: "constructor" is a key every object answers to.
@@ -138,6 +139,7 @@ async function openPack(service: any, userId: string, body: any, json: (body: un
     p_pack: pack.id,
     p_open: body.open,
     p_cards: pulled.map((c: any) => ({ card: c.id, finish: c.finish })),
+    p_price: body.price,
   });
   if (error || !data) {
     const said = String(error?.message || "");

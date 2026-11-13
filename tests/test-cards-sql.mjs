@@ -264,6 +264,29 @@ await runTest("the last one of a limited pack goes to one buyer", async () => {
   await owner("update card_packs set stock_left = 5000 where id = 'pack-legends'");
 });
 
+await runTest("a pack that got dearer since the buyer looked is refused, and a cheaper one is just cheaper", async () => {
+  const fresh = await freshDb();
+  const q = (sql, params) => fresh.query(sql, params).then((r) => r.rows);
+  const U = uuid(77);
+  await addAccount(fresh, { id: U, username: "pricey" });
+  await q("select wallet_apply($1, 1000, 'season', 'seed')", [U]);
+  const buy = async (open, shown) => {
+    try { return { data: (await q("select buy_pack($1, 'pack-standard', $2, $3::jsonb, $4) as r", [U, open, JSON.stringify([{ card: 1, finish: "base" }, { card: 2, finish: "base" }, { card: 3, finish: "base" }]), shown]))[0].r }; }
+    catch (e) { return { error: String(e?.message || e).replace(/^.*?([a-z_]+)$/s, "$1") }; }
+  };
+  const bal = async () => Number((await q("select balance from wallets where user_id = $1", [U]))[0].balance);
+  const start = await bal();
+  await q("update card_packs set price = 200 where id = 'pack-standard'");
+  const dearer = await buy("open-price-1", 150);
+  assert(dearer.error === "price_changed", "shown 150, now 200: " + JSON.stringify(dearer));
+  assert(await bal() === start && (await q("select count(*)::int as n from card_owned where user_id = $1", [U]))[0].n === 0, "nothing charged, nothing given");
+  await q("update card_packs set price = 100 where id = 'pack-standard'");
+  const cheaper = await buy("open-price-2", 150);
+  assert(cheaper.data?.price === 100 && await bal() === start - 100, "shown 150, now 100: charged 100: " + JSON.stringify(cheaper));
+  const unasked = await buy("open-price-3", null);
+  assert(unasked.data?.price === 100, "and with no shown price the row's is simply charged");
+});
+
 await runTest("who and what buy_pack refuses, with nothing taken", async () => {
   const before = JSON.stringify([await balanceOf(RICH), await ownedBy(RICH), await packLedger(RICH), await stockOf("pack-legends")]);
   assert((await buy(PGUEST, "pack-standard", "open-0010", three(1))).error === "guest_not_allowed", "a guest");

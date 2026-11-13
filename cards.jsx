@@ -33,6 +33,7 @@ export const CARD_SENTENCES = {
   bad_open: "That didn't go through. Reload the page and try again.",
   unavailable: "That pack isn't on sale right now. Nothing was charged.",
   sold_out: "That pack has sold out. Nothing was charged.",
+  price_changed: "That pack's price has gone up since this page loaded. Nothing was charged - the new price is showing now.",
   not_enough: "You don't have enough coins for that pack. Nothing was charged.",
 };
 export const CARD_SENTENCE_KEYS = [...CARD_REFUSALS, "offline", "network"];

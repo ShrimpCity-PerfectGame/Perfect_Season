@@ -208,7 +208,9 @@ on conflict (id) do nothing;
 --
 -- The card-claim Edge Function has already chosen the cards (card-packs.mjs's rollPack, with a cryptographic
 -- generator) and hands them over; everything that must not be the caller's word is decided here:
---   - the PRICE is this table's, read now. Whatever a screen showed, this is what is charged.
+--   - the PRICE is this table's, read now. p_price is what the buyer's screen SHOWED: a pack that has since
+--     become dearer is refused (price_changed) rather than charged at a price nobody agreed to. Cheaper is
+--     simply charged cheaper. Null skips the question - for a caller with no screen.
 --   - the STOCK is taken under a lock on the pack's row, so two buyers of the last one take turns.
 --   - the COUNT of cards must be exactly the pack's size.
 --   - the DEBIT goes through wallet_apply under (user, 'pack', open id), which is unique.
@@ -221,9 +223,10 @@ on conflict (id) do nothing;
 --
 -- It returns { duplicate, cards: [{ card, finish }], balance, stock_left, price } and raises, in this order:
 --   no_profile, guest_not_allowed, bad_open, unavailable (no such pack, or off sale), bad_grant (not exactly
---   `size` well-formed cards), sold_out, not_enough, purchase_conflict.
+--   `size` well-formed cards), sold_out, price_changed, not_enough, purchase_conflict.
 -- wallet_lock comes before anything is decided on the balance, as in every function that moves coins.
-create or replace function public.buy_pack(p_user uuid, p_pack text, p_open text, p_cards jsonb)
+drop function if exists public.buy_pack(uuid, text, text, jsonb);
+create or replace function public.buy_pack(p_user uuid, p_pack text, p_open text, p_cards jsonb, p_price integer default null)
 returns jsonb
 language plpgsql
 volatile
@@ -283,6 +286,9 @@ begin
   if v_pack.stock_left is not null and v_pack.stock_left <= 0 then
     raise exception 'sold_out' using errcode = 'P0001';
   end if;
+  if p_price is not null and v_pack.price > p_price then
+    raise exception 'price_changed' using errcode = 'P0001';
+  end if;
   if v_balance < v_pack.price then
     raise exception 'not_enough' using errcode = 'P0001';
   end if;
@@ -303,5 +309,5 @@ begin
 end;
 $$;
 
-revoke all on function public.buy_pack(uuid, text, text, jsonb) from public, anon, authenticated;
-grant execute on function public.buy_pack(uuid, text, text, jsonb) to service_role;
+revoke all on function public.buy_pack(uuid, text, text, jsonb, integer) from public, anon, authenticated;
+grant execute on function public.buy_pack(uuid, text, text, jsonb, integer) to service_role;

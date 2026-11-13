@@ -9,7 +9,7 @@ import { getClient } from "./storage-core.js";
 // one that is not here - a reason this list does not know is a rule that would read as "check your connection".
 const CARD_PAGE = 1000; // PostgREST's default ceiling on one select
 export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "cards_off", "duplicate", "malformed", "server",
-  "unknown_pack", "bad_open", "unavailable", "sold_out", "not_enough"];
+  "unknown_pack", "bad_open", "unavailable", "sold_out", "price_changed", "not_enough"];
 
 // A player's collection, and whether they have claimed their starter deck.
 //   { status: "ok", cards: [{ id, finish, count }], starter: boolean }
@@ -108,8 +108,9 @@ export function newOpenId() {
 // Buy and open a pack: { ok: true, cards: [{ id, finish }], balance, stockLeft, duplicate } or { ok: false, reason }.
 // "offline" and "network" mean the answer is UNKNOWN, not no: the purchase may have gone through. Ask again with
 // the same openId to find out.
-export async function openPack(packId, openId) {
-  const res = await callClaim({ action: "open_pack", pack: packId, open: openId });
+// `price` is the price the screen SHOWED; a pack that has become dearer since is refused, never charged.
+export async function openPack(packId, openId, price) {
+  const res = await callClaim({ action: "open_pack", pack: packId, open: openId, price });
   if (!res.ok) return res;
   const d = res.data;
   if (typeof d.balance !== "number") return { ok: false, reason: "server" };

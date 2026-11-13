@@ -111,36 +111,38 @@ await runTest("the pack shop: what is on sale, buying one, and asking again", as
   auth._cards.packsReadFail = true;
   assert((await fetchPacks()).status === "error", "a shelf that could not be read says so");
   auth._cards.packsReadFail = false;
-  assert((await openPack("pack-standard", newOpenId())).reason === "signed_out", "signed out, nothing is sold");
+  assert((await openPack("pack-standard", newOpenId(), 150)).reason === "signed_out", "signed out, nothing is sold");
 
   const uid = await signUp("pat@example.test", "pat"); // 250 welcome coins
   const id = newOpenId();
   assert(/^[A-Za-z0-9-]{8,36}$/.test(id) && id !== newOpenId(), "an open id is one the server accepts, and each is new: " + id);
-  const got = await openPack("pack-standard", id);
+  assert((await openPack("pack-standard", newOpenId(), 100)).reason === "price_changed", "a price lower than the row's is a price that went up");
+  assert((await openPack("pack-standard", newOpenId())).reason === "malformed", "and no price at all is not a purchase");
+  const got = await openPack("pack-standard", id, 150);
   assert(got.ok === true && got.cards.length === 3 && got.balance === 100 && got.duplicate === false && got.stockLeft === null, "three cards for 150: " + JSON.stringify(got).slice(0, 200));
   assert((await fetchMyCards()).cards.reduce((n, c) => n + c.count, 0) === 3, "and they are in the collection");
-  const poor = await openPack("pack-standard", newOpenId());
+  const poor = await openPack("pack-standard", newOpenId(), 150);
   assert(poor.ok === false && poor.reason === "not_enough", "100 coins does not buy another: " + JSON.stringify(poor));
-  assert((await openPack("pack-nope", newOpenId())).reason === "unknown_pack", "a pack that does not exist");
-  assert((await openPack("pack-standard", "x")).reason === "bad_open", "an id that is not one");
+  assert((await openPack("pack-nope", newOpenId(), 150)).reason === "unknown_pack", "a pack that does not exist");
+  assert((await openPack("pack-standard", "x", 150)).reason === "bad_open", "an id that is not one");
 
   // THE CASE THE OPEN ID EXISTS FOR: the purchase goes through and the answer never arrives.
   auth._wallet.apply(uid, 400, "season", "test");
   const lostId = newOpenId();
   auth._cards.openFails = true;
-  const lost = await openPack("pack-standard", lostId);
+  const lost = await openPack("pack-standard", lostId, 150);
   assert(lost.ok === false && lost.reason === "offline", "the answer was lost: " + JSON.stringify(lost));
   assert(auth._wallet.balanceOf(uid) === 350, "though the coins were taken");
-  const found = await openPack("pack-standard", lostId);
+  const found = await openPack("pack-standard", lostId, 150);
   assert(found.ok === true && found.duplicate === true && found.cards.length === 3 && found.balance === 350, "asking again with the same id hands over that pack, and charges nothing: " + JSON.stringify(found).slice(0, 200));
   assert((await fetchMyCards()).cards.reduce((n, c) => n + c.count, 0) === 6, "two packs' cards in all, not three");
 
   auth._cards.packs.get("pack-standard").active = false;
-  assert((await openPack("pack-standard", newOpenId())).reason === "unavailable", "off sale");
+  assert((await openPack("pack-standard", newOpenId(), 150)).reason === "unavailable", "off sale");
   auth._cards.packs.get("pack-standard").active = true;
   auth._cards.packs.get("pack-legends").stock_left = 0;
   auth._wallet.apply(uid, 5000, "season", "test2");
-  assert((await openPack("pack-legends", newOpenId())).reason === "sold_out", "sold out");
+  assert((await openPack("pack-legends", newOpenId(), 1500)).reason === "sold_out", "sold out");
   auth._cards.packs.get("pack-legends").stock_left = 5000;
   await auth.auth.signOut();
   await auth.auth.signInWithPassword({ email: "ann@example.test", password: "Password1" });

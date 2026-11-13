@@ -41,7 +41,7 @@ function store({ on = true } = {}) {
       grant_cards: (args) => cards.grantCards(args.p_user, args.p_kind, args.p_grants),
       // A raise comes back as an error object, the way PostgREST reports one.
       buy_pack: (args) => {
-        try { return cards.buyPack(args.p_user, args.p_pack, args.p_open, args.p_cards); }
+        try { return cards.buyPack(args.p_user, args.p_pack, args.p_open, args.p_cards, args.p_price); }
         catch (e) { return { __rpcError: { message: e.message, code: "P0001" } }; }
       },
     },
@@ -124,7 +124,7 @@ await runTest("who may not collect, and what a failure is called", async () => {
   assert(s.cards.owned(ME).length === 0, "and nothing was granted on a read that failed");
 });
 
-const open = (userId, pack = "pack-standard", id = "open-0001") => invoke({ action: "open_pack", pack, open: id }, { userId });
+const open = (userId, pack = "pack-standard", id = "open-0001", price = 5000) => invoke({ action: "open_pack", pack, open: id, price }, { userId });
 const bought = (s) => s.rpcCalls.filter((c) => c.name === "buy_pack");
 
 await runTest("opening a pack: three cards from that pack, paid for once", async () => {
@@ -137,7 +137,7 @@ await runTest("opening a pack: three cards from that pack, paid for once", async
   assert(res.body.balance === 850 && s.wallet.balanceOf(ME) === 850, "150 coins, by the row's price: " + res.body.balance);
   assert(res.body.stockLeft === null, "Standard is not limited");
   assert(s.cards.owned(ME).reduce((n, o) => n + o.count, 0) === 3, "and the account owns them");
-  assert(JSON.stringify(Object.keys(bought(s)[0].args).sort()) === JSON.stringify(["p_cards", "p_open", "p_pack", "p_user"]) && bought(s)[0].args.p_user === ME, "the buyer is the session's user, never the body's");
+  assert(JSON.stringify(Object.keys(bought(s)[0].args).sort()) === JSON.stringify(["p_cards", "p_open", "p_pack", "p_price", "p_user"]) && bought(s)[0].args.p_user === ME, "the buyer is the session's user, never the body's");
 
   // The same open id again: nothing more is charged, and the answer is the FIRST pack's cards.
   const again = await open(ME);
@@ -163,7 +163,7 @@ await runTest("what opening a pack is refused for, with nothing taken", async ()
   assert(s.wallet.balanceOf(ME) === 100 && s.cards.owned(ME).length === 0, "nothing taken, nothing given");
   s.wallet.apply(ME, 9000, "season", "seed2");
 
-  for (const [body, why] of [[{ action: "open_pack", pack: "pack-standard" }, "no open id"], [{ action: "open_pack", open: "open-0001" }, "no pack"], [{ action: "open_pack", pack: 7, open: "open-0001" }, "a pack that is not text"]]) {
+  for (const [body, why] of [[{ action: "open_pack", pack: "pack-standard", price: 150 }, "no open id"], [{ action: "open_pack", open: "open-0001", price: 150 }, "no pack"], [{ action: "open_pack", pack: 7, open: "open-0001", price: 150 }, "a pack that is not text"], [{ action: "open_pack", pack: "pack-standard", open: "open-0001" }, "no price"], [{ action: "open_pack", pack: "pack-standard", open: "open-0001", price: "150" }, "a price that is not a number"], [{ action: "open_pack", pack: "pack-standard", open: "open-0001", price: 0 }, "a price of nothing"]]) {
     const r = await invoke(body, { userId: ME });
     assert(r.status === 400 && r.body.reason === "malformed", why + ": " + JSON.stringify(r));
   }
@@ -176,6 +176,13 @@ await runTest("what opening a pack is refused for, with nothing taken", async ()
     assert(r.status === 400 && r.body.reason === "bad_open", `"${id}" is not an open id: ` + JSON.stringify(r));
   }
   assert(bought(s).length === 1, "none of those reached the database (only the not-enough one did): " + bought(s).length);
+
+  // The screen showed 150 and the row now says 200: refused, not charged 200.
+  s.cards.packs.get("pack-standard").price = 200;
+  const dearer = await open(ME, "pack-standard", "open-0005", 150);
+  assert(dearer.status === 409 && dearer.body.reason === "price_changed", "a price that went up: " + JSON.stringify(dearer));
+  assert(s.wallet.balanceOf(ME) === 9100 && s.cards.owned(ME).length === 0, "and nothing was charged");
+  s.cards.packs.get("pack-standard").price = 150;
 
   s.cards.packs.get("pack-standard").active = false;
   const off = await open(ME);
@@ -208,7 +215,7 @@ await runTest("every reason the function can give is one the client knows", asyn
   const table = src.match(/const PACK_REFUSALS[^=]*=\s*\{([^}]+)\}/);
   assert(table, "the function's table of pack refusals was found");
   const packReasons = [...table[1].matchAll(/([a-z_]+)\s*:/g)].map((m) => m[1]);
-  assert(packReasons.length === 6, "six of them: " + packReasons);
+  assert(packReasons.length === 7, "seven of them: " + packReasons);
   for (const r of packReasons) assert(CARD_REFUSALS.includes(r), `storage-cards.js does not know the pack reason "${r}"`);
 });
 
