@@ -188,5 +188,68 @@ await runTest("leaving the card area goes back to Modes", async () => {
   assert(!container.querySelector(".cd-area") && tile(), "All modes returns to Modes");
 });
 
+// ---------- the daily card on the result screen ----------
+const until = async (cond, what, tries = 80) => { for (let i = 0; i < tries; i++) { const v = cond(); if (v) return v; await flush(1); } throw new Error("waited for " + (typeof what === "function" ? what() : what)); };
+async function draftFirstEligible() {
+  let card = null;
+  for (let i = 0; i < 10 && !card; i++) { await flush(1); card = [...container.querySelectorAll(".card")].find((c) => !c.classList.contains("off")); }
+  if (!card) throw new Error("no draftable player on the board: " + container.textContent.slice(0, 160));
+  await click(card.querySelector("button.hit")); await flush();
+  await click(card.querySelector(".drafts button.btn.solid")); await flush();
+}
+async function playToResult() {
+  for (let round = 0; round < 6; round++) await draftFirstEligible();
+  await flush(6);
+  for (let i = 0; i < 6 && button("Skip to the end"); i++) { await click(button("Skip to the end")); await flush(4); }
+  await until(() => container.querySelector(".result-hero .strip"), () => "the finished season, got: " + container.textContent.slice(0, 200));
+}
+const earned = () => container.querySelector(".cd-earned");
+
+await runTest("finishing the daily shows the card it earned, under the coins", async () => {
+  const uid = await signUp("dana@cards.test", "dana");
+  await goHome();
+  await click(findButtonByText(container, "Fantasy daily")); await flush(3);
+  await playToResult();
+  await until(() => earned(), () => "Today's card on the result: " + container.textContent.slice(-300));
+  assert(earned().querySelector("h3").textContent === "Today's card" && earned().querySelectorAll("[data-card]").length === 1, "one card under its own heading");
+  const shown = Number(earned().querySelector("[data-card]").dataset.card);
+  const owned = auth._cards.owned(uid);
+  assert(owned.length === 1 && owned[0].card_id === shown, "and it is the card the account now owns");
+  assert(auth._cards.grants(uid)[0].kind === "daily", "granted as the daily card");
+  const coins = container.querySelector(".sc, .season-coins, [class*='sc-']");
+  assert(!coins || (coins.compareDocumentPosition(earned()) & 4), "after the coins, never before the result");
+  await click(findButtonByText(earned(), "See your cards")); await settle();
+  // This account has a daily card and has never opened its starter deck: it is offered the deck AND shown the card.
+  assert(button("Open your starter deck"), "the starter deck is still on offer");
+  assert(container.querySelector("#cd-coll-h")?.textContent === "1 card" && container.querySelector(`[data-card="${shown}"]`), "and the card it was just shown is there: " + container.querySelector("#cd-coll-h")?.textContent);
+  await click(button("Open your starter deck")); await settle(); await settle();
+  assert(container.querySelector("#cd-coll-h")?.textContent === "9 cards", "opening the deck adds eight to it");
+});
+
+await runTest("with cards hidden the daily shows no card, and the card is still banked", async () => {
+  // A fresh device: the daily keeps a per-device record of its own, and this is another player's day.
+  window.storage = makeStorage(); await remount();
+  const uid = await signUp("eli@cards.test", "eli");
+  await openCards();
+  await click(button("Hide cards")); await flush();
+  await click(findButtonByText(container, "Fantasy daily")); await flush(3);
+  await playToResult();
+  await flush(10);
+  assert(!earned(), "no card block on the result");
+  assert(auth._cards.owned(uid).length === 1, "but the account owns the card it earned");
+  await goHome();
+  await click(button("Show cards")); await flush();
+});
+
+await runTest("an Unlimited season shows no card", async () => {
+  window.storage = makeStorage(); await remount();
+  const uid = await signUp("fay@cards.test", "fay");
+  await goHome();
+  await clickMode(container, "Unlimited"); await flush(3);
+  await playToResult();
+  await flush(10);
+  assert(!earned() && auth._cards.owned(uid).length === 0, "no card block and no card");
+});
+
 void cardBoardKey;
 console.log("test-cards-screen.mjs done");

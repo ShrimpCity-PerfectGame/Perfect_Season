@@ -45,7 +45,7 @@ import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { initVersusData } from "./versus-logic.mjs";
 import { CENTURY_CSS, CenturyScreen, CENTURY_DONE } from "./century.jsx";
-import { CARDS_CSS, CardsScreen } from "./cards.jsx";
+import { CARDS_CSS, CardsScreen, SeasonCard } from "./cards.jsx";
 import { cardsOn } from "./cards-switch.mjs";
 import { initCenturyData, CENTURY_GOAL, centuryReservedSeed } from "./century-logic.mjs";
 import { drainOne } from "./pending-daily.mjs";
@@ -3627,7 +3627,7 @@ export default function PerfectSeason() {
   // record this time, so it loses the sitewide and personal best that finish() worked out before the answer.
   function showSaveAnswer(runId, res) {
     if (!runId || !res) return;
-    const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [], payer: res.uid }
+    const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [], payer: res.uid, card: res.card ?? null }
       : res.reason === "duplicate" ? { duplicate: true, payer: res.uid, newSiteBest: false, newBestScore: false } : null;
     if (extras) setResult((r) => (r && r.runId === runId ? { ...r, ...extras } : r));
   }
@@ -5567,6 +5567,10 @@ export default function PerfectSeason() {
                       <SeasonStrip result={result} ladderName={LADDER_LABEL[modeKey({ mode: mode.kind, gm: mode.gm, genius: mode.genius })]} />
                       <SeasonMoments result={result} formatLabel={FORMAT_LABEL[normFormat(result.format)]} />
                       {userId && result.payer === userId && <SeasonCoins result={result} onOpenShop={isGuest ? null : openShop} />}
+                      {/* The card this daily earned (CARDS.md). Same payer check as the coins, so one account's card
+                          is never shown to whoever is signed in when the answer lands. Hidden cards hide this too -
+                          the card is still banked. */}
+                      {userId && result.payer === userId && showCards && result.card && <SeasonCard card={result.card} onOpenCards={openCards} />}
                       {/* In place of the save-error panel: nothing from this season counted. */}
                       {userId && result.payer === userId && result.duplicate && <p className="sc-note sc-dup">This draft was already recorded, so it didn't count again.</p>}
                     </>

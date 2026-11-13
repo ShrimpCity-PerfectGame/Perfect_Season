@@ -119,7 +119,9 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
         </div>
       )}
 
-      {phase === "collection" && (
+      {/* The collection also shows under the starter panel when there is anything in it: a player can earn a
+          daily card before ever opening the deck, and a card they were just shown must not then be missing. */}
+      {(phase === "collection" || (phase === "starter" && owned.length > 0)) && (
         <>
           {fresh && fresh.length > 0 && (
             <section className="cd-fresh" aria-labelledby="cd-fresh-h">
@@ -150,6 +152,27 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide })
   );
 }
 
+// The card a finished daily draft earned, on the result screen. Deliberately small and deliberately late: it
+// loads the catalog itself and draws NOTHING until it has, so it can never delay or cover the result it sits
+// under. A card the catalog does not know (a stale cached file) is likewise nothing rather than a blank.
+export function SeasonCard({ card, onOpenCards }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    loadCardData().then(() => { if (live) setReady(true); }, () => {});
+    return () => { live = false; };
+  }, []);
+  const known = ready && card ? CARDS.get(card.id) : null;
+  if (!known) return null;
+  return (
+    <section className="cd-earned" aria-labelledby="cd-earned-h">
+      <h3 className="cd-earned-h" id="cd-earned-h">Today's card</h3>
+      <CardFace card={known} finish={card.finish} />
+      {onOpenCards && <button className="linkbtn" onClick={onOpenCards}>See your cards</button>}
+    </section>
+  );
+}
+
 export const CARDS_CSS = CARD_FACE_CSS + `
 .cd-area{display:grid;gap:16px}
 .cd-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -163,6 +186,9 @@ export const CARDS_CSS = CARD_FACE_CSS + `
 .cd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:26px 12px;justify-items:center;padding:8px 0 4px}
 .cd-grid .cd-card{--cd-w:160px}
 .cd-fresh{padding-bottom:8px;border-bottom:2px solid var(--line)}
+.cd-earned{display:grid;justify-items:center;gap:10px;margin:18px 0 6px}
+.cd-earned-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:18px;margin:0;color:var(--ink)}
+.cd-earned .cd-card{--cd-w:150px}
 @media (max-width:400px){
   .cd-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 8px}
   .cd-grid .cd-card{--cd-w:min(150px,calc((100vw - 48px) / 2))}
