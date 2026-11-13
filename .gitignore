@@ -12,3 +12,6 @@ android/local.properties
 
 # Build scratch. esbuild --outfile=/tmp/... resolves here on Windows, not to the system temp.
 tmp/
+
+# superpowers scratch: brainstorm mockups and plan ledgers
+.superpowers/
