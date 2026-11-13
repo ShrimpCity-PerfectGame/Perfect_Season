@@ -1,0 +1,22 @@
+{
+  "sheets": {
+    "1": { "file": "source/sheet-1.png", "cols": 5, "rows": 2 },
+    "2": { "file": "source/sheet-2.png", "cols": 5, "rows": 2 }
+  },
+  "poses": {
+    "gunslinger": ["1", 1],
+    "scrambler": ["2", 1],
+    "volume": ["2", 2],
+    "manager": ["1", 5],
+    "workhorse": ["1", 2],
+    "goalline": ["1", 8],
+    "homerun": ["1", 7],
+    "receiving": ["1", 0],
+    "deep": ["2", 4],
+    "redzone": ["1", 9],
+    "possession": ["1", 6],
+    "seam": ["1", 3],
+    "valve": ["2", 6],
+    "role": ["2", 0]
+  }
+}
