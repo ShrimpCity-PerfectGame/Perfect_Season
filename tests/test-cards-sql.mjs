@@ -196,7 +196,7 @@ await runTest("the pack table: anyone reads it, nobody writes it, and it agrees 
   const rows = await owner("select id, price, size, active, stock_total, stock_left from card_packs order by sort");
   assert(rows.map((r) => r.id).join() === PACKS.map((p) => p.id).join(), "the seed is the module's three packs, in order: " + rows.map((r) => r.id));
   for (const r of rows) assert(r.size === PACK_BY_ID[r.id].size, `${r.id}'s size is the module's (${r.size} vs ${PACK_BY_ID[r.id].size})`);
-  assert(rows[0].price === 150 && rows[1].price === 250 && rows[2].price === 1500, "the stated prices: " + rows.map((r) => r.price));
+  assert(rows[0].price === 150 && rows[1].price === 250 && rows[2].price === 3000, "the stated prices: " + rows.map((r) => r.price));
   assert(rows[2].stock_total === 5000 && rows[2].stock_left === 5000 && rows[0].stock_left === null, "only Legends has stock");
   for (const who of [ALICE, null]) {
     const read = await attempt(who, "select id from card_packs");
@@ -259,7 +259,7 @@ await runTest("the last one of a limited pack goes to one buyer", async () => {
   const won = [a, b].filter((r) => r.data), lost = [a, b].filter((r) => r.error);
   assert(won.length === 1 && lost.length === 1 && lost[0].error === "sold_out", "one buys it, the other is told it sold out: " + JSON.stringify([a, b]));
   assert((await stockOf("pack-legends")) === 0, "stock is zero, not below it");
-  assert((await packLedger(RICH)).filter((l) => l.amount === -1500).length === 1, "and exactly one of them was charged");
+  assert((await packLedger(RICH)).filter((l) => l.amount === -3000).length === 1, "and exactly one of them was charged");
   assert((await buy(RICH, "pack-legends", "open-0007", [{ card: 9, finish: "gold" }])).error === "sold_out", "and it stays sold out");
   await owner("update card_packs set stock_left = 5000 where id = 'pack-legends'");
 });

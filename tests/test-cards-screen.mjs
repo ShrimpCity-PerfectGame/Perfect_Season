@@ -299,7 +299,7 @@ await runTest("the pack shop: three packs, their prices, and exactly what is ins
   assert(packEl("pack-standard").textContent.includes("150") && packEl("pack-standard").textContent.includes("3 cards"), "Standard: 150 for three cards");
   assert(packEl("pack-legends").textContent.includes("5,000 of 5,000 left"), "the limited pack says how many are left");
   assert(packEl("pack-standard").querySelector("img").getAttribute("alt") === "", "the picture is decoration: the name beside it is what is read");
-  assert(packBtn("pack-legends", "Open").disabled && packEl("pack-legends").textContent.includes("You need 500 more coins"), "a pack the wallet cannot reach says how far short it is");
+  assert(packBtn("pack-legends", "Open").disabled && packEl("pack-legends").textContent.includes("You need 2,000 more coins"), "a pack the wallet cannot reach says how far short it is");
   assert(!button("Open your starter deck"), "the shop is its own tab: the starter panel is on the other one");
 
   const who = packBtn("pack-standard", "Who is inside");

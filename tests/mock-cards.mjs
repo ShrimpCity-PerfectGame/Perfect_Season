@@ -15,7 +15,7 @@ const KINDS = ["starter", "daily", "gift", "pack"];
 const PACK_SEED = [
   { id: "pack-standard", price: 150, size: 3, active: true, stock_total: null, stock_left: null, sort: 10 },
   { id: "pack-air-raid", price: 250, size: 3, active: true, stock_total: null, stock_left: null, sort: 20 },
-  { id: "pack-legends", price: 1500, size: 1, active: true, stock_total: 5000, stock_left: 5000, sort: 30 },
+  { id: "pack-legends", price: 3000, size: 1, active: true, stock_total: 5000, stock_left: 5000, sort: 30 },
 ];
 
 // The shape functions-js hands back for a non-2xx: the reason is in the response body, reached through context.

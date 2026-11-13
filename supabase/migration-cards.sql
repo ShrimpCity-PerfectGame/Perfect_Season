@@ -198,10 +198,15 @@ grant select on public.card_packs to anon, authenticated;
 
 -- The seed only ADDS missing rows, like shop_items': a price changed by hand survives a re-run. Edit it here
 -- too when changing one, so a new database starts where the live ones are.
+--
+-- The prices are MEASURED, not guessed: tests/test-economy-security.mjs prints what a day of play buys and what
+-- a card rated 100+ costs by each route, and holds them to bands. Legends is 3,000 because a 100+ card costs
+-- about 3,960 coins through Standard packs and about 2,375 through Air raid; at the 1,500 first written here
+-- the one pack that is CERTAIN to hold one was also the cheapest way to get one, by a wide margin.
 insert into public.card_packs (id, price, size, stock_total, stock_left, sort) values
   ('pack-standard', 150, 3, null, null, 10),
   ('pack-air-raid', 250, 3, null, null, 20),
-  ('pack-legends', 1500, 1, 5000, 5000, 30)
+  ('pack-legends', 3000, 1, 5000, 5000, 30)
 on conflict (id) do nothing;
 
 -- buy_pack(user, pack, open id, cards): the stock, the coins and the cards, in ONE transaction.

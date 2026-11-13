@@ -106,7 +106,7 @@ await runTest("the pack shop: what is on sale, buying one, and asking again", as
   await auth.auth.signOut();
   const shelf = await fetchPacks();
   assert(shelf.status === "ok" && shelf.packs.map((p) => p.id).join() === "pack-standard,pack-air-raid,pack-legends", "signed out, the shelf still reads, in shelf order: " + JSON.stringify(shelf).slice(0, 200));
-  assert(JSON.stringify(shelf.packs[2]) === JSON.stringify({ id: "pack-legends", price: 1500, size: 1, active: true, stockTotal: 5000, stockLeft: 5000 }), "a limited pack carries its stock: " + JSON.stringify(shelf.packs[2]));
+  assert(JSON.stringify(shelf.packs[2]) === JSON.stringify({ id: "pack-legends", price: 3000, size: 1, active: true, stockTotal: 5000, stockLeft: 5000 }), "a limited pack carries its stock: " + JSON.stringify(shelf.packs[2]));
   assert(shelf.packs[0].stockLeft === null && shelf.packs[0].stockTotal === null, "and an unlimited one carries none");
   auth._cards.packsReadFail = true;
   assert((await fetchPacks()).status === "error", "a shelf that could not be read says so");
@@ -142,7 +142,7 @@ await runTest("the pack shop: what is on sale, buying one, and asking again", as
   auth._cards.packs.get("pack-standard").active = true;
   auth._cards.packs.get("pack-legends").stock_left = 0;
   auth._wallet.apply(uid, 5000, "season", "test2");
-  assert((await openPack("pack-legends", newOpenId(), 1500)).reason === "sold_out", "sold out");
+  assert((await openPack("pack-legends", newOpenId(), 3000)).reason === "sold_out", "sold out");
   auth._cards.packs.get("pack-legends").stock_left = 5000;
   await auth.auth.signOut();
   await auth.auth.signInWithPassword({ email: "ann@example.test", password: "Password1" });
