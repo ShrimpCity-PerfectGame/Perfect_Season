@@ -59,7 +59,21 @@ alter table public.card_grants add constraint card_grants_kind_check check (kind
 -- migration-wallet.sql's create table, which that file can never change on a database that already has the
 -- table - so it is replaced here, by the name Postgres gave it (wallet_ledger_kind_check; confirmed on PGlite
 -- and on the staging project). The list is the whole list: every kind migration-wallet.sql names, plus this.
-alter table public.wallet_ledger drop constraint if exists wallet_ledger_kind_check;
+-- Dropped by what it IS rather than by what it is called: a check on that table whose definition is the list of
+-- kinds. If a database ever named it differently, dropping by name would do nothing, the old list would stay
+-- beside the new one, and every pack purchase would fail on it - as a 500, which the screen calls "try again".
+do $$
+declare
+  c record;
+begin
+  for c in
+    select conname from pg_constraint
+     where conrelid = 'public.wallet_ledger'::regclass and contype = 'c'
+       and pg_get_constraintdef(oid) like '%kind%' and pg_get_constraintdef(oid) like '%''season''%'
+  loop
+    execute format('alter table public.wallet_ledger drop constraint %I', c.conname);
+  end loop;
+end $$;
 alter table public.wallet_ledger add constraint wallet_ledger_kind_check
   check (kind in ('starting', 'welcome', 'season', 'daily', 'badge', 'minigame', 'purchase', 'pack'));
 
@@ -241,6 +255,7 @@ as $$
 declare
   v_guest boolean;
   v_balance bigint;
+  v_granted jsonb;
   v_pack public.card_packs;
   v_entry jsonb;
   v_grants jsonb := '[]'::jsonb;
@@ -305,7 +320,13 @@ begin
   if public.wallet_apply(p_user, -v_pack.price, 'pack', p_open) is distinct from (-v_pack.price)::bigint then
     raise exception 'purchase_conflict' using errcode = 'P0001';
   end if;
-  perform public.grant_cards(p_user, 'pack', v_grants);
+  -- grant_cards skips a ref it has granted before. Nothing honest leaves '<open>:n' behind without its ledger
+  -- row, but rows edited by hand could - and then this would charge in full and hand over fewer cards than it
+  -- reports. Short means stop: the raise undoes the stock and the debit with it.
+  v_granted := public.grant_cards(p_user, 'pack', v_grants);
+  if jsonb_array_length(coalesce(v_granted -> 'granted', '[]'::jsonb)) <> v_pack.size then
+    raise exception 'purchase_conflict' using errcode = 'P0001';
+  end if;
 
   return jsonb_build_object('duplicate', false, 'cards', v_cards,
     'balance', (select balance from public.wallets where user_id = p_user),

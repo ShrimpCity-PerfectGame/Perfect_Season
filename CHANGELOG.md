@@ -43,6 +43,10 @@ CLAUDE.md.
 - The Legends pack was first priced at 1,500. Measured, that made the one pack certain to hold a top card
   also the cheapest way to get one, so it is 3,000. `tests/test-economy-security.mjs` prints what every pack
   is worth and holds the prices to it.
+- An independent review before release found three ways the first version could have charged twice or lost
+  a purchase from the screen's side (the purchase's id died on a tab switch; one slot was shared by every
+  pack; an answer arriving after the shop was left was dropped). All three are fixed and tested. Nothing was
+  found that could take coins without cards inside the database.
 - Rollout order: re-run `migration-cards.sql`, deploy the Edge Functions, then the client - and the client
   and the functions together, because both carry `card-packs.mjs`.
 

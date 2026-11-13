@@ -325,7 +325,7 @@ await runTest("the mock buys a pack the way the database does", async () => {
   wallet.welcome(A); wallet.apply(A, 1000, "season", "seed");
   const mock = makeCards(state, { wallet });
   const viaSql = async (...args) => {
-    try { return { data: (await fresh.query("select buy_pack($1, $2, $3, $4::jsonb) as r", [args[0], args[1], args[2], JSON.stringify(args[3])])).rows[0].r }; }
+    try { return { data: (await fresh.query("select buy_pack($1, $2, $3, $4::jsonb, $5) as r", [args[0], args[1], args[2], JSON.stringify(args[3]), args[4] ?? null])).rows[0].r }; }
     catch (e) { return { error: String(e?.message || e).replace(/^.*?([a-z_]+)$/s, "$1") }; }
   };
   const viaMock = (...args) => { try { return { data: mock.buyPack(...args) }; } catch (e) { return { error: e.message }; } };
@@ -336,6 +336,12 @@ await runTest("the mock buys a pack the way the database does", async () => {
     [A, "pack-standard", "open-1006", three(50)], [A, "pack-standard", "open-1007", three(60)], [A, "pack-air-raid", "open-1008", three(70)],
     [G, "pack-standard", "open-1009", three(1)], [A, "pack-nope", "open-1010", three(1)], [A, "pack-standard", "x", three(1)],
     [A, "pack-standard", "open-1011", three(1).slice(1)], [A, "pack-standard", "open-1003", three(1)],
+    // The price the buyer was shown: dearer is refused, the same and cheaper are bought.
+    [A, "pack-standard", "open-1012", three(80), 100], [A, "pack-standard", "open-1013", three(80), 150], [A, "pack-standard", "open-1014", three(90), 9999],
+    // TWO refusals true at once, so the ORDER is held and not just each reason: a bad id on a pack that does not
+    // exist; too few cards for a price that is too low; a price too low for a wallet that is too thin.
+    [A, "pack-nope", "x", three(1)], [A, "pack-standard", "open-1015", three(1).slice(1), 1], [A, "pack-legends", "open-1016", one, 1],
+    [G, "pack-nope", "x", three(1)],
   ];
   for (const step of steps) {
     const s = await viaSql(...step), m = viaMock(...step);
@@ -346,6 +352,49 @@ await runTest("the mock buys a pack the way the database does", async () => {
   assert(sqlBal === wallet.balanceOf(A), `the two wallets end level (${sqlBal} vs ${wallet.balanceOf(A)})`);
   const sqlStock = (await fresh.query("select stock_left from card_packs where id = 'pack-legends'")).rows[0].stock_left;
   assert(sqlStock === mock.packs.get("pack-legends").stock_left, "and so does the Legends stock");
+});
+
+await runTest("a grant that would come up short stops the purchase, with the coins and the stock put back", async () => {
+  const fresh = await freshDb();
+  const U = uuid(81);
+  await addAccount(fresh, { id: U, username: "shorted" });
+  const q = (statement, params) => fresh.query(statement, params).then((r) => r.rows);
+  await q("select wallet_apply($1, 9000, 'season', 'seed')", [U]);
+  // Rows nothing honest leaves behind: a pack ref with no ledger row beside it.
+  await q("select grant_cards($1, 'pack', $2::jsonb)", [U, JSON.stringify([{ ref: "open-short:0", card: 5, finish: "base" }])]);
+  const before = Number((await q("select balance from wallets where user_id = $1", [U]))[0].balance);
+  let err = "";
+  try { await q("select buy_pack($1, 'pack-legends', 'open-short', $2::jsonb)", [U, JSON.stringify([{ card: 9, finish: "gold" }])]); } catch (e) { err = String(e.message); }
+  assert(/purchase_conflict/.test(err), "refused as a conflict rather than charged for nothing: " + err);
+  assert(Number((await q("select balance from wallets where user_id = $1", [U]))[0].balance) === before, "the coins are where they were");
+  assert((await q("select stock_left from card_packs where id = 'pack-legends'"))[0].stock_left === 5000, "and so is the stock");
+  assert((await q("select count(*)::int as n from wallet_ledger where user_id = $1 and kind = 'pack'", [U]))[0].n === 0, "and no ledger row was left");
+  // The mock refuses the same thing, with the same nothing moved.
+  const profiles = new Map([[U, { id: U, username: "shorted", guest: false }]]);
+  const state = { profiles, currentUserId: () => U };
+  const wallet = makeWallet(state); wallet.apply(U, 9000, "season", "seed");
+  const mock = makeCards(state, { wallet });
+  mock.grantCards(U, "pack", [{ ref: "open-short:0", card: 5, finish: "base" }]);
+  let merr = "";
+  try { mock.buyPack(U, "pack-legends", "open-short", [{ card: 9, finish: "gold" }]); } catch (e) { merr = e.message; }
+  assert(merr === "purchase_conflict" && wallet.balanceOf(U) === 9000 && mock.packs.get("pack-legends").stock_left === 5000, "the mock agrees: " + merr);
+});
+
+await runTest("the ledger's list of kinds is replaced whatever the old check was called", async () => {
+  const { sql } = await import("./pg-fixture.mjs");
+  const fresh = await freshDb();
+  const checks = async () => (await fresh.query("select conname, pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.wallet_ledger'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%kind%'")).rows;
+  await fresh.exec("alter table public.wallet_ledger rename constraint wallet_ledger_kind_check to some_other_name");
+  await fresh.exec(sql("migration-cards.sql"));
+  const after = await checks();
+  assert(after.length === 1 && after[0].conname === "wallet_ledger_kind_check" && after[0].def.includes("'pack'"), "one check on kind, the new one: " + JSON.stringify(after));
+  const others = (await fresh.query("select count(*)::int as n from pg_constraint where conrelid = 'public.wallet_ledger'::regclass and contype = 'c'")).rows[0].n;
+  assert(others === 3, "and the table's other two checks (amount, ref) were left alone: " + others);
+  const U = uuid(82);
+  await addAccount(fresh, { id: U, username: "renamed" });
+  await fresh.query("select wallet_apply($1, 500, 'season', 'seed')", [U]);
+  const r = (await fresh.query("select buy_pack($1, 'pack-standard', 'open-renamed', $2::jsonb) as r", [U, JSON.stringify([{ card: 1, finish: "base" }, { card: 2, finish: "base" }, { card: 3, finish: "base" }])])).rows[0].r;
+  assert(r.duplicate === false && r.cards.length === 3, "and a pack can be bought on that database");
 });
 
 console.log("test-cards-sql.mjs done");

@@ -370,7 +370,8 @@ which does the stock, the coins and the grant in ONE transaction:
    cheaper pack is simply charged cheaper
 8. `not_enough`
 9. take one from stock, debit the wallet under the ledger key (user, `pack`, open id), grant the cards under
-   refs `<open id>:0`, `:1`, ... - a raise anywhere rolls all of it back
+   refs `<open id>:0`, `:1`, ... - a raise anywhere rolls all of it back, and a grant that comes up short
+   (`grant_cards` skips a ref it has seen) is itself a raise, `purchase_conflict`
 
 **The open id is what makes a retry safe**, and it is the whole answer to "the coins went and the cards did
 not". The screen makes one id per purchase (`newOpenId`) and keeps it until that purchase is answered for
@@ -378,7 +379,21 @@ certain. `offline`, `network` and `server` mean the outcome is UNKNOWN - the pac
 the answer lost - so the screen keeps the id, says it does not know, and its button becomes **Try again**,
 which asks about the same purchase. `PACK_SENTENCES` may promise "never charged twice" because step 3 keeps
 it; `tests/test-cards-screen.mjs` fails if one of those three sentences ever claims nothing was charged.
-Leaving the screen forgets the id, and a pack that was bought is then simply in the collection.
+The ids are held by the card area, one per pack, so switching to the Collection tab (the first thing anyone
+does) or buying a different pack keeps them; leaving the card area altogether forgets them, and a pack that
+was bought is then simply in the collection.
+
+**Which refusals are certain.** `unavailable`, `sold_out`, `price_changed` and `not_enough` are buy_pack's
+own, made AFTER it has looked for an earlier charge under the same id - so they are a certain no even on a
+retry. Everything refused before the database is asked (`signed_out`, `cards_off`...) is a plain no on a
+first attempt and settles nothing on a retry: the screen keeps the purchase and says "we still can't confirm"
+rather than "nothing was charged". And the function reports a refusal only for buy_pack's exact raise (code
+`P0001`, a message that is nothing but the reason): a gateway's "service unavailable" is a 500, never the
+refusal `unavailable`.
+
+Three things found in review, each of which was a second charge or a lost purchase waiting to happen: the id
+lived in the shop component and died on a tab switch; one slot was shared by every pack; and an answer that
+landed after the shop was left was dropped before the wallet or the collection heard of it.
 
 Every reason is in `CARD_REFUSALS` and has a sentence in both `CARD_SENTENCES` and `PACK_SENTENCES`. The
 pack refusals travel as the keys of `PACK_REFUSALS` in the function rather than as `reason: "..."` literals,
@@ -390,8 +405,10 @@ An account gets two tabs on the card area, Collection and Packs (`PackShop` in `
 its own three answers - loading, could-not-load, the packs - for the reason the collection does. **Who is
 inside** prints the finish odds, the odds by rating band, and every card with its own chance: twelve to begin
 with and all of them on request, so the odds are published in full. Open asks to Confirm with the price in
-the button. After a purchase the cards appear under "You pulled", which takes focus so a screen reader lands
-on what happened. A price that went up, a sell-out or a pack taken off sale re-reads the shelf, so the screen
+the button - Open, Confirm and Try again are ONE button whose label changes, so keyboard focus is never
+dropped. After a purchase the cards appear under "You pulled", which takes focus so a screen reader lands
+on what happened. The shop reads the wallet itself on opening: the app only loads it for a profile or the
+cosmetic shop, so a player arriving from Modes had no balance on screen. A price that went up, a sell-out or a pack taken off sale re-reads the shelf, so the screen
 stops offering what it cannot sell.
 
 ### 9.4 What they cost, measured

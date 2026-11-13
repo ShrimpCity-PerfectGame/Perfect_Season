@@ -90,7 +90,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "invalid JSON", reason: "malformed" }, 400); }
   if (body?.action !== "starter" && body?.action !== "open_pack") return json({ error: "unknown action", reason: "malformed" }, 400);
-  if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1)) {
+  if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1 || body.price > 1000000)) {
     return json({ error: "a pack, an open id and the price shown are all needed", reason: "malformed" }, 400);
   }
 
@@ -142,8 +142,11 @@ async function openPack(service: any, userId: string, body: any, json: (body: un
     p_price: body.price,
   });
   if (error || !data) {
+    // EXACTLY buy_pack's own raise: its code, and a message that is nothing but the reason. A substring test
+    // would call a gateway's "service unavailable" the refusal `unavailable` - and a refusal tells the screen the
+    // purchase certainly did not happen, which is the one thing a failure in between cannot know.
     const said = String(error?.message || "");
-    const reason = Object.keys(PACK_REFUSALS).find((r) => said === r || said.includes(r));
+    const reason = error?.code === "P0001" && Object.hasOwn(PACK_REFUSALS, said) ? said : null;
     if (reason) return json({ error: "refused", reason }, PACK_REFUSALS[reason]);
     console.error("card-claim buy_pack:", error);
     return json({ error: "failed", reason: "server" }, 500);

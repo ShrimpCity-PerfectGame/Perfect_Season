@@ -395,6 +395,62 @@ await runTest("what the shop refuses, in words, and what it does next", async ()
   auth._cards.enabled = true;
 });
 
+await runTest("an unanswered purchase survives leaving the shop, another pack, and a refusal that settles nothing", async () => {
+  const collTab = () => [...container.querySelectorAll(".cd-tabs .cd-chip")].find((b) => b.textContent === "Collection");
+  const ownedNow = () => auth._cards.owned(pat).reduce((n, o) => n + o.count, 0);
+  await remount(); await openShop();
+  // Straight from Modes, with no profile or shop opened first: the shop asks for the wallet itself.
+  assert(container.querySelector(".cd-bal")?.textContent.includes("5,700"), "the balance is read by the shop, not borrowed from a screen that happened to load it: " + container.querySelector(".cd-bal")?.textContent);
+  const cardsBefore = ownedNow();
+
+  auth._cards.openFails = true;
+  const main = packBtn("pack-standard", "Open");
+  main.focus();
+  await click(main); await flush();
+  assert(document.activeElement === main && main.isConnected && main.textContent.includes("Confirm"), "Open becomes Confirm in place, so the keyboard's focus is not dropped");
+  await click(main); await settle(); await settle();
+  assert(auth._wallet.balanceOf(pat) === 5550 && packBtn("pack-standard", "Try again"), "bought, and the answer lost");
+  assert(!packBtn("pack-standard", "Cancel"), "a purchase that may have happened offers no Cancel");
+  assert(container.querySelector(".cd-bal").textContent.includes("5,550"), "the wallet was asked again, so the balance already tells the truth");
+
+  // The first thing a player does: look at the collection. The cards are there - and the purchase's id survives.
+  await click(collTab()); await settle(); await settle();
+  assert(container.querySelector("#cd-coll-h")?.textContent === `${cardsBefore + 3} cards`, "the collection was re-read and has them: " + container.querySelector("#cd-coll-h")?.textContent);
+  await click(shopTab()); await settle();
+  assert(packBtn("pack-standard", "Try again") && !packBtn("pack-standard", "Confirm"), "back in the shop it is still Try again - not a fresh Confirm that would buy a second pack");
+  assert(/never charged twice/.test(packAlert("pack-standard")), "and it still says why");
+
+  // Buying a different pack does not forget the first one.
+  await click(packBtn("pack-air-raid", "Open")); await flush();
+  await click(packBtn("pack-air-raid", "Confirm")); await settle(); await settle();
+  assert(auth._wallet.balanceOf(pat) === 5300 && packBtn("pack-standard", "Try again"), "Air raid bought; Standard's purchase is still waiting");
+
+  // A refusal made before the database is asked settles nothing about the earlier attempt.
+  auth._cards.enabled = false;
+  await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
+  assert(/still can't confirm/.test(packAlert("pack-standard")) && !/Nothing was charged/i.test(packAlert("pack-standard")), "it does not claim nothing was charged: " + packAlert("pack-standard"));
+  assert(packBtn("pack-standard", "Try again"), "and keeps the purchase");
+  auth._cards.enabled = true;
+
+  await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
+  assert(auth._wallet.balanceOf(pat) === 5300, "resolving it charged nothing more");
+  assert(container.querySelector(".cd-fresh")?.textContent.includes("weren't charged twice") && packBtn("pack-standard", "Open"), "it hands over that pack and goes back to Open");
+  assert(ownedNow() === cardsBefore + 6, "two packs in all: " + (ownedNow() - cardsBefore));
+});
+
+await runTest("a pack that finishes opening after the shop is left still counts", async () => {
+  const collTab = () => [...container.querySelectorAll(".cd-tabs .cd-chip")].find((b) => b.textContent === "Collection");
+  const before = auth._cards.owned(pat).reduce((n, o) => n + o.count, 0);
+  await click(packBtn("pack-standard", "Open")); await flush();
+  const confirm = packBtn("pack-standard", "Confirm");
+  confirm.click(); collTab().click(); // no waiting in between: the answer lands on a shop that is gone
+  await settle(); await settle(); await settle();
+  assert(auth._wallet.balanceOf(pat) === 5150, "the pack was bought");
+  assert(container.querySelector("#cd-coll-h")?.textContent === `${before + 3} cards`, "and the collection on screen has it: " + container.querySelector("#cd-coll-h")?.textContent);
+  await click(shopTab()); await settle();
+  assert(packBtn("pack-standard", "Open") && container.querySelector(".cd-bal").textContent.includes("5,150"), "the shop is back to Open with the right balance - nothing left waiting");
+});
+
 await runTest("every pack refusal has a sentence, and none blames the connection for a rule", async () => {
   const { PACK_SENTENCES } = await (await import("./helpers.mjs")).loadModule("cards.jsx");
   for (const key of [...CARD_REFUSALS, "offline", "network"]) assert(typeof PACK_SENTENCES[key] === "string" && PACK_SENTENCES[key].length > 15, `"${key}" has a pack sentence`);

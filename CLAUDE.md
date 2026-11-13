@@ -561,7 +561,12 @@ The parts unlike everything else:
 - **A purchase carries an open id, and three failures mean "unknown", not "no".** `offline`, `network` and
   `server` may each follow a pack that WAS bought, so the screen keeps the id and asks again about the same
   purchase; `buy_pack` answers a repeat with the first time's cards and charges nothing. None of those three
-  sentences may say nothing was charged, and a test holds that.
+  sentences may say nothing was charged, and a test holds that. **The ids live in `CardsScreen`, one per pack**,
+  not in the shop component: review found the first version lost the id on a tab switch, which made Try again
+  a second purchase. Only buy_pack's own four refusals are a certain no on a retry.
+- **The migration replaces `wallet_ledger`'s kind check by what it is, not by its name** - a DO block drops any
+  check on that table listing the kinds. The name is confirmed on PGlite and staging only; on a database that
+  called it something else, a drop-by-name would leave the old list in force and every purchase a 500.
 - **Pack prices are measured** by test 11 in `tests/test-economy-security.mjs`. Legends was first written at
   1,500, which made the one pack CERTAIN to hold a 100+ card also the cheapest route to one.
 - **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not

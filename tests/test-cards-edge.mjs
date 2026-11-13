@@ -201,6 +201,22 @@ await runTest("what opening a pack is refused for, with nothing taken", async ()
   const failed = await open(ME);
   assert(failed.status === 500 && failed.body.reason === "server", "the database failing is a server error: " + JSON.stringify(failed));
 
+  // WHAT IS NOT A REFUSAL. A failure that merely contains a refusal's word, or carries its word without the
+  // database's own code, is not buy_pack speaking - and calling it one would tell the screen the purchase
+  // certainly did not happen.
+  for (const [error, why] of [[{ message: "upstream service unavailable", code: "XX000" }, "a gateway that says unavailable"], [{ message: "sold_out" }, "the word with no code"], [{ message: "new row violates not_enough", code: "23514" }, "another error naming one"], [{ message: "sold_out and more", code: "P0001" }, "the code with more than the word"]]) {
+    s = store(); s.wallet.apply(ME, 1000, "season", "seed");
+    s.rpcs.buy_pack = () => ({ __rpcError: error });
+    const r = await open(ME);
+    assert(r.status === 500 && r.body.reason === "server", why + " is a server error, not a refusal: " + JSON.stringify(r));
+  }
+  s = store(); s.wallet.apply(ME, 1000, "season", "seed");
+  const huge = await open(ME, "pack-standard", "open-0001", 1e12);
+  assert(huge.status === 400 && huge.body.reason === "malformed" && bought(s).length === 0, "a price no pack could have is not sent to the database");
+  // The buyer is the session's user whatever the body claims.
+  const lying = await invoke({ action: "open_pack", pack: "pack-standard", open: "open-0002", price: 150, user: GUEST, p_user: GUEST, userId: GUEST }, { userId: ME });
+  assert(lying.status === 200 && bought(s)[0].args.p_user === ME && s.cards.owned(GUEST).length === 0 && s.cards.owned(ME).length === 3, "a body naming somebody else buys for the caller");
+
   s = store({ on: false });
   const dark = await open(ME);
   assert(dark.status === 403 && dark.body.reason === "cards_off" && s.rpcCalls.length === 0, "with the switch off, nothing is sold and nothing is asked");

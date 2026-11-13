@@ -59,6 +59,9 @@ export function makeCards(state, { wallet = null } = {}) {
       if (pack.stock_left != null && pack.stock_left <= 0) throw new Error("sold_out");
       if (shownPrice != null && pack.price > shownPrice) throw new Error("price_changed");
       if (balance < pack.price) throw new Error("not_enough");
+      // The SQL is one transaction, so a grant that comes up short undoes the stock and the debit. Here that is
+      // checked BEFORE either moves: the same outcome, with nothing to roll back.
+      if (cards.some((_, i) => grants.some((g) => g.user_id === userId && g.kind === "pack" && g.ref === `${open}:${i}`))) throw new Error("purchase_conflict");
       if (pack.stock_left != null) pack.stock_left -= 1;
       if (wallet.apply(userId, -pack.price, "pack", open) !== -pack.price) throw new Error("purchase_conflict");
       api.grantCards(userId, "pack", cards.map((c, i) => ({ ref: `${open}:${i}`, card: c.card, finish: c.finish })));
@@ -115,7 +118,7 @@ export function makeCards(state, { wallet = null } = {}) {
       const uid = state.currentUserId();
       if (!uid) return cardHttpError("signed_out", 401);
       if (!body || (body.action !== "starter" && body.action !== "open_pack")) return cardHttpError("malformed", 400);
-      if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1)) return cardHttpError("malformed", 400);
+      if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1 || body.price > 1000000)) return cardHttpError("malformed", 400);
       if (!api.enabled) return cardHttpError("cards_off", 403);
       const profile = state.profiles.get(uid);
       if (!profile) return cardHttpError("no_profile", 400);

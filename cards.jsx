@@ -14,7 +14,7 @@
 // `error` is its own state on purpose. A read that failed is not an empty collection: collapsing the two would
 // offer a player with fifty cards a starter deck they opened last week (storage-cards.js says the same).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId } from "./storage.js";
+import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId, fetchWallet } from "./storage.js";
 import { loadCardData } from "./card-data.mjs";
 import { CARDS, FINISHES } from "./card-logic.mjs";
 import { PACKS, packCards, packOdds } from "./card-packs.mjs";
@@ -38,7 +38,7 @@ export const CARD_SENTENCES = {
   bad_open: "That didn't go through. Reload the page and try again.",
   unavailable: "That pack isn't on sale right now. Nothing was charged.",
   sold_out: "That pack has sold out. Nothing was charged.",
-  price_changed: "That pack's price has gone up since this page loaded. Nothing was charged - the new price is showing now.",
+  price_changed: "That pack's price has gone up since this page loaded. Nothing was charged.",
   not_enough: "You don't have enough coins for that pack. Nothing was charged.",
 };
 export const CARD_SENTENCE_KEYS = [...CARD_REFUSALS, "offline", "network"];
@@ -59,6 +59,13 @@ export const PACK_SENTENCES = {
   network: UNKNOWN_OUTCOME,
 };
 const OUTCOME_UNKNOWN = ["server", "offline", "network"];
+// The refusals buy_pack itself makes. They are certain EVEN ON A RETRY, because buy_pack looks for an earlier
+// charge under the same open id before it refuses anything: reaching one of these means there was none.
+const CERTAIN_NO = ["unavailable", "sold_out", "price_changed", "not_enough"];
+// Every other refusal is made before the database is asked (signed out, the switch off...). On a first attempt
+// that is a plain no. On a RETRY of a purchase whose outcome is unknown it settles nothing - the first attempt
+// may have been charged - so the screen keeps the purchase's id and must not say "nothing was charged".
+const STILL_UNKNOWN = "We still can't confirm that earlier purchase, so it is being kept to try again. ";
 
 const FINISH_NAME = { base: "Base", silver: "Silver", gold: "Gold", prism: "Prism" };
 // A chance as a player reads it: "12%", "1.4%", "0.046%". Two figures below one percent, so a rare card never
@@ -85,9 +92,13 @@ function packContents(pack) {
 }
 const SHOWN_FIRST = 12;
 
-// The pack shop. `balance` is the wallet the app already holds (null while unknown); `onBalance` hands back the
-// balance a purchase answered with; `onOpened` tells the card area its collection has grown.
-export function PackShop({ balance, onBalance, onOpened }) {
+// The pack shop. `balance` is the wallet the app already holds (null while unknown); `onBalance` hands back a
+// balance just learned; `onOpened` tells the card area its collection may have grown. `pendingRef` is the card
+// area's: a Map of pack id -> { id, price }, the purchases sent and not yet answered for certain. It lives
+// ABOVE this component because the first thing a player does after "we couldn't confirm that" is look at the
+// Collection tab, which unmounts the shop - and an id that died with it would make Try again a second purchase.
+// It is one entry PER PACK for the same reason: buying a different pack must not forget the first one's id.
+export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
   const [shelf, setShelf] = useState(null); // null: loading. "error". Or [{ id, price, ... }]
   const [inside, setInside] = useState(null); // the pack whose contents are open
   const [all, setAll] = useState(false); // every card listed, rather than the first few
@@ -95,9 +106,8 @@ export function PackShop({ balance, onBalance, onOpened }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null); // { pack, text }
   const [pulled, setPulled] = useState(null); // { pack, cards, again }
-  // The purchase that has been sent and not yet answered for certain: { pack, id, price }. Kept across a failed
-  // attempt so the next one asks about the same purchase instead of making a second.
-  const pending = useRef(null);
+  const own = useRef(new Map());
+  const pending = (pendingRef || own).current;
   const pulledRef = useRef(null);
   const live = useRef(true);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
@@ -109,33 +119,53 @@ export function PackShop({ balance, onBalance, onOpened }) {
     setShelf(got.status === "ok" ? got.packs : "error");
   }, []);
   useEffect(() => { loadShelf(); }, [loadShelf]);
+  // The wallet, asked for here. The app only reads it when a profile or the shop is opened, so a player coming
+  // straight from Modes would otherwise see no balance and an Open button on a pack they cannot afford.
+  const readWallet = useCallback(async () => {
+    const w = await fetchWallet();
+    if (w && typeof w.balance === "number") onBalance?.(w.balance);
+  }, [onBalance]);
+  useEffect(() => { readWallet(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (pulled) pulledRef.current?.focus(); }, [pulled]);
 
   async function buy(pack, row) {
     if (busy) return;
-    if (!pending.current || pending.current.pack !== pack.id) pending.current = { pack: pack.id, id: newOpenId(), price: row.price };
-    const mine = pending.current;
-    setBusy(true); setNotice(null);
-    const res = await openPack(mine.pack, mine.id, mine.price);
-    if (!live.current) return;
-    setBusy(false);
+    const retry = pending.has(pack.id);
+    if (!retry) pending.set(pack.id, { id: newOpenId(), price: row.price });
+    const mine = pending.get(pack.id);
+    setBusy(true); setNotice(null); setAsking(pack.id);
+    const res = await openPack(pack.id, mine.id, mine.price);
+    // What the purchase changed is the card area's and the app's to know WHETHER OR NOT this shop is still on
+    // screen - a player who taps Collection while a pack is opening has still bought it.
     if (res.ok) {
-      pending.current = null;
-      setAsking(null);
-      setPulled({ pack, cards: toCards(res.cards.map((c) => ({ ...c, count: 1 }))), again: res.duplicate });
-      setShelf((s) => (Array.isArray(s) ? s.map((r) => (r.id === pack.id ? { ...r, stockLeft: res.stockLeft } : r)) : s));
+      pending.delete(pack.id);
       onBalance?.(res.balance);
       onOpened?.();
+      if (!live.current) return;
+      setBusy(false);
+      setAsking(null);
+      const cards = toCards(res.cards.map((c) => ({ ...c, count: 1 })));
+      setPulled({ pack, cards, again: res.duplicate, missing: cards.length < res.cards.length });
+      setShelf((s) => (Array.isArray(s) ? s.map((r) => (r.id === pack.id ? { ...r, stockLeft: res.stockLeft } : r)) : s));
       return;
     }
-    // A definite no ends this purchase; an unknown keeps its id for the next press.
-    if (!OUTCOME_UNKNOWN.includes(res.reason)) { pending.current = null; setAsking(null); }
-    setNotice({ pack: pack.id, text: PACK_SENTENCES[res.reason] || UNKNOWN_OUTCOME });
+    const unknown = OUTCOME_UNKNOWN.includes(res.reason) || !PACK_SENTENCES[res.reason];
+    const certain = CERTAIN_NO.includes(res.reason) || (!retry && !unknown);
+    if (certain) pending.delete(pack.id);
+    else { onOpened?.(); readWallet(); } // it may have gone through: let the collection and the wallet say
+    if (!live.current) return;
+    setBusy(false);
+    if (certain) setAsking(null);
+    setNotice({
+      pack: pack.id,
+      text: unknown ? UNKNOWN_OUTCOME : certain ? PACK_SENTENCES[res.reason] : STILL_UNKNOWN + PACK_SENTENCES[res.reason].replace(/\s*Nothing was charged\./, ""),
+    });
     // The shelf is what was wrong about these three: read it again so the screen stops offering what it cannot sell.
     if (["price_changed", "sold_out", "unavailable"].includes(res.reason)) {
       const got = await fetchPacks();
       if (live.current && got.status === "ok") setShelf(got.packs);
     }
+    if (res.reason === "not_enough") readWallet(); // the balance on screen was wrong about this
   }
 
   if (shelf === null) return <p className="note" role="status">Loading the pack shop…</p>;
@@ -158,6 +188,7 @@ export function PackShop({ balance, onBalance, onOpened }) {
         <section className="cd-fresh" aria-labelledby="cd-pulled-h">
           <h2 className="cd-h" id="cd-pulled-h" tabIndex={-1} ref={pulledRef}>You pulled</h2>
           {pulled.again && <p className="note">This pack was already bought — here are its cards again. You weren't charged twice.</p>}
+          {pulled.missing && <p className="note">Some of these cards can't be shown because this page is out of date. They are yours — reload to see them.</p>}
           <div className="cd-grid">
             {pulled.cards.map((r) => <CardFace key={`p${r.id}:${r.finish}`} card={r.card} finish={r.finish} />)}
           </div>
@@ -169,7 +200,8 @@ export function PackShop({ balance, onBalance, onOpened }) {
           const row = rows.get(pack.id);
           const soldOut = row.stockLeft != null && row.stockLeft <= 0;
           const short = balance != null && balance < row.price ? row.price - balance : 0;
-          const isAsking = asking === pack.id;
+          const waiting = pending.has(pack.id); // sent, and not answered for certain
+          const isAsking = asking === pack.id || waiting;
           const open = inside === pack.id;
           const contents = open ? packContents(pack) : null;
           return (
@@ -184,27 +216,32 @@ export function PackShop({ balance, onBalance, onOpened }) {
                   <p className="cd-pack-stock">{soldOut ? "Sold out" : `${row.stockLeft.toLocaleString("en-US")} of ${row.stockTotal.toLocaleString("en-US")} left`}</p>
                 )}
                 <div className="cd-pack-acts">
-                  {!isAsking && (
-                    <button className="btn solid" disabled={soldOut || short > 0 || busy} onClick={() => { setAsking(pack.id); setNotice(null); }}>
-                      {soldOut ? "Sold out" : "Open"}
-                    </button>
-                  )}
-                  {isAsking && (
-                    <>
-                      <button className="btn solid" disabled={busy} onClick={() => buy(pack, row)}>
-                        {busy ? "Opening…" : (pending.current?.pack === pack.id ? "Try again" : `Confirm: ${row.price.toLocaleString("en-US")} coins`)}
-                      </button>
-                      <button className="btn" disabled={busy} onClick={() => { setAsking(null); if (pending.current?.pack !== pack.id) setNotice(null); }}>Cancel</button>
-                    </>
+                  {/* ONE button through Open, Confirm and Try again, so the keyboard's focus stays on it as its
+                      label changes. Two buttons swapped in and out dropped focus to the page at every step. */}
+                  <button className="btn solid" data-buy disabled={busy || (!isAsking && (soldOut || short > 0))}
+                    onClick={() => { if (isAsking) buy(pack, row); else { setAsking(pack.id); setNotice(null); } }}>
+                    {!isAsking ? (soldOut ? "Sold out" : "Open")
+                      : busy && asking === pack.id ? "Opening…"
+                      : waiting ? "Try again"
+                      : `Confirm: ${row.price.toLocaleString("en-US")} coins`}
+                  </button>
+                  {/* No Cancel on a purchase that may already have happened: it cannot be cancelled, only asked about. */}
+                  {isAsking && !waiting && (
+                    <button className="btn" disabled={busy} onClick={(e) => {
+                      const main = e.currentTarget.parentElement.querySelector("[data-buy]");
+                      setAsking(null); setNotice(null); main?.focus();
+                    }}>Cancel</button>
                   )}
                   <button className="linkbtn" aria-expanded={open} aria-controls={open ? `cd-in-${pack.id}` : undefined}
                     onClick={() => { setInside(open ? null : pack.id); setAll(false); }}>Who is inside</button>
                 </div>
                 {short > 0 && !soldOut && <p className="note">You need {short.toLocaleString("en-US")} more coins.</p>}
-                {notice?.pack === pack.id && <p className="note" role="alert">{notice.text}</p>}
+                {/* A purchase still waiting says so even when the notice that first said it is gone - the shop
+                    was left and come back to - or "Try again" would be a button with no reason beside it. */}
+                {(notice?.pack === pack.id || waiting) && <p className="note" role="alert">{notice?.pack === pack.id ? notice.text : UNKNOWN_OUTCOME}</p>}
               </div>
               {open && (
-                <div className="cd-inside" id={`cd-in-${pack.id}`}>
+                <div className="cd-inside" id={`cd-in-${pack.id}`} tabIndex={-1}>
                   <p className="cd-inside-lead">{contents.cards.length.toLocaleString("en-US")} cards can come out of this pack. Each card in it is drawn on its own,
                     and its finish is rolled separately. No two cards in one pack are the same.</p>
                   <div className="cd-odds">
@@ -229,7 +266,7 @@ export function PackShop({ balance, onBalance, onOpened }) {
                     </tbody>
                   </table>
                   {!all && contents.cards.length > SHOWN_FIRST && (
-                    <button className="linkbtn" onClick={() => setAll(true)}>Show all {contents.cards.length.toLocaleString("en-US")} cards</button>
+                    <button className="linkbtn" onClick={(e) => { const box = e.currentTarget.closest(".cd-inside"); setAll(true); box?.focus(); }}>Show all {contents.cards.length.toLocaleString("en-US")} cards</button>
                   )}
                 </div>
               )}
@@ -261,6 +298,7 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
   const [notice, setNotice] = useState("");
   const [pos, setPos] = useState("All");
   const [stale, setStale] = useState(false); // an owned card this page's catalog does not know
+  const pendingBuys = useRef(new Map()); // PackShop's unanswered purchases - held here so a tab switch keeps them
 
   // ONLY THE LATEST LOAD MAY SPEAK. Whether an account is a guest arrives a beat after its id does, so a load
   // can start as "not a guest", be superseded by one that knows better, and then finish - and without this it
@@ -340,12 +378,14 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
 
       {(phase === "collection" || phase === "starter") && (
         <div className="cd-tabs" role="group" aria-label="Cards">
-          <button className="cd-chip" aria-pressed={tab === "collection"} onClick={() => setTab("collection")}>Collection</button>
+          {/* Coming back to the collection re-reads it, quietly: a pack opened a moment ago - or one whose answer
+              was lost - is in it by now, and the read made at the time may have failed. */}
+          <button className="cd-chip" aria-pressed={tab === "collection"} onClick={() => { if (tab !== "collection") { setTab("collection"); load(true); } }}>Collection</button>
           <button className="cd-chip" aria-pressed={tab === "packs"} onClick={() => setTab("packs")}>Packs</button>
         </div>
       )}
       {(phase === "collection" || phase === "starter") && tab === "packs" && (
-        <PackShop balance={balance} onBalance={onBalance} onOpened={() => load(true)} />
+        <PackShop balance={balance} onBalance={onBalance} onOpened={() => load(true)} pendingRef={pendingBuys} />
       )}
 
       {phase === "account" && (
@@ -440,7 +480,7 @@ export const CARDS_CSS = CARD_FACE_CSS + `
 .cd-earned .cd-card{--cd-w:150px}
 .cd-tabs{display:flex;gap:8px}
 /* "You pulled" takes focus so a screen reader lands on what just happened; it is not a control, so no ring. */
-.cd-h[tabindex="-1"]:focus{outline:none}
+.cd-h[tabindex="-1"]:focus,.cd-inside:focus{outline:none}
 .cd-shop{display:grid;gap:18px}
 .cd-shop-h{margin:0}
 .cd-bal{margin:0;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px}
