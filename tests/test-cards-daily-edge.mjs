@@ -1,0 +1,132 @@
+// The daily card, through the REAL supabase/functions/submit-run/index.ts (tests/edge-harness.mjs). Finishing
+// the daily draft earns one card off that day's boards - and the rule that matters more than the card is that
+// IT CAN NEVER COST A SEASON: the season is already saved and paid by the time the card is chosen, so a grant
+// that fails, throws, or is switched off answers `card: null` and nothing else changes.
+import { readFileSync } from "node:fs";
+import { assert, runTest } from "./helpers.mjs";
+import { loadEdgeFunction } from "./edge-harness.mjs";
+import { makeCards } from "./mock-cards.mjs";
+import * as GL from "../game-logic.mjs";
+import { initCardData, CARDS, cardBoardKey, FINISHES } from "../card-logic.mjs";
+
+const data = JSON.parse(readFileSync(new URL("../data/players.json", import.meta.url), "utf8"));
+GL.initGameData(data.players, data.opponents);
+initCardData(JSON.parse(readFileSync(new URL("../data/cards.json", import.meta.url), "utf8")));
+const { invoke } = await loadEdgeFunction("submit-run");
+
+const ME = "11111111-1111-4111-8111-111111111111";
+const today = () => new Date().toISOString().slice(0, 10);
+
+// A real, legal draft from a seed, the way the client plays one (the same walk tests/test-tamper-resistance.mjs uses).
+function legitTrace(seed) {
+  const seq = GL.seededSequence(seed);
+  const roster = {}; const drafted = new Set(); const history = [];
+  let seqIdx = GL.boardAt(seq, 0, roster);
+  for (let n = 0; n < GL.SLOTS.length; n++) {
+    const key = seq[seqIdx];
+    const open = GL.SLOTS.filter((s) => !roster[s]);
+    const player = GL.BOARDS[key].find((p) => !drafted.has(p.id) && open.some((s) => GL.fits(p.pos, s)));
+    const slot = open.find((s) => GL.fits(player.pos, s));
+    history.push({ key, id: player.id, season: player.season, slot });
+    roster[slot] = player; drafted.add(player.id);
+    if (history.length < GL.SLOTS.length) seqIdx = GL.boardAt(seq, seqIdx + 1, roster);
+  }
+  return { history, seq };
+}
+
+function store({ on = true } = {}) {
+  const profiles = new Map([[ME, {
+    id: ME, username: "someone", guest: false, rev: 0, created_at: "2026-11-01T00:00:00.000Z",
+    runs: 4, dnf: 1, wins: 30, losses: 38, champs: 0, perfect: 0, playoffs: 1,
+    best_score: 91.2, best_run: null, best_record: null, best_score_std: null, best_run_std: null,
+    points_daily: 0, points_unlimited: 120, points_genius: 0, points_gm: 0,
+    points_bank: 120, points_day: null, recent: [],
+    daily_streak: 0, daily_last: null, daily_best_streak: 0,
+  }]]);
+  const cards = makeCards({ profiles, currentUserId: () => null });
+  const tables = { runs: [], daily_runs: [], finished_codes: [], profile_details: [] };
+  globalThis.__edge_env__ = on ? { CARDS_ENABLED: "1" } : {};
+  const s = {
+    users: { has: (id) => profiles.has(id) },
+    readFails: {}, writeFails: {}, rpcFails: {}, throwOn: {}, beforeWrite: null, rpcCalls: [],
+    profiles, cards, tables,
+    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : tables[table] || []),
+    insert(table, row) {
+      // daily_runs' primary key is (date, format, user_id): one daily per format per day.
+      if (table === "daily_runs" && tables.daily_runs.some((r) => r.date === row.date && (r.format || "fantasy") === (row.format || "fantasy") && r.user_id === row.user_id)) {
+        return { error: { code: "23505", message: "duplicate key value violates unique constraint" } };
+      }
+      (tables[table] || (tables[table] = [])).push(row);
+      return { row };
+    },
+    remove() {},
+    rpcs: {
+      credit_coins: (a) => ({ credited: a.p_amount, balance: 250 + a.p_amount, capped: false, duplicate: false }),
+      player_stats: () => ({}),
+      award_badges: () => ({ awarded: [], credited: 0, balance: 0 }),
+      grant_cards: (a) => cards.grantCards(a.p_user, a.p_kind, a.p_grants),
+    },
+  };
+  globalThis.__edge_store__ = s;
+  return s;
+}
+const called = (s, name) => s.rpcCalls.filter((c) => (c?.name ?? c?.[0]) === name);
+const daily = (format) => {
+  const date = today();
+  const trace = legitTrace(GL.dailySeed(date, format));
+  return { date, trace, // the scoring format rides at the top level of the body, never inside mode (submit-run reads it only there)
+    send: () => invoke({ mode: { kind: "daily", date }, format, history: trace.history, seq: trace.seq, gm: false }, { userId: ME }) };
+};
+
+await runTest("finishing the daily earns one card off that day's boards", async () => {
+  const s = store();
+  const d = daily("fantasy");
+  const res = await d.send();
+  assert(res.status === 200 && res.body.ok === true, "the daily saved: " + JSON.stringify(res.body).slice(0, 200));
+  const card = res.body.card;
+  assert(card && CARDS.has(card.id) && FINISHES.includes(card.finish), "and the answer carries a real card: " + JSON.stringify(card));
+  const boards = new Set(d.trace.history.map((h) => h.key));
+  assert(boards.has(cardBoardKey(CARDS.get(card.id))), `off one of the day's boards (${cardBoardKey(CARDS.get(card.id))} of ${[...boards]})`);
+  const owned = s.cards.owned(ME);
+  assert(owned.length === 1 && owned[0].card_id === card.id && owned[0].finish === card.finish && owned[0].count === 1, "the account now owns it");
+  const g = s.cards.grants(ME);
+  assert(g.length === 1 && g[0].kind === "daily" && g[0].ref === d.date, "granted under the day, and nothing else: " + JSON.stringify(g));
+});
+
+await runTest("one card a day, whichever scoring format's daily was played", async () => {
+  const s = store();
+  const first = await daily("fantasy").send();
+  const second = await daily("standard").send();
+  assert(first.body.card && second.status === 200 && second.body.ok === true, "both dailies saved");
+  assert(second.body.card === null, "the second daily of the day earns no second card: " + JSON.stringify(second.body.card));
+  assert(s.cards.owned(ME).reduce((n, o) => n + o.count, 0) === 1, "and the account owns one");
+  assert(second.body.coins, "but it was still paid its coins");
+});
+
+await runTest("a card that cannot be granted never costs the season", async () => {
+  for (const [how, arm] of [["the grant answers with an error", (s) => { s.rpcFails.grant_cards = true; }], ["the grant throws", (s) => { s.rpcs.grant_cards = () => { throw new Error("boom"); }; }]]) {
+    const s = store(); arm(s);
+    const res = await daily("fantasy").send();
+    assert(res.status === 200 && res.body.ok === true, `${how}: the season is still saved (${res.status} ${JSON.stringify(res.body).slice(0, 120)})`);
+    assert(res.body.coins && res.body.run, `${how}: and paid, with its run`);
+    assert(res.body.card === null, `${how}: and the answer says there is no card`);
+    assert(s.profiles.get(ME).runs === 5, `${how}: the profile counted the season`);
+  }
+});
+
+await runTest("with the server's switch off no card is chosen at all", async () => {
+  const s = store({ on: false });
+  const res = await daily("fantasy").send();
+  assert(res.status === 200 && res.body.ok === true && res.body.card === null, "saved, no card: " + JSON.stringify(res.body.card));
+  assert(called(s, "grant_cards").length === 0 && s.cards.owned(ME).length === 0, "and grant_cards was never called");
+});
+
+await runTest("only a daily earns one", async () => {
+  const s = store();
+  const trace = legitTrace("CARDS01");
+  const res = await invoke({ mode: { kind: "free", code: "CARDS01" }, history: trace.history, seq: trace.seq, gm: false }, { userId: ME });
+  assert(res.status === 200 && res.body.ok === true, "the Unlimited season saved: " + JSON.stringify(res.body).slice(0, 160));
+  assert(res.body.card === null && s.cards.owned(ME).length === 0, "and earned no card");
+});
+
+console.log("test-cards-daily-edge.mjs done");

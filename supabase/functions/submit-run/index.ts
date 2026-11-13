@@ -23,9 +23,17 @@ import * as GL from "../../../game-logic.mjs";
 import { seasonReward, badgeRewards, coinsSummary } from "../../../rewards.mjs";
 import { badgeProgress } from "../../../badges.mjs";
 import { mapPlayerStats } from "../../../profile-rules.mjs";
+import { initCardData, dailyCard } from "../../../card-logic.mjs";
 import gameData from "../../../data/players.json" with { type: "json" };
+import cardCatalog from "../../../data/cards.json" with { type: "json" };
 
 GL.initGameData(gameData.players, gameData.opponents);
+initCardData(cardCatalog);
+// Cards (CARDS.md). Read per request, so a secret set after a deploy is seen without a second one. With it
+// unset this function chooses no card and calls nothing: shipping it ahead of the feature is inert.
+const cardsEnabled = () => Deno.env.get("CARDS_ENABLED") === "1";
+// A [0, 1) draw from the platform's cryptographic generator - which card a daily earns must not be predictable.
+const secureRand = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -444,6 +452,32 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     newBadges = [];
   }
 
-  // `coins` and `newBadges` are new; a client from before them reads `ok` and `run` as it always did.
-  return json({ ok: true, run, coins, newBadges });
+  // The daily card (v2.23.0): finishing the daily draft earns one card off the boards that day dealt.
+  //
+  // IT CAN NEVER COST THE SEASON. Everything above has already been written and paid, so this is its own
+  // try/catch, exactly as logRun and the coins are: a grant that fails or throws is logged and answered as
+  // `card: null`. The ref is the DATE ALONE, not the date and the format, so the two scoring formats' dailies
+  // share one card a day - grant_cards answers the second with nothing new, and that is `card: null` too.
+  // A guest never reaches here (a guest's daily is refused far above), and grant_cards refuses one anyway.
+  let card: unknown = null;
+  if (mode.kind === "daily" && cardsEnabled()) {
+    try {
+      const pick = dailyCard(history.map((h: any) => h.key), secureRand);
+      if (pick) {
+        const { data: granted, error: grantError } = await service.rpc("grant_cards", {
+          p_user: user.id, p_kind: "daily", p_grants: [{ ref: mode.date, card: pick.id, finish: pick.finish }],
+        });
+        if (grantError) throw new Error(`grant_cards: ${grantError.message}`);
+        const got = Array.isArray(granted?.granted) ? granted.granted[0] : null;
+        if (got) card = { id: got.card, finish: got.finish };
+      }
+    } catch (e) {
+      console.error("daily card failed:", e instanceof Error ? e.message : e);
+      card = null;
+    }
+  }
+
+  // `coins`, `newBadges` and `card` are each newer than the client that may be reading this; one from before
+  // them reads `ok` and `run` as it always did.
+  return json({ ok: true, run, coins, newBadges, card });
 }

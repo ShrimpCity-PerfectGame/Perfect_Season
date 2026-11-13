@@ -11,6 +11,7 @@ import { makeVersus } from "./mock-versus.mjs";
 import { makeCentury } from "./mock-century.mjs";
 import { makeGuess } from "./mock-guess.mjs";
 import { makeCards } from "./mock-cards.mjs";
+import { dailyCard } from "../card-logic.mjs";
 import { seasonReward, badgeRewards, coinsSummary } from "../rewards.mjs";
 import { badgeProgress } from "../badges.mjs";
 import { mapPlayerStats } from "../profile-rules.mjs";
@@ -617,7 +618,16 @@ export function makeMockAuth() {
       coins = null;
       newBadges = [];
     }
-    return { data: { ok: true, run, coins, newBadges } };
+    // The daily card, as submit-run grants it: one a day under the date alone, and never at the season's cost.
+    let card = null;
+    if (mode.kind === "daily" && cards.enabled) {
+      try {
+        const pick = dailyCard(history.map((h) => h.key), Math.random);
+        const got = pick ? cards.grantCards(userId, "daily", [{ ref: mode.date, card: pick.id, finish: pick.finish }]).granted[0] : null;
+        if (got) card = { id: got.card, finish: got.finish };
+      } catch { card = null; }
+    }
+    return { data: { ok: true, run, coins, newBadges, card } };
   }
 
   // Mirrors index.ts's logRun: after the profile write, and a duplicate of the unique key is a no-op.

@@ -60,7 +60,11 @@ export const BUNDLE = "/page.js";
 // name never changes either, and it is treated exactly like the bundle for the same reason: the daily's answer is
 // a walk through a permutation of THIS file and submit-guess walks its own copy, so a browser holding last
 // release's pool would play one player and hand in another. Network first, the store only when there is none.
-export const DATA = new Set(["/data/guess-pool.json"]);
+//
+// The card catalog (v2.23.0) is here for the same reason: card-claim and submit-run choose cards out of THEIR copy
+// of it, so a browser holding last release's would be told it owns a card it cannot draw. It exists only where
+// cards are switched on; this is a rule about how to fetch it, never a file the worker fetches for itself.
+export const DATA = new Set(["/data/guess-pool.json", "/data/cards.json"]);
 
 // "page" and "bundle" are fetched first and only fall back to what's stored; "asset" and "font" are served
 // from store and refreshed behind the player's back; null means the worker never touches the request.

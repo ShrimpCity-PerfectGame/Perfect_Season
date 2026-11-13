@@ -17,6 +17,8 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
 // for a staging setup is not knowing which of the two sites you're looking at.
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 const appEnv = process.env.APP_ENV || "production";
+// Cards (CARDS.md): on for the test site, off for production, CARDS_ON overriding either way.
+const cardsOn = (process.env.CARDS_ON ?? (appEnv === "staging" ? "1" : "")) === "1";
 
 // A Turnstile SECRET key in CAPTCHA_SITE_KEY would be baked into the public bundle and served to every
 // visitor, because that is what this variable is for - the site key is public by design. The two are easy to
@@ -82,6 +84,9 @@ await esbuild.build({
     // sends no token, which is exactly the behaviour before it existed - see the note at the top of that file
     // about shipping the client BEFORE the project setting. Checked above for the secret-key shape.
     CAPTCHA_SITE_KEY: JSON.stringify(captchaKey),
+    // Cards (CARDS.md): "1" switches the card area on. On for the test site, off for production until the owner
+    // says otherwise; CARDS_ON in the environment overrides either way. cards-switch.mjs is the only reader.
+    CARDS_ON: JSON.stringify(cardsOn ? "1" : ""),
   },
 });
 
@@ -98,6 +103,11 @@ if (!existsSync("data/guess-pool.json")) {
   throw new Error("data/guess-pool.json is missing - run node tools/data/build-guess-pool.mjs");
 }
 cpSync("data/guess-pool.json", "public/data/guess-pool.json");
+// The card catalog, fetched like the guess pool (card-data.mjs) - but ONLY where cards are switched on. With
+// them off the file is not shipped at all: nothing would read it, and a catalog sitting on production ahead of
+// the feature is a thing somebody finds.
+if (cardsOn) cpSync("data/cards.json", "public/data/cards.json");
+else rmSync("public/data/cards.json", { force: true });
 
 // The service worker, which is what makes the site installable and what lets a draft carry on with no signal
 // (service-worker.js, sw-rules.mjs; entry.jsx registers it). Its store is named after this exact build - the

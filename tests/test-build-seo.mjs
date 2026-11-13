@@ -23,6 +23,8 @@ function build(env) {
   return {
     html: read("page.html"), robots: read("robots.txt"), sitemap: read("sitemap.xml"), js: read("page.js"),
     pool: read(path.join("data", "guess-pool.json")),
+    cards: read(path.join("data", "cards.json")),
+    env,
     pages: Object.fromEntries(SITE_PAGES.map((p) => [p.id, read(p.file)])),
   };
 }
@@ -143,8 +145,19 @@ check("every other page says when its own words last changed",
   SITE_PAGES.every((p) => stamp(p.path) === p.updated),
   SITE_PAGES.map((p) => `${p.path} sitemap=${stamp(p.path)} declared=${p.updated}`).join(" | "));
 
+// Cards (CARDS.md) are switched on for the test site and off for production. Off means OFF: the catalog is not
+// shipped, and the switch the bundle carries is empty. Checked before the staging build below overwrites public/.
+check("production does not ship the card catalog", prod.cards === null);
+check("production's bundle has cards switched off", !/CARDS_ON/.test(prod.js) && !/"1"===""/.test(prod.js));
+const forced = build({ CARDS_ON: "1" });
+check("CARDS_ON=1 turns them on for a production build, catalog included", forced.cards !== null && JSON.parse(forced.cards).cards.length === 3124);
+
 console.log("staging build");
 const stg = build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app" });
+check("staging ships the card catalog", stg.cards !== null && JSON.parse(stg.cards).cards.length === 3124);
+const stgOff = build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app", CARDS_ON: "" });
+check("CARDS_ON= turns them off for a staging build, and takes the catalog back out", stgOff.cards === null);
+build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app" });
 check("noindex", /<meta name="robots" content="noindex, nofollow" \/>/.test(stg.html));
 check("canonical points at staging itself", attr(stg.html, /<link rel="canonical" href="([^"]+)"/) === "https://perfect-season-staging.vercel.app/");
 check("robots.txt doesn't block crawling (a crawler must fetch a page to see its noindex)", !/Disallow/.test(stg.robots || "x"), stg.robots);

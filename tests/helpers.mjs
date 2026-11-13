@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import * as GL from "../game-logic.mjs";
 import * as V from "../versus-logic.mjs";
+import { initCardData } from "../card-logic.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const root = path.resolve(__dirname, "..");
@@ -24,6 +25,10 @@ GL.initGameData(gameData.players, gameData.opponents);
 // so that module stays free of Node - tests/mock-supabase.mjs runs in a browser page too (tools/ui-harness).
 const versusPool = JSON.parse(readFileSync(path.join(root, "data", "versus-pool.json"), "utf8"));
 V.initVersusData(versusPool);
+// The card catalog, for the mock's card-claim and daily card (tests/mock-cards.mjs may not read a file itself:
+// it is bundled into a browser page by tools/ui-harness). This is the Node copy of card-logic.mjs the mock
+// imports - the app under test has its own copy inside its bundle and loads the catalog by fetch.
+initCardData(JSON.parse(readFileSync(path.join(root, "data", "cards.json"), "utf8")));
 
 export { makeMockAuth } from "./mock-supabase.mjs";
 
@@ -132,6 +137,7 @@ export async function loadPerfectSeason() {
         APP_VERSION: JSON.stringify("test"),
         APP_ENV: JSON.stringify("production"),
         APP_SITE_URL: JSON.stringify("https://gridspin.test"),
+        CARDS_ON: JSON.stringify("1"), // tests decide per test through window.__ps_cards__ (cards-switch.mjs)
       },
       outfile,
     });
@@ -166,6 +172,7 @@ export async function loadModule(entry) {
         APP_VERSION: JSON.stringify("test"),
         APP_ENV: JSON.stringify("production"),
         APP_SITE_URL: JSON.stringify("https://gridspin.test"),
+        CARDS_ON: JSON.stringify("1"),
       },
       outfile,
     });
