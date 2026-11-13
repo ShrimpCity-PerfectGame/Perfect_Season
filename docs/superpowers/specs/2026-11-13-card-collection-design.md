@@ -224,13 +224,17 @@ number.
   transaction. A sold-out pack stays visible, marked sold out.
 - **(call)** How many cards a pack holds is a property of the pack (the mockup's 1 and 3 are
   examples). Standing packs can be bought without limit.
-- **The odds a player reads are the odds the server rolls from** - one set of rows, not a table in
-  the browser and another in the database.
+- **The odds a player reads are the odds the server rolls from** - one definition both use.
+  **(call, revised when packs were planned)** That definition is a module, `card-packs.mjs`, which
+  the browser and the Edge Function both import, not database rows: a pack's contents are up to
+  3,124 weighted cards derived from the catalog, and a second copy of that in SQL is a second
+  thing to drift. What stays in rows is what an owner changes without a release: a pack's price,
+  whether it is on sale, and a limited pack's stock.
 - **Prices (call):** set from what play really pays (`rewards.mjs`: about 40 plus wins for a
   Daily, 15 per mini game, a 250 welcome, existing balances up to 10,000), not from the ChatGPT
   document. Existing players can open packs on day one; pricing must mean a veteran's saved
-  balance buys a good start, not the catalog. Prices, odds and pack contents are data rows that
-  can change without a release, as `shop_items` prices can.
+  balance buys a good start, not the catalog. Prices, on-sale and stock are data rows that
+  can change without a release, as `shop_items` prices can; contents and odds ship with the code.
 - **Guests (call):** cannot collect, matching the shop. Coins they earn wait for them as now.
 
 ## 6. Where it lives
