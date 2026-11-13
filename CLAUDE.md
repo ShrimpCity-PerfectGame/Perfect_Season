@@ -512,9 +512,9 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.23.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
-five parts. **Two exist: the rules, and owning cards** - a starter deck, a card a day from the daily draft, and a
-collection screen. Nothing plays a battle yet and there are no packs. **Production has cards switched off** in two
+**Cards (in progress, v2.24.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+five parts. **Three exist: the rules, owning cards, and the pack shop** - a starter deck, a card a day from the
+daily draft, a collection screen, and packs bought with coins. Nothing plays a battle yet. **Production has cards switched off** in two
 places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
 `card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
 with the client off banks daily cards nobody can see, which is a launch order and not a state to leave things in. **`CARDS.md` is the reference** and
@@ -553,6 +553,17 @@ The parts unlike everything else:
 - **Sprites are recoloured in the browser**, so fourteen neutral PNGs serve every card and there is no file per
   team. `data/card-skin.json`'s player list is EMPTY on purpose: every card wears one default tone until the list
   is made by hand, because a wrong tone on a named real person is worse than a neutral one.
+- **What is in a pack is `card-packs.mjs`; what it costs is a `card_packs` row** (v2.24.0). The browser prints
+  the odds from the module and `card-claim` rolls from the same module, so what is read is what is rolled - and
+  **the client and the functions must ship together whenever it changes**. `buy_pack` does the stock, the coins
+  and the grant in one transaction, charges the ROW's price, and refuses a pack that got dearer than the price
+  the buyer's screen showed.
+- **A purchase carries an open id, and three failures mean "unknown", not "no".** `offline`, `network` and
+  `server` may each follow a pack that WAS bought, so the screen keeps the id and asks again about the same
+  purchase; `buy_pack` answers a repeat with the first time's cards and charges nothing. None of those three
+  sentences may say nothing was charged, and a test holds that.
+- **Pack prices are measured** by test 11 in `tests/test-economy-security.mjs`. Legends was first written at
+  1,500, which made the one pack CERTAIN to hold a 100+ card also the cheapest route to one.
 - **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not
   used; the number on the card face is always the number in the battle.
 
@@ -797,7 +808,8 @@ node tests/test-cards-daily-edge.mjs   # the real submit-run: a daily earns one 
 node tests/test-cards-client.mjs       # the switch, the catalog load that retries, and a collection read with three answers
 node tests/test-card-sprites.mjs       # the fourteen neutral sprites: one per archetype plus role, the size a card draws
 node tests/test-card-face.mjs          # the recolouring maths, a card's spoken label, every text colour at AA, a card with no sprite
-node tests/test-cards-screen.mjs       # the tile and the switch, the starter deck, the collection, hiding it, the daily card on the result
+node tests/test-cards-screen.mjs       # the tile and the switch, the starter deck, the collection, hiding it, the pack shop, the daily card on the result
+node tests/test-card-packs.mjs         # what is in a pack: the odds add up, 20,000 rolls match what is stated, the art exists
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -1466,6 +1478,14 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.24.0's (the pack shop, on the test site): re-run **`migration-cards.sql`**, then **deploy the Edge
+  Functions**, then the client. The migration adds `card_packs` and `buy_pack`, and replaces two constraints by
+  name - `card_grants_kind_check` and **`wallet_ledger_kind_check`, which belongs to migration-wallet.sql's
+  table** and gains the kind `pack`; it only adds, so the site works between the steps. `card-claim` changed and
+  bundles the new `card-packs.mjs`, which the browser also carries, so **the client and the functions ship
+  together**: a client ahead of the function gets `malformed` on every Open, and a function ahead of the
+  migration answers `server`. Production takes the same migration and functions and stays off - `card-claim`
+  answers `cards_off` before touching the database, and a production build carries no tile.
   v2.23.0's (cards, on the test site): run **`migration-cards.sql`**, re-run **`migration-profiles.sql`**
   (`delete_account` learns to erase cards), **set the secret `CARDS_ENABLED=1` on the STAGING project only**
   (`npx supabase secrets set CARDS_ENABLED=1 --project-ref <staging ref>`), **deploy the Edge Functions**

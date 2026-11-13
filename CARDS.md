@@ -310,19 +310,116 @@ surface. `CARD_TEXT_PAIRS` lists every text colour and what it sits on; the test
   `select grant_cards('<user uuid>', 'gift', '[{"ref":"gift-1","card":412,"finish":"gold"}]'::jsonb);`
   `gift` is a kind of its own, so a hand-out never takes a day's daily card. A ref already used for that
   player and kind grants nothing.
-- **A new kind of grant** (packs are next) is two edits in `migration-cards.sql`: the named constraint
-  `card_grants_kind_check`, which the file drops and re-adds, and the list inside `grant_cards`.
+- **A new kind of grant** is two edits in `migration-cards.sql`: the named constraint
+  `card_grants_kind_check`, which the file drops and re-adds, and the list inside `grant_cards`. (`pack` was
+  added that way in v2.24.0.)
 - **See what someone owns:** `select card_id, finish, count from card_owned where user_id = '<uuid>';`
 
 ## 8b. Not built
 
-Packs and their odds, the server side of battles and runs, the battle screen, badges, the profile's best card,
-boards, the real skin-tone list. `/privacy` and `/terms` do not mention cards yet; they change in the release
+The server side of battles and runs, the battle screen, badges, the profile's best card, boards, the real
+skin-tone list. Packs exist (section 9) but nothing a player does with a card exists yet, so a pack today is
+only something to own. No pack-opening animation: the cards simply appear. The Standard pack's picture has
+words painted into it that are not this game's ("FOOTBALL BOOSTER", "COMMON TIER") and a wordless one is owed
+before production. `/privacy` and `/terms` do not mention cards yet; they change in the release
 that switches cards on for production. The owner's full 50-pose sprite set arrived at about 100x135 pixels a
 sprite and is wanted at full size; the sprites in use are cut from the first two sheets. The licence on the
 tool that made the sprites is cleared (owner, 2026-11-13).
 
-## 9. Tests
+## 9. Packs (v2.24.0, on the test site)
+
+A pack is bought with coins - the same wallet as the shop - and holds cards rolled when it is opened.
+
+### 9.1 What is in a pack is code; what it costs is a row
+
+`card-packs.mjs` is the ONE definition of a pack's contents and odds. The browser imports it to print "Who is
+inside" before anybody buys; `card-claim` imports it to roll the pack. What a player reads is therefore what
+is rolled, by construction. That is also why contents are not database rows: a pack is up to 3,124 weighted
+cards derived from the catalog, and a copy in SQL would be a second thing to keep true. **So the client and
+the functions ship together whenever that file changes**, the rule `versus-logic.mjs` and the guess pool carry.
+
+| Pack | Cards | Holds | Finish odds | Seed price |
+|---|---|---|---|---|
+| Standard | 3 | every card (3,124) | Base 70, Silver 22, Gold 7, Prism 1 | 150 |
+| Air raid | 3 | Gunslingers, Volume passers, Deep threats, Seam stretchers, Possession receivers (471) | the same | 250 |
+| Legends | 1 | cards rated 100+ (252) | Gold 85, Prism 15 | 3,000, and 5,000 exist in all |
+
+Better cards are rarer by `cardWeight`: 10 under a rating of 60, then 6, 3, 1.5, and 0.6 at 120 and up. A
+weight, not a chance - a card's chance is its weight over the pack's total, so the same card is likelier in a
+small themed pack. No two cards in one pack are the same. A roll makes exactly two draws a card.
+
+`card_packs` (public select, no write policy) holds what an owner changes without a release: `price`,
+`active`, and `stock_total`/`stock_left` for a limited pack. `size` is the one thing held in both places, on
+purpose - `buy_pack` refuses a purchase that is not exactly that many cards, so a function with a bug cannot
+hand over twenty. The seed only adds missing rows, so a price changed by hand survives a re-run.
+
+### 9.2 Buying one
+
+`card-claim`, action `open_pack`, body `{ pack, open, price }`. The function rolls the cards with the
+cryptographic generator and hands them to **`buy_pack(user, pack, open, cards, price)`** (service role only),
+which does the stock, the coins and the grant in ONE transaction:
+
+1. `no_profile`, `guest_not_allowed`, `bad_open` (the open id is 8-36 letters, digits and hyphens)
+2. `wallet_lock`
+3. **the open id has been charged before** - answer with the cards granted the first time, `duplicate: true`,
+   and change nothing
+4. the pack's row, `for update` - `unavailable` if there is none or it is off sale
+5. `bad_grant` unless the cards are exactly `size` well-formed entries
+6. `sold_out`
+7. `price_changed` if the row's price is HIGHER than `price`, which is what the buyer's screen showed. A
+   cheaper pack is simply charged cheaper
+8. `not_enough`
+9. take one from stock, debit the wallet under the ledger key (user, `pack`, open id), grant the cards under
+   refs `<open id>:0`, `:1`, ... - a raise anywhere rolls all of it back
+
+**The open id is what makes a retry safe**, and it is the whole answer to "the coins went and the cards did
+not". The screen makes one id per purchase (`newOpenId`) and keeps it until that purchase is answered for
+certain. `offline`, `network` and `server` mean the outcome is UNKNOWN - the pack may have been bought and
+the answer lost - so the screen keeps the id, says it does not know, and its button becomes **Try again**,
+which asks about the same purchase. `PACK_SENTENCES` may promise "never charged twice" because step 3 keeps
+it; `tests/test-cards-screen.mjs` fails if one of those three sentences ever claims nothing was charged.
+Leaving the screen forgets the id, and a pack that was bought is then simply in the collection.
+
+Every reason is in `CARD_REFUSALS` and has a sentence in both `CARD_SENTENCES` and `PACK_SENTENCES`. The
+pack refusals travel as the keys of `PACK_REFUSALS` in the function rather than as `reason: "..."` literals,
+so `tests/test-cards-edge.mjs` reads that table separately.
+
+### 9.3 The screen
+
+An account gets two tabs on the card area, Collection and Packs (`PackShop` in `cards.jsx`). The shelf has
+its own three answers - loading, could-not-load, the packs - for the reason the collection does. **Who is
+inside** prints the finish odds, the odds by rating band, and every card with its own chance: twelve to begin
+with and all of them on request, so the odds are published in full. Open asks to Confirm with the price in
+the button. After a purchase the cards appear under "You pulled", which takes focus so a screen reader lands
+on what happened. A price that went up, a sell-out or a pack taken off sale re-reads the shelf, so the screen
+stops offering what it cannot sell.
+
+### 9.4 What they cost, measured
+
+`tests/test-economy-security.mjs` (test 11) reads the seed's prices and prints, from the same earning rates
+the shop is held to: a casual day opens about 2.2 Standard packs and a heavy day about 14; the 10,000 starting
+cap opens 66; a card rated 100+ costs about 3,970 coins through Standard, 2,370 through Air raid and 3,000
+through Legends. **Legends was first written at 1,500 and that was wrong**: the one pack certain to hold a
+100+ card was also the cheapest route to one, by 40%. The test now holds that it is never cheaper than the
+cheapest other route. Coins farmed through the economy's known gaps buy cards as well as cosmetics now; cards
+change nothing in a draft, a score or a board, and the battles in part four must be priced against that.
+
+**Before any coin is sold for money**, a pack with random contents bought with a purchasable currency is the
+thing loot-box rules are written about, and that question goes to the owner's lawyer first.
+
+### 9.5 Runbook
+
+- **Change a price:** `update card_packs set price = 200 where id = 'pack-standard';` - and edit the seed in
+  `migration-cards.sql` and `PACK_SEED` in `tests/mock-cards.mjs` so new databases and the tests agree.
+- **Take a pack off sale:** `update card_packs set active = false where id = 'pack-air-raid';`
+- **Restock the limited pack:** `update card_packs set stock_left = stock_total where id = 'pack-legends';`
+- **A new pack** is an entry in `card-packs.mjs`, a seed row here, a picture
+  (`tools/cards/source/` then `node tools/cards/build-pack-art.mjs`), and both halves shipped together.
+- **What did somebody buy:** `select ref, amount, created_at from wallet_ledger where user_id = '<uuid>' and
+  kind = 'pack';` then `select ref, card_id, finish from card_grants where user_id = '<uuid>' and kind =
+  'pack' and ref like '<open id>:%';`
+
+## 10. Tests
 
 ```bash
 node tests/test-card-catalog.mjs   # the catalog: every pool row is a card, and a rebuild never rewrites one
@@ -334,5 +431,6 @@ node tests/test-cards-daily-edge.mjs # the real submit-run: a daily earns one ca
 node tests/test-cards-client.mjs   # the switch, the catalog load, and a collection read with three answers
 node tests/test-card-sprites.mjs   # fourteen PNGs of the size a card draws
 node tests/test-card-face.mjs      # the recolouring maths, the spoken label, contrast, a card with no sprite
-node tests/test-cards-screen.mjs   # the tile, the starter deck, the collection, hiding it, the daily card on the result
+node tests/test-cards-screen.mjs   # the tile, the starter deck, the collection, the pack shop, the daily card on the result
+node tests/test-card-packs.mjs     # what is in a pack: the odds add up, and 20,000 rolls match what is stated
 ```

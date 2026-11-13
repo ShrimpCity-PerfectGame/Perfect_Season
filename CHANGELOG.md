@@ -20,6 +20,32 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-11-13
+
+**On the test site only**, like 2.23.0: production builds have cards switched off.
+
+### Added
+- **Cards: a pack shop.** The card area has a Packs tab. Three packs, bought with the same coins as the shop:
+  Standard (three cards from anywhere, 150), Air raid (three passers and receivers, 250) and Legends (one card
+  rated 100 or better, always Gold or Prism, 3,000, with 5,000 in existence). **Who is inside** shows every
+  card a pack can hold and its exact chance before you buy, and the finish odds beside it - what the screen
+  prints and what the server rolls are one piece of code, so they cannot disagree.
+- Opening asks you to confirm with the price in the button, and the cards you pulled are shown straight away.
+- **A purchase can never charge twice.** If the answer is lost on the way back, the screen says it does not
+  know rather than guessing, and Try again asks about the same purchase: you get that pack's cards and are
+  not charged again.
+- A pack whose price has gone up since you looked is refused, not charged at the new price.
+
+### Changed
+- Pack art is cut from the owner's three pictures by `tools/cards/build-pack-art.mjs`.
+
+### For the record
+- The Legends pack was first priced at 1,500. Measured, that made the one pack certain to hold a top card
+  also the cheapest way to get one, so it is 3,000. `tests/test-economy-security.mjs` prints what every pack
+  is worth and holds the prices to it.
+- Rollout order: re-run `migration-cards.sql`, deploy the Edge Functions, then the client - and the client
+  and the functions together, because both carry `card-packs.mjs`.
+
 ## [2.23.0] - 2026-11-13
 
 **On the test site only.** Production builds have cards switched off: no tile, no catalog file, and the two
