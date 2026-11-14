@@ -14,7 +14,7 @@
 // `error` is its own state on purpose. A read that failed is not an empty collection: collapsing the two would
 // offer a player with fifty cards a starter deck they opened last week (storage-cards.js says the same).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId, fetchWallet } from "./storage.js";
+import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId, fetchWallet, sellCopies } from "./storage.js";
 import { loadCardData } from "./card-data.mjs";
 import { CARDS, FINISHES } from "./card-logic.mjs";
 import { TEAMS } from "./game-logic.mjs";
@@ -194,7 +194,7 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
           {pulled.again && <p className="note">This pack was already bought — here are its cards again. You weren't charged twice.</p>}
           {pulled.missing && <p className="note">Some of these cards can't be shown because this page is out of date. They are yours — reload to see them.</p>}
           <div className="cd-grid">
-            {pulled.cards.map((r) => <CardFace key={`p${r.id}:${r.finish}`} card={r.card} finish={r.finish} />)}
+            {pulled.cards.map((r) => <PulledCard key={`p${r.id}:${r.finish}`} row={r} />)}
           </div>
         </section>
       )}
@@ -282,6 +282,20 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
   );
 }
 
+// A card just handed over. One the player ALREADY HELD in that finish was sold as it arrived (CARDS.md 12), and
+// is drawn here as that: the card tips over and a coin badge lands on it, with the sale in words underneath -
+// the animation is decoration, the sentence is the fact. `sold` is the coins, or undefined for a card kept.
+export function PulledCard({ row }) {
+  if (row.sold == null) return <CardFace card={row.card} finish={row.finish} />;
+  return (
+    <div className="cd-sold" data-sold={row.sold}>
+      <div className="cd-sold-card"><CardFace card={row.card} finish={row.finish} /></div>
+      <span className="cd-sold-coin" aria-hidden="true"><Coins amount={row.sold} size={16} /></span>
+      <p className="cd-sold-say">You have this one. Sold for <b>{row.sold.toLocaleString("en-US")}</b> coins.</p>
+    </div>
+  );
+}
+
 const POSITIONS = ["All", "QB", "RB", "WR", "TE"];
 const FINISH_ORDER = { prism: 0, gold: 1, silver: 2, base: 3 };
 // Owned rows as cards to draw: best first. A row whose card is not in the catalog this browser loaded is
@@ -292,7 +306,12 @@ function toCards(rows) {
     .sort((a, b) => b.card.rating - a.card.rating || FINISH_ORDER[a.finish] - FINISH_ORDER[b.finish] || a.id - b.id);
 }
 
+// Two levels (v2.26.0): three things to do with cards across the top - look at them, get more, play them - and
+// the three ways to play under Battle. Five chips in one group wrapped onto two ragged rows on a phone.
 const TABS = [["collection", "Collection"], ["packs", "Packs"], ["run", "Run"], ["showdown", "Showdown"], ["boards", "Boards"]];
+const TOP_TABS = [["collection", "Collection"], ["packs", "Packs"], ["battle", "Battle"]];
+const BATTLE_TABS = [["run", "Run"], ["showdown", "Showdown"], ["boards", "Boards"]];
+const isBattle = (tab) => BATTLE_TABS.some(([id]) => id === tab);
 // initialTab is the UI harness's, so the pack shop and the battle screens can be looked at and audited without a click.
 export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, balance = null, onBalance, initialTab = "collection" }) {
   const [phase, setPhase] = useState("loading");
@@ -305,6 +324,9 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
   const [fin, setFin] = useState("All");   // a finish, or "All"
   const [team, setTeam] = useState("All"); // a team code, or "All"
   const [stale, setStale] = useState(false); // an owned card this page's catalog does not know
+  const lastBattle = useRef(isBattle(initialTab) ? initialTab : "run"); // which way to play Battle opens on
+  const [swept, setSwept] = useState(null); // { copies, coins }: stacked copies just sold, said once
+  const sweeping = useRef(false);
   const pendingBuys = useRef(new Map()); // PackShop's unanswered purchases - held here so a tab switch keeps them
 
   // ONLY THE LATEST LOAD MAY SPEAK. Whether an account is a guest arrives a beat after its id does, so a load
@@ -344,6 +366,21 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
   }, [userId, isGuest]);
   useEffect(() => { load(); return () => { latest.current++; }; }, [load]);
 
+  // COPIES ARE SOLD, NOT KEPT (CARDS.md 12). A copy is sold as it arrives; this is for the stacks from before
+  // that rule, found the first time the collection is read. Once a mount - a sale that fails is left for the
+  // next visit rather than retried in a loop, and asking again can never sell anything twice.
+  useEffect(() => {
+    if (sweeping.current || (phase !== "collection" && phase !== "starter") || !owned.some((r) => r.count > 1)) return;
+    sweeping.current = true;
+    (async () => {
+      const res = await sellCopies();
+      if (!res.ok) return;
+      if (typeof res.balance === "number") onBalance?.(res.balance);
+      if (res.copies > 0) setSwept({ copies: res.copies, coins: res.coins });
+      load(true);
+    })();
+  }, [phase, owned]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function openStarter() {
     if (busy) return;
     setBusy(true); setNotice("");
@@ -381,6 +418,13 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
         <p className="note" role="status">Some of your cards can't be shown because this page is out of date. Reload to see them all.</p>
       )}
 
+      {swept && (phase === "collection" || phase === "starter") && (
+        <p className="cd-swept" role="status" data-swept>
+          <span className="cd-swept-coin" aria-hidden="true"><Coins amount={swept.coins} size={18} /></span>
+          You only keep one of each card now. {swept.copies} extra {swept.copies === 1 ? "copy was" : "copies were"} sold for <b>{swept.coins.toLocaleString("en-US")}</b> coins.
+        </p>
+      )}
+
       {phase === "error" && (
         <div className="panel" role="alert">
           <p><b>Couldn't load your cards.</b> Nothing is lost — this is a connection problem, not an empty collection.</p>
@@ -392,18 +436,29 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
         <div className="cd-tabs" role="group" aria-label="Cards">
           {/* Coming back to the collection re-reads it, quietly: a pack opened a moment ago - or one whose answer
               was lost - is in it by now, and the read made at the time may have failed. */}
-          {TABS.map(([id, name]) => (
-            <button key={id} className="cd-chip" data-tab={id} aria-pressed={tab === id}
-              onClick={() => { if (tab !== id) { setTab(id); if (id === "collection") load(true); } }}>{name}</button>
-          ))}
+          {TOP_TABS.map(([id, name]) => {
+            const on = id === "battle" ? isBattle(tab) : tab === id;
+            return (
+              <button key={id} className="cd-seg" data-tab={id} aria-pressed={on}
+                onClick={() => { if (on) return; setTab(id === "battle" ? lastBattle.current : id); if (id === "collection") load(true); }}>{name}</button>
+            );
+          })}
         </div>
       )}
       {(phase === "collection" || phase === "starter") && tab === "packs" && (
         <PackShop balance={balance} onBalance={onBalance} onOpened={() => load(true)} pendingRef={pendingBuys} />
       )}
 
-      {(phase === "collection" || phase === "starter") && (tab === "run" || tab === "showdown" || tab === "boards") && (
-        <BattleArea mode={tab} rows={owned} onBalance={onBalance} />
+      {(phase === "collection" || phase === "starter") && isBattle(tab) && (
+        <>
+          <div className="cd-sub" role="group" aria-label="Battle">
+            {BATTLE_TABS.map(([id, name]) => (
+              <button key={id} className="cd-chip" data-tab={id} aria-pressed={tab === id}
+                onClick={() => { lastBattle.current = id; setTab(id); }}>{name}</button>
+            ))}
+          </div>
+          <BattleArea mode={tab} rows={owned} onBalance={onBalance} />
+        </>
       )}
 
       {phase === "account" && (
@@ -434,12 +489,13 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
             <section className="cd-fresh" aria-labelledby="cd-fresh-h">
               <h2 className="cd-h" id="cd-fresh-h">Your starter deck</h2>
               <div className="cd-grid">
-                {fresh.map((r) => <CardFace key={`f${r.id}:${r.finish}`} card={r.card} finish={r.finish} />)}
+                {fresh.map((r) => <PulledCard key={`f${r.id}:${r.finish}`} row={r} />)}
               </div>
             </section>
           )}
           <section aria-labelledby="cd-coll-h">
             <h2 className="cd-h" id="cd-coll-h">{total} {total === 1 ? "card" : "cards"}</h2>
+            <p className="cd-rule">You keep one of each card in each finish. Pull one you already have and it is sold for half its value.</p>
             <div className="cd-filter" role="group" aria-label="Show a position">
               {POSITIONS.map((p) => (
                 <button key={p} className="cd-chip" aria-pressed={pos === p} onClick={() => setPos(p)}>{p}</button>
@@ -489,7 +545,7 @@ export function SeasonCard({ card, onOpenCards }) {
   return (
     <section className="cd-earned" aria-labelledby="cd-earned-h">
       <h3 className="cd-earned-h" id="cd-earned-h">Today's card</h3>
-      <CardFace card={known} finish={card.finish} />
+      <PulledCard row={{ card: known, finish: card.finish, sold: typeof card.sold === "number" ? card.sold : undefined }} />
       {onOpenCards && <button className="linkbtn" onClick={onOpenCards}>See your cards</button>}
     </section>
   );
@@ -514,7 +570,24 @@ export const CARDS_CSS = CARD_FACE_CSS + CARD_BATTLE_CSS + `
 .cd-earned{display:grid;justify-items:center;gap:10px;margin:18px 0 6px}
 .cd-earned-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:18px;margin:0;color:var(--ink)}
 .cd-earned .cd-card{--cd-w:150px}
-.cd-tabs{display:flex;flex-wrap:wrap;gap:8px}
+.cd-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:2px solid var(--ink);border-radius:12px;overflow:hidden;background:var(--surface)}
+.cd-seg{border:0;border-left:2px solid var(--ink);background:transparent;color:var(--ink);font-weight:800;font-size:15px;padding:12px 6px;min-height:46px;position:relative}
+.cd-seg:first-child{border-left:0}
+.cd-seg[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.cd-seg:focus-visible{outline:3px solid var(--accent-ink);outline-offset:-5px}
+.cd-sub{display:flex;flex-wrap:wrap;gap:8px}
+.cd-rule{margin:-4px 0 14px;font-size:14px;line-height:1.4;color:var(--muted)}
+/* A copy being sold: the card tips and dims, a coin badge drops onto it. Nothing here fades - text at half
+   opacity is below AA for as long as the fade lasts - so the badge is hidden until its turn and then whole. */
+.cd-sold{position:relative;display:grid;justify-items:center;gap:14px;width:var(--cd-w,172px)}
+.cd-sold-card{animation:cd-sell .7s .5s cubic-bezier(.3,.7,.3,1) both}
+.cd-sold-coin{position:absolute;top:26%;left:50%;display:inline-flex;align-items:center;background:var(--accent);color:var(--on-accent);border:2px solid var(--on-accent);border-radius:999px;padding:6px 12px;font-weight:800;box-shadow:3px 3px 0 var(--hard);transform:translate(-50%,-50%) rotate(-6deg);animation:cd-coin .5s 1s cubic-bezier(.2,1.4,.4,1) both}
+.cd-sold-say{margin:0;text-align:center;font-size:13px;line-height:1.35;font-weight:600;color:var(--ink)}
+.cd-swept{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;background:var(--surface);border:2px solid var(--btn-line);border-radius:12px;padding:12px 14px;color:var(--ink);line-height:1.4}
+.cd-swept-coin{display:inline-flex;align-items:center;background:var(--accent);color:var(--on-accent);border-radius:999px;padding:4px 10px;font-weight:800;animation:cd-coin .5s .2s cubic-bezier(.2,1.4,.4,1) both}
+@keyframes cd-sell{from{transform:none;filter:none}to{transform:rotate(-5deg) scale(.9);filter:grayscale(.85) brightness(.92)}}
+@keyframes cd-coin{from{visibility:hidden;transform:translate(-50%,-160%) rotate(-6deg) scale(.4)}to{visibility:visible;transform:translate(-50%,-50%) rotate(-6deg) scale(1)}}
+@media (prefers-reduced-motion:reduce){.cd-sold-card{animation:none;transform:rotate(-5deg) scale(.9);filter:grayscale(.85) brightness(.92)}.cd-sold-coin,.cd-swept-coin{animation:none}}
 /* "You pulled" takes focus so a screen reader lands on what just happened; it is not a control, so no ring. */
 .cd-h[tabindex="-1"]:focus,.cd-inside:focus{outline:none}
 .cd-shop{display:grid;gap:18px}

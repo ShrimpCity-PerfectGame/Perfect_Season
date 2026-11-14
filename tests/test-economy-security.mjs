@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { assert, runTest, makeMockAuth, setupDom, loadModule, renderComponent } from "./helpers.mjs";
 import { freshDb, addAccount, asUser, asAnon, uuid, sql, RENAME_MIGRATIONS } from "./pg-fixture.mjs";
 import * as GL from "../game-logic.mjs";
-import { COIN_RULES, coinsForRun, seasonReward } from "../rewards.mjs";
+import { COIN_RULES, coinsForRun, seasonReward, cardSellCoins } from "../rewards.mjs";
 import { BADGES, BADGE_BY_ID } from "../badges.mjs";
 import { SHOP_ITEMS, LAUNCH_PRICES, AVATAR_PACKS, SHOWCASE_MAX } from "../shop-catalog.mjs";
 import * as CL from "../card-logic.mjs";
@@ -1505,6 +1505,17 @@ await runTest("11. what packs cost: a casual day opens a pack or two, the starti
   assert(economy.ceiling / price["pack-legends"].price < 5, "and no day's coins, however earned, buy more than a handful of Legends packs");
   // Stock: the limited pack's whole run, in coins, is far more than any one account's starting balance.
   assert(PACK_BY_ID["pack-legends"].limited && /\('pack-legends',\s*\d+,\s*1,\s*5000,\s*5000,/.test(seed), "Legends is the limited one: 5,000 in all");
+  // COPIES SELL FOR COINS (v2.26.0, CARDS.md 12), so a pack is also a way to turn coins into coins - and it
+  // must always be a losing one. The worst case is an account that already holds every card in every finish:
+  // everything it pulls is a copy. Even then the pack has to return clearly less than it cost, or a full
+  // collection is a coin printer.
+  const sellBack = {};
+  for (const p of PACKS) {
+    const perCard = packOdds(p).reduce((s, o) => s + o.chance * Object.entries(p.finish).reduce((t, [f, c]) => t + c * cardSellCoins(CL.CARDS.get(o.id).rating, f), 0), 0);
+    sellBack[p.id] = (p.size * perCard) / price[p.id].price;
+    assert(sellBack[p.id] < 0.8, `${p.id}: a pack of nothing but copies returns ${Math.round(100 * sellBack[p.id])}% of its price, which must stay well under all of it`);
+  }
+  console.log(`    A pack of nothing but copies returns ${PACKS.map((p) => `${Math.round(100 * sellBack[p.id])}% (${p.name})`).join(", ")} of its price.`);
   economy.packs = { std, heavyPacks, legends: price["pack-legends"].price };
   console.log(`    Standard ${std}, Air raid ${price["pack-air-raid"].price}, Legends ${price["pack-legends"].price}. A casual day opens ${casualPacks.toFixed(1)} Standard packs, a heavy day ${heavyPacks.toFixed(1)};`
     + ` the starting cap opens ${Math.floor(capPacks)}. A card rated 100+ costs about ${Math.round(route["pack-standard"]).toLocaleString("en-US")} coins through Standard,`

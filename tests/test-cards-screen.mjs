@@ -155,13 +155,24 @@ await runTest("a card the catalog does not know is skipped, and the rest still s
   auth._cards.tables.card_owned.pop();
 });
 
-await runTest("copies stack and say how many", async () => {
+await runTest("a stack of copies from before is sold the first time the collection opens", async () => {
+  // Stacked the old way (no price on the grant): what every collection from before v2.26.0 can hold.
   const first = auth._cards.owned(ann)[0];
   auth._cards.grantCards(ann, "daily", [{ ref: "2026-11-01", card: first.card_id, finish: first.finish }]);
-  await remount(); await openCards();
+  auth._cards.grantCards(ann, "daily", [{ ref: "2026-11-02", card: first.card_id, finish: first.finish }]);
+  assert(auth._cards.owned(ann).find((o) => o.card_id === first.card_id).count === 3, "three of one card to begin with");
+  const before = auth._wallet.balanceOf(ann);
+  const each = auth._cards.sellFor({ id: first.card_id, finish: first.finish });
+  await remount(); await openCards(); await settle(); await settle();
+  assert(auth._cards.owned(ann).find((o) => o.card_id === first.card_id).count === 1, "one is kept");
+  assert(each > 0 && auth._wallet.balanceOf(ann) === before + 2 * each, `and two were sold for ${each} each: ${auth._wallet.balanceOf(ann) - before}`);
+  const said = container.querySelector("[data-swept]")?.textContent || "";
+  assert(/2 extra copies were sold for/.test(said) && said.includes((2 * each).toLocaleString("en-US")), "the screen says what was sold and for how much: " + said);
   const el = container.querySelector(`[data-card="${first.card_id}"]`);
-  assert(el.querySelector(".cd-count")?.textContent === "x2" && el.getAttribute("aria-label").includes("2 copies"), "two copies show x2 and say so");
-  assert(container.querySelector("#cd-coll-h").textContent === "9 cards", "and count as two");
+  assert(!el.querySelector(".cd-count") && container.querySelector("#cd-coll-h").textContent === "8 cards", "and the collection shows one of it, eight cards in all");
+  // Opening it again sells nothing more and says nothing more.
+  await remount(); await openCards(); await settle();
+  assert(auth._wallet.balanceOf(ann) === before + 2 * each && !container.querySelector("[data-swept]"), "a second visit sells nothing");
 });
 
 await runTest("a server that has cards switched off says so, in a sentence", async () => {
@@ -308,7 +319,7 @@ await runTest("an Unlimited season shows no card", async () => {
 });
 
 // ---------- The pack shop ----------
-const shopTab = () => [...container.querySelectorAll(".cd-tabs .cd-chip")].find((b) => b.textContent === "Packs");
+const shopTab = () => container.querySelector('.cd-tabs [data-tab="packs"]');
 const packEl = (id) => container.querySelector(`[data-pack="${id}"]`);
 const packBtn = (id, needle) => [...packEl(id).querySelectorAll("button")].find((b) => b.textContent.includes(needle));
 const packAlert = (id) => packEl(id)?.querySelector("[role='alert']")?.textContent || "";
@@ -362,7 +373,7 @@ await runTest("opening a pack: confirm first, then the cards, the coins and the 
   assert(document.activeElement === container.querySelector("#cd-pulled-h"), "and focus lands on them, so a screen reader hears what happened");
   assert(container.querySelector(".cd-bal").textContent.includes("850"), "the shelf's balance moved: " + container.querySelector(".cd-bal").textContent);
   assert(packBtn("pack-standard", "Open") && !packBtn("pack-standard", "Confirm"), "and the pack is back to Open, not left on Confirm");
-  await click([...container.querySelectorAll(".cd-tabs .cd-chip")].find((b) => b.textContent === "Collection")); await settle();
+  await click(container.querySelector('.cd-tabs [data-tab="collection"]')); await settle();
   assert(container.querySelector("#cd-coll-h")?.textContent === "3 cards", "the collection has them without a reload: " + container.querySelector("#cd-coll-h")?.textContent);
   assert(button("Open your starter deck"), "and buying a pack did not cost the starter deck");
 });
@@ -423,7 +434,7 @@ await runTest("what the shop refuses, in words, and what it does next", async ()
 });
 
 await runTest("an unanswered purchase survives leaving the shop, another pack, and a refusal that settles nothing", async () => {
-  const collTab = () => [...container.querySelectorAll(".cd-tabs .cd-chip")].find((b) => b.textContent === "Collection");
+  const collTab = () => container.querySelector('.cd-tabs [data-tab="collection"]');
   const ownedNow = () => auth._cards.owned(pat).reduce((n, o) => n + o.count, 0);
   await remount(); await openShop();
   // Straight from Modes, with no profile or shop opened first: the shop asks for the wallet itself.
@@ -466,7 +477,7 @@ await runTest("an unanswered purchase survives leaving the shop, another pack, a
 });
 
 await runTest("a pack that finishes opening after the shop is left still counts", async () => {
-  const collTab = () => [...container.querySelectorAll(".cd-tabs .cd-chip")].find((b) => b.textContent === "Collection");
+  const collTab = () => container.querySelector('.cd-tabs [data-tab="collection"]');
   const before = auth._cards.owned(pat).reduce((n, o) => n + o.count, 0);
   await click(packBtn("pack-standard", "Open")); await flush();
   const confirm = packBtn("pack-standard", "Confirm");
@@ -493,11 +504,18 @@ await runTest("a guest and a signed-out visitor get no pack shop", async () => {
 });
 
 // ---------- battles (v2.25.0): a run, the daily showdown, the boards ----------
-const tabBtn = (id) => container.querySelector(`.cd-tabs [data-tab="${id}"]`);
+// Run, Showdown and Boards sit under Battle, so reaching one is Battle first when it is not already open.
+const tabBtn = (id) => container.querySelector(`.cd-area [data-tab="${id}"]`);
 const area = () => container.querySelector(".cb-area");
 const q = (sel) => container.querySelector(sel);
 const HIGH = () => Array(12).fill(0.98), LOW = () => Array(12).fill(0.02);
-async function openTabOf(id) { await openCards(); assert(tabBtn(id), `an account sees a ${id} tab`); await click(tabBtn(id)); await settle(); await settle(); }
+async function openTabOf(id) {
+  await openCards();
+  assert(tabBtn("battle"), "an account sees a Battle tab");
+  if (!tabBtn(id)) { await click(tabBtn("battle")); await settle(); }
+  assert(tabBtn(id), `and a ${id} tab under it`);
+  await click(tabBtn(id)); await settle(); await settle();
+}
 let bea;
 
 await runTest("a run: see the defense, pick six, play, and go again", async () => {
@@ -506,7 +524,8 @@ await runTest("a run: see the defense, pick six, play, and go again", async () =
   await click(button("Open your starter deck")); await settle(); await settle();
   await openTabOf("run");
   assert(area()?.dataset.phase === "idle" && q("[data-start]") && q("[data-best]") === null, "it opens on the offer to start, not on a battle: " + container.querySelector(".cd-area")?.textContent.slice(0, 160));
-  assert(q("[data-paid-left]").textContent === "15" && /Your best run: 0 wins/.test(area().textContent), "with the day's paid wins and the best so far");
+  assert(q("[data-paid-left]").textContent === "15" && q("[data-best-run]").textContent === "0", "with the day's paid wins and the best so far");
+  assert(container.querySelectorAll(".cd-tabs [data-tab]").length === 3 && tabBtn("battle").getAttribute("aria-pressed") === "true" && tabBtn("run").getAttribute("aria-pressed") === "true", "three tabs across the top, Battle pressed, and Run pressed under it");
   await click(q("[data-start]")); await settle();
   assert(area().dataset.phase === "pick" && q("[data-defense]") && /defense/i.test(q(".cb-def-h").textContent), "starting shows the defense first: " + area().textContent.slice(0, 120));
   const run = auth._cards.runs.find((r) => r.user_id === bea);
@@ -547,7 +566,7 @@ await runTest("a run survives leaving and coming back, and can be walked away fr
   assert(area().dataset.phase === "pick" && /0 wins so far/.test(q(".cb-kick").textContent), "the same run is there on return, not a new one");
   assert(auth._cards.runs.filter((r) => r.user_id === bea && r.status === "live").length === 1, "still one live run");
   await click(q("[data-quit]")); await settle(); await settle();
-  assert(area().dataset.phase === "idle" && /Your best run: 1 win\./.test(q("[data-best-run]").textContent) && q("[data-paid-left]").textContent === "14", "walking away ends it; the best and the day's paid wins are remembered: " + area().textContent.slice(-120));
+  assert(area().dataset.phase === "idle" && q("[data-best-run]").textContent === "1" && q("[data-paid-left]").textContent === "14", "walking away ends it; the best and the day's paid wins are remembered: " + area().textContent.slice(-120));
 });
 
 await runTest("a battle whose answer is lost is shown as it was played, never played again", async () => {
@@ -637,6 +656,44 @@ await runTest("every battle refusal has a sentence, and none claims to know what
   }
   for (const key of ["offline", "network", "server"]) assert(!/not played|wasn't played|was played/i.test(BATTLE_SENTENCES[key]), `"${key}" does not say whether the battle happened`);
   for (const key of ["not_owned", "same_player", "bad_slot", "guest_not_allowed", "cards_off", "no_run"]) assert(!/connection/i.test(BATTLE_SENTENCES[key]), `"${key}" is a rule, not a fault in your connection`);
+});
+
+await runTest("a copy pulled from a pack is sold as it arrives, and the screen shows it going", async () => {
+  const dee = await signUp("dee@cards.test", "deedee");
+  auth._wallet.apply(dee, 1000, "season", "test-coins");
+  await openCards();
+  await click(button("Open your starter deck")); await settle(); await settle();
+  const held = auth._cards.owned(dee)[0];
+  const fresh = [...CARDS.values()].filter((c) => !auth._cards.owned(dee).some((o) => o.card_id === c.id)).slice(0, 2);
+  auth._cards.nextPull = [{ id: held.card_id, finish: held.finish }, { id: fresh[0].id, finish: "base" }, { id: fresh[1].id, finish: "silver" }];
+  const each = auth._cards.sellFor({ id: held.card_id, finish: held.finish });
+  const before = auth._wallet.balanceOf(dee);
+  await click(shopTab()); await settle();
+  await click(packBtn("pack-standard", "Open")); await flush();
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
+  const sold = [...container.querySelectorAll(".cd-fresh .cd-sold")];
+  assert(sold.length === 1 && Number(sold[0].dataset.sold) === each && sold[0].querySelector(`[data-card="${held.card_id}"]`), "the copy is drawn as sold, the other two as kept: " + sold.length);
+  assert(/You have this one\. Sold for/.test(sold[0].textContent) && sold[0].textContent.includes(String(each)), "in words, not only as an animation: " + sold[0].textContent);
+  assert(container.querySelectorAll(".cd-fresh [data-card]").length === 3, "all three cards that came out are shown");
+  assert(auth._wallet.balanceOf(dee) === before - 150 + each, "the wallet is the pack's price down and the copy's coins up");
+  assert(auth._cards.owned(dee).every((o) => o.count === 1) && auth._cards.owned(dee).length === 10, "and the collection holds one of everything: eight, and the two new ones");
+  assert(!container.querySelector("[data-swept]"), "nothing was stacked, so there was nothing to sweep");
+});
+
+await runTest("a daily card the account already holds is sold, and the result says so", async () => {
+  // LAST in the file: it renders the component on its own, in place of the app.
+  const helpers = await import("./helpers.mjs");
+  const { SeasonCard } = await helpers.loadModule("cards.jsx");
+  const card = [...CARDS.values()].find((c) => c.rating >= 100 && c.rating < 120);
+  reactRoot.unmount();
+  const view = await helpers.renderComponent(SeasonCard, { card: { id: card.id, finish: "gold", sold: 1000 } });
+  await settle(); await settle();
+  const el = view.container.querySelector(".cd-earned .cd-sold");
+  assert(el && Number(el.dataset.sold) === 1000 && el.querySelector(`[data-card="${card.id}"]`), "the card is shown as sold: " + view.container.textContent.slice(0, 120));
+  assert(/You have this one\. Sold for 1,000 coins\./.test(el.textContent), "with the coins in words: " + el.textContent);
+  await view.rerender({ card: { id: card.id, finish: "gold" } });
+  await settle();
+  assert(!view.container.querySelector(".cd-sold") && view.container.querySelector(`.cd-earned [data-card="${card.id}"]`), "and a card that was kept is just the card");
 });
 
 void cardBoardKey;

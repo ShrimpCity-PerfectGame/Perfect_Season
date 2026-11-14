@@ -324,7 +324,7 @@ surface. `CARD_TEXT_PAIRS` lists every text colour and what it sits on; the test
 
 ## 8b. Not built
 
-Badges, the profile's best card, the real skin-tone list. Battles exist (section 11) and **nobody has played
+Badges, the profile's best card, the real skin-tone list, selling a card you hold only one of. Battles exist (section 11) and **nobody has played
 one against a person's judgement yet**: every number in them is the builder's. No pack-opening animation: the cards simply appear. The Standard pack's picture has
 words painted into it that are not this game's ("FOOTBALL BOOSTER", "COMMON TIER") and a wordless one is owed
 before production. `/privacy` and `/terms` do not mention cards yet; they change in the release
@@ -506,8 +506,13 @@ Standard pack (150) every day or two for somebody who plays both. **These are th
 `card-battle.jsx`, mounted by `cards.jsx` under three more tabs: Run, Showdown, Boards.
 
 - A defense is shown, with what each trait does, **before** the lineup is picked.
-- The clash is CSS only: six cards appear one after another and a meter runs to the total. Nothing fades -
-  half-opacity text is below AA for as long as the fade lasts, and axe caught exactly that.
+- **The battle plays out** (v2.26.0): a scoreboard pinned at the top counts up against the bar while the cards
+  take their turns, then the result is stamped. The outcome is already known when it draws - the playback
+  only decides when it is shown - so the parent hides the heading, the coins and the next button until
+  `onDone`. It plays where `matchMedia` says motion is fine and is simply finished everywhere else
+  (reduced motion; jsdom, so every test sees the finished battle; a showdown opened again later). Nothing
+  fades - a waiting card is greyed with a filter - because half-opacity text is below AA while the fade lasts.
+- The tabs are two levels (v2.26.0): Collection, Packs, Battle; then Run, Showdown, Boards under Battle.
 - **A failed play is not "not played".** `offline`, `network` and `server` may follow a battle that was
   played. The screen never replays to find out: it reads `card_battle_state` and shows what is there. Only
   when that confirms the run did not move does it say the battle was not played; when the state cannot be
@@ -527,6 +532,32 @@ Standard pack (150) every day or two for somebody who plays both. **These are th
 - The showdown's gap is section 7's: the day's best lineup can be worked out offline.
 - A run's seed never leaves the server, but each defense is known once it is shown - walking away from a bad
   draw costs the streak, which is the price the design set on it.
+
+## 12. Copies (v2.26.0, on the test site)
+
+**A player holds one of a card in a finish. The next one is sold.** Owner's decision, 2026-11-14.
+
+- **What a card is worth** is `rewards.mjs`: `cardValue(rating, finish)` is the rating band (under 60: 20,
+  60-79: 40, 80-99: 100, 100-119: 400, 120 and up: 1,500) times the finish (Base 1, Silver 2, Gold 5,
+  Prism 20). `cardSellCoins` is half of that. A Base role player sells for 10; a Prism 120+ for 15,000.
+- **The database holds no catalog**, so it cannot price a card. Every grant an Edge Function makes carries
+  `sell`, the coins a copy would fetch, and `grant_cards` decides whether it applies: only when the account
+  already holds that card in that finish. Then the grant still happens once - its `card_grants` row is
+  written, so a day's card is still "given" - but the count does not move and the coins are credited under
+  `(user, 'card_sell', '<kind>:<ref>')`. The entry comes back with `sold`.
+- **An entry with no `sell` stacks**, as before. That is what a hand-out from the SQL editor does (8.6).
+- **Stacks from before** (and any a hand-out makes): `card-claim { action: "sell_copies" }` reads
+  `card_copies`, prices each from the catalog, and `card_sell_copies` sells whatever is past one under a
+  row lock, as one ledger row. `cards.jsx` asks once per visit when it sees a count above one. A card the
+  function's catalog does not know is left stacked rather than sold for nothing.
+- **A pack is never a way to make coins.** The worst case is a full collection, where every pull is a copy;
+  `tests/test-economy-security.mjs` measures it and holds each pack under 80%. As measured: Standard 57%,
+  Air raid 54%, Legends 69% of the price back.
+- The same card in another finish is another card and is kept.
+- On screen a sold card is `PulledCard`: the card tips and greys, a coin badge lands on it, and the sale is
+  written underneath. The sentence is the fact; the animation is decoration, and nothing in it fades.
+
+**Not built:** selling a card you hold one of, trading, or seeing a card's value before you pull it.
 
 ## 10. Tests
 

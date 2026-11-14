@@ -20,10 +20,10 @@
 // supabase/migration-wallet.sql).
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as GL from "../../../game-logic.mjs";
-import { seasonReward, badgeRewards, coinsSummary } from "../../../rewards.mjs";
+import { seasonReward, badgeRewards, coinsSummary, cardSellCoins } from "../../../rewards.mjs";
 import { badgeProgress } from "../../../badges.mjs";
 import { mapPlayerStats } from "../../../profile-rules.mjs";
-import { initCardData, dailyCard } from "../../../card-logic.mjs";
+import { CARDS, initCardData, dailyCard } from "../../../card-logic.mjs";
 import gameData from "../../../data/players.json" with { type: "json" };
 import cardCatalog from "../../../data/cards.json" with { type: "json" };
 
@@ -474,14 +474,15 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
         // Raced against a short timer. If the timer wins the grant may still land a moment later - then the
         // card is in the collection and this answer simply did not show it, which is the right way round.
         const grant = service.rpc("grant_cards", {
-          p_user: user.id, p_kind: "daily", p_grants: [{ ref: mode.date, card: pick.id, finish: pick.finish }],
+          // "sell": what a copy is worth, should the account already hold this card in this finish (CARDS.md 12)
+          p_user: user.id, p_kind: "daily", p_grants: [{ ref: mode.date, card: pick.id, finish: pick.finish, sell: cardSellCoins(CARDS.get(pick.id)?.rating, pick.finish) }],
         });
         let timer: number | undefined;
         const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("grant_cards: timed out")), CARD_GRANT_MS); });
         const { data: granted, error: grantError } = await Promise.race([grant, late]).finally(() => clearTimeout(timer));
         if (grantError) throw new Error(`grant_cards: ${grantError.message}`);
         const got = Array.isArray(granted?.granted) ? granted.granted[0] : null;
-        if (got) card = { id: got.card, finish: got.finish };
+        if (got) card = got.sold != null ? { id: got.card, finish: got.finish, sold: got.sold } : { id: got.card, finish: got.finish };
       }
     } catch (e) {
       console.error("daily card failed:", e instanceof Error ? e.message : e);

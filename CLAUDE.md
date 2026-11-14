@@ -519,7 +519,7 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.25.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+**Cards (in progress, v2.26.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
 five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck, a card a day
 from the daily draft, a collection screen, packs bought with coins, runs against real defenses and a daily
 showdown. Badges and the profile spot are part 5. **Production has cards switched off** in two
@@ -591,6 +591,14 @@ The parts unlike everything else:
   `claim_username` know nothing of them.
 - **A failed play is not "not played".** The battle screen never replays after a lost answer: it reads the
   state, which carries the run's latest battle, and shows that. Same family as the pack shop's open id.
+- **One of a card in a finish; a copy is sold** (v2.26.0, CARDS.md 12). The database has no catalog and cannot
+  price a card, so every grant an Edge Function makes carries `sell` and `grant_cards` applies it only when
+  the card is already held. A grant with no `sell` (the SQL editor's) still stacks. Card values are
+  `rewards.mjs`'s; `tests/test-economy-security.mjs` holds a pack of nothing but copies under 80% of its
+  price, which is the promise that a full collection is not a coin printer.
+- **A battle's playback hides the ending until it is over** (v2.26.0): `BattleShown` reports `onDone` and the
+  parent tracks WHICH battle finished, not a flag - a flag reset in an effect on the parent runs after the
+  child's effect has already reported, and sticks at false.
 - **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not
   used; the number on the card face is always the number in the battle.
 
@@ -1506,6 +1514,12 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.26.0's (copies are sold, on the test site): re-run **`migration-cards.sql`**, then **deploy the Edge
+  Functions**, then the client. The migration replaces `grant_cards` and `buy_pack`, adds two functions and
+  replaces `wallet_ledger_kind_check` again (`card_sell`). **Migration first is not optional here**: the
+  new `card-claim` and `submit-run` send `sell` on every grant, which the OLD `grant_cards` ignores (so a
+  copy simply stacks, harmless), but a copy sold by the new one needs the new ledger kind. A client ahead of
+  the function gets `malformed` on the copies sweep and nothing else changes.
   v2.25.0's (battles, on the test site): re-run **`migration-cards.sql`**, re-run **`migration-profiles.sql`**
   (`delete_account` learns to erase runs and showdowns), then **deploy the Edge Functions**, then the client.
   The migration adds two tables and seven functions and replaces `wallet_ledger_kind_check` again (it gains

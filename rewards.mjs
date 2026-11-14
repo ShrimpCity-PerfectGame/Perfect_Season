@@ -41,6 +41,20 @@ export function cardWinCoins(wins) {
   return COIN_RULES.cardWin + COIN_RULES.cardWinStep * Math.min(COIN_RULES.cardWinStepMax, Math.floor(n) - 1);
 }
 
+// What a card is WORTH in coins, and what a copy of one sells for (CARDS.md 12). A player never holds two of the
+// same card in the same finish: the second is sold the moment it arrives, for half its value.
+// The value is the card's rating band times its finish. Owner's scale, 2026-11-14; tests/test-economy-security.mjs
+// holds the promise it rests on - that a pack of nothing but copies still returns less than the pack cost.
+export const CARD_VALUE_BANDS = Object.freeze([[120, 1500], [100, 400], [80, 100], [60, 40], [-Infinity, 20]]);
+export const CARD_FINISH_VALUE = Object.freeze({ base: 1, silver: 2, gold: 5, prism: 20 });
+export const CARD_SELL_SHARE = 0.5;
+export function cardValue(rating, finish) {
+  const r = Number(rating);
+  if (!Number.isFinite(r) || !Object.hasOwn(CARD_FINISH_VALUE, finish)) return 0;
+  return CARD_VALUE_BANDS.find(([min]) => r >= min)[1] * CARD_FINISH_VALUE[finish];
+}
+export const cardSellCoins = (rating, finish) => Math.floor(cardValue(rating, finish) * CARD_SELL_SHARE);
+
 // A count from something that may be missing, fractional or negative.
 const count = (v) => {
   const n = Number(v);

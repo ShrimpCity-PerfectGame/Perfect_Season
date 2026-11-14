@@ -561,4 +561,95 @@ await runTest("closing an account takes its battles with it", async () => {
   assert(!differs(board.runs, [{ username: "runner", wins: 2 }]), "and the board no longer lists it: " + J(board.runs));
 });
 
+// ---------- copies (v2.26.0): one of a card in a finish; the next is sold ----------
+const SELLER = uuid(41), SGUEST = uuid(43);
+await addAccount(db, { id: SELLER, username: "seller" });
+await addGuestAccount(db, SGUEST);
+const sellMock = (() => {
+  const profiles = new Map([[SELLER, { id: SELLER, username: "seller", guest: false }], [SGUEST, { id: SGUEST, username: "Guest_y", guest: true }]]);
+  const state = { profiles, currentUserId: () => SELLER };
+  const wallet = makeWallet(state); wallet.welcome(SELLER);
+  return { wallet, cards: makeCards(state, { wallet }) };
+})();
+const sellLedger = async (u) => (await owner("select amount, ref from wallet_ledger where user_id = $1 and kind = 'card_sell' order by id", [u])).map((r) => ({ amount: Number(r.amount), ref: r.ref }));
+async function grantBoth(kind, list) {
+  const a = await grant(SELLER, kind, list);
+  let b; try { b = { data: sellMock.cards.grantCards(SELLER, kind, list) }; } catch (e) { b = { error: e.message }; }
+  assert(!differs(a, b), `grant_cards(${kind}): the SQL and the mock disagree - ${differs(a, b)}`);
+  return a;
+}
+
+await runTest("a copy of a card already held is sold for its price, not stacked", async () => {
+  const first = await grantBoth("daily", [{ ref: "2026-11-01", card: 50, finish: "gold", sell: 250 }]);
+  assert(first.data.granted.length === 1 && first.data.granted[0].sold === undefined, "the first one is kept, price or no price: " + J(first));
+  assert(await balanceOf(SELLER) === 250 && (await sellLedger(SELLER)).length === 0, "and nothing was paid");
+  const second = await grantBoth("daily", [{ ref: "2026-11-02", card: 50, finish: "gold", sell: 250 }]);
+  assert(second.data.granted[0].sold === 250 && second.data.duplicate === false, "the second is sold: " + J(second));
+  assert(await balanceOf(SELLER) === 500 && sellMock.wallet.balanceOf(SELLER) === 500, "for its 250 coins");
+  assert(J(await sellLedger(SELLER)) === J([{ amount: 250, ref: "daily:2026-11-02" }]), "under the grant's own kind and ref: " + J(await sellLedger(SELLER)));
+  assert((await ownedBy(SELLER)).find((r) => r.card_id === 50).count === 1, "and the count did not move");
+  assert((await grantsOf(SELLER)).filter((g) => g.kind === "daily").length === 2, "though both grants are on the ledger - the day's card was still given");
+  // The same grant again is a duplicate and pays nothing a second time.
+  const again = await grantBoth("daily", [{ ref: "2026-11-02", card: 50, finish: "gold", sell: 250 }]);
+  assert(again.data.duplicate === true && await balanceOf(SELLER) === 500, "a repeat of the grant sells nothing twice");
+  // Another FINISH of the same card is another card.
+  const silver = await grantBoth("daily", [{ ref: "2026-11-03", card: 50, finish: "silver", sell: 100 }]);
+  assert(silver.data.granted[0].sold === undefined && await balanceOf(SELLER) === 500, "the same card in another finish is kept");
+  // With no price on it a copy stacks, as a hand-out from the SQL editor does.
+  const gift = await grantBoth("gift", [{ ref: "g-1", card: 50, finish: "gold" }]);
+  assert(gift.data.granted[0].sold === undefined && (await ownedBy(SELLER)).find((r) => r.card_id === 50 && r.finish === "gold").count === 2, "an unpriced copy stacks");
+  // Two of one card in ONE grant: the first is kept and the second sold.
+  const pair = await grantBoth("gift", [{ ref: "g-2", card: 60, finish: "base", sell: 10 }, { ref: "g-3", card: 60, finish: "base", sell: 10 }]);
+  assert(pair.data.granted[0].sold === undefined && pair.data.granted[1].sold === 10, "within one grant, too: " + J(pair));
+  // A price of nothing sells for nothing and still does not stack.
+  const zero = await grantBoth("gift", [{ ref: "g-4", card: 60, finish: "base", sell: 0 }]);
+  assert(zero.data.granted[0].sold === 0 && (await ownedBy(SELLER)).find((r) => r.card_id === 60).count === 1, "a copy worth nothing is still not kept");
+  for (const [why, sell] of [["a price that is not a number", "lots"], ["a negative price", -5], ["a fraction", 2.5], ["a price no card is worth", 20001]]) {
+    const bad = await grantBoth("gift", [{ ref: "g-bad", card: 61, finish: "base", sell }]);
+    assert(bad.error === "bad_grant", `${why} is refused: ${J(bad)}`);
+  }
+  assert((await ownedBy(SELLER)).every((r) => r.card_id !== 61), "and a refused grant wrote nothing");
+});
+
+await runTest("a pack that holds a copy: the copy's coins come back with the cards, once", async () => {
+  await owner("select wallet_apply($1, 1000, 'season', 'seed-sell')", [SELLER]); sellMock.wallet.apply(SELLER, 1000, "season", "seed-sell");
+  const cards = [{ card: 50, finish: "gold", sell: 250 }, { card: 70, finish: "base", sell: 10 }, { card: 71, finish: "base", sell: 10 }];
+  const before = await balanceOf(SELLER);
+  const a = await buy(SELLER, "pack-standard", "open-copy-1", cards);
+  const b = sellMock.cards.buyPack(SELLER, "pack-standard", "open-copy-1", cards);
+  a.data.balance = Number(a.data.balance);
+  assert(!differs(a.data, b), "buy_pack: the SQL and the mock disagree - " + differs(a.data, b));
+  assert(J(a.data.cards.map((c) => c.sold ?? null)) === J([250, null, null]), "the copy is marked sold and the other two are not: " + J(a.data.cards));
+  assert(a.data.balance === before - 150 + 250, "the price went out and the copy's coins came in: " + a.data.balance);
+  const again = await buy(SELLER, "pack-standard", "open-copy-1", [{ card: 1, finish: "base" }, { card: 2, finish: "base" }, { card: 3, finish: "base" }]);
+  const againMock = sellMock.cards.buyPack(SELLER, "pack-standard", "open-copy-1", []);
+  again.data.balance = Number(again.data.balance);
+  for (const c of again.data.cards) if (c.sold != null) c.sold = Number(c.sold);
+  assert(!differs(again.data, againMock) && again.data.duplicate === true && again.data.cards[0].sold === 250 && again.data.balance === a.data.balance, "asked again, the answer is the same cards with the same copy sold, and nothing more moves: " + J(again.data));
+});
+
+await runTest("the stacks from before are sold in one go, and only once", async () => {
+  // seller holds two gold 50s (one stacked by the unpriced gift above). Stack another card three deep.
+  await grantBoth("gift", [{ ref: "s-1", card: 80, finish: "base" }, { ref: "s-2", card: 80, finish: "base" }, { ref: "s-3", card: 80, finish: "base" }]);
+  const stacks = (await owner("select card_copies($1) as r", [SELLER]))[0].r;
+  assert(!differs(stacks, sellMock.cards.copies(SELLER)) && J(stacks.map((s) => [s.card, s.count])) === J([[80, 3], [50, 2]]), "card_copies lists the stacks, deepest first: " + J(stacks));
+  const sales = [{ card: 80, finish: "base", each: 10 }, { card: 50, finish: "gold", each: 250 }, { card: 9999, finish: "base", each: 500 }];
+  const before = await balanceOf(SELLER);
+  const sold = await both("card_sell_copies", [SELLER, J(sales), "sweep-0001"], ["::uuid", "::jsonb", "::text"], () => sellMock.cards.sellCopies(SELLER, sales, "sweep-0001"));
+  sold.data.copies = Number(sold.data.copies); sold.data.coins = Number(sold.data.coins);
+  assert(sold.data.copies === 3 && sold.data.coins === 270 && sold.data.balance === before + 270, "three copies, two tens and a 250: " + J(sold));
+  assert((await ownedBy(SELLER)).every((r) => r.count === 1), "and nothing is stacked any more");
+  assert((await sellLedger(SELLER)).some((l) => l.ref === "copies:sweep-0001" && l.amount === 270), "as one ledger row");
+  const again = await both("card_sell_copies", [SELLER, J(sales), "sweep-0002"], ["::uuid", "::jsonb", "::text"], () => sellMock.cards.sellCopies(SELLER, sales, "sweep-0002"));
+  assert(Number(again.data.copies) === 0 && Number(again.data.coins) === 0 && again.data.balance === before + 270, "asked again, there is nothing left to sell");
+  for (const [why, args] of [["a price that is too high", [[{ card: 80, finish: "base", each: 20001 }], "sweep-0003"]], ["a ref that is not one", [sales, "x"]], ["a finish that does not exist", [[{ card: 80, finish: "shiny", each: 1 }], "sweep-0003"]]]) {
+    const bad = await both("card_sell_copies", [SELLER, J(args[0]), args[1]], ["::uuid", "::jsonb", "::text"], () => sellMock.cards.sellCopies(SELLER, args[0], args[1]));
+    assert(bad.error === "bad_sale", `${why}: ${J(bad)}`);
+  }
+  for (const who of [SELLER, null]) for (const call of ["card_copies($1)", "card_sell_copies($1, '[]'::jsonb, 'sweep-9999')"]) {
+    const r = await attempt(who, `select ${call}`, [SELLER]);
+    assert(/permission denied/i.test(r.error || ""), `${who ? "a signed-in player" : "a visitor"} cannot call ${call.split("(")[0]}`);
+  }
+});
+
 console.log("test-cards-sql.mjs done");

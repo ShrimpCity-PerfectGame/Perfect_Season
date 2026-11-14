@@ -117,6 +117,13 @@ revoke all on sequence public.card_grants_id_seq from anon, authenticated;
 -- given and every caller gives a starter deck's in the same order, so two claims cannot deadlock.
 -- tests/test-cards-sql.mjs cannot show this - PGlite is one connection - so it is argued here.
 --
+-- A COPY IS SOLD, NOT STACKED (v2.26.0, CARDS.md 12). An entry may carry "sell": the coins a copy of that card
+-- is worth to its holder (rewards.mjs's cardSellCoins - the Edge Functions know the card's rating; this database
+-- holds no catalog). When the account ALREADY holds that card in that finish, the grant still happens once -
+-- its ledger row is written - but the count does not move: the coins are credited instead, under the wallet
+-- ledger's (user, 'card_sell', '<kind>:<ref>'), and the entry comes back with "sold": <coins>. An entry with
+-- no "sell" stacks as it always did, which is what a hand-out from the SQL editor does.
+--
 -- EVERYTHING IS CHECKED BEFORE ANYTHING IS WRITTEN, and a raise rolls back the call, so a list with one bad
 -- entry in it grants nothing. The Edge Functions build these lists themselves and never send a bad one; the
 -- checks are here because this function is the boundary and they are not.
@@ -134,6 +141,7 @@ declare
   v_card integer;
   v_finish text;
   v_new bigint;
+  v_sell integer;
   v_granted jsonb := '[]'::jsonb;
 begin
   select guest into v_guest from public.profiles where id = p_user;
@@ -151,25 +159,42 @@ begin
        or jsonb_typeof(v_entry -> 'card') is distinct from 'number'
        or (v_entry ->> 'card') !~ '^[1-9][0-9]{0,8}$'
        or jsonb_typeof(v_entry -> 'finish') is distinct from 'string'
-       or (v_entry ->> 'finish') not in ('base', 'silver', 'gold', 'prism') then
+       or (v_entry ->> 'finish') not in ('base', 'silver', 'gold', 'prism')
+       -- "sell" may be left out or null; when it is there it is a whole number of coins no card is worth more than
+       or (jsonb_typeof(v_entry -> 'sell') is not null and jsonb_typeof(v_entry -> 'sell') not in ('null', 'number'))
+       or (jsonb_typeof(v_entry -> 'sell') = 'number' and ((v_entry ->> 'sell') !~ '^[0-9]{1,5}$' or (v_entry ->> 'sell')::integer > 20000)) then
       raise exception 'bad_grant' using errcode = 'P0001';
     end if;
   end loop;
+
+  -- A sale moves coins, so the wallet is locked before anything is decided - as in every function that does.
+  if exists (select 1 from jsonb_array_elements(p_grants) e where jsonb_typeof(e -> 'sell') = 'number') then
+    perform public.wallet_lock(p_user);
+  end if;
 
   for v_entry in select * from jsonb_array_elements(p_grants) loop
     v_ref := v_entry ->> 'ref';
     v_card := (v_entry ->> 'card')::integer;
     v_finish := v_entry ->> 'finish';
+    v_sell := case when jsonb_typeof(v_entry -> 'sell') = 'number' then (v_entry ->> 'sell')::integer else null end;
     v_new := null;
     insert into public.card_grants (user_id, kind, ref, card_id, finish)
     values (p_user, p_kind, v_ref, v_card, v_finish)
     on conflict (user_id, kind, ref) do nothing
     returning id into v_new;
     if v_new is not null then
-      insert into public.card_owned (user_id, card_id, finish, count)
-      values (p_user, v_card, v_finish, 1)
-      on conflict (user_id, card_id, finish) do update set count = public.card_owned.count + 1;
-      v_granted := v_granted || jsonb_build_object('ref', v_ref, 'card', v_card, 'finish', v_finish);
+      if v_sell is not null and exists (select 1 from public.card_owned
+                                         where user_id = p_user and card_id = v_card and finish = v_finish and count >= 1) then
+        if v_sell > 0 then
+          perform public.wallet_apply(p_user, v_sell::bigint, 'card_sell', p_kind || ':' || v_ref);
+        end if;
+        v_granted := v_granted || jsonb_build_object('ref', v_ref, 'card', v_card, 'finish', v_finish, 'sold', v_sell);
+      else
+        insert into public.card_owned (user_id, card_id, finish, count)
+        values (p_user, v_card, v_finish, 1)
+        on conflict (user_id, card_id, finish) do update set count = public.card_owned.count + 1;
+        v_granted := v_granted || jsonb_build_object('ref', v_ref, 'card', v_card, 'finish', v_finish);
+      end if;
     end if;
   end loop;
 
@@ -274,7 +299,10 @@ begin
   v_balance := public.wallet_lock(p_user);
 
   if exists (select 1 from public.wallet_ledger where user_id = p_user and kind = 'pack' and ref = p_open) then
-    select coalesce(jsonb_agg(jsonb_build_object('card', g.card_id, 'finish', g.finish) order by g.ref), '[]'::jsonb)
+    -- ...with "sold" on the ones that were copies and turned into coins the first time (v2.26.0).
+    select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('card', g.card_id, 'finish', g.finish, 'sold',
+             (select l.amount from public.wallet_ledger l where l.user_id = p_user and l.kind = 'card_sell' and l.ref = 'pack:' || g.ref)))
+             order by g.ref), '[]'::jsonb)
       into v_cards
       from public.card_grants g
      where g.user_id = p_user and g.kind = 'pack' and g.ref like p_open || ':%';
@@ -298,8 +326,8 @@ begin
        or (v_entry ->> 'finish') not in ('base', 'silver', 'gold', 'prism') then
       raise exception 'bad_grant' using errcode = 'P0001';
     end if;
-    v_grants := v_grants || jsonb_build_object('ref', p_open || ':' || v_i, 'card', (v_entry ->> 'card')::integer, 'finish', v_entry ->> 'finish');
-    v_cards := v_cards || jsonb_build_object('card', (v_entry ->> 'card')::integer, 'finish', v_entry ->> 'finish');
+    -- "sell" rides through untouched: grant_cards is what checks it and what decides whether it applies.
+    v_grants := v_grants || jsonb_strip_nulls(jsonb_build_object('ref', p_open || ':' || v_i, 'card', (v_entry ->> 'card')::integer, 'finish', v_entry ->> 'finish', 'sell', v_entry -> 'sell'));
     v_i := v_i + 1;
   end loop;
 
@@ -327,6 +355,9 @@ begin
   if jsonb_array_length(coalesce(v_granted -> 'granted', '[]'::jsonb)) <> v_pack.size then
     raise exception 'purchase_conflict' using errcode = 'P0001';
   end if;
+  -- What came out, in the order it was rolled, with "sold" on a copy that turned into coins.
+  select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('card', g.value -> 'card', 'finish', g.value -> 'finish', 'sold', g.value -> 'sold')) order by g.ordinality), '[]'::jsonb)
+    into v_cards from jsonb_array_elements(v_granted -> 'granted') with ordinality g;
 
   return jsonb_build_object('duplicate', false, 'cards', v_cards,
     'balance', (select balance from public.wallets where user_id = p_user),
@@ -401,7 +432,7 @@ begin
   end loop;
 end $$;
 alter table public.wallet_ledger add constraint wallet_ledger_kind_check
-  check (kind in ('starting', 'welcome', 'season', 'daily', 'badge', 'minigame', 'purchase', 'pack', 'card_win'));
+  check (kind in ('starting', 'welcome', 'season', 'daily', 'badge', 'minigame', 'purchase', 'pack', 'card_win', 'card_sell'));
 
 -- Does this account hold every card of a lineup? p_lineup is a JSON list of exactly six { card, finish }.
 -- Raises bad_lineup for anything that is not that, and answers false when one of the six is not owned.
@@ -684,3 +715,89 @@ as $$
 $$;
 revoke all on function public.card_boards(integer) from public, anon;
 grant execute on function public.card_boards(integer) to authenticated;
+
+-- ============================================================================================================
+-- Copies (v2.26.0). See CARDS.md 12.
+--
+-- A player holds ONE of a card in a finish. grant_cards sells a copy the moment it arrives (above); these two
+-- deal with the copies that were already stacked before that rule existed, and with any a hand-out stacks later.
+--
+-- card_copies(user): the stacks, [{ card, finish, count }], most copies first. Service role only - the Edge
+-- Function reads it, prices each from the catalog, and hands the prices to card_sell_copies.
+create or replace function public.card_copies(p_user uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object('card', t.card_id, 'finish', t.finish, 'count', t.count) order by t.count desc, t.card_id, t.finish), '[]'::jsonb)
+    from (select card_id, finish, count from public.card_owned
+           where user_id = p_user and count > 1
+           order by count desc, card_id, finish limit 500) t;
+$$;
+revoke all on function public.card_copies(uuid) from public, anon, authenticated;
+grant execute on function public.card_copies(uuid) to service_role;
+
+-- card_sell_copies(user, sales, ref): sell every copy past the first, in ONE transaction.
+-- p_sales is [{ card, finish, each }] - what ONE copy of that card sells for. For each, the row is locked and
+-- whatever it holds past one is sold at that price, so the count the function read a moment ago does not have
+-- to still be true: a stack that has since grown sells the new copy too, and one that is gone sells nothing.
+-- The coins go in as one ledger row, (user, 'card_sell', 'copies:<ref>'); the ref is the caller's, one a call.
+-- Calling it again sells nothing, because nothing is stacked any more.
+-- Returns { copies, coins, balance }. Raises no_profile, guest_not_allowed, bad_sale.
+create or replace function public.card_sell_copies(p_user uuid, p_sales jsonb, p_ref text)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_guest boolean;
+  v_entry jsonb;
+  v_count integer;
+  v_copies bigint := 0;
+  v_coins bigint := 0;
+begin
+  select guest into v_guest from public.profiles where id = p_user;
+  if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
+  if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
+  if p_ref is null or p_ref !~ '^[A-Za-z0-9-]{8,36}$'
+     or p_sales is null or jsonb_typeof(p_sales) <> 'array' or jsonb_array_length(p_sales) > 500 then
+    raise exception 'bad_sale' using errcode = 'P0001';
+  end if;
+  for v_entry in select * from jsonb_array_elements(p_sales) loop
+    if jsonb_typeof(v_entry) <> 'object'
+       or jsonb_typeof(v_entry -> 'card') is distinct from 'number'
+       or (v_entry ->> 'card') !~ '^[1-9][0-9]{0,8}$'
+       or jsonb_typeof(v_entry -> 'finish') is distinct from 'string'
+       or (v_entry ->> 'finish') not in ('base', 'silver', 'gold', 'prism')
+       or jsonb_typeof(v_entry -> 'each') is distinct from 'number'
+       or (v_entry ->> 'each') !~ '^[0-9]{1,5}$' or (v_entry ->> 'each')::integer > 20000 then
+      raise exception 'bad_sale' using errcode = 'P0001';
+    end if;
+  end loop;
+
+  perform public.wallet_lock(p_user);
+  for v_entry in select * from jsonb_array_elements(p_sales) loop
+    v_count := null;
+    select count into v_count from public.card_owned
+     where user_id = p_user and card_id = (v_entry ->> 'card')::integer and finish = v_entry ->> 'finish' and count > 1
+       for update;
+    if v_count is not null then
+      update public.card_owned set count = 1
+       where user_id = p_user and card_id = (v_entry ->> 'card')::integer and finish = v_entry ->> 'finish';
+      v_copies := v_copies + (v_count - 1);
+      v_coins := v_coins + (v_count - 1)::bigint * (v_entry ->> 'each')::integer;
+    end if;
+  end loop;
+  if v_coins > 0 then
+    perform public.wallet_apply(p_user, v_coins, 'card_sell', 'copies:' || p_ref);
+  end if;
+  return jsonb_build_object('copies', v_copies, 'coins', v_coins,
+    'balance', (select balance from public.wallets where user_id = p_user));
+end;
+$$;
+revoke all on function public.card_sell_copies(uuid, jsonb, text) from public, anon, authenticated;
+grant execute on function public.card_sell_copies(uuid, jsonb, text) to service_role;

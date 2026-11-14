@@ -58,9 +58,9 @@
 // The starter deck pays no coins and touches no other table; a pack moves coins only inside buy_pack. Every reason above has to be in storage-cards.js's
 // CARD_REFUSALS - tests/test-cards-edge.mjs reads this file and fails on one that is not.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { initCardData, initDefenses, starterDeck, defenseByKey, lineupProblem, scoreBattle, runDefense, showdownDefense, showdownScore } from "../../../card-logic.mjs";
+import { CARDS, initCardData, initDefenses, starterDeck, defenseByKey, lineupProblem, scoreBattle, runDefense, showdownDefense, showdownScore } from "../../../card-logic.mjs";
 import { SLOTS } from "../../../game-logic.mjs";
-import { COIN_RULES, cardWinCoins } from "../../../rewards.mjs";
+import { COIN_RULES, cardWinCoins, cardSellCoins } from "../../../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../../../card-packs.mjs";
 import catalog from "../../../data/cards.json" with { type: "json" };
 import versusPool from "../../../data/versus-pool.json" with { type: "json" };
@@ -68,7 +68,12 @@ import cardDefense from "../../../data/card-defense.json" with { type: "json" };
 
 initCardData(catalog);
 initDefenses(versusPool, cardDefense);
-const ACTIONS = ["starter", "open_pack", "run_start", "run_battle", "run_end", "showdown"];
+const ACTIONS = ["starter", "open_pack", "sell_copies", "run_start", "run_battle", "run_end", "showdown"];
+// What a copy of a card sells for (rewards.mjs), from the catalog's rating. The database holds no catalog, so
+// every grant this function makes carries the price, and grant_cards decides whether it applies: only when the
+// account already holds that card in that finish (CARDS.md 12).
+const sellFor = (c: { id: number; finish: string }) => cardSellCoins(CARDS.get(c.id)?.rating, c.finish);
+const shownCard = (g: any) => (g.sold != null ? { id: g.card, finish: g.finish, sold: g.sold } : { id: g.card, finish: g.finish });
 const BATTLE_ACTIONS = ["run_start", "run_battle", "run_end", "showdown"];
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -137,6 +142,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   if (profile.guest) return json({ error: "cards are for accounts", reason: "guest_not_allowed" }, 403);
 
   if (body.action === "open_pack") return openPack(service, user.id, body, json);
+  if (body.action === "sell_copies") return sellCopies(service, user.id, json);
   if (BATTLE_ACTIONS.includes(body.action)) return battle(service, user.id, body, json);
 
   // The refs are fixed - starter:0 to starter:7 - and the cards are fresh each time. So a second claim deals a
@@ -145,14 +151,34 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   const { data, error } = await service.rpc("grant_cards", {
     p_user: user.id,
     p_kind: "starter",
-    p_grants: deck.map((card, i) => ({ ref: `starter:${i}`, card: card.id, finish: card.finish })),
+    p_grants: deck.map((card, i) => ({ ref: `starter:${i}`, card: card.id, finish: card.finish, sell: sellFor(card) })),
   });
   if (error || !data) {
     console.error("card-claim grant:", error);
     return json({ error: "failed", reason: "server" }, 500);
   }
   if (data.duplicate) return json({ error: "already claimed", reason: "duplicate" }, 409);
-  return json({ ok: true, cards: (data.granted || []).map((g: any) => ({ id: g.card, finish: g.finish })) });
+  return json({ ok: true, cards: (data.granted || []).map(shownCard) });
+}
+
+// SELLING THE COPIES ALREADY STACKED ({ action: "sell_copies" }). Since v2.26.0 a copy is sold as it arrives;
+// this is for the stacks from before that, and for any a hand-out makes. It reads the stacks, prices each from
+// the catalog, and card_sell_copies sells whatever is past one under a lock. Asking twice sells nothing twice.
+//   500 server   200 { ok, copies, coins, balance }
+async function sellCopies(service: any, userId: string, json: (body: unknown, status?: number) => Response) {
+  const { data: stacks, error: readError } = await service.rpc("card_copies", { p_user: userId });
+  if (readError || !Array.isArray(stacks)) {
+    console.error("card-claim card_copies:", readError);
+    return json({ error: "failed", reason: "server" }, 500);
+  }
+  // A card this function's catalog does not know cannot be priced, so it is left stacked rather than sold for nothing.
+  const sales = stacks.filter((s: any) => CARDS.has(s.card)).map((s: any) => ({ card: s.card, finish: s.finish, each: sellFor({ id: s.card, finish: s.finish }) }));
+  const { data, error } = await service.rpc("card_sell_copies", { p_user: userId, p_sales: sales, p_ref: crypto.randomUUID() });
+  if (error || !data) {
+    console.error("card-claim card_sell_copies:", error);
+    return json({ error: "failed", reason: "server" }, 500);
+  }
+  return json({ ok: true, copies: Number(data.copies) || 0, coins: Number(data.coins) || 0, balance: data.balance ?? null });
 }
 // What buy_pack may refuse a purchase for, and the status each travels under. Anything it raises that is not
 // here (bad_grant, purchase_conflict) is this function's fault rather than the player's, and is a 500.
@@ -249,7 +275,7 @@ async function openPack(service: any, userId: string, body: any, json: (body: un
     p_user: userId,
     p_pack: pack.id,
     p_open: body.open,
-    p_cards: pulled.map((c: any) => ({ card: c.id, finish: c.finish })),
+    p_cards: pulled.map((c: any) => ({ card: c.id, finish: c.finish, sell: sellFor(c) })),
     p_price: body.price,
   });
   if (error || !data) {
@@ -264,7 +290,7 @@ async function openPack(service: any, userId: string, body: any, json: (body: un
   }
   return json({
     ok: true,
-    cards: (data.cards || []).map((c: any) => ({ id: c.card, finish: c.finish })),
+    cards: (data.cards || []).map(shownCard),
     balance: data.balance,
     stockLeft: data.stock_left ?? null,
     duplicate: data.duplicate === true,

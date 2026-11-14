@@ -20,6 +20,29 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.26.0] - 2026-11-14
+
+Test site only. All three asked for by the owner, from their phone.
+
+### Added
+- Cards: **you keep one of each card in each finish, and a copy is sold.** Pull a card you already hold -
+  from a pack, the daily draft or a starter deck - and it turns into coins on the spot, for half its value,
+  with the card tipping over and a coin landing on it. A card's value is its rating band (20, 40, 100, 400
+  or 1,500) times its finish (Base 1, Silver 2, Gold 5, Prism 20). Copies already stacked in a collection
+  are sold the first time it is opened, and the screen says how many and for how much.
+- Cards: **a battle plays out.** A scoreboard counts your offense up against the bar while the six cards take
+  their turns - each steps forward, shows its game and what the matchup did to it - then the result lands,
+  with the player of the game called out. Skip to the result at any time; reduced motion shows it finished.
+  The heading, the coins and the next button wait for it, so the ending is not given away above it.
+
+### Changed
+- Cards: the card area's tabs are two levels - **Collection, Packs, Battle** across the top, and **Run,
+  Showdown, Boards** under Battle - instead of five chips wrapping onto two rows. The Runs screen opens on
+  your best run and the day's paid wins left, the button, then four short rules.
+- `grant_cards` takes an optional `sell` on each entry and `buy_pack` passes it through;
+  `card_copies` and `card_sell_copies` are new; the wallet's ledger gains the kind `card_sell`;
+  `card-claim` gains the action `sell_copies`, and it and `submit-run` price every card they grant.
+
 ## [2.25.0] - 2026-11-13
 
 Test site only. Part 4 of 5 of the card update: battles.

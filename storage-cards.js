@@ -7,7 +7,7 @@ import { getClient, READ } from "./storage-core.js";
 
 // Every reason card-claim can answer with. tests/test-cards-edge.mjs reads the function's source and fails on
 // one that is not here - a reason this list does not know is a rule that would read as "check your connection".
-const BATTLE_ACTIONS = ["run_start", "run_battle", "run_end", "showdown"];
+const BATTLE_ACTIONS = ["run_start", "run_battle", "run_end", "showdown", "sell_copies"];
 const CARD_PAGE = 1000; // PostgREST's default ceiling on one select
 export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "cards_off", "duplicate", "malformed", "server",
   "unknown_pack", "bad_open", "unavailable", "sold_out", "price_changed", "not_enough",
@@ -124,6 +124,10 @@ export const startRun = () => battleCall({ action: "run_start" });
 export const playBattle = (run, step, lineup) => battleCall({ action: "run_battle", run, step, lineup });
 export const endRun = () => battleCall({ action: "run_end" });
 export const playShowdown = (lineup) => battleCall({ action: "showdown", lineup });
+
+// Sell every copy past the first: { ok: true, copies, coins, balance } or { ok: false, reason }. Safe to ask
+// again after an answer that never came - a copy already sold is not there to sell twice.
+export const sellCopies = () => battleCall({ action: "sell_copies" });
 
 // What the pack shop is selling: { status: "ok", packs: [{ id, price, size, active, stockTotal, stockLeft }] }
 // in shelf order, or { status: "error" }. Prices are public, so this works signed out. What is IN a pack is not

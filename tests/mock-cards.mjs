@@ -8,7 +8,7 @@
 // the jsdom suites, and in the harness the app's own loadCardData does.
 import { starterDeck, CARDS, DEFENSES, defenseByKey, lineupProblem, scoreBattle, runDefense, showdownDefense, showdownScore } from "../card-logic.mjs";
 import { SLOTS } from "../game-logic.mjs";
-import { COIN_RULES, cardWinCoins } from "../rewards.mjs";
+import { COIN_RULES, cardWinCoins, cardSellCoins } from "../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../card-packs.mjs";
 
 const FINISHES = ["base", "silver", "gold", "prism"];
@@ -57,6 +57,31 @@ export function makeCards(state, { wallet = null } = {}) {
     nextRolls: null,      // twelve [0,1) draws the next run battle uses instead of fresh ones - for a test that needs to know
     battleFails: false,   // the next battle or showdown HAPPENS and its answer is lost on the way back
     stateFails: false,    // card_battle_state and card_boards answer with an error
+    // public.card_copies
+    copies(userId) {
+      return owned.filter((o) => o.user_id === userId && o.count > 1)
+        .sort((a, b) => b.count - a.count || a.card_id - b.card_id || (a.finish < b.finish ? -1 : a.finish > b.finish ? 1 : 0))
+        .slice(0, 500).map((o) => ({ card: o.card_id, finish: o.finish, count: o.count }));
+    },
+    // public.card_sell_copies
+    sellCopies(userId, sales, ref) {
+      who(userId);
+      if (typeof ref !== "string" || !/^[A-Za-z0-9-]{8,36}$/.test(ref) || !Array.isArray(sales) || sales.length > 500) throw new Error("bad_sale");
+      for (const e of sales) {
+        const good = e && typeof e === "object" && !Array.isArray(e) && typeof e.card === "number" && Number.isInteger(e.card) && e.card >= 1 && e.card <= 999999999
+          && FINISHES.includes(e.finish) && typeof e.each === "number" && Number.isInteger(e.each) && e.each >= 0 && e.each <= 20000;
+        if (!good) throw new Error("bad_sale");
+      }
+      wallet.lock(userId);
+      let copies = 0, coins = 0;
+      for (const e of sales) {
+        const row = owned.find((o) => o.user_id === userId && o.card_id === e.card && o.finish === e.finish && o.count > 1);
+        if (!row) continue;
+        copies += row.count - 1; coins += (row.count - 1) * e.each; row.count = 1;
+      }
+      if (coins > 0) wallet.apply(userId, coins, "card_sell", `copies:${ref}`);
+      return { copies, coins, balance: wallet.balanceOf(userId) };
+    },
     // public.card_lineup_owned
     lineupOwned(userId, list) {
       if (!Array.isArray(list) || list.length !== 6) throw new Error("bad_lineup");
@@ -163,7 +188,10 @@ export function makeCards(state, { wallet = null } = {}) {
       const balance = wallet.balanceOf(userId);
       if (wallet.tables.wallet_ledger.has(`${userId}|pack|${open}`)) {
         const before = grants.filter((g) => g.user_id === userId && g.kind === "pack" && g.ref.startsWith(`${open}:`))
-          .sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0)).map((g) => ({ card: g.card_id, finish: g.finish }));
+          .sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0)).map((g) => {
+            const sale = wallet.tables.wallet_ledger.get(`${userId}|card_sell|pack:${g.ref}`);
+            return sale ? { card: g.card_id, finish: g.finish, sold: sale.amount } : { card: g.card_id, finish: g.finish };
+          });
         return { duplicate: true, cards: before, balance, stock_left: packs.get(packId)?.stock_left ?? null, price: null };
       }
       const pack = packs.get(packId);
@@ -181,8 +209,9 @@ export function makeCards(state, { wallet = null } = {}) {
       if (cards.some((_, i) => grants.some((g) => g.user_id === userId && g.kind === "pack" && g.ref === `${open}:${i}`))) throw new Error("purchase_conflict");
       if (pack.stock_left != null) pack.stock_left -= 1;
       if (wallet.apply(userId, -pack.price, "pack", open) !== -pack.price) throw new Error("purchase_conflict");
-      api.grantCards(userId, "pack", cards.map((c, i) => ({ ref: `${open}:${i}`, card: c.card, finish: c.finish })));
-      return { duplicate: false, cards: cards.map((c) => ({ card: c.card, finish: c.finish })), balance: wallet.balanceOf(userId), stock_left: pack.stock_left, price: pack.price };
+      const got = api.grantCards(userId, "pack", cards.map((c, i) => ({ ref: `${open}:${i}`, card: c.card, finish: c.finish, ...(c.sell != null ? { sell: c.sell } : {}) })));
+      const out = got.granted.map((g) => (g.sold != null ? { card: g.card, finish: g.finish, sold: g.sold } : { card: g.card, finish: g.finish }));
+      return { duplicate: false, cards: out, balance: wallet.balanceOf(userId), stock_left: pack.stock_left, price: pack.price };
     },
     readFails: false, // makes a client select on either table answer with an error
     openFails: false, // the next pack purchase goes through and its answer is lost on the way back
@@ -204,12 +233,21 @@ export function makeCards(state, { wallet = null } = {}) {
         const okRef = e && typeof e === "object" && !Array.isArray(e) && typeof e.ref === "string" && e.ref.length >= 1 && e.ref.length <= 40;
         const okCard = okRef && typeof e.card === "number" && Number.isInteger(e.card) && e.card >= 1 && e.card <= 999999999;
         if (!okCard || !FINISHES.includes(e.finish)) throw new Error("bad_grant");
+        // "sell": left out or null, or a whole number of coins no card is worth more than
+        if (e.sell != null && !(typeof e.sell === "number" && Number.isInteger(e.sell) && e.sell >= 0 && e.sell <= 20000)) throw new Error("bad_grant");
       }
+      if (wallet && list.some((e) => e.sell != null)) wallet.lock(userId);
       const granted = [];
       for (const e of list) {
         if (grants.some((g) => g.user_id === userId && g.kind === kind && g.ref === e.ref)) continue;
         grants.push({ user_id: userId, kind, ref: e.ref, card_id: e.card, finish: e.finish });
         const row = owned.find((o) => o.user_id === userId && o.card_id === e.card && o.finish === e.finish);
+        // A copy of a card already held, with a price on it, is sold rather than stacked (CARDS.md 12).
+        if (e.sell != null && row && row.count >= 1) {
+          if (e.sell > 0) wallet.apply(userId, e.sell, "card_sell", `${kind}:${e.ref}`);
+          granted.push({ ref: e.ref, card: e.card, finish: e.finish, sold: e.sell });
+          continue;
+        }
         if (row) row.count++;
         else owned.push({ user_id: userId, card_id: e.card, finish: e.finish, count: 1 });
         granted.push({ ref: e.ref, card: e.card, finish: e.finish });
@@ -234,7 +272,7 @@ export function makeCards(state, { wallet = null } = {}) {
     async claimStarter(body) {
       const uid = state.currentUserId();
       if (!uid) return cardHttpError("signed_out", 401);
-      if (!body || !["starter", "open_pack", "run_start", "run_battle", "run_end", "showdown"].includes(body.action)) return cardHttpError("malformed", 400);
+      if (!body || !["starter", "open_pack", "sell_copies", "run_start", "run_battle", "run_end", "showdown"].includes(body.action)) return cardHttpError("malformed", 400);
       if (body.action === "run_battle" && (!Number.isInteger(body.run) || !Number.isInteger(body.step) || body.step < 0)) return cardHttpError("malformed", 400);
       if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1 || body.price > 1000000)) return cardHttpError("malformed", 400);
       if (!api.enabled) return cardHttpError("cards_off", 403);
@@ -250,23 +288,34 @@ export function makeCards(state, { wallet = null } = {}) {
         const pulled = api.nextPull || rollPack(pack, Math.random);
         api.nextPull = null;
         let bought;
-        try { bought = api.buyPack(uid, pack.id, body.open, pulled.map((c) => ({ card: c.id, finish: c.finish })), body.price); }
+        try { bought = api.buyPack(uid, pack.id, body.open, pulled.map((c) => ({ card: c.id, finish: c.finish, sell: sellFor(c) })), body.price); }
         catch (e) {
           const status = { unavailable: 409, sold_out: 409, price_changed: 409, not_enough: 409, bad_open: 400, no_profile: 400, guest_not_allowed: 403 }[e?.message];
           return status ? cardHttpError(e.message, status) : cardHttpError("server", 500);
         }
         if (api.openFails) { api.openFails = false; return { data: null, error: { name: "FunctionsFetchError", message: "Failed to send" } }; }
-        return { data: { ok: true, cards: bought.cards.map((c) => ({ id: c.card, finish: c.finish })), balance: bought.balance, stockLeft: bought.stock_left ?? null, duplicate: bought.duplicate }, error: null };
+        return { data: { ok: true, cards: bought.cards.map((c) => (c.sold != null ? { id: c.card, finish: c.finish, sold: c.sold } : { id: c.card, finish: c.finish })), balance: bought.balance, stockLeft: bought.stock_left ?? null, duplicate: bought.duplicate }, error: null };
       }
       if (["run_start", "run_battle", "run_end", "showdown"].includes(body.action)) return api.battle(uid, body);
+      if (body.action === "sell_copies") {
+        let sold;
+        try { sold = api.sellCopies(uid, api.copies(uid).filter((c) => CARDS.has(c.card)).map((c) => ({ card: c.card, finish: c.finish, each: sellFor({ id: c.card, finish: c.finish }) })), "mock-sweep-0001"); }
+        catch { return cardHttpError("server", 500); }
+        if (api.sweepFails) { api.sweepFails = false; return { data: null, error: { name: "FunctionsFetchError", message: "Failed to send" } }; }
+        return { data: { ok: true, copies: sold.copies, coins: sold.coins, balance: sold.balance }, error: null };
+      }
       const deck = starterDeck(Math.random);
       let res;
-      try { res = api.grantCards(uid, "starter", deck.map((c, i) => ({ ref: `starter:${i}`, card: c.id, finish: c.finish }))); }
+      try { res = api.grantCards(uid, "starter", deck.map((c, i) => ({ ref: `starter:${i}`, card: c.id, finish: c.finish, sell: sellFor(c) }))); }
       catch { return cardHttpError("server", 500); }
       if (res.duplicate) return cardHttpError("duplicate", 409);
-      return { data: { ok: true, cards: res.granted.map((g) => ({ id: g.card, finish: g.finish })) }, error: null };
+      return { data: { ok: true, cards: res.granted.map((g) => (g.sold != null ? { id: g.card, finish: g.finish, sold: g.sold } : { id: g.card, finish: g.finish })) }, error: null };
     },
   };
+  // What a copy of a card sells for: rewards.mjs's, from the catalog's rating - as card-claim works it out.
+  const sellFor = (c) => cardSellCoins(CARDS.get(c.id)?.rating, c.finish);
+  api.sellFor = sellFor;
+  api.sweepFails = false; // the next sweep HAPPENS and its answer is lost
   // supabase/functions/card-claim's battle half, answer for answer and in its order.
   const BATTLE_REFUSALS = { no_profile: 400, guest_not_allowed: 403, no_run: 409, stale: 409, not_owned: 409 };
   const shown = (result, defense) => ({ defense: defense.key, cards: result.cards, offense: result.offense, target: result.target, win: result.win });

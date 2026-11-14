@@ -11,7 +11,7 @@ import { makeCards } from "./mock-cards.mjs";
 import { makeWallet } from "./mock-wallet.mjs";
 import { PACK_BY_ID, packCards } from "../card-packs.mjs";
 import { initCardData, initDefenses, CARDS, STARTER_MAX_RATING, lineupProblem, defenseByKey, runDefense, battleTarget, showdownScore, showdownDefense, LUCK_SPREAD } from "../card-logic.mjs";
-import { COIN_RULES, cardWinCoins } from "../rewards.mjs";
+import { COIN_RULES, cardWinCoins, cardSellCoins } from "../rewards.mjs";
 import { SLOTS } from "../game-logic.mjs";
 import { CARD_REFUSALS } from "../storage-cards.js";
 
@@ -46,6 +46,8 @@ function store({ on = true } = {}) {
         card_run_start: (a) => cards.runStart(a.p_user, a.p_seed, a.p_defense),
         card_run_battle: (a) => cards.runBattle(a.p_user, a.p_run, a.p_step, a.p_lineup, a.p_win, a.p_next, a.p_last, a.p_coins, a.p_cap),
         card_run_end: (a) => cards.runEnd(a.p_user),
+        card_copies: (a) => cards.copies(a.p_user),
+        card_sell_copies: (a) => cards.sellCopies(a.p_user, a.p_sales, a.p_ref),
         card_showdown_record: (a) => cards.showdownRecord(a.p_user, a.p_date, a.p_defense, a.p_lineup, a.p_score, a.p_shown),
       }).map(([name, fn]) => [name, (args) => { try { return fn(args); } catch (e) { return { __rpcError: { message: e.message, code: "P0001" } }; } }])),
       buy_pack: (args) => {
@@ -410,6 +412,46 @@ await runTest("with the switch off, no battle touches the database", async () =>
     assert(res.status === 403 && res.body.reason === "cards_off", body.action + " is cards_off: " + JSON.stringify(res.body));
   }
   assert(s.rpcCalls.length === 0 && s.cards.runs.length === 0, "not one call was made");
+});
+
+// ---------- copies (v2.26.0) ----------
+await runTest("a copy from a pack is sold at the catalog's price, which the function - not the browser - sets", async () => {
+  const s = store();
+  s.wallet.apply(ME, 1000, "season", "seed");
+  const pack = PACK_BY_ID["pack-standard"];
+  const inPack = packCards(pack).map((c) => c.id ?? c);
+  // Hold a Base copy of every card the pack can give, so most of what is rolled (70% of pulls are Base) is a copy.
+  for (let i = 0; i < inPack.length; i += 20) s.cards.grantCards(ME, "gift", inPack.slice(i, i + 20).map((id) => ({ ref: `h:${id}`, card: id, finish: "base" })));
+  const res = await invoke({ action: "open_pack", pack: "pack-standard", open: "open-copies-1", price: 150, sell: 99999, cards: [{ id: 1, finish: "prism", sell: 99999 }] }, { userId: ME });
+  assert(res.status === 200 && res.body.cards.length === 3, "opened: " + JSON.stringify(res.body).slice(0, 200));
+  const call = s.rpcCalls.find((c) => c.name === "buy_pack").args;
+  for (const c of call.p_cards) assert(c.sell === cardSellCoins(CARDS.get(c.card).rating, c.finish), `every card carries rewards.mjs's price for a copy of it: ${JSON.stringify(c)}`);
+  let back = 0;
+  for (const c of res.body.cards) {
+    if (c.sold != null) { assert(c.sold === cardSellCoins(CARDS.get(c.id).rating, c.finish), "a sold copy went for that price"); back += c.sold; }
+    else assert(c.finish !== "base", "a kept card is one that was not held - here, anything but a Base");
+  }
+  assert(res.body.balance === 1000 - 150 + back && s.wallet.balanceOf(ME) === res.body.balance, "and the balance is the price out and the copies in: " + res.body.balance);
+  assert(s.cards.owned(ME).every((o) => o.count === 1), "nothing stacked");
+});
+
+await runTest("the stacks from before are sold on request, priced from the catalog, once", async () => {
+  const s = store();
+  const card = [...CARDS.values()].find((c) => c.rating >= 80 && c.rating < 100);
+  s.cards.grantCards(ME, "gift", [1, 2, 3].map((n) => ({ ref: `old:${n}`, card: card.id, finish: "silver" })));
+  s.cards.grantCards(ME, "gift", [{ ref: "odd:1", card: 99999999, finish: "base" }, { ref: "odd:2", card: 99999999, finish: "base" }]); // a card no catalog knows
+  const each = cardSellCoins(card.rating, "silver");
+  const res = await invoke({ action: "sell_copies", coins: 99999, sales: [{ card: card.id, finish: "silver", each: 20000 }] }, { userId: ME });
+  assert(res.status === 200 && res.body.copies === 2 && res.body.coins === 2 * each && each === 100, "two copies at the catalog's price, whatever the body claims: " + JSON.stringify(res.body));
+  assert(s.wallet.balanceOf(ME) === res.body.balance && s.cards.owned(ME).find((o) => o.card_id === card.id).count === 1, "the wallet has them and one card is kept");
+  assert(s.cards.owned(ME).find((o) => o.card_id === 99999999).count === 2, "a card that cannot be priced is left alone rather than sold for nothing");
+  const again = await invoke({ action: "sell_copies" }, { userId: ME });
+  assert(again.status === 200 && again.body.copies === 0 && again.body.coins === 0, "and asking again sells nothing");
+  assert((await invoke({ action: "sell_copies" }, { userId: GUEST })).body.reason === "guest_not_allowed", "a guest is refused before any of it");
+  s.rpcFails.card_copies = true;
+  assert((await invoke({ action: "sell_copies" }, { userId: ME })).body.reason === "server", "a database that fails is a server error");
+  const off = store({ on: false });
+  assert((await invoke({ action: "sell_copies" }, { userId: ME })).body.reason === "cards_off" && off.rpcCalls.length === 0, "and with the switch off nothing is asked");
 });
 
 console.log("test-cards-edge.mjs done");

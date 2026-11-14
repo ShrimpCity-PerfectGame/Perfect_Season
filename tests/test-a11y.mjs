@@ -84,6 +84,9 @@ const SCREENS = [
   ["a card battle that was lost", "?screen=cards&tab=run&battle=loss", null],
   ["the daily showdown, played", "?screen=cards&tab=showdown&played=1", null],
   ["the card boards", "?screen=cards&tab=boards&played=1", null],
+  // Copies (CARDS.md 12): a pulled copy drawn as sold with its coin badge, and the notice after old stacks are sold.
+  ["a pack with a copy that was sold", "?screen=cards&tab=packs&copy=1", null],
+  ["a collection whose old copies were just sold", "?screen=cards&stacked=1", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {

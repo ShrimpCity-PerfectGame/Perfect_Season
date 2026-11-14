@@ -174,38 +174,85 @@ export function LineupBuilder({ rows, defense, step = 0, bar = true, lineup, onC
   );
 }
 
-// One battle, as the function reported it: six games lighting up one after another, then the total.
+// One battle, as the function reported it, PLAYED OUT: a scoreboard counts up against the bar while the six
+// cards take their turns - each steps forward, shows its game and what the matchup did to it, and adds its
+// total - and then the result lands. The owner's note on the first version was that it "just shows a score and
+// then a bar"; the numbers were always all there, and nothing made a player wait for them.
+//
+// The outcome is the server's and is already known when this draws; the playback only decides WHEN it is shown.
+// So the parent hides the heading, the coins and the next button until onDone - a result screen titled "Win 3"
+// above a battle still counting up is the ending given away.
+//
+// It plays in a browser that can say it does not mind motion, and is simply finished everywhere else: reduced
+// motion, a browser with no matchMedia (jsdom, so every test sees the finished battle), or `instant` - a
+// showdown opened again later is a record, not a replay. Nothing in it fades: a card waiting its turn is greyed
+// with a filter, because text at half opacity is below AA for as long as the fade lasts.
 // battle: { defense, cards: [{ slot, id, finish, base, roll, mods, total, line }], offense, target, win }.
-export function BattleShown({ battle, bar = true }) {
+const STEP_MS = 900;
+function plays() {
+  try { return typeof window !== "undefined" && typeof window.matchMedia === "function" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+  catch { return false; }
+}
+export function BattleShown({ battle, bar = true, instant = false, onDone }) {
+  const n = battle.cards.length;
+  const [at, setAt] = useState(() => (instant || !plays() ? n + 1 : 0)); // cards played so far; n + 1 is finished
+  const done = at > n;
+  useEffect(() => {
+    if (done) { onDone?.(); return undefined; }
+    const timer = setTimeout(() => setAt((a) => a + 1), at === 0 ? 500 : at === n ? 700 : STEP_MS);
+    return () => clearTimeout(timer);
+  }, [at, done]); // eslint-disable-line react-hooks/exhaustive-deps
+  const played = Math.min(at, n);
+  const running = done ? battle.offense : Math.round(battle.cards.slice(0, played).reduce((s, c) => s + c.total, 0) * 10) / 10;
   const top = Math.max(battle.offense, bar ? battle.target : 0, 1) * 1.08;
+  const totals = battle.cards.map((c) => c.total);
+  const best = totals.indexOf(Math.max(...totals)), cold = totals.indexOf(Math.min(...totals));
   const verdict = bar
     ? (battle.win ? `You won, ${fmt(battle.offense)} to a bar of ${battle.target}.` : `You were stopped: ${fmt(battle.offense)} against a bar of ${battle.target}.`)
     : `You scored ${fmt(battle.offense)}.`;
+  const toGo = bar ? (running >= battle.target ? "Over the bar" : `${fmt(battle.target - running)} to go`) : `${n - played} still to play`;
   return (
-    <section className={`cb-clash${bar ? (battle.win ? " cb-won" : " cb-lost") : ""}`} aria-label="The battle" data-win={bar ? String(!!battle.win) : undefined}>
+    <section className={`cb-clash${done && bar ? (battle.win ? " cb-won" : " cb-lost") : ""}`} aria-label="The battle" data-done={String(done)} data-win={bar ? String(!!battle.win) : undefined}>
+      <div className="cb-sb">
+        <div className="cb-sb-you"><span>Your offense</span><b data-running>{fmt(running)}</b></div>
+        {bar && <div className="cb-sb-bar"><span>Bar</span><b>{battle.target}</b></div>}
+        <div className="cb-meter" aria-hidden="true">
+          <span className="cb-fill" style={{ width: `${(Math.max(0, running) / top) * 100}%` }} />
+          {bar && <span className="cb-mark" style={{ left: `${(battle.target / top) * 100}%` }} />}
+        </div>
+        {!done && <p className="cb-togo" aria-hidden="true">{toGo}</p>}
+      </div>
+      {done && (
+        <div className="cb-finale">
+          {bar && <p className="cb-stamp" aria-hidden="true">{battle.win ? "\u{1F3C8} Win" : "\u{1F480} Stopped"}</p>}
+          <p className="cb-verdict" role="status" data-verdict>{verdict}</p>
+          {bar && <p className="cb-margin">{battle.win ? `Cleared by ${fmt(battle.offense - battle.target)}.` : `Short by ${fmt(battle.target - battle.offense)}.`}</p>}
+        </div>
+      )}
       <ol className="cb-six">
         {battle.cards.map((c, i) => {
           const card = CARDS.get(c.id);
+          const state = i >= played ? "cb-wait" : i === played - 1 && !done ? "cb-now" : "cb-played";
           return (
-            <li key={c.slot} className="cb-play" style={{ "--cb-i": i }} data-slot={c.slot}>
+            <li key={c.slot} className={`cb-play ${state}`} data-slot={c.slot}>
               {card ? <CardFace card={card} finish={c.finish} /> : <span className="cb-gone">A card this page doesn't know</span>}
-              <span className="cb-line">{c.line}</span>
-              <span className="cb-math">{fmt(c.base)} rating, {signed(c.roll)} luck</span>
-              {/* Under a card there is room for the trait or the pairing, not for the sentence: "Ball hawks", not
-                  "Ball hawks vs Gunslinger" - the card above already says who he is. */}
-              {c.mods.length > 0 && <span className="cb-mods">{c.mods.map((m) => <Chip key={m.key} pts={m.pts} label={m.label.split(" vs ")[0]} />)}</span>}
-              <b className="cb-total">{fmt(c.total)}</b>
+              {i < played && (
+                <span className="cb-game">
+                  <b className="cb-total">{fmt(c.total)}</b>
+                  <span className="cb-line">{c.line}</span>
+                  <span className="cb-math">{fmt(c.base)} rating, {signed(c.roll)} luck</span>
+                  {/* Under a card there is room for the trait or the pairing, not for the sentence: "Ball hawks", not
+                      "Ball hawks vs Gunslinger" - the card above already says who he is. */}
+                  {c.mods.length > 0 && <span className="cb-mods">{c.mods.map((m) => <Chip key={m.key} pts={m.pts} label={m.label.split(" vs ")[0]} />)}</span>}
+                  {done && n > 1 && i === best && <span className="cb-tag cb-tag-best">{"\u26A1"} Player of the game</span>}
+                  {done && n > 1 && i === cold && cold !== best && <span className="cb-tag">{"\u{1F9CA}"} Cold day</span>}
+                </span>
+              )}
             </li>
           );
         })}
       </ol>
-      <div className="cb-score">
-        <div className="cb-meter" aria-hidden="true">
-          <span className="cb-fill" style={{ width: `${(Math.max(0, battle.offense) / top) * 100}%` }} />
-          {bar && <span className="cb-mark" style={{ left: `${(battle.target / top) * 100}%` }} />}
-        </div>
-        <p className="cb-verdict" role="status" data-verdict>{verdict}</p>
-      </div>
+      {!done && <button className="linkbtn cb-skip" data-skip onClick={() => setAt(n + 1)}>Skip to the result</button>}
     </section>
   );
 }
@@ -254,6 +301,10 @@ export function BattleArea({ mode, rows, onBalance }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [asking, setAsking] = useState(false); // the showdown's second tap
+  // WHICH battle has finished playing out - the battle itself, not a flag. A flag reset in an effect on `shown`
+  // is reset AFTER the child's own effect has reported it done (children's effects run first), and stuck at false.
+  const [seenBattle, setSeenBattle] = useState(null);
+  const [freshDay, setFreshDay] = useState(false); // today's showdown was played just now, on this screen
   const live = useRef(true);
   const top = useRef(null);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
@@ -355,7 +406,7 @@ export function BattleArea({ mode, rows, onBalance }) {
     const res = await playShowdown(lineup);
     if (!live.current) return;
     setAsking(false);
-    if (res.ok) { setBusy(false); setSt((s) => ({ ...s, showdown: res.showdown })); return; }
+    if (res.ok) { setBusy(false); setFreshDay(true); setSt((s) => ({ ...s, showdown: res.showdown })); return; }
     if (UNKNOWN.includes(res.reason) || res.reason === "duplicate") {
       // Either it went through and the answer was lost, or it was already played somewhere else: the state says.
       const fresh = await fetchBattleState();
@@ -378,7 +429,7 @@ export function BattleArea({ mode, rows, onBalance }) {
         {st.showdown ? (
           <>
             <p className="cb-lead" data-played>Your score today: <b>{fmt(st.showdown.score)}</b>. One go a day - the next showdown opens at midnight UTC.</p>
-            {st.showdown.lineup?.cards && <BattleShown battle={st.showdown.lineup} bar={false} />}
+            {st.showdown.lineup?.cards && <BattleShown battle={st.showdown.lineup} bar={false} instant={!freshDay} />}
           </>
         ) : (
           <>
@@ -400,23 +451,26 @@ export function BattleArea({ mode, rows, onBalance }) {
   // ---- a run ----
   const run = st.run && st.run.status === "live" ? st.run : null;
   if (shown) {
+    const seen = seenBattle === shown.battle;
     const paid = shown.coins?.credited > 0;
     return (
       <div className="cb-area" data-mode="run" data-phase="result">
-        <h2 className="cb-h2 cb-result-h" tabIndex={-1} ref={top}>{shown.battle.win ? `Win ${shown.wins}` : "Stopped"}</h2>
+        <h2 className="cb-h2 cb-result-h" tabIndex={-1} ref={top}>{!seen ? `Battle ${shown.battle.win ? shown.wins : shown.wins + 1}` : shown.battle.win ? `Win ${shown.wins}` : "Stopped"}</h2>
         {alert}
-        <BattleShown battle={shown.battle} />
-        {shown.battle.win && shown.coins && (
+        <BattleShown key={`${shown.wins}:${shown.battle.offense}`} battle={shown.battle} onDone={() => setSeenBattle(shown.battle)} />
+        {seen && shown.battle.win && shown.coins && (
           <p className="cb-lead" data-paid>{paid
             ? <>You earned <Coins amount={shown.coins.credited} size={16} />.</>
             : "That win counts for your run. It paid no coins - today's paid wins are used up."}</p>
         )}
-        {shown.over && <p className="cb-lead" data-over>The run ends at <b>{shown.wins}</b> {shown.wins === 1 ? "win" : "wins"}. Your best is {st.best}.</p>}
-        <div className="cb-acts">
-          {shown.over
-            ? <button className="btn solid xl" data-start disabled={busy} onClick={begin}>{busy ? "Starting…" : "Start a new run"}</button>
-            : <button className="btn solid xl" data-next onClick={() => { setShown(null); setNotice(""); }}>Next defense</button>}
-        </div>
+        {seen && shown.over && <p className="cb-lead" data-over>The run ends at <b>{shown.wins}</b> {shown.wins === 1 ? "win" : "wins"}. Your best is {st.best}.</p>}
+        {seen && (
+          <div className="cb-acts">
+            {shown.over
+              ? <button className="btn solid xl" data-start disabled={busy} onClick={begin}>{busy ? "Starting…" : "Start a new run"}</button>
+              : <button className="btn solid xl" data-next onClick={() => { setShown(null); setNotice(""); }}>Next defense</button>}
+          </div>
+        )}
       </div>
     );
   }
@@ -424,11 +478,20 @@ export function BattleArea({ mode, rows, onBalance }) {
     return (
       <div className="cb-area" data-mode="run" data-phase="idle">
         <h2 className="cb-h2">Runs</h2>
-        <p className="cb-lead">Defenses come one after another until one stops you. You see each defense before you pick your six, and the bar goes up with every win.</p>
-        <p className="cb-lead">A win pays {cardWinCoins(1)} coins, and one more for every win the run already has, up to {cardWinCoins(99)}. The first {COIN_RULES.paidCardWinsPerDay} wins of a day pay; <b data-paid-left>{paidLeft}</b> left today.</p>
-        <p className="cb-lead" data-best-run>Your best run: <b>{st.best}</b> {st.best === 1 ? "win" : "wins"}.</p>
+        <p className="cb-lead">Beat one defense after another. How far can your six go?</p>
+        <dl className="cb-stats">
+          <div><dt>Best run</dt><dd data-best-run>{st.best}</dd></div>
+          <div><dt>Paid wins left today</dt><dd data-paid-left>{paidLeft}</dd></div>
+        </dl>
         <div className="cb-acts"><button className="btn solid xl" data-start disabled={busy} onClick={begin}>{busy ? "Starting…" : "Start a run"}</button></div>
         {alert}
+        <h3 className="cb-h3">How a run works</h3>
+        <ul className="cb-how">
+          <li>You see each defense, and what it is good at, before you pick your six.</li>
+          <li>Beat its bar and the next defense comes up. The bar rises with every win.</li>
+          <li>One loss ends the run.</li>
+          <li>A win pays {cardWinCoins(1)} coins, plus one for every win the run already has, up to {cardWinCoins(99)}. The first {COIN_RULES.paidCardWinsPerDay} wins of a day pay.</li>
+        </ul>
       </div>
     );
   }
@@ -464,6 +527,11 @@ export const CARD_BATTLE_CSS = `
 .cb-lead,.cb-foot{margin:0;color:var(--ink);line-height:1.45}
 .cb-foot{color:var(--muted);font-size:14px}
 .cb-acts{display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px}
+.cb-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
+.cb-stats div{border-top:3px solid var(--ink);padding-top:8px;display:flex;flex-direction:column-reverse;gap:2px}
+.cb-stats dt{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.cb-stats dd{margin:0;font-family:var(--display);font-size:44px;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.cb-how{margin:0;padding-left:20px;display:grid;gap:6px;color:var(--ink);line-height:1.45;font-size:15px}
 .cb-def{background:var(--ink);color:var(--bg);border-radius:14px;padding:16px 16px 14px;display:grid;gap:8px}
 .cb-kick{margin:0;font-weight:800;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--surface2)}
 .cb-def-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.02em;font-size:clamp(24px,6vw,34px);line-height:1.05;margin:0;color:var(--bg)}
@@ -496,30 +564,50 @@ export const CARD_BATTLE_CSS = `
 .cb-proj{margin:0;font-size:15px;color:var(--ink)}
 .cb-proj b,.cb-total,.cb-verdict{font-variant-numeric:tabular-nums}
 .cb-clash{display:grid;gap:16px}
-.cb-six{list-style:none;margin:0;padding:8px 0 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:26px 10px;justify-items:center}
-.cb-play{display:grid;justify-items:center;align-content:start;gap:6px;text-align:center;min-width:0;width:100%;animation:cb-in .5s both;animation-delay:calc(var(--cb-i) * .45s)}
-.cb-play .cd-card{--cd-w:min(132px,calc((100vw - 64px) / 3))}
+/* The scoreboard: the app's navy "scoreboard" treatment, pinned while the cards take their turns so the count
+   is on screen whichever card the page has scrolled to. */
+.cb-sb{position:sticky;top:calc(8px + var(--sa-top,0px));z-index:3;display:grid;grid-template-columns:1fr auto;align-items:end;gap:6px 16px;background:var(--ink);color:var(--bg);border-radius:14px;padding:12px 16px 14px;box-shadow:4px 4px 0 var(--hard)}
+.cb-sb span{display:block;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--surface2)}
+.cb-sb b{display:block;font-family:var(--display);font-weight:400;line-height:1;font-variant-numeric:tabular-nums}
+.cb-sb-you b{font-size:clamp(44px,13vw,60px);color:var(--accent)}
+.cb-sb-bar{text-align:right}
+.cb-sb-bar b{font-size:clamp(28px,8vw,36px);color:var(--bg)}
+.cb-meter{grid-column:1 / -1;position:relative;height:14px;border-radius:999px;background:rgba(255,255,255,.16);overflow:hidden}
+.cb-fill{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:999px;transition:width .55s cubic-bezier(.2,.8,.2,1)}
+.cb-lost .cb-fill{background:var(--orange)}
+.cb-mark{position:absolute;top:0;bottom:0;width:3px;background:var(--bg)}
+.cb-togo{grid-column:1 / -1;margin:0;font-weight:800;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--bg)}
+.cb-six{list-style:none;margin:0;padding:8px 0 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px 10px;justify-items:center}
+.cb-play{display:grid;justify-items:center;align-content:start;gap:10px;text-align:center;min-width:0;width:100%}
+.cb-play .cd-card{--cd-w:min(132px,calc((100vw - 64px) / 3));transition:transform .35s cubic-bezier(.2,1.3,.4,1),filter .3s}
+/* Waiting its turn: greyed, never faded. Up now: forward and tilted. */
+.cb-wait .cd-card{filter:grayscale(1) brightness(.82);transform:scale(.94)}
+.cb-now .cd-card{transform:scale(1.07) rotate(-2deg)}
+.cb-game{display:grid;justify-items:center;gap:5px;min-width:0;width:100%;animation:cb-pop .4s cubic-bezier(.2,1.4,.4,1) both}
 .cb-play .cb-mods{justify-content:center;margin:0}
 .cb-play .cb-chip{white-space:normal;font-size:11px;padding:2px 7px}
-.cb-line{font-weight:800;font-size:13.5px;color:var(--ink);margin-top:8px}
+.cb-total{font-family:var(--display);font-weight:400;font-size:30px;line-height:1;color:var(--ink);margin-top:6px}
+.cb-line{font-weight:800;font-size:13.5px;color:var(--ink)}
 .cb-math{font-size:12.5px;color:var(--muted)}
-.cb-total{font-family:var(--display);font-weight:400;font-size:26px;line-height:1;color:var(--ink)}
 .cb-gone{font-size:13px;color:var(--muted)}
-.cb-score{display:grid;gap:10px;border-top:2px solid var(--ink);padding-top:14px}
-.cb-meter{position:relative;height:18px;border-radius:999px;background:var(--surface2);border:2px solid var(--ink);overflow:hidden}
-.cb-fill{position:absolute;left:0;top:0;bottom:0;background:var(--blue);transform-origin:left;animation:cb-grow 2.9s cubic-bezier(.2,.7,.2,1) both}
-.cb-won .cb-fill{background:var(--win)}
-.cb-lost .cb-fill{background:var(--loss)}
-.cb-mark{position:absolute;top:-2px;bottom:-2px;width:3px;background:var(--ink)}
-.cb-verdict{margin:0;font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.01em;font-size:clamp(20px,5vw,28px);line-height:1.15;color:var(--ink);animation:cb-in .5s both;animation-delay:2.9s}
+.cb-tag{display:inline-block;font-weight:800;font-size:11px;letter-spacing:.03em;text-transform:uppercase;background:var(--surface2);color:var(--ink);border-radius:999px;padding:3px 8px}
+.cb-tag-best{background:var(--accent);color:var(--on-accent)}
+.cb-skip{justify-self:start}
+.cb-finale{display:grid;gap:6px;justify-items:start}
+.cb-stamp{margin:0;font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:clamp(40px,13vw,64px);line-height:1;padding:8px 16px 6px;border-radius:14px;border:3px solid var(--ink);box-shadow:5px 5px 0 var(--hard);transform:rotate(-3deg);animation:cb-stamp .45s cubic-bezier(.2,1.5,.4,1) both}
+.cb-won .cb-stamp{background:var(--accent);color:var(--on-accent)}
+.cb-lost .cb-stamp{background:var(--ink);color:var(--bg)}
+.cb-verdict{margin:8px 0 0;font-weight:800;font-size:17px;line-height:1.3;color:var(--ink);font-variant-numeric:tabular-nums}
+.cb-margin{margin:0;color:var(--muted);font-size:15px}
 .cb-boards{display:grid;gap:14px}
 .cb-board caption{text-align:left;font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:18px;padding-bottom:6px;color:var(--ink)}
 /* Hidden until its turn, then it slides in at FULL strength. Never a fade: text at half opacity is text below
    AA for as long as the fade lasts, and the chips' red and green have no contrast to spare. */
 @keyframes cb-in{from{visibility:hidden;transform:translateY(12px) scale(.96)}to{visibility:visible;transform:none}}
-@keyframes cb-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes cb-pop{from{transform:translateY(-8px) scale(.8)}to{transform:none}}
+@keyframes cb-stamp{from{transform:rotate(8deg) scale(2.2)}to{transform:rotate(-3deg) scale(1)}}
 @media (max-width:400px){
-  .cb-six{gap:24px 6px}
+  .cb-six{gap:20px 6px}
   .cb-math{font-size:11.5px}
 }
 @media (min-width:700px){
@@ -531,6 +619,7 @@ export const CARD_BATTLE_CSS = `
   .cb-opt{min-height:48px}
 }
 @media (prefers-reduced-motion:reduce){
-  .cb-play,.cb-fill,.cb-verdict{animation:none}
+  .cb-game,.cb-stamp{animation:none}
+  .cb-fill,.cb-play .cd-card{transition:none}
 }
 `;

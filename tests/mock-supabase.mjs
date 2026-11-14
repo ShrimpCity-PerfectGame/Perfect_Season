@@ -644,8 +644,8 @@ export function makeMockAuth() {
     if (mode.kind === "daily" && cards.enabled) {
       try {
         const pick = dailyCard(history.map((h) => h.key), Math.random);
-        const got = pick ? cards.grantCards(userId, "daily", [{ ref: mode.date, card: pick.id, finish: pick.finish }]).granted[0] : null;
-        if (got) card = { id: got.card, finish: got.finish };
+        const got = pick ? cards.grantCards(userId, "daily", [{ ref: mode.date, card: pick.id, finish: pick.finish, sell: cards.sellFor(pick) }]).granted[0] : null;
+        if (got) card = got.sold != null ? { id: got.card, finish: got.finish, sold: got.sold } : { id: got.card, finish: got.finish };
       } catch { card = null; }
     }
     return { data: { ok: true, run, coins, newBadges, card } };

@@ -787,7 +787,10 @@ async function setUpCards(withDeck) {
     const pick = (name, season) => all.find((c) => c.name === name && c.season === season);
     const show = [[pick("Tom Brady", 2007), "prism"], [pick("Adrian Peterson", 2012), "gold"], [pick("Antonio Gates", 2005), "silver"],
       [pick("Devery Henderson", 2011), "base"], [pick("Devery Henderson", 2011), "base"], [pick("Devery Henderson", 2011), "base"]];
-    show.forEach(([card, finish], i) => card && mock._cards.grantCards(uid, "daily", [{ ref: `2026-10-${String(i + 1).padStart(2, "0")}`, card: card.id, finish }]));
+    // &stacked=1 leaves Devery Henderson three deep, the way a collection from before v2.26.0 can be - opening
+    // it sells the two copies and says so. Otherwise a copy is priced, and sold as it arrives.
+    const stacked = params.get("stacked") === "1";
+    show.forEach(([card, finish], i) => card && mock._cards.grantCards(uid, "daily", [{ ref: `2026-10-${String(i + 1).padStart(2, "0")}`, card: card.id, finish, ...(stacked ? {} : { sell: mock._cards.sellFor({ id: card.id, finish }) }) }]));
   }
   if (withDeck && (params.get("run") === "1" || params.get("battle"))) mock._cards.runStart(uid, "harness-seed-0001", "2000|BAL");
   if (withDeck && params.get("played") === "1") {
@@ -806,6 +809,14 @@ async function setUpCards(withDeck) {
   if (params.get("screen") === "cards") {
     const uid = await setUpCards(params.get("starter") !== "0");
     createRoot(document.getElementById("root")).render(<CardsPreview userId={uid} />);
+    // &tab=packs&copy=1: open a Standard pack whose first card is one already held, so a sold copy is on screen.
+    if (params.get("copy") === "1") {
+      const held = mock._cards.owned(uid).find((o) => o.finish === "gold") || mock._cards.owned(uid)[0];
+      const fresh = [...CL.CARDS.values()].filter((c) => !mock._cards.owned(uid).some((o) => o.card_id === c.id)).slice(100, 102);
+      mock._cards.nextPull = [{ id: held.card_id, finish: held.finish }, { id: fresh[0].id, finish: "base" }, { id: fresh[1].id, finish: "silver" }];
+      const press = () => document.querySelector('[data-pack="pack-standard"] [data-buy]')?.click();
+      setTimeout(press, 900); setTimeout(press, 1100);
+    }
     // &battle=win|loss: fill the lineup and play, with the luck pinned so the result is the one asked for.
     if (params.get("battle")) {
       mock._cards.nextRolls = Array(12).fill(params.get("battle") === "loss" ? 0.02 : 0.98);
