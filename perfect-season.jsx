@@ -44,7 +44,7 @@ import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { loadVersusData } from "./versus-data.mjs";
 import { CENTURY_CSS, CenturyScreen, CENTURY_DONE } from "./century.jsx";
-import { CARDS_CSS, CardsScreen, SeasonCard } from "./cards.jsx";
+import { LazyCardsScreen, LazySeasonCard } from "./cards-lazy.jsx";
 import { cardsOn } from "./cards-switch.mjs";
 import { initCenturyData, CENTURY_GOAL, centuryReservedSeed } from "./century-logic.mjs";
 import { drainOne } from "./pending-daily.mjs";
@@ -1344,7 +1344,7 @@ p.gamecoins .earned{display:flex}
 // The whole stylesheet the app renders, for previewing one screen on its own (the UI harness).
 // The screens in their own files bring their own rules, each scoped to its class prefix (pf-, av-, ap-,
 // md-), after the base stylesheet so they can reuse its tokens and classes.
-export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS + GUESS_CSS + CARDS_CSS;
+export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS + GUESS_CSS; // the card screens bring their own (cards-lazy.jsx)
 
 // reducedMotion now lives in ui-common.jsx - century.jsx starts its reel from the same check.
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's
@@ -5576,7 +5576,7 @@ export default function PerfectSeason() {
                       {/* The card this daily earned (CARDS.md). Same payer check as the coins, so one account's card
                           is never shown to whoever is signed in when the answer lands. Hidden cards hide this too -
                           the card is still banked. */}
-                      {userId && result.payer === userId && showCards && result.card && <SeasonCard card={result.card} onOpenCards={openCards} />}
+                      {userId && result.payer === userId && showCards && result.card && <LazySeasonCard card={result.card} onOpenCards={openCards} />}
                       {/* In place of the save-error panel: nothing from this season counted. */}
                       {userId && result.payer === userId && result.duplicate && <p className="sc-note sc-dup">This draft was already recorded, so it didn't count again.</p>}
                     </>
@@ -5826,7 +5826,7 @@ export default function PerfectSeason() {
         {view === "cards" && (
           <>
             <h1 className="vh">Cards</h1>
-            <CardsScreen
+            <LazyCardsScreen
               key={userId || "anon"} userId={userId} isGuest={!!stats?.guest}
               onBack={() => openTab("home")} onHide={() => hideCards(true)}
               balance={wallet?.balance ?? null} onBalance={onShopBalance}

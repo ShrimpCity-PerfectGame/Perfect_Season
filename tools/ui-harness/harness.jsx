@@ -54,7 +54,7 @@ import * as C from "../../century-logic.mjs";
 import { GuessScreen, GUESS_WIP } from "../../guess.jsx";
 import * as G from "../../guess-logic.mjs";
 import guessPool from "../../data/guess-pool.json";
-import { CardsScreen } from "../../cards.jsx";
+import { CardsScreen, CARDS_CSS } from "../../cards.jsx";
 import * as CL from "../../card-logic.mjs";
 import cardCatalog from "../../data/cards.json";
 import harnessVersusPool from "../../data/versus-pool.json";
@@ -759,7 +759,7 @@ function CardsPreview({ userId }) {
   const [balance, setBalance] = useState(Number(params.get("coins") ?? 2000));
   return (
     <div className="ps">
-      <style>{APP_CSS}</style>
+      <style>{APP_CSS + CARDS_CSS}</style>
       <main id="content">
         <div className="wrap">
           <h1 className="vh">Cards</h1>

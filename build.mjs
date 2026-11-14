@@ -65,29 +65,82 @@ if (!siteUrl) console.warn("Warning: no SITE_URL - link previews get relative im
 // adds the native wiring - so the site's bundle never carries any of it.
 const entry = process.env.APP_ENTRY || "entry.jsx";
 
+const define = {
+  "process.env.NODE_ENV": '"production"',
+  SUPABASE_URL: JSON.stringify(process.env.SUPABASE_URL || ""),
+  SUPABASE_ANON_KEY: JSON.stringify(process.env.SUPABASE_ANON_KEY || ""),
+  APP_VERSION: JSON.stringify(version),
+  APP_ENV: JSON.stringify(appEnv),
+  APP_SITE_URL: JSON.stringify(siteUrl),
+  // Empty until the owner creates a Turnstile site key. Empty means captcha.mjs loads no script and
+  // sends no token, which is exactly the behaviour before it existed - see the note at the top of that file
+  // about shipping the client BEFORE the project setting. Checked above for the secret-key shape.
+  CAPTCHA_SITE_KEY: JSON.stringify(captchaKey),
+  // Cards (CARDS.md): "1" switches the card area on. On for the test site, off for production until the owner
+  // says otherwise; CARDS_ON in the environment overrides either way. cards-switch.mjs is the only reader.
+  CARDS_ON: JSON.stringify(cardsOn ? "1" : ""),
+};
+
+// The card screens are a file of their own, public/cards.js, fetched when Cards is first opened (cards-lazy.jsx,
+// CARDS.md 15). It is built FIRST, because the page names it by a fingerprint of its contents.
+//
+// It owns the card files and nothing else. Every other import - React above all - is answered at run time from
+// the table the page publishes (cards-shared.mjs), so there is one React, one Supabase client and one
+// game-logic.mjs however the screens arrive. An import that is neither a card file nor in that table FAILS THE
+// BUILD: the alternative is a second copy of some module bundled in silently, with its own state.
+const OWN = /^(?:cards\.jsx|card-[a-z-]+\.(?:jsx|mjs)|card-skin\.json)$/;
+const sharedKeys = new Set([...readFileSync("cards-shared.mjs", "utf8").matchAll(/^  "([^"]+)":/gm)].map((m) => m[1]));
+const borrowed = new Set();
+await esbuild.build({
+  entryPoints: ["cards.jsx"],
+  bundle: true,
+  format: "esm",
+  jsx: "automatic",
+  outfile: "public/cards.js",
+  minify: true,
+  define,
+  plugins: [{
+    name: "borrow-from-the-page",
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, (args) => {
+        if (args.kind === "entry-point") return null;
+        if (OWN.test(args.path.slice(args.path.lastIndexOf("/") + 1))) return null;
+        if (!sharedKeys.has(args.path)) {
+          return { errors: [{ text: `${args.importer} imports "${args.path}", which is neither a card file nor in cards-shared.mjs. Add it to that table (and import it there), or it would be bundled into cards.js as a second copy.` }] };
+        }
+        borrowed.add(args.path);
+        // Named without its extension: a path ending .mjs is read as an ES module, and this stand-in is CommonJS.
+        return { path: args.path.replace(/[^a-z0-9]+/gi, "_"), namespace: "borrowed", pluginData: { key: args.path } };
+      });
+      build.onLoad({ filter: /.*/, namespace: "borrowed" }, (args) => ({
+        contents: `module.exports = globalThis.__ps_shared__[${JSON.stringify(args.pluginData.key)}];`,
+        loader: "js",
+      }));
+    },
+  }],
+});
+for (const key of sharedKeys) if (!borrowed.has(key)) console.warn(`Note: cards-shared.mjs lists "${key}", which no card file imports any more.`);
+const cardsId = createHash("sha256").update(readFileSync("public/cards.js")).digest("hex").slice(0, 8);
+
 await esbuild.build({
   entryPoints: [entry],
   bundle: true,
   format: "iife",
   jsx: "automatic",
   outfile: "public/page.js",
+  // The one dynamic import in the app is the card screens. Left as a real import() of the file built above -
+  // which a classic script may do - with that file's fingerprint in the address, so the page and the screens it
+  // fetches are always from the same build and the fingerprint below moves when either does.
+  plugins: [{
+    name: "cards-on-demand",
+    setup(build) {
+      build.onResolve({ filter: /^\.\/cards\.jsx$/ }, (args) => (
+        args.kind === "dynamic-import" ? { path: `/cards.js?v=${cardsId}`, external: true } : null));
+    },
+  }],
   // Half the bytes for phones to download and parse (about 1.6 MB to 0.8 MB before compression).
   minify: true,
-  define: {
-    "process.env.NODE_ENV": '"production"',
-    SUPABASE_URL: JSON.stringify(process.env.SUPABASE_URL || ""),
-    SUPABASE_ANON_KEY: JSON.stringify(process.env.SUPABASE_ANON_KEY || ""),
-    APP_VERSION: JSON.stringify(version),
-    APP_ENV: JSON.stringify(appEnv),
-    APP_SITE_URL: JSON.stringify(siteUrl),
-    // Empty until the owner creates a Turnstile site key. Empty means captcha.mjs loads no script and
-    // sends no token, which is exactly the behaviour before it existed - see the note at the top of that file
-    // about shipping the client BEFORE the project setting. Checked above for the secret-key shape.
-    CAPTCHA_SITE_KEY: JSON.stringify(captchaKey),
-    // Cards (CARDS.md): "1" switches the card area on. On for the test site, off for production until the owner
-    // says otherwise; CARDS_ON in the environment overrides either way. cards-switch.mjs is the only reader.
-    CARDS_ON: JSON.stringify(cardsOn ? "1" : ""),
-  },
+  define,
 });
 
 // Icons, the web manifest and the link preview image (see tools/brand/render.mjs) are served from
@@ -198,4 +251,4 @@ if (appEnv === "production" && canonicalUrl) {
   writeFileSync("public/robots.txt", "User-agent: *\nAllow: /\n");
   rmSync("public/sitemap.xml", { force: true });
 }
-console.log(`Built public/page.js, public/page.html and public/sw.js (${buildId}, ${appEnv}, ${siteUrl || "no SITE_URL"}, canonical ${canonicalUrl || "none"})`);
+console.log(`Built public/page.js, public/cards.js, public/page.html and public/sw.js (${buildId}, ${appEnv}, ${siteUrl || "no SITE_URL"}, canonical ${canonicalUrl || "none"})`);

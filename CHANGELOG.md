@@ -20,6 +20,24 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.30.0] - 2026-11-14
+
+Nothing a player can see changes. The site's main download is about 110 KB smaller.
+
+### Changed
+- **The card screens are fetched when Cards is first opened**, instead of being part of the page every visitor
+  downloads. They are a file of their own, `/cards.js` (about 123 KB), and the page fell from 1,302,307 bytes
+  to about 1,193,000. On production, where cards are off, nobody downloads them at all.
+- While they load the screen says "Loading cards…"; if the fetch fails it says so and offers Try again, which
+  really does fetch again. The daily card under a finished season simply appears once they have loaded.
+- The bundle-size check is back at 1.30 MB (2.29.1 had raised it to 1.35 MB for one release).
+
+### Fixed
+- `tests/test-cards-screen.mjs` failed about one run in three by chance: a pack is rolled at random, a card
+  already owned is sold for coins on the spot, and several assertions pinned the wallet to the coin. They allow
+  for sold copies now. One more compared their six against the hand by card rather than by name, and failed
+  when the same man was in both as two different seasons.
+
 ## [2.29.1] - 2026-11-14
 
 Test site only.

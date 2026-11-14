@@ -519,7 +519,7 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.29.1 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+**Cards (in progress, v2.30.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
 five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck of thirty, a
 card a day from the daily draft, a collection screen, packs bought with coins, a ladder of CPU teams and a
 daily battle. **The battle was rebuilt in v2.27.0 as offense against offense** (the owner's redesign: "a fast
@@ -607,6 +607,11 @@ The parts unlike everything else:
   carry the spots to come and not the cards. A new answer that carries a run's `foe` has to go through it.
 - **The daily card is one of the six players drafted** (`dailyCard(history, rand)`), falling back to the day's
   boards only when none of the six has a card.
+- **The card screens are not in the page** (v2.30.0, CARDS.md 15). `build.mjs` builds them into
+  `public/cards.js`, fetched when Cards is first opened through `cards-lazy.jsx`. They borrow React, storage,
+  game-logic, rewards and cosmetics from the page at run time (`cards-shared.mjs`), and **a card file importing
+  anything not in that table fails the build**. Never import a card file statically from `perfect-season.jsx`,
+  and note their stylesheet is no longer part of `APP_CSS`.
 - **The gauntlet's list is written out and append-only** (`GAUNTLET`, CARDS.md 13): progress is a count of
   stages cleared, so reordering or recomputing the list silently changes which team stage five is.
 - **A round is written by its number** (`card_run_round`, `card_daily_round`): anything but the next one is
@@ -1534,6 +1539,8 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.30.0's (card screens on demand): client only. The deploy now serves a second script, `/cards.js`; nothing
+  per-environment. Re-run `npm run app:sync` when the Android app is next built.
   v2.29.1's (the battle's field): client only.
   v2.29.0's (the gauntlet's screen): client only on a database that took 2.28.1's migration and functions -
   the table, the four functions and `card-claim`'s three actions shipped then, dormant.

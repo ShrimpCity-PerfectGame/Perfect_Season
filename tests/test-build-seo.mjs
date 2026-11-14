@@ -5,6 +5,7 @@
 // Runs the real build.mjs, which writes public/ (gitignored); it's left holding the staging build.
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SITE_PAGES } from "../site-pages.mjs";
@@ -25,6 +26,7 @@ function build(env) {
     pool: read(path.join("data", "guess-pool.json")),
     versus: read(path.join("data", "versus-pool.json")),
     cards: read(path.join("data", "cards.json")),
+    cardsJs: read("cards.js"),
     env,
     pages: Object.fromEntries(SITE_PAGES.map((p) => [p.id, read(p.file)])),
   };
@@ -84,13 +86,21 @@ check("the share link people see stays gridspin.app", prod.js.includes('"https:/
 // this the duel pool was moved out, as written above. The ceiling stays where it was. The next thing to ask of a
 // release that reaches it is whether a SCREEN can load on demand - there is no data file left to move.
 //
-// Raised to 1,350,000 in v2.29.1, at 1,302,307 bytes. The question was asked: what took it over is the card
-// battle's SCREENS (the gauntlet, then the field), which is code, and there is no data file left to move. The
-// honest fix is the one named above - load the card screens on demand - and it is not small: a second chunk the
-// service worker has to learn, in a bundle whose name never changes. It is OWED BEFORE CARDS REACH PRODUCTION,
-// where today every visitor downloads about 100 KB of card screens that their build never draws. Do that
-// rather than raise this again.
-check("the bundle is minified", prod.js.length < 1_350_000, `${prod.js.length} bytes`);
+// v2.29.1 raised it to 1,350,000 for one release, at 1,302,307 bytes, when the card battle's field went over.
+// DONE in v2.30.0 (cards-lazy.jsx, CARDS.md 15): the card screens are a file of their own, public/cards.js,
+// fetched when Cards is first opened. The page fell to about 1,193,000 and the ceiling is back where it was.
+// The next screen to move, when this is reached again, is whichever mode is largest and least opened - the
+// table in cards-shared.mjs and the two plugins in build.mjs are written to be copied.
+check("the bundle is minified", prod.js.length < 1_300_000, `${prod.js.length} bytes`);
+// The card screens are not in the page any more, and the page asks for them by the fingerprint of the file that
+// was actually built - the two halves that make "on demand" true rather than merely intended.
+const asked = (prod.js.match(/import\("\/cards\.js\?v=([0-9a-f]{8})"\)/) || [])[1];
+check("the page fetches the card screens on demand, by fingerprint", asked === createHash("sha256").update(prod.cardsJs || "").digest("hex").slice(0, 8), `asked for ${asked}`);
+check("and does not carry them", !prod.js.includes("cb-field") && !prod.js.includes("cd-card") && (prod.cardsJs || "").includes("cb-field") && prod.cardsJs.includes("cd-card"));
+// cards.js borrows React and the rest from the page (cards-shared.mjs). A second React in it would be about
+// 130 KB on its own and would break every hook; a second game-logic would carry data/players.json, 225 KB.
+check("the card screens carry no second copy of React or the game data", (prod.cardsJs || "").length > 60_000 && prod.cardsJs.length < 200_000 && !prod.cardsJs.includes("react.element") && !prod.cardsJs.includes("Minified React error"), `${(prod.cardsJs || "").length} bytes`);
+check("and borrow what they need from the page", (prod.cardsJs.match(/__ps_shared__/g) || []).length === 6 && ["react/jsx-runtime", "./storage.js", "./game-logic.mjs", "./rewards.mjs", "./cosmetics.jsx"].every((k) => prod.cardsJs.includes(`__ps_shared__["${k}"]`)) && prod.js.includes("__ps_shared__"), "six modules, each asked for by name");
 check("Duel's pool is served from the site root, not carried in the bundle", (prod.versus || "").length > 50_000, `${(prod.versus || "").length} bytes`);
 // Guess the Player's pool is the one data file the bundle does NOT carry (guess-pool.mjs), because page.js sits
 // a few KB under the ceiling above. Its SIZE moves with the football season - the pool is the men currently

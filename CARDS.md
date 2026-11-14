@@ -523,6 +523,31 @@ A ladder win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run alre
 - A battle is now six requests rather than one. Each is small, and a lost one is recovered from the state.
 - Two accounts are two collections; nothing stops one person climbing twice.
 
+## 15. Loaded on demand (v2.30.0)
+
+The card screens are not in `page.js`. `build.mjs` builds `cards.jsx` and everything only it reads into
+`public/cards.js`, and the page fetches that the first time `LazyCardsScreen` or `LazySeasonCard`
+(`cards-lazy.jsx`) is drawn. Three answers: loading, loaded, could not load - with a Try again that fetches again.
+
+- **What is in it:** `cards.jsx`, `card-battle.jsx`, `card-face.jsx`, `card-logic.mjs`, `card-packs.mjs`,
+  `card-sprites.mjs`, `card-data.mjs`, `data/card-skin.json`, and their stylesheet - which is no longer part
+  of `APP_CSS`; the lazy components draw it beside the screen, after the app's own.
+- **What it borrows:** React, `storage.js`, `game-logic.mjs`, `rewards.mjs` and `cosmetics.jsx`, at run time,
+  from the table the page publishes (`cards-shared.mjs`, `globalThis.__ps_shared__`). One React, one Supabase
+  client, one `BOARDS`. **A card file that imports anything else fails the build** until it is added to that
+  table - otherwise it would be bundled in as a second copy with state of its own.
+- **`perfect-season.jsx` must not import a card file statically**, or esbuild puts all of it back in the page.
+  `tests/test-build-seo.mjs` holds that (no `cb-field` or `cd-card` in page.js) and holds cards.js to having
+  no React of its own.
+- **The address carries a fingerprint** (`/cards.js?v=<8 hex of its contents>`), so the page and the screens are
+  always one build, and the service worker's build id - a hash of page.js - moves when either does. The worker
+  fetches it network-first, like the bundle (`CARDS_BUNDLE` in sw-rules.mjs). It is not in the offline shell:
+  every card screen needs the server anyway.
+- **In the tests and the UI harness** esbuild inlines the import, so they exercise the real screens through the
+  same lazy components. What they cannot exercise is the fetch itself: nothing-at-load, fetched-on-open and
+  blocked-then-Try-again were checked in real Chrome against a real build (2026-11-14), not by a test.
+- The Android app gets it for free: `tools/app/build-app.mjs` copies `public/`, and the address is root-relative.
+
 ## 14. The field (v2.29.1)
 
 `Arena`'s lineup display. `.cb-field` carries the `dark` class, so its tokens are the navy scope's wherever
@@ -532,10 +557,6 @@ the screen is drawn; the floodlight and yard lines are white over `--surface2`, 
 (`li.cb-t`): `.cb-t-back` and a "?" until the round is played, unless the answer carried the card (the
 gauntlet). It shows nothing the server did not send, so it is not a second place the hidden card could leak.
 Order on the screen: scoreboard, the round playing back, the result, the field, then the choice.
-
-**Owed before production:** the card screens ride in the one bundle every visitor loads, including on
-production where they are never drawn, and v2.29.1 took that bundle past the ceiling in
-`tests/test-build-seo.mjs`, which was raised. Load them on demand before cards launch.
 
 ## 13. The gauntlet (v2.29.0, on the test site)
 

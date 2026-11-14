@@ -358,16 +358,23 @@ await runTest("the pack shop: three packs, their prices, and exactly what is ins
   assert(chanceText(0.7) === "70%" && chanceText(0.07) === "7.0%" && chanceText(0.000025) === "0.0025%" && chanceText(0) === "0%", "a rare chance never rounds to a zero it is not");
 });
 
+// What an account has been paid for copies. A pack is rolled at random, so any pack may hold a card already
+// owned, which is sold for coins on the spot - a test that pins a balance after a random pack has to allow for
+// it, or it fails one run in a few for no reason (it did, about one run in three, until v2.30.0).
+const soldCoins = (uid) => [...auth._wallet.tables.wallet_ledger.values()].filter((e) => e.user_id === uid && e.kind === "card_sell").reduce((n, e) => n + e.amount, 0);
+// The balance with those coins taken back out: what the wallet would hold had no pack held a copy.
+const spent = (uid) => auth._wallet.balanceOf(uid) - soldCoins(uid);
+
 await runTest("opening a pack: confirm first, then the cards, the coins and the collection", async () => {
   await click(packBtn("pack-standard", "Open")); await flush();
-  assert(auth._wallet.balanceOf(pat) === 1000 && auth._cards.owned(pat).length === 0, "Open alone buys nothing");
+  assert(spent(pat) === 1000 && auth._cards.owned(pat).length === 0, "Open alone buys nothing");
   assert(packBtn("pack-standard", "Confirm: 150 coins") && packBtn("pack-standard", "Cancel"), "it asks first, with the price in the button");
   await click(packBtn("pack-standard", "Cancel")); await flush();
-  assert(packBtn("pack-standard", "Open") && auth._wallet.balanceOf(pat) === 1000, "and Cancel is a real way out");
+  assert(packBtn("pack-standard", "Open") && spent(pat) === 1000, "and Cancel is a real way out");
 
   await click(packBtn("pack-standard", "Open")); await flush();
   await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
-  assert(auth._wallet.balanceOf(pat) === 850, "150 coins left the wallet");
+  assert(spent(pat) === 850, "150 coins left the wallet");
   assert(container.querySelector("#cd-pulled-h")?.textContent === "You pulled" && container.querySelectorAll(".cd-fresh [data-card]").length === 3, "the three pulled are shown");
   assert(document.activeElement === container.querySelector("#cd-pulled-h"), "and focus lands on them, so a screen reader hears what happened");
   assert(container.querySelector(".cd-bal").textContent.includes("850"), "the shelf's balance moved: " + container.querySelector(".cd-bal").textContent);
@@ -382,11 +389,11 @@ await runTest("a purchase whose answer is lost is the same purchase when tried a
   auth._cards.openFails = true;
   await click(packBtn("pack-standard", "Open")); await flush();
   await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
-  assert(auth._wallet.balanceOf(pat) === 700, "the pack WAS bought - only the answer was lost");
+  assert(spent(pat) === 700, "the pack WAS bought - only the answer was lost");
   assert(/never charged twice/.test(packAlert("pack-standard")) && !/Nothing was charged/.test(packAlert("pack-standard")), "the screen says it does not know, and never claims nothing was charged: " + packAlert("pack-standard"));
   assert(packBtn("pack-standard", "Try again"), "and offers to try again");
   await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
-  assert(auth._wallet.balanceOf(pat) === 700, "trying again charged nothing more");
+  assert(spent(pat) === 700, "trying again charged nothing more");
   assert(container.querySelectorAll(".cd-fresh [data-card]").length === 3 && container.querySelector(".cd-fresh").textContent.includes("weren't charged twice"), "and handed over that pack's cards, saying so");
   assert(auth._cards.owned(pat).reduce((n, o) => n + o.count, 0) === 6, "two packs' cards in all - not three");
 });
@@ -396,7 +403,7 @@ await runTest("what the shop refuses, in words, and what it does next", async ()
   auth._cards.packs.get("pack-standard").price = 200;
   await click(packBtn("pack-standard", "Open")); await flush();
   await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
-  assert(auth._wallet.balanceOf(pat) === 700, "nothing charged at a price nobody agreed to");
+  assert(spent(pat) === 700, "nothing charged at a price nobody agreed to");
   assert(/price has gone up/.test(packAlert("pack-standard")), "it says why: " + packAlert("pack-standard"));
   assert(packEl("pack-standard").querySelector(".cd-pack-price").textContent.includes("200"), "and the shelf now shows the new price");
   auth._cards.packs.get("pack-standard").price = 150;
@@ -406,7 +413,7 @@ await runTest("what the shop refuses, in words, and what it does next", async ()
   auth._cards.packs.get("pack-legends").stock_left = 0;
   await click(packBtn("pack-legends", "Open")); await flush();
   await click(packBtn("pack-legends", "Confirm")); await settle(); await settle();
-  assert(/sold out/i.test(packAlert("pack-legends")) && auth._wallet.balanceOf(pat) === 5700, "sold out, in a sentence, with nothing charged: " + packAlert("pack-legends"));
+  assert(/sold out/i.test(packAlert("pack-legends")) && spent(pat) === 5700, "sold out, in a sentence, with nothing charged: " + packAlert("pack-legends"));
   assert(packBtn("pack-legends", "Sold out")?.disabled, "and the button now says so and is off");
   auth._cards.packs.get("pack-legends").stock_left = 5000;
 
@@ -446,7 +453,7 @@ await runTest("an unanswered purchase survives leaving the shop, another pack, a
   await click(main); await flush();
   assert(document.activeElement === main && main.isConnected && main.textContent.includes("Confirm"), "Open becomes Confirm in place, so the keyboard's focus is not dropped");
   await click(main); await settle(); await settle();
-  assert(auth._wallet.balanceOf(pat) === 5550 && packBtn("pack-standard", "Try again"), "bought, and the answer lost");
+  assert(spent(pat) === 5550 && packBtn("pack-standard", "Try again"), "bought, and the answer lost");
   assert(!packBtn("pack-standard", "Cancel"), "a purchase that may have happened offers no Cancel");
   assert(container.querySelector(".cd-bal").textContent.includes("5,550"), "the wallet was asked again, so the balance already tells the truth");
 
@@ -460,7 +467,7 @@ await runTest("an unanswered purchase survives leaving the shop, another pack, a
   // Buying a different pack does not forget the first one.
   await click(packBtn("pack-air-raid", "Open")); await flush();
   await click(packBtn("pack-air-raid", "Confirm")); await settle(); await settle();
-  assert(auth._wallet.balanceOf(pat) === 5300 && packBtn("pack-standard", "Try again"), "Air raid bought; Standard's purchase is still waiting");
+  assert(spent(pat) === 5300 && packBtn("pack-standard", "Try again"), "Air raid bought; Standard's purchase is still waiting");
 
   // A refusal made before the database is asked settles nothing about the earlier attempt.
   auth._cards.enabled = false;
@@ -470,7 +477,7 @@ await runTest("an unanswered purchase survives leaving the shop, another pack, a
   auth._cards.enabled = true;
 
   await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
-  assert(auth._wallet.balanceOf(pat) === 5300, "resolving it charged nothing more");
+  assert(spent(pat) === 5300, "resolving it charged nothing more");
   assert(container.querySelector(".cd-fresh")?.textContent.includes("weren't charged twice") && packBtn("pack-standard", "Open"), "it hands over that pack and goes back to Open");
   assert(ownedNow() === cardsBefore + 6, "two packs in all: " + (ownedNow() - cardsBefore));
 });
@@ -482,7 +489,7 @@ await runTest("a pack that finishes opening after the shop is left still counts"
   const confirm = packBtn("pack-standard", "Confirm");
   confirm.click(); collTab().click(); // no waiting in between: the answer lands on a shop that is gone
   await settle(); await settle(); await settle();
-  assert(auth._wallet.balanceOf(pat) === 5150, "the pack was bought");
+  assert(spent(pat) === 5150, "the pack was bought");
   assert(container.querySelector("#cd-coll-h")?.textContent === `${before + 3} cards`, "and the collection on screen has it: " + container.querySelector("#cd-coll-h")?.textContent);
   await click(shopTab()); await settle();
   assert(packBtn("pack-standard", "Open") && container.querySelector(".cd-bal").textContent.includes("5,150"), "the shop is back to Open with the right balance - nothing left waiting");
@@ -551,7 +558,7 @@ await runTest("the ladder: a round at a time - see the spot and who you face, pl
   // Round one: the spot, the card across from it, the categories still to come - and NOT which one this is.
   const choose = q("[data-choose]");
   assert(choose && choose.dataset.choose === "0" && choose.dataset.spot === run.foe[0].spot, "round one is for the spot the server's first card plays: " + choose?.dataset.spot);
-  assert(q("[data-facing-hidden]") && !q(".cb-facing [data-card]") && !run.foe.some((e) => container.textContent.includes(CARDS.get(e.card).name) && !run.hand.some((h) => h.card === e.card)), "and does NOT show the card you are facing - or any of theirs");
+  assert(q("[data-facing-hidden]") && !q(".cb-facing [data-card]") && !run.foe.some((e) => container.textContent.includes(CARDS.get(e.card).name) && !run.hand.some((h) => CARDS.get(h.card).name === CARDS.get(e.card).name)), "and does NOT show the card you are facing - or any of theirs");
   assert(/Still to come: Production, Touchdown threat, Big play, Workload, Efficiency, Star power\./.test(q("[data-left]").textContent), "all six categories are still to come: " + q("[data-left]").textContent);
   assert(!container.textContent.includes(run.cats.join()) && !q(".cb-ring"), "nothing says which category round one is");
   const options = qa("[data-play-card]");
@@ -807,16 +814,16 @@ await runTest("several packs at once: one confirm, each its own purchase, and a 
   await click(qty(5)); await flush();
   assert(qty(5).getAttribute("aria-pressed") === "true" && packBtn("pack-standard", "Open 5"), "five chosen, and the button says so");
   await click(packBtn("pack-standard", "Open 5")); await flush();
-  assert(packBtn("pack-standard", "Confirm: 750 coins for 5") && auth._wallet.balanceOf(mo) === 2000, "it asks once, for the whole price, and has bought nothing yet");
+  assert(packBtn("pack-standard", "Confirm: 750 coins for 5") && spent(mo) === 2000, "it asks once, for the whole price, and has bought nothing yet");
   await click(packBtn("pack-standard", "Confirm")); await settle(); await settle(); await settle();
-  assert(auth._wallet.balanceOf(mo) === 1250, "five packs left the wallet: " + auth._wallet.balanceOf(mo));
+  assert(spent(mo) === 1250, "five packs left the wallet: " + auth._wallet.balanceOf(mo) + " with " + soldCoins(mo) + " back for copies");
   assert(container.querySelectorAll(".cd-fresh [data-card]").length === 15 && /5 packs opened\./.test(container.querySelector("[data-batch]").textContent), "all fifteen cards are shown together: " + container.querySelectorAll(".cd-fresh [data-card]").length);
   const opens = new Set(auth._cards.grants(mo).filter((g) => g.kind === "pack").map((g) => g.ref.split(":")[0]));
   assert(opens.size === 5, "five purchases, each with an open id of its own: " + opens.size);
 
   // Ten, with coins for eight: the button will not start what the wallet cannot finish.
   await click(qty(10)); await flush();
-  assert(packBtn("pack-standard", "Open 10").disabled && /You need 250 more coins for 10\./.test(packEl("pack-standard").textContent), "ten costs more than there is, and it says by how much");
+  assert(packBtn("pack-standard", "Open 10").disabled && packEl("pack-standard").textContent.includes(`You need ${(1500 - auth._wallet.balanceOf(mo)).toLocaleString("en-US")} more coins for 10.`), "ten costs more than there is, and it says by how much");
 
   // A batch whose third answer is lost: two are opened and shown, the third is the one Try again asks about.
   await click(qty(5)); await flush();
@@ -827,11 +834,11 @@ await runTest("several packs at once: one confirm, each its own purchase, and a 
   await click(packBtn("pack-standard", "Confirm")); await settle(); await settle(); await settle();
   auth._cards.claimStarter = real;
   assert(calls === 3, "it stopped at the one that did not answer: " + calls);
-  assert(auth._wallet.balanceOf(mo) === 1250 - 450, "three were bought - the third's answer was lost, not its purchase");
+  assert(spent(mo) === 1250 - 450, "three were bought - the third's answer was lost, not its purchase");
   assert(/2 of 5 packs opened/.test(container.querySelector("[data-batch]").textContent) && container.querySelectorAll(".cd-fresh [data-card]").length === 6, "the two that answered are shown");
   assert(packBtn("pack-standard", "Try again") && qty(5).disabled, "and the third is asked about, not bought again - with the count locked meanwhile");
   await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
-  assert(auth._wallet.balanceOf(mo) === 800 && container.querySelectorAll(".cd-fresh [data-card]").length === 3 && /already bought/.test(container.querySelector(".cd-fresh").textContent), "Try again shows that one pack's cards and charges nothing more");
+  assert(spent(mo) === 800 && container.querySelectorAll(".cd-fresh [data-card]").length === 3 && /already bought/.test(container.querySelector(".cd-fresh").textContent), "Try again shows that one pack's cards and charges nothing more");
   assert(packBtn("pack-standard", "Open 5") && !qty(5).disabled, "and the shop is back to normal");
 });
 
