@@ -519,12 +519,15 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.27.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+**Cards (in progress, v2.28.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
 five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck of thirty, a
 card a day from the daily draft, a collection screen, packs bought with coins, a ladder of CPU teams and a
 daily battle. **The battle was rebuilt in v2.27.0 as offense against offense** (the owner's redesign: "a fast
 collectible strategy game powered by historical NFL seasons"): a deck of thirty, a hand of twelve dealt by the
-server, six fielded in an order the player chooses, six rounds each on a category. The historical gauntlet,
+server, six rounds each on a category. **Since v2.28.0 a battle is played a round at a time**: each round is
+one lineup spot (QB, RB, WR, TE, Flex, Flex - the first five in a random order, **the last always a Flex**), the
+player sees the spot and the card across from it, plays one card from the hand, and only then learns the
+category. The historical gauntlet,
 the draft arena, badges and the profile spot are not built. **Production has cards switched off** in two
 places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
 `card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
@@ -595,7 +598,13 @@ The parts unlike everything else:
   coming - and are read through `card_battle_state()` and `card_boards()`. Their boards carry **no name snapshot**: they join `profiles` when read, so `mod_act` and
   `claim_username` know nothing of them.
 - **A failed play is not "not played".** The battle screen never replays after a lost answer: it reads the
-  state, which carries the run's latest battle, and shows that. Same family as the pack shop's open id.
+  state, which carries the rounds played, and shows that. Same family as the pack shop's open id.
+- **The category order is stored and never sent** (`card_runs.cats`; the daily's follows from the date, the
+  accepted gap every seeded daily has). A round's category arrives inside that round's result. Do not add it
+  to `card_battle_state` - knowing it turns every round back into reading off the bigger number, which is
+  the objection that made the battle round-by-round in the first place.
+- **A round is written by its number** (`card_run_round`, `card_daily_round`): anything but the next one is
+  `stale`, under the row's lock, so a retry can never re-roll a round's luck.
 - **One of a card in a finish; a copy is sold** (v2.26.0, CARDS.md 12). The database has no catalog and cannot
   price a card, so every grant an Edge Function makes carries `sell` and `grant_cards` applies it only when
   the card is already held. A grant with no `sell` (the SQL editor's) still stacks. Card values are
@@ -1519,6 +1528,12 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.28.0's (a round at a time, on the test site): re-run **`migration-cards.sql`**, then **deploy the Edge
+  Functions**, then the client. The migration adds `card_runs.cats` and `rounds` and `card_dailies.log`, adds
+  `card_run_round` and `card_daily_round`, and **ends any run left live from v2.27.0** (it has no category
+  order to play on). `card-logic.mjs` changed, so the 2,000-battle checksum moved and **the client and the
+  functions ship together**: an old client against the new function gets `malformed` on every play, and a new
+  client against the old function likewise.
   v2.27.0's (the battle rebuilt, on the test site): re-run **`migration-cards.sql`**, re-run
   **`migration-profiles.sql`** (`delete_account` learns the deck and the daily battles), then **deploy the Edge
   Functions**, then the client. **This migration DROPS**, the second in the repo to: the v2.25.0 shape of

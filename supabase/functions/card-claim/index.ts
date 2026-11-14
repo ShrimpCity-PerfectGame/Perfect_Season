@@ -40,21 +40,26 @@
 //   { action: "run_start" }
 //     409 no_deck           the collection cannot fill a deck of thirty
 //     200 { ok, run: { id, wins, hand, foe, last } }   the live run - the one already going, or a new one
-//   { action: "run_battle", run, step, team: [{ id, finish } x 6] }
-//     400 malformed | incomplete | unknown_card | bad_finish | bad_slot | same_player   the six, by the rules
-//     409 not_in_hand       one of the six was not dealt for this battle
+//   { action: "run_round", run, step, round, card: { id, finish } }     ONE ROUND of the battle the run is on
+//     400 malformed | unknown_card | bad_finish | bad_slot   the card, by the rules (bad_slot: it does not fit the round's spot)
+//     409 not_in_hand | already_played | same_player
 //     409 no_run            this account has no live run
-//     409 stale             the run is not the one, or not at the step, the browser thinks - it must read again
-//     409 not_owned         one of the six is not theirs any more
-//     200 { ok, battle, run: { id, wins, status, hand, foe }, coins: { credited, capped, balance } }
+//     409 stale             the run is not the one, or not at the step or the ROUND, the browser thinks - read again
+//     409 not_owned         the card is not theirs any more
+//     200 { ok, round, done: false, run: { id, wins, status, hand, foe, rounds } }
+//     200 { ok, round, done: true, battle, run, coins: { credited, capped, balance } }   the sixth round ends it
 //   { action: "run_end" }
 //     200 { ok, ended, wins }
 //   { action: "daily_deal" }
 //     409 no_deck
-//     200 { ok, date, daily: { hand, played, rounds, score, shown } }   today's hand, dealt once
-//   { action: "daily_play", team }
-//     409 no_hand (nothing dealt today)   400/409 (the team's reasons)   409 duplicate (already played today)
-//     200 { ok, date, daily }
+//     200 { ok, date, daily: { hand, log, played, rounds, score, shown } }   today's hand, dealt once
+//   { action: "daily_round", round, card }
+//     409 no_hand (nothing dealt today)   409 duplicate (already played today)   409 stale   (the card's reasons)
+//     200 { ok, date, round, done, daily }
+// A BATTLE IS PLAYED A ROUND AT A TIME. Each round is for one spot of the lineup, in the order of the other
+// side's six (random, with a Flex last); the browser sends ONE card from the hand and is told how the round
+// went, category and all. The order the categories come up in is drawn when the hand is dealt and kept in
+// card_runs.cats, which no browser can read - a round's category is revealed by playing it.
 // The rules are card-logic.mjs's. THE HAND IS DEALT HERE, with the cryptographic generator, from the deck the
 // account saved (or its best thirty), and stored before it is shown - so it cannot be dealt again by asking
 // again. A ladder battle's luck and the order of its categories are drawn here, fresh; the daily battle's are
@@ -69,13 +74,13 @@
 // The starter deck pays no coins and touches no other table; a pack moves coins only inside buy_pack. Every reason above has to be in storage-cards.js's
 // CARD_REFUSALS - tests/test-cards-edge.mjs reads this file and fails on one that is not.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { CARDS, initCardData, starterFill, deckProblem, bestDeck, dealHand, teamProblem, scoreBattle, ladderFoe, ladderEdge, dailyFoe, dailyBattle, dailyScore, ownKey } from "../../../card-logic.mjs";
+import { CARDS, initCardData, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, shuffleCategories, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey } from "../../../card-logic.mjs";
 import { COIN_RULES, cardWinCoins, cardSellCoins } from "../../../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../../../card-packs.mjs";
 import catalog from "../../../data/cards.json" with { type: "json" };
 
 initCardData(catalog);
-const ACTIONS = ["starter", "open_pack", "sell_copies", "deck_save", "run_start", "run_battle", "run_end", "daily_deal", "daily_play"];
+const ACTIONS = ["starter", "open_pack", "sell_copies", "deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round"];
 // What a copy of a card sells for (rewards.mjs), from the catalog's rating. The database holds no catalog, so
 // every grant this function makes carries the price, and grant_cards decides whether it applies: only when the
 // account already holds that card in that finish (CARDS.md 12).
@@ -84,7 +89,7 @@ const shownCard = (g: any) => (g.sold != null ? { id: g.card, finish: g.finish, 
 // The database says { card, finish }; the rules and the browser say { id, finish }.
 const toSql = (list: any[]) => list.map((e) => ({ card: e.id, finish: e.finish }));
 const fromSql = (list: any) => (Array.isArray(list) ? list.map((e: any) => ({ id: e.card, finish: e.finish })) : []);
-const BATTLE_ACTIONS = ["deck_save", "run_start", "run_battle", "run_end", "daily_deal", "daily_play"];
+const BATTLE_ACTIONS = ["deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round"];
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -132,8 +137,11 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "invalid JSON", reason: "malformed" }, 400); }
   if (!ACTIONS.includes(body?.action)) return json({ error: "unknown action", reason: "malformed" }, 400);
-  if (body.action === "run_battle" && (!Number.isInteger(body.run) || !Number.isInteger(body.step) || body.step < 0)) {
+  if (body.action === "run_round" && (!Number.isInteger(body.run) || !Number.isInteger(body.step) || body.step < 0)) {
     return json({ error: "a run and the step it is on are both needed", reason: "malformed" }, 400);
+  }
+  if ((body.action === "run_round" || body.action === "daily_round") && (!Number.isInteger(body.round) || body.round < 0 || body.round > 5)) {
+    return json({ error: "which round is being played is needed", reason: "malformed" }, 400);
   }
   if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1 || body.price > 1000000)) {
     return json({ error: "a pack, an open id and the price shown are all needed", reason: "malformed" }, 400);
@@ -203,13 +211,20 @@ const PACK_REFUSALS: Record<string, number> = { unavailable: 409, sold_out: 409,
 
 // What the battle functions may refuse for, and the status each travels under. Anything else they raise
 // (bad_battle, bad_run, bad_daily, bad_lineup) is this function's fault rather than the player's: a 500.
-const BATTLE_REFUSALS: Record<string, number> = { no_profile: 400, guest_not_allowed: 403, no_run: 409, stale: 409, not_owned: 409, no_hand: 409 };
+const BATTLE_REFUSALS: Record<string, number> = { no_profile: 400, guest_not_allowed: 403, no_run: 409, stale: 409, not_owned: 409, no_hand: 409, duplicate: 409 };
 function refusal(error: any) {
   const said = String(error?.message || "");
   return error?.code === "P0001" && Object.hasOwn(BATTLE_REFUSALS, said) ? said : null;
 }
-// A battle as the browser is shown it, and as the row keeps it for a browser whose answer was lost.
-const shownBattle = (result: any, team: any, foe: any, edge: number) => ({ team, foe, edge, rounds: result.rounds, wins: result.wins, losses: result.losses, total: result.total, foeTotal: result.foeTotal, win: result.win });
+// A card the rules will not let be played, and the status it travels under: a card that is not a card is a bad
+// request; one that is simply not available for this round is a conflict with where the battle stands.
+const ROUND_STATUS: Record<string, number> = { not_in_hand: 409, already_played: 409, same_player: 409 };
+// A CPU card keeps its spot with it: the order of the other side's spots is the order of the rounds.
+const foeSql = (list: any[]) => list.map((e) => ({ card: e.id, finish: e.finish, spot: e.spot }));
+const foeFrom = (list: any) => (Array.isArray(list) ? list.map((e: any) => ({ id: e.card, finish: e.finish, spot: e.spot })) : []);
+const playedOf = (rounds: any[]) => rounds.map((r) => ({ id: r.mine.id, finish: r.mine.finish }));
+// A finished battle as the browser is shown it, and as the row keeps it for a browser whose answer was lost.
+const shownBattle = (result: any, foe: any, edge: number) => ({ team: playedOf(result.rounds), foe, edge, rounds: result.rounds, wins: result.wins, losses: result.losses, total: result.total, foeTotal: result.foeTotal, win: result.win });
 
 async function battle(service: any, userId: string, body: any, json: (body: unknown, status?: number) => Response) {
   const failed = (what: string, error: unknown) => { console.error(`card-claim ${what}:`, error); return json({ error: "failed", reason: "server" }, 500); };
@@ -246,74 +261,92 @@ async function battle(service: any, userId: string, body: any, json: (body: unkn
     if (!deck) return noDeck();
     const seed = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
     const { data, error } = await service.rpc("card_run_start", {
-      p_user: userId, p_seed: seed, p_hand: toSql(dealHand(deck, secureRand)), p_foe: toSql(ladderFoe(seed, 0)),
+      p_user: userId, p_seed: seed, p_hand: toSql(dealHand(deck, secureRand)), p_foe: foeSql(ladderFoe(seed, 0)), p_cats: shuffleCategories(secureRand),
     });
     if (error || !data) return refused("card_run_start", error);
-    return json({ ok: true, run: { id: data.id, wins: data.wins, hand: fromSql(data.hand), foe: fromSql(data.foe), last: data.last ?? null } });
+    return json({ ok: true, run: { id: data.id, wins: data.wins, hand: fromSql(data.hand), foe: foeFrom(data.foe), rounds: data.rounds ?? [], last: data.last ?? null } });
   }
 
   // The day is THIS function's clock, in UTC - the same day card_battle_state calls today.
   const date = new Date().toISOString().slice(0, 10);
-  const shownDaily = (row: any) => ({ hand: fromSql(row.hand), played: row.played === true, rounds: row.rounds ?? null, score: row.score == null ? null : Number(row.score), shown: row.shown ?? null });
+  const shownDaily = (row: any) => ({ hand: fromSql(row.hand), log: row.log ?? [], played: row.played === true, rounds: row.rounds ?? null, score: row.score == null ? null : Number(row.score), shown: row.shown ?? null });
 
   if (body.action === "daily_deal") {
     // Dealt once: card_daily_deal keeps the first hand it is handed for a day and answers with that one ever
     // after. So a hand is dealt here even when the day's already is, and thrown away - simpler than asking
     // first, and it cannot re-deal. (Cards never leave a collection, so an account that had a deck has one.)
     if (!deck) return noDeck();
-    const handIn = toSql(dealHand(deck, secureRand));
-    const { data, error } = await service.rpc("card_daily_deal", { p_user: userId, p_date: date, p_hand: handIn });
+    const { data, error } = await service.rpc("card_daily_deal", { p_user: userId, p_date: date, p_hand: toSql(dealHand(deck, secureRand)) });
     if (error || !data) return refused("card_daily_deal", error);
     return json({ ok: true, date, daily: shownDaily(data) });
   }
 
-  if (body.action === "daily_play") {
+  if (body.action === "daily_round") {
     const { data: row, error: rowError } = await service
-      .from("card_dailies").select("hand").eq("user_id", userId).eq("date", date).maybeSingle();
+      .from("card_dailies").select("hand, log, played_at").eq("user_id", userId).eq("date", date).maybeSingle();
     if (rowError) return failed("daily read", rowError);
     if (!row) return json({ error: "no hand has been dealt today", reason: "no_hand" }, 409);
-    const problem = teamProblem(body.team, fromSql(row.hand));
-    if (problem) return json({ error: "that team cannot be played", reason: problem }, problem === "not_in_hand" ? 409 : 400);
-    const result = dailyBattle(date, body.team);
-    const { rounds, score } = dailyScore(result);
+    if (row.played_at) return json({ error: "today's battle is already played", reason: "duplicate" }, 409);
+    const log = Array.isArray(row.log) ? row.log : [];
+    if (log.length !== body.round) return json({ error: "the battle has moved on", reason: "stale" }, 409);
+    const foe = dailyFoe(date);
+    const problem = roundProblem(fromSql(row.hand), foe, log, body.card);
+    if (problem) return json({ error: "that card cannot be played", reason: problem }, ROUND_STATUS[problem] || 400);
+    const round = dailyRound(date, log, body.card);
+    const rounds = [...log, round];
+    if (rounds.length < 6) {
+      const { data, error } = await service.rpc("card_daily_round", { p_user: userId, p_date: date, p_round: body.round, p_card: toSql([body.card]), p_rounds: rounds });
+      if (error || !data) return refused("card_daily_round", error);
+      return json({ ok: true, date, round, done: false, daily: { hand: fromSql(row.hand), log: rounds, played: false, rounds: null, score: null, shown: null } });
+    }
+    const result = battleResult(rounds);
+    const { rounds: won, score } = dailyScore(result);
     const { data, error } = await service.rpc("card_daily_record", {
-      p_user: userId, p_date: date, p_lineup: toSql(body.team), p_rounds: rounds, p_score: score,
-      p_shown: shownBattle(result, body.team, dailyFoe(date), 0),
+      p_user: userId, p_date: date, p_lineup: toSql(playedOf(rounds)), p_rounds: won, p_score: score, p_shown: shownBattle(result, foe, 0),
     });
     if (error || !data) return refused("card_daily_record", error);
     if (data.duplicate) return json({ error: "today's battle is already played", reason: "duplicate" }, 409);
-    return json({ ok: true, date, daily: { hand: fromSql(row.hand), played: true, rounds: data.rounds, score: Number(data.score), shown: data.shown } });
+    return json({ ok: true, date, round, done: true, daily: { hand: fromSql(row.hand), log: rounds, played: true, rounds: data.rounds, score: Number(data.score), shown: data.shown } });
   }
 
-  // run_battle. The run is read here for its hand, its CPU team and its seed, and checked AGAIN under a lock by
-  // card_run_battle - so two requests that both read "three wins" cannot both play the fourth battle.
+  // run_round. The run is read here for its hand, its CPU team, its rounds and the category this round is on,
+  // and checked AGAIN under a lock by the function that writes - so two requests that both read "round three"
+  // cannot both play it.
   const { data: run, error: runError } = await service
-    .from("card_runs").select("id, wins, seed, hand, foe").eq("user_id", userId).eq("status", "live").maybeSingle();
+    .from("card_runs").select("id, wins, seed, hand, foe, cats, rounds").eq("user_id", userId).eq("status", "live").maybeSingle();
   if (runError) return failed("run read", runError);
   if (!run) return json({ error: "no run is going", reason: "no_run" }, 409);
-  if (run.id !== body.run || run.wins !== body.step) return json({ error: "the run has moved on", reason: "stale" }, 409);
-  const hand = fromSql(run.hand), foe = fromSql(run.foe);
-  const problem = teamProblem(body.team, hand);
-  if (problem) return json({ error: "that team cannot be played", reason: problem }, problem === "not_in_hand" ? 409 : 400);
-  if (teamProblem(foe, null)) return failed("run foe", "the stored CPU team is not a team");
+  const before = Array.isArray(run.rounds) ? run.rounds : [];
+  if (run.id !== body.run || run.wins !== body.step || before.length !== body.round) return json({ error: "the run has moved on", reason: "stale" }, 409);
+  const hand = fromSql(run.hand), foe = foeFrom(run.foe);
+  const problem = roundProblem(hand, foe, before, body.card);
+  if (problem) return json({ error: "that card cannot be played", reason: problem }, ROUND_STATUS[problem] || 400);
+  if (!Array.isArray(run.cats) || run.cats.length !== 6) return failed("run cats", "the run has no category order");
 
   const edge = ladderEdge(run.wins);
-  const result = scoreBattle(body.team, foe, secureRand, null, edge);
-  const last = shownBattle(result, body.team, foe, edge);
-  // The next battle's hand is dealt NOW and stored with the win, so it exists before the browser knows it won.
-  // A deck that has somehow stopped being one (it cannot - cards do not leave) falls back to the hand just played from.
-  const nextDeck = deck || null;
+  const round = playRound(foe, before, body.card, run.cats[body.round], secureRand, edge);
+  const rounds = [...before, round];
+  if (rounds.length < 6) {
+    const { data, error } = await service.rpc("card_run_round", { p_user: userId, p_run: run.id, p_step: run.wins, p_round: body.round, p_card: toSql([body.card]), p_rounds: rounds });
+    if (error || !data) return refused("card_run_round", error);
+    return json({ ok: true, round, done: false, run: { id: run.id, wins: run.wins, status: "live", hand, foe, rounds } });
+  }
+
+  // The sixth round ends the battle. The next battle's hand and category order are dealt NOW and stored with the
+  // win, so they exist before the browser knows it won.
+  const result = battleResult(rounds);
+  const last = shownBattle(result, foe, edge);
   const { data, error } = await service.rpc("card_run_battle", {
-    p_user: userId, p_run: run.id, p_step: run.wins, p_lineup: toSql(body.team), p_win: result.win,
-    p_hand: result.win ? toSql(nextDeck ? dealHand(nextDeck, secureRand) : hand) : null,
-    p_foe: result.win ? toSql(ladderFoe(run.seed, run.wins + 1)) : null,
+    p_user: userId, p_run: run.id, p_step: run.wins, p_lineup: toSql(playedOf(rounds)), p_win: result.win,
+    p_hand: result.win ? toSql(deck ? dealHand(deck, secureRand) : hand) : null,
+    p_foe: result.win ? foeSql(ladderFoe(run.seed, run.wins + 1)) : null,
+    p_cats: result.win ? shuffleCategories(secureRand) : null,
     p_last: last, p_coins: result.win ? cardWinCoins(run.wins + 1) : 0, p_cap: COIN_RULES.paidCardWinsPerDay,
   });
   if (error || !data) return refused("card_run_battle", error);
   return json({
-    ok: true,
-    battle: last,
-    run: { id: run.id, wins: data.wins, status: data.status, hand: fromSql(data.hand), foe: fromSql(data.foe) },
+    ok: true, round, done: true, battle: last,
+    run: { id: run.id, wins: data.wins, status: data.status, hand: fromSql(data.hand), foe: foeFrom(data.foe), rounds: [] },
     coins: { credited: data.credited ?? 0, capped: data.capped === true, balance: data.balance ?? null },
   });
 }

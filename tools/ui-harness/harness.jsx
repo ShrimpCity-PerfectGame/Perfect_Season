@@ -749,9 +749,10 @@ async function setUpGuess(howMany, finish) {
 
 // ---------- screen=cards: the card area ----------
 // &tab=packs is the pack shop (&coins=N for the wallet, &inside=1 with a pack's odds open, &soldout=1).
-// &tab=run is the ladder (&run=1 with a run going, so the team picker; &battle=win|loss to play its first
-// battle - the arena, then the result), &tab=daily the daily battle (&dealt=1 with the hand dealt, &played=1
-// once it is played), &tab=deck the deck builder, &tab=boards the two boards.
+// &tab=run is the ladder: &run=1 with a run going (the arena on its first round's choice); &rounds=N to play N
+// rounds of it and stop on the next choice; &anim=1 to play one more and leave it PLAYING OUT; &battle=win|loss
+// to play all six and land on the result. &tab=daily is the daily battle (&dealt=1 with the hand dealt,
+// &played=1 once it is played), &tab=deck the deck builder, &tab=boards the two boards.
 // ?starter=0 is an account that has not opened its deck (the starter panel); the default is a collection with
 // a starter deck and one showpiece in each finish, so every edge and the count badge are on screen at once.
 function CardsPreview({ userId }) {
@@ -793,14 +794,18 @@ async function setUpCards(withDeck) {
     const stacked = params.get("stacked") === "1";
     show.forEach(([card, finish], i) => card && mock._cards.grantCards(uid, "daily", [{ ref: `2026-10-${String(i + 1).padStart(2, "0")}`, card: card.id, finish, ...(stacked ? {} : { sell: mock._cards.sellFor({ id: card.id, finish }) }) }]));
   }
-  if (withDeck && (params.get("run") === "1" || params.get("battle"))) {
+  if (withDeck && (params.get("run") === "1" || params.get("battle") || params.get("rounds"))) {
     await mock._cards.battle(uid, { action: "run_start" });
     // A loss needs a team that can beat a deck holding 2007 Brady: the top of the ladder, met in battle one.
-    if (params.get("battle") === "loss") mock._cards.runs[0].foe = CL.buildTeam(seededRand(7), 126).map((e) => ({ card: e.id, finish: e.finish }));
+    if (params.get("battle") === "loss") mock._cards.runs[0].foe = CL.buildTeam(seededRand(7), 126).map((e) => ({ card: e.id, finish: e.finish, spot: e.spot }));
   }
   if (withDeck && (params.get("dealt") === "1" || params.get("played") === "1")) {
     const dealt = await mock._cards.battle(uid, { action: "daily_deal" });
-    if (params.get("played") === "1") await mock._cards.battle(uid, { action: "daily_play", team: CL.bestTeam(dealt.data.daily.hand) });
+    if (params.get("played") === "1") {
+      const hand = dealt.data.daily.hand, foe = CL.dailyFoe(mock._cards.today());
+      let log = [];
+      for (let round = 0; round < 6; round++) log = (await mock._cards.battle(uid, { action: "daily_round", round, card: CL.autoPick(hand, foe, log) })).data.daily.log;
+    }
   }
   return uid;
 }
@@ -817,13 +822,22 @@ async function setUpCards(withDeck) {
       const press = () => document.querySelector('[data-pack="pack-standard"] [data-buy]')?.click();
       setTimeout(press, 900); setTimeout(press, 1100);
     }
-    // &battle=win|loss: fill the lineup and play, with the luck pinned so the result is the one asked for.
-    if (params.get("battle")) {
-      // Twenty-nine draws: five to order the categories, then your card's two and theirs, six times over.
+    // &battle=win|loss plays all six rounds; &rounds=N plays N and stops on the next choice; &anim=1 then plays
+    // one more and leaves it playing out. The luck is pinned (four draws a round: your card's two, then theirs).
+    if (params.get("battle") || params.get("rounds")) {
       const [you, them] = params.get("battle") === "loss" ? [0.05, 0.95] : [0.95, 0.05];
-      mock._cards.nextRolls = [0.1, 0.7, 0.3, 0.9, 0.5, ...Array(6).fill([you, you, them, them]).flat()];
-      setTimeout(() => document.querySelector("[data-best]")?.click(), 900);
-      setTimeout(() => document.querySelector("[data-play]")?.click(), 1100);
+      mock._cards.nextRolls = Array(6).fill([you, you, them, them]).flat();
+      const want = params.get("battle") ? 6 : Math.max(0, Math.min(5, Number(params.get("rounds")) || 0));
+      let extra = params.get("anim") === "1";
+      const tick = setInterval(() => {
+        const arena = document.querySelector(".cb-arena");
+        if (!arena) return;
+        const played = Number(arena.dataset.rounds);
+        const skip = document.querySelector("[data-skip]"), pick = document.querySelector("[data-best]");
+        if (played >= want && !extra) { if (skip) skip.click(); else clearInterval(tick); return; }
+        if (skip) { skip.click(); return; }
+        if (pick && !pick.disabled) { if (played >= want) { extra = false; clearInterval(tick); } pick.click(); }
+      }, 250);
     }
     // &tab=packs&inside=1 also opens the first pack's contents, so the odds tables are on screen.
     if (params.get("inside") === "1") setTimeout(() => [...document.querySelectorAll(".cd-pack .linkbtn")][0]?.click(), 900);

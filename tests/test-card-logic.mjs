@@ -20,7 +20,7 @@ const need = (name) => { if (typeof C[name] === "undefined") { fails++; console.
 
 // ---------- 1. Cards and archetypes ----------
 const catalog = read("data/cards.json");
-const CHECKSUM = 9516468; // the 2,000-battle pin in section 5: a change to a number, a category or a draw moves it
+const CHECKSUM = 9088863; // the 2,000-battle pin in section 5: a change to a number, a category or a draw moves it
 const info = C.initCardData(catalog);
 eq(info.cards, 3124, "every card loads");
 eq(info.players, 1639, "1,639 players");
@@ -169,25 +169,26 @@ if (need("deckProblem")) {
 }
 
 // ---------- 4. Synergies and abilities ----------
-if (need("teamSynergies")) {
+if (need("playedSynergies")) {
   // Real teammates: a quarterback and two receivers from one team in one season (the 2021 Jets have nine cards).
-  const brady = F("Zach Wilson", 2021), moss = F("Corey Davis", 2021), welker = F("Elijah Moore", 2021);
-  ok(brady && moss && welker && brady.team === moss.team && moss.team === welker.team, "three real teammates are in the catalog");
-  const TM = brady.team, YR = brady.season;
-  const rb = byPos("RB").find((c) => c.team !== TM && c.season !== YR && c.archetype === "role");
-  const te = byPos("TE").find((c) => c.team !== TM && c.team !== rb.team && c.season !== YR && c.season !== rb.season && c.archetype === "role");
-  const wr = byPos("WR").find((c) => c.team !== TM && c.team !== rb.team && c.team !== te.team && ![YR, rb.season, te.season].includes(c.season) && c.archetype === "role");
-  const team = [brady, moss, welker, rb, te, wr].map((c) => E(c));
-  eq(C.teamProblem(team, null), null, "a legal six to measure");
-  const syn = C.teamSynergies(team);
-  const pts = (i, key) => syn[i].find((m) => m.key === key)?.pts ?? 0;
-  eq(pts(0, "team"), 2 * C.TEAM_BONUS, "two lineup-mates from his team");
-  eq(pts(0, "season"), 2 * C.SEASON_BONUS, "two from his season");
-  eq(pts(0, "mates"), C.TEAMMATE_BONUS, "and a real teammate, once however many there are");
-  eq(syn[3].length + syn[4].length + syn[5].length, 0, "three strangers get nothing");
-  if (brady.archetype === "gunslinger" && moss.archetype === "deep") eq(pts(0, "pair:gunslinger+deep"), 6, "a Gunslinger with his Deep threat");
-  const four = C.teamSynergies([brady, moss, welker, ...A.filter((c) => c.team === TM && c.season !== YR && c.pos !== "QB" && ![moss.pid, welker.pid].includes(c.pid)).slice(0, 3)].map((c) => E(c)));
-  ok(four[0].find((m) => m.key === "team").pts === C.TEAM_BONUS_MAX, "the team bonus stops at its cap");
+  const qb = F("Zach Wilson", 2021), w1 = F("Corey Davis", 2021), w2 = F("Elijah Moore", 2021);
+  ok(qb && w1 && w2 && qb.team === w1.team && w1.team === w2.team, "three real teammates are in the catalog");
+  const pts = (mods, key) => mods.find((m) => m.key === key)?.pts ?? 0;
+  eq(C.playedSynergies(E(qb), []).length, 0, "the first card down has nobody to play off");
+  const second = C.playedSynergies(E(w1), [E(qb)]);
+  eq(pts(second, "team"), C.TEAM_BONUS, "the second, with one teammate already played");
+  eq(pts(second, "season"), C.SEASON_BONUS, "from the same season");
+  eq(pts(second, "mates"), C.TEAMMATE_BONUS, "and a real teammate");
+  const third = C.playedSynergies(E(w2), [E(qb), E(w1)]);
+  eq(pts(third, "team"), 2 * C.TEAM_BONUS, "the third, with two - synergy builds as the battle goes");
+  eq(pts(third, "mates"), C.TEAMMATE_BONUS, "real teammates once, however many");
+  const stranger = byPos("RB").find((c) => c.team !== qb.team && c.season !== qb.season && c.archetype === "role");
+  eq(C.playedSynergies(E(stranger), [E(qb), E(w1)]).length, 0, "a stranger gets nothing");
+  const sameTeam = A.filter((c) => c.team === qb.team && c.pid !== qb.pid).slice(0, 5).map((c) => E(c));
+  eq(pts(C.playedSynergies(E(qb), sameTeam), "team"), C.TEAM_BONUS_MAX, "the team bonus stops at its cap");
+  const gun = byPos("QB").find((c) => c.archetype === "gunslinger"), deep = byPos("WR").find((c) => c.archetype === "deep" && c.team !== gun.team && c.season !== gun.season);
+  eq(pts(C.playedSynergies(E(deep), [E(gun)]), "pair:gunslinger+deep"), 6, "a Deep threat played after his Gunslinger");
+  eq(pts(C.playedSynergies(E(gun), []), "pair:gunslinger+deep"), 0, "the Gunslinger played first gets no pair - nobody is down yet");
   ok(Object.keys(C.ABILITIES).length === C.ARCHETYPES.length && C.ARCHETYPES.every((a) => C.ABILITIES[a.id]), "every archetype has an ability");
   eq(C.abilityOf({ archetype: "role" }), null, "and a Role player has none");
   const R = (over) => ({ cat: "star", wins: 0, losses: 0, prevWon: null, qbPlayed: false, foeRating: 50, rating: 50, ...over });
@@ -204,71 +205,114 @@ if (need("teamSynergies")) {
   ok(C.ABILITIES.workhorse.when(R({ prevWon: null })) !== true, "momentum needs a round before it");
 }
 
-// ---------- 5. A battle ----------
-if (need("scoreBattle")) {
-  const deck = someDeck(), other = someDeck(60);
-  const mine = C.bestTeam(C.dealHand(deck, mulberry32(11))), foe = C.bestTeam(C.dealHand(other, mulberry32(12)));
+// ---------- 5. A battle, a round at a time ----------
+if (need("playRound")) {
+  const deck = someDeck();
+  const hand = C.dealHand(deck, mulberry32(11));
+  const foe = C.buildTeam(mulberry32(12), 55);
+  // The other side: six spots, each card fitting its own, in an order with a Flex last.
+  eq(foe.map((e) => e.spot).slice().sort().join(), [...C.SPOTS].sort().join(), "the other side's six carry the six spots");
+  eq(foe[5].spot, "FLEX", "and the last is a Flex");
+  ok(foe.every((e) => C.spotFits(C.CARDS.get(e.id).pos, e.spot)), "each of their cards fits its spot");
+  ok(C.spotFits("TE", "FLEX") && C.spotFits("RB", "FLEX") && !C.spotFits("QB", "FLEX") && C.spotFits("QB", "QB") && !C.spotFits("RB", "WR"), "a Flex is anybody but a quarterback");
+  const firsts = new Set(Array.from({ length: 300 }, (_, i) => C.buildTeam(mulberry32(i + 1), 60)[0].spot));
+  eq(firsts.size, 5, "the first round can be any of the five spots that are not the last Flex - it is not the quarterback every time");
+  ok(Array.from({ length: 300 }, (_, i) => C.buildTeam(mulberry32(i + 1), 60)).every((t) => t[5].spot === "FLEX"), "and the last round is a Flex in every one of 300 teams");
+
+  // What may be played: in the hand, fits the spot, not already down.
+  const spot = foe[0].spot;
+  const fit = hand.find((e) => C.spotFits(C.CARDS.get(e.id).pos, spot));
+  const misfit = hand.find((e) => !C.spotFits(C.CARDS.get(e.id).pos, spot));
+  const outsider = A.find((c) => C.spotFits(c.pos, spot) && !deck.some((d) => C.CARDS.get(d.id).pid === c.pid));
+  eq(C.roundProblem(hand, foe, [], fit), null, "a card from the hand that fits the spot may be played");
+  for (const [reason, entry, rounds] of [
+    ["malformed", null], ["malformed", "my best card"], ["unknown_card", { id: 99999999, finish: "base" }], ["bad_finish", { id: fit.id, finish: "diamond" }],
+    ["not_in_hand", E(outsider)], ["not_in_hand", { id: fit.id, finish: "prism" }], ["bad_slot", misfit],
+  ]) eq(C.roundProblem(hand, foe, rounds || [], entry), reason, `roundProblem: ${reason}`);
+  eq(C.roundProblem(hand, foe, new Array(6).fill({ mine: fit }), fit), "malformed", "a seventh round is not a round");
+  eq(C.roundProblem(null, foe, [], fit), "malformed", "nor is one with no hand");
+  ok(C.playable(hand, foe, []).every((e) => C.spotFits(C.CARDS.get(e.id).pos, spot)) && C.playable(hand, foe, []).length >= 2, "playable lists the cards that fit, and there is always a choice");
+  ok(C.playable(hand, foe, []).every((e, i, list) => i === 0 || C.CARDS.get(list[i - 1].id).rating >= C.CARDS.get(e.id).rating), "best first");
+
+  // Play one, and what it changes for the next.
   let draws = 0;
-  const r = C.scoreBattle(mine, foe, () => (draws++, 0.5));
+  const r0 = C.playRound(foe, [], fit, "star", () => (draws++, 0.5));
+  eq(draws, 4, "a round is four draws");
+  ok(r0.cat === "star" && r0.spot === spot && r0.mine.id === fit.id && r0.foe.id === foe[0].id && r0.mine.roll === 0, "it is your card against theirs in that spot, on that category");
+  ok(Math.abs(r0.mine.total - (r0.mine.base + r0.mine.roll + r0.mine.mods.reduce((n, m) => n + m.pts, 0))) < 0.06 && r0.mine.base === C.roundBase(fit, "star"), "a card's total is its base, its luck and its bonuses");
+  eq(r0.win, r0.mine.total > r0.foe.total ? "me" : r0.mine.total < r0.foe.total ? "foe" : "tie", "the higher total takes the round");
+  eq(r0.score.join(), r0.win === "me" ? "1,0" : r0.win === "foe" ? "0,1" : "0,0", "and the score moves");
+  eq(C.roundProblem(hand, foe, [r0], fit), foe[1].spot === spot || (foe[1].spot === "FLEX" && C.CARDS.get(fit.id).pos !== "QB") ? "already_played" : "bad_slot", "the same card cannot be played again");
+
+  // "Pick for me" never strands a later spot, and a whole battle can always be played from any hand.
+  let stuck = 0, wrong = 0;
+  for (let i = 0; i < 500; i++) {
+    const h = C.dealHand(deck, mulberry32(i + 100)), f = C.buildTeam(mulberry32(i + 900), 40 + (i % 70));
+    const picks = C.autoLineup(h, f);
+    if (!picks) { stuck++; continue; }
+    if (picks.some((e, k) => !C.spotFits(C.CARDS.get(e.id).pos, f[k].spot)) || new Set(picks.map((e) => C.CARDS.get(e.id).pid)).size !== 6) wrong++;
+  }
+  eq(stuck + wrong, 0, "500 hands against 500 teams: Pick for me fills all six spots, legally, every time");
+  // ...and the trap it avoids: a Flex round that eats the only card a later spot can use.
+  const flexFirst = [{ ...foe.find((e) => e.spot === "FLEX"), spot: "FLEX" }, ...["TE", "QB", "RB", "WR"].map((s) => ({ ...foe.find((e) => e.spot === s) })), { ...foe.filter((e) => e.spot === "FLEX")[1] }];
+  const tes = hand.filter((e) => C.CARDS.get(e.id).pos === "TE");
+  const oneTe = hand.filter((e) => C.CARDS.get(e.id).pos !== "TE" || e.id === tes[0].id);
+  ok(C.leavesAWay(oneTe, flexFirst, [], oneTe.find((e) => C.CARDS.get(e.id).pos === "RB")) && !C.leavesAWay(oneTe, flexFirst, [], tes[0]), "with one tight end left and his round to come, he is not spent on a Flex");
+  ok(C.CARDS.get(C.autoPick(oneTe, flexFirst, []).id).pos !== "TE", "and Pick for me does not spend him");
+
+  // A whole battle: the same rounds, added up.
+  const mine = C.autoLineup(hand, foe);
+  draws = 0;
+  const b = C.scoreBattle(mine, foe, () => (draws++, 0.5));
   eq(draws, 29, "twenty-nine draws: five to order the categories, four a round");
-  eq(r.rounds.length, 6, "six rounds");
-  eq(r.rounds.map((x) => x.cat).sort().join(), [...C.CATEGORY_IDS].sort().join(), "each category exactly once");
-  ok(r.rounds.every((x, i) => x.mine.id === mine[i].id && x.foe.id === foe[i].id), "your first card meets their first, and so on down");
-  ok(r.rounds.every((x) => x.mine.roll === 0 && x.foe.roll === 0), "a draw of one half is no luck at all");
-  ok(r.rounds.every((x) => Math.abs(x.mine.total - (x.mine.base + x.mine.roll + x.mine.mods.reduce((n, m) => n + m.pts, 0))) < 0.06), "a card's total is its base, its luck and its bonuses");
-  ok(r.rounds.every((x) => x.mine.base === C.roundBase(mine[r.rounds.indexOf(x)], x.cat)), "and the base is the one the screen can show beforehand");
-  ok(r.rounds.every((x) => x.win === (x.mine.total > x.foe.total ? "me" : x.mine.total < x.foe.total ? "foe" : "tie")), "the higher total takes the round");
-  eq(r.wins, r.rounds.filter((x) => x.win === "me").length, "wins are rounds won");
-  eq(r.rounds[5].score.join(), `${r.wins},${r.losses}`, "and the running score ends on them");
-  eq(r.win, r.wins !== r.losses ? r.wins > r.losses : r.total >= r.foeTotal, "more rounds wins; level on rounds, the higher total; dead level, you");
+  eq(b.rounds.map((x) => x.cat).sort().join(), [...C.CATEGORY_IDS].sort().join(), "each category exactly once");
+  eq(b.rounds.map((x) => x.spot).join(), foe.map((e) => e.spot).join(), "the rounds are the other side's spots, in order");
+  eq(JSON.stringify(C.battleResult(b.rounds)), JSON.stringify(b), "battleResult is the rounds added up");
+  eq(b.win, b.wins !== b.losses ? b.wins > b.losses : b.total >= b.foeTotal, "more rounds wins; level on rounds, the higher total; dead level, you");
   eq(JSON.stringify(C.scoreBattle(mine, foe, mulberry32(77))), JSON.stringify(C.scoreBattle(mine, foe, mulberry32(77))), "the same generator plays the same battle");
-  ok(JSON.stringify(C.scoreBattle(mine, foe, mulberry32(77)).rounds.map((x) => x.cat)) !== JSON.stringify(C.scoreBattle(mine, foe, mulberry32(78)).rounds.map((x) => x.cat)) || true, "and a different one may order the categories differently");
   const orders = new Set(Array.from({ length: 60 }, (_, i) => C.scoreBattle(mine, foe, mulberry32(i + 1)).rounds.map((x) => x.cat).join()));
   ok(orders.size > 40, "the category order really is shuffled: " + orders.size + " orders in 60 battles");
+  eq(C.shuffleCategories(mulberry32(3)).slice().sort().join(), [...C.CATEGORY_IDS].sort().join(), "shuffleCategories is the six, each once");
   // Luck is bounded, and wider only for a Gunslinger.
   let worst = 0, wide = 0;
   for (let i = 0; i < 200; i++) for (const x of C.scoreBattle(mine, foe, mulberry32(i + 500)).rounds) for (const side of [x.mine, x.foe]) {
-    const gun = C.CARDS.get(side.id).archetype === "gunslinger";
-    if (gun) wide = Math.max(wide, Math.abs(side.roll)); else worst = Math.max(worst, Math.abs(side.roll));
+    if (C.CARDS.get(side.id).archetype === "gunslinger") wide = Math.max(wide, Math.abs(side.roll)); else worst = Math.max(worst, Math.abs(side.roll));
   }
   ok(worst <= C.LUCK_SPREAD && worst > C.LUCK_SPREAD * 0.7, "luck stays inside its spread: " + worst);
   ok(wide <= C.LUCK_SPREAD * C.LUCK_WIDE, "a Gunslinger's inside the wider one: " + wide);
-  // A fixed order of categories, and an edge for the other side.
   const fixed = C.scoreBattle(mine, foe, () => 0.5, ["star", "scoring", "bigplay", "workload", "efficiency", "production"], 5);
   eq(fixed.rounds.map((x) => x.cat).join(), "star,scoring,bigplay,workload,efficiency,production", "the categories can be handed in");
   ok(fixed.rounds.every((x) => x.foe.mods.some((m) => m.key === "edge" && m.pts === 5) && !x.mine.mods.some((m) => m.key === "edge")), "an edge goes on every card of theirs and none of yours");
-  // The rating is part of a round and never the whole of it: the same card scores differently by category.
   const one = E(F("Adrian Peterson", 2012));
   ok(new Set(C.CATEGORY_IDS.map((k) => C.roundBase(one, k))).size >= 4, "one card is worth different amounts in different categories");
   eq(Math.round(10 * (C.roundBase(E(F("Adrian Peterson", 2012), "prism"), "star") - C.roundBase(one, "star"))) / 10, Math.round(10 * C.RATING_SHARE * C.FINISH_BONUS.prism) / 10, "a finish adds its bonus to the rating's share");
-  // The abilities that depend on the battle so far.
-  const qb = byPos("QB").find((c) => c.archetype === "manager"), deepWr = byPos("WR").find((c) => c.archetype === "deep" && c.team !== qb.team && c.season !== qb.season);
-  const fill = [byPos("RB"), byPos("TE"), byPos("WR"), byPos("RB")].map((list, i) => list.filter((c) => c.archetype === "role" && ![qb.pid, deepWr.pid].includes(c.pid))[i * 3 + 5]);
-  const order = [qb, deepWr, ...fill].map((c) => E(c));
-  if (C.teamProblem(order, null) === null) {
-    const b = C.scoreBattle(order, foe, () => 0.5);
-    ok(b.rounds[1].mine.mods.some((m) => m.key === "next" && m.pts === C.ABILITY_NEXT), "the card after a Game manager gets his lift");
-    ok(b.rounds[1].mine.mods.some((m) => m.key === "ability" && m.label === "Go route"), "and a Deep threat played after his quarterback fires");
-    const flipped = C.scoreBattle([order[1], order[0], ...order.slice(2)], foe, () => 0.5);
-    ok(!flipped.rounds[0].mine.mods.some((m) => m.key === "ability"), "played BEFORE the quarterback he does not - the order is a real choice");
-    ok(flipped.rounds[0].mine.ability && flipped.rounds[0].mine.ability.on === false, "and the card is still shown its ability, as not this round");
-  } else ok(false, "the ability lineup should be legal: " + C.teamProblem(order, null));
-  // A Safety valve cancels the ability across from him.
+
+  // The abilities that depend on the battle so far - which is what makes the next card a decision.
+  const mgr = byPos("QB").find((c) => c.archetype === "manager"), deepWr = byPos("WR").find((c) => c.archetype === "deep" && c.team !== mgr.team && c.season !== mgr.season);
+  const two = [{ ...foe.find((e) => e.spot === "QB") }, { ...foe.find((e) => e.spot === "WR") }];
+  const afterQb = C.playRound(two, [C.playRound(two, [], E(mgr), "star", () => 0.5)], E(deepWr), "star", () => 0.5);
+  ok(afterQb.mine.mods.some((m) => m.key === "next" && m.pts === C.ABILITY_NEXT), "the card after a Game manager gets his lift");
+  ok(afterQb.mine.mods.some((m) => m.key === "ability" && m.label === "Go route"), "and a Deep threat played after his quarterback fires");
+  const wrFirst = C.playRound([two[1], two[0]], [], E(deepWr), "star", () => 0.5);
+  ok(!wrFirst.mine.mods.some((m) => m.key === "ability") && wrFirst.mine.ability.on === false, "played BEFORE the quarterback he does not - and is shown his ability as not this round");
+  const seamTe = byPos("TE").find((c) => c.archetype === "seam");
+  const behind = [{ cat: "x", win: "foe", mine: E(byPos("RB")[0]), foe: E(byPos("RB")[1]) }];
+  // across from a Role player, so nothing cancels him
+  const plain = { ...E(byPos("TE").find((c) => c.archetype === "role")), spot: "TE" };
+  const teSpot = [{ ...foe[0] }, plain];
+  ok(C.playRound(teSpot, behind, E(seamTe), "star", () => 0.5).mine.mods.some((m) => m.label === "Clutch"), "a Seam stretcher played when you are behind is Clutch");
+  ok(!C.playRound([teSpot[1]], [], E(seamTe), "star", () => 0.5).mine.mods.some((m) => m.label === "Clutch"), "and level, he is not");
   const valve = byPos("TE").find((c) => c.archetype === "valve"), goal = byPos("RB").find((c) => c.archetype === "goalline");
-  const vTeam = [E(valve), ...C.bestTeam(someDeck(90)).filter((e) => C.CARDS.get(e.id).pos !== "TE" && C.CARDS.get(e.id).pid !== valve.pid).slice(0, 5)];
-  const gTeam = [E(goal), ...C.bestTeam(someDeck(120)).filter((e) => C.CARDS.get(e.id).pid !== goal.pid && C.CARDS.get(e.id).pos !== "RB").slice(0, 5)];
-  if (C.teamProblem(vTeam, null) === null && C.teamProblem(gTeam, null) === null) {
-    const b = C.scoreBattle(gTeam, vTeam, () => 0.5, ["scoring", "star", "bigplay", "workload", "efficiency", "production"]);
-    ok(!b.rounds[0].mine.mods.some((m) => m.key === "ability") && b.rounds[0].mine.ability.cancelled === true, "a Goal-line back in a Touchdown round, across from a Safety valve, gets nothing");
-    const free = C.scoreBattle(gTeam, [vTeam[1], vTeam[0], ...vTeam.slice(2)], () => 0.5, ["scoring", "star", "bigplay", "workload", "efficiency", "production"]);
-    ok(free.rounds[0].mine.mods.some((m) => m.key === "ability" && m.pts === 6), "and across from anybody else he gets his six");
-  }
+  const cancelled = C.playRound([{ ...E(valve), spot: "RB" }], [], E(goal), "scoring", () => 0.5);
+  ok(!cancelled.mine.mods.some((m) => m.key === "ability") && cancelled.mine.ability.cancelled === true, "a Goal-line back in a Touchdown round, across from a Safety valve, gets nothing");
+  ok(C.playRound([{ ...E(byPos("RB").find((c) => c.archetype === "role")), spot: "RB" }], [], E(goal), "scoring", () => 0.5).mine.mods.some((m) => m.key === "ability" && m.pts === 6), "and across from anybody else he gets his six");
+
   // Pinned: 2,000 battles, so a change to any number or to the order of a draw shows here.
   let sum = 0; const pin = mulberry32(20261114);
   for (let i = 0; i < 2000; i++) {
-    const m = C.bestTeam(C.dealHand(deck, pin)), f = C.buildTeam(pin, 40 + (i % 60));
-    const b = C.scoreBattle(m, f, pin);
-    sum = (sum + Math.round(b.total * 10) + 7 * b.wins + (b.win ? 13 : 0)) % 1000000007;
+    const h = C.dealHand(deck, pin), f = C.buildTeam(pin, 40 + (i % 60));
+    const res = C.scoreBattle(C.autoLineup(h, f), f, pin);
+    sum = (sum + Math.round(res.total * 10) + 7 * res.wins + (res.win ? 13 : 0)) % 1000000007;
   }
   console.log(`  2,000 battles checksum: ${sum}`);
   eq(sum, CHECKSUM, "the pinned checksum (a change here moves every battle - the client and the functions must ship together)");
@@ -278,7 +322,7 @@ if (need("scoreBattle")) {
 if (need("buildTeam")) {
   let draws = 0;
   const t = C.buildTeam(() => (draws++, 0.4), 70);
-  eq(draws, 11, "a CPU team is eleven draws");
+  eq(draws, 10, "a CPU team is ten draws");
   eq(C.teamProblem(t, null), null, "and a legal six");
   ok(t.every((e) => e.finish === "base" && Math.abs(C.CARDS.get(e.id).rating - 70) <= C.CPU_BAND), "of Base cards near its target");
   for (const target of [20, 38, 70, 100, 124, 140]) eq(C.teamProblem(C.buildTeam(mulberry32(target), target), null), null, `a team can be built at ${target}`);
@@ -294,17 +338,21 @@ if (need("buildTeam")) {
   ok(C.ladderName(0) === "Practice squad" && C.ladderName(99) === "The GOATs", "the tiers have names");
 
   const day = "2026-11-14";
-  eq(JSON.stringify(C.dailyFoe(day)), JSON.stringify(C.dailyFoe(day)), "the day's team is the day's");
-  ok(JSON.stringify(C.dailyFoe(day)) !== JSON.stringify(C.dailyFoe("2026-11-15")), "and tomorrow's is another");
+  const dfoe = C.dailyFoe(day);
+  eq(JSON.stringify(dfoe), JSON.stringify(C.dailyFoe(day)), "the day's team is the day's");
+  ok(JSON.stringify(dfoe) !== JSON.stringify(C.dailyFoe("2026-11-15")), "and tomorrow's is another");
   eq(C.dailyCategories(day).slice().sort().join(), [...C.CATEGORY_IDS].sort().join(), "the day's categories are the six");
-  const deck = someDeck(30), hand = C.dealHand(deck, mulberry32(5)), team = C.bestTeam(hand);
+  const hand = C.dealHand(someDeck(30), mulberry32(5)), team = C.autoLineup(hand, dfoe);
   const a = C.dailyBattle(day, team);
-  eq(JSON.stringify(a), JSON.stringify(C.dailyBattle(day, team)), "the same six in the same order score the same for everyone");
+  eq(JSON.stringify(a), JSON.stringify(C.dailyBattle(day, team)), "the same cards in the same spots score the same for everyone");
   eq(a.rounds.map((x) => x.cat).join(), C.dailyCategories(day).join(), "on the day's categories, in the day's order");
-  // ONE ROLL PER CARD PER DAY: moving a card to another spot does not change its luck, and nor does its finish.
-  const moved = C.dailyBattle(day, [team[1], team[0], ...team.slice(2)]);
-  eq(moved.rounds[1].mine.roll, a.rounds[0].mine.roll, "a card keeps its luck for the day wherever it plays");
-  eq(moved.rounds[0].mine.roll, a.rounds[1].mine.roll, "both of them do");
+  eq(JSON.stringify(C.dailyRound(day, [], team[0])), JSON.stringify(a.rounds[0]), "a round played on its own is the round of the whole battle");
+  // ONE ROLL PER CARD PER DAY: the same card has the same luck whichever round it plays in, and whatever its finish.
+  const flexA = dfoe.findIndex((e) => e.spot === "FLEX"), flexB = 5;
+  const swapped = team.slice(); [swapped[flexA], swapped[flexB]] = [swapped[flexB], swapped[flexA]];
+  const moved = C.dailyBattle(day, swapped);
+  eq(moved.rounds[flexB].mine.roll, a.rounds[flexA].mine.roll, "a card keeps its luck for the day whichever round it plays in");
+  eq(moved.rounds[flexA].mine.roll, a.rounds[flexB].mine.roll, "both of them do");
   const shiny = C.dailyBattle(day, [{ id: team[0].id, finish: "prism" }, ...team.slice(1)]);
   eq(shiny.rounds[0].mine.roll, a.rounds[0].mine.roll, "and a better finish is the same luck, plus its bonus");
   ok(a.rounds.every((x, i) => x.foe.roll === moved.rounds[i].foe.roll), "the other side's luck is the day's too");

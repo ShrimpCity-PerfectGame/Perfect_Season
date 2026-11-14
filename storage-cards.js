@@ -7,13 +7,13 @@ import { getClient, READ } from "./storage-core.js";
 
 // Every reason card-claim can answer with. tests/test-cards-edge.mjs reads the function's source and fails on
 // one that is not here - a reason this list does not know is a rule that would read as "check your connection".
-const BATTLE_ACTIONS = ["deck_save", "run_start", "run_battle", "run_end", "daily_deal", "daily_play", "sell_copies"];
+const BATTLE_ACTIONS = ["deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round", "sell_copies"];
 const CARD_PAGE = 1000; // PostgREST's default ceiling on one select
 export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "cards_off", "duplicate", "malformed", "server",
   "unknown_pack", "bad_open", "unavailable", "sold_out", "price_changed", "not_enough",
   // battles (v2.27.0): a deck's and a team's own reasons out of card-logic.mjs, a run's, and the daily battle's
   "incomplete", "unknown_card", "bad_finish", "bad_slot", "same_player", "not_owned", "no_run", "stale",
-  "bad_deck", "no_deck", "not_in_hand", "no_hand"];
+  "bad_deck", "no_deck", "not_in_hand", "no_hand", "already_played"];
 
 // A player's collection, and whether they have claimed their starter deck.
 //   { status: "ok", cards: [{ id, finish, count }], starter: boolean }
@@ -85,12 +85,15 @@ async function callClaim(body) {
 // ---------- battles (v2.27.0: offense against offense, CARDS.md 11) ----------
 // The database says { card, finish }; the rules and the screens say { id, finish }.
 const fromSql = (list) => (Array.isArray(list) ? list.map((e) => ({ id: e.card, finish: e.finish })) : []);
-const dailyOf = (d) => (d ? { hand: Array.isArray(d.hand) && d.hand[0] && "card" in d.hand[0] ? fromSql(d.hand) : d.hand || [], played: d.played === true, rounds: d.rounds ?? null, score: d.score == null ? null : Number(d.score), shown: d.shown ?? null } : null);
+// A CPU card keeps the spot it plays: the order of the other side's spots is the order of a battle's rounds.
+const foeFrom = (list) => (Array.isArray(list) ? list.map((e) => ({ id: e.card, finish: e.finish, spot: e.spot })) : []);
+const dailyOf = (d) => (d ? { hand: Array.isArray(d.hand) && d.hand[0] && "card" in d.hand[0] ? fromSql(d.hand) : d.hand || [], log: Array.isArray(d.log) ? d.log : [], played: d.played === true, rounds: d.rounds ?? null, score: d.score == null ? null : Number(d.score), shown: d.shown ?? null } : null);
 
 // What the battle screens open on:
 //   { status: "ok", today, deck: [{ id, finish }] | null,
-//     run: { id, wins, status, hand, foe, last } | null, best, paidToday,
-//     daily: { hand, played, rounds, score, shown } | null }
+//     run: { id, wins, status, hand, foe, rounds, last } | null, best, paidToday,
+//     daily: { hand, log, played, rounds, score, shown } | null }
+// run.rounds and daily.log are the rounds of the battle IN PROGRESS, played so far.
 //   { status: "signed_out" } | { status: "error" }
 // `run` is the account's LATEST run, live or over. Three answers, for the reason fetchMyCards has three: a read
 // that failed is not "no run going" - saying so would offer to start a run over the top of one already live.
@@ -103,7 +106,7 @@ export async function fetchBattleState() {
     if (error || !data || typeof data !== "object" || typeof data.today !== "string") return { status: "error" };
     return {
       status: "ok", today: data.today, deck: data.deck ? fromSql(data.deck) : null,
-      run: data.run ? { ...data.run, hand: fromSql(data.run.hand), foe: fromSql(data.run.foe) } : null,
+      run: data.run ? { ...data.run, hand: fromSql(data.run.hand), foe: foeFrom(data.run.foe), rounds: Array.isArray(data.run.rounds) ? data.run.rounds : [] } : null,
       best: Number(data.best) || 0, paidToday: Number(data.paid_today) || 0, daily: dailyOf(data.daily),
     };
   } catch {
@@ -130,10 +133,10 @@ export async function fetchCardBoards(limit = 25) {
 const battleCall = async (body) => { const res = await callClaim(body); return res.ok ? { ...res.data, ok: true } : res; };
 export const saveDeck = (cards) => battleCall({ action: "deck_save", cards });
 export const startRun = () => battleCall({ action: "run_start" });
-export const playBattle = (run, step, team) => battleCall({ action: "run_battle", run, step, team });
+export const playRound = (run, step, round, card) => battleCall({ action: "run_round", run, step, round, card });
 export const endRun = () => battleCall({ action: "run_end" });
 export const dealDaily = () => battleCall({ action: "daily_deal" });
-export const playDaily = (team) => battleCall({ action: "daily_play", team });
+export const playDailyRound = (round, card) => battleCall({ action: "daily_round", round, card });
 
 // Sell every copy past the first: { ok: true, copies, coins, balance } or { ok: false, reason }. Safe to ask
 // again after an answer that never came - a copy already sold is not there to sell twice.

@@ -226,9 +226,9 @@ export function bestTeam(entries) {
 }
 
 // ---------- Synergies ----------
-// What a team's six do for each other, worked out ONCE for the lineup and worth the same in every round:
-// cards from the same franchise, cards from the same season, real teammates (both at once), and the archetype
-// pairs. Small beside a category score on purpose - they tilt a close round, they do not decide a lopsided one.
+// What a side's cards do for each other: cards from the same franchise, from the same season, real teammates
+// (both at once), and the archetype pairs. Small beside a category score on purpose - they tilt a close round,
+// they do not decide a lopsided one.
 export const TEAM_BONUS = 2, TEAM_BONUS_MAX = 6;       // per lineup-mate from the same team
 export const SEASON_BONUS = 1, SEASON_BONUS_MAX = 3;   // per lineup-mate from the same season
 export const TEAMMATE_BONUS = 2;                       // once, for sharing BOTH with somebody
@@ -237,23 +237,25 @@ export const PAIRS = [
   ["gunslinger", "deep", 6], ["gunslinger", "seam", 5], ["manager", "possession", 5], ["manager", "valve", 4],
   ["scrambler", "homerun", 5], ["volume", "receiving", 5], ["volume", "possession", 4],
 ];
-// [[{ key, label, pts }, ...] for each of the six, in order].
-export function teamSynergies(team) {
-  const cards = team.map((e) => CARDS.get(e.id));
+// What the cards a side has ALREADY PLAYED this battle do for the one it plays now: [{ key, label, pts }].
+// Synergy builds as the battle goes (v2.28.0) - a battle is played a round at a time, so there is no lineup to
+// add up beforehand, and "who have I already put down?" is a thing a player can act on with the next card.
+// `earlier` is the entries ({ id }) that side has played so far, in order.
+export function playedSynergies(entry, earlier) {
+  const card = CARDS.get(entry.id);
+  const cards = earlier.map((e) => CARDS.get(e.id));
+  const mods = [];
+  const mates = cards.filter((c) => c.team === card.team).length;
+  const years = cards.filter((c) => c.season === card.season).length;
+  if (mates) mods.push({ key: "team", label: `${card.team} teammates`, pts: Math.min(TEAM_BONUS_MAX, TEAM_BONUS * mates) });
+  if (years) mods.push({ key: "season", label: `Class of ${card.season}`, pts: Math.min(SEASON_BONUS_MAX, SEASON_BONUS * years) });
+  if (cards.some((c) => c.team === card.team && c.season === card.season)) mods.push({ key: "mates", label: "Real teammates", pts: TEAMMATE_BONUS });
   const fielded = new Set(cards.map((c) => c.archetype));
-  return cards.map((card, i) => {
-    const mods = [];
-    const mates = cards.filter((c, j) => j !== i && c.team === card.team).length;
-    const years = cards.filter((c, j) => j !== i && c.season === card.season).length;
-    if (mates) mods.push({ key: "team", label: `${card.team} teammates`, pts: Math.min(TEAM_BONUS_MAX, TEAM_BONUS * mates) });
-    if (years) mods.push({ key: "season", label: `Class of ${card.season}`, pts: Math.min(SEASON_BONUS_MAX, SEASON_BONUS * years) });
-    if (cards.some((c, j) => j !== i && c.team === card.team && c.season === card.season)) mods.push({ key: "mates", label: "Real teammates", pts: TEAMMATE_BONUS });
-    for (const [a, b, pts] of PAIRS) {
-      const partner = card.archetype === a ? b : card.archetype === b ? a : null;
-      if (partner && fielded.has(partner)) mods.push({ key: `pair:${a}+${b}`, label: `${archetypeLabel(a)} + ${archetypeLabel(b)}`, pts });
-    }
-    return mods;
-  });
+  for (const [a, b, pts] of PAIRS) {
+    const partner = card.archetype === a ? b : card.archetype === b ? a : null;
+    if (partner && fielded.has(partner)) mods.push({ key: `pair:${a}+${b}`, label: `${archetypeLabel(a)} + ${archetypeLabel(b)}`, pts });
+  }
+  return mods;
 }
 
 // ---------- Abilities ----------
@@ -320,75 +322,154 @@ function playLine(card, base, total) {
 // A card's round before luck: what the screen shows a player who is deciding where to play him.
 export const roundBase = (entry, cat) => round1(RATING_SHARE * (CARDS.get(entry.id).rating + FINISH_BONUS[entry.finish]) + (1 - RATING_SHARE) * CAT_SCALE * CARDS.get(entry.id).cats[cat]);
 
-// Only ever called with two teams teamProblem has passed - it trusts both. rand is a () => [0, 1) generator.
-// `cats`, when given, is the order of the six categories (the daily battle's is the day's); the five ordering
-// draws are STILL MADE and thrown away, so the count never depends on who called.
-// `foeEdge` is points added to every card on the other side in every round - the ladder's, once its teams
-// cannot be made of better cards than the game holds (see ladderEdge).
-export function scoreBattle(mine, foe, rand, cats = null, foeEdge = 0) {
+// ONE ROUND AT A TIME, ONE SPOT A ROUND (v2.28.0). The owner's question about the first version was the right
+// one: if you set all six and their order before anything is known, where is the choice? So a battle is PLAYED
+// a round at a time. Each round is for one spot of the lineup - QB, RB, WR, TE and two Flex - in an order that
+// is random for the battle except that THE LAST IS ALWAYS A FLEX (the owner's rule). You see the spot, the card
+// you are facing and which categories are still to come; you commit a card from your HAND that fits; only then
+// is the category revealed. Everything a round needs about the battle so far - the score, whether your last
+// card won, whether your quarterback has played, who is already down - follows from the rounds played.
+export const SPOTS = ["QB", "RB", "WR", "TE", "FLEX", "FLEX"];
+export const spotFits = (pos, spot) => (spot === "FLEX" ? pos !== "QB" : pos === spot);
+const SPOT_LABEL = { QB: "Quarterback", RB: "Running back", WR: "Receiver", TE: "Tight end", FLEX: "Flex" };
+export const spotLabel = (spot) => SPOT_LABEL[spot] || spot;
+
+// null when `entry` may be played next, otherwise why not. NEVER THROWS - it is the door a modified browser
+// knocks on. The card has to be in the hand, fit the round's spot, and be a man not already played.
+// `foe` is the other side's six, each carrying the `spot` it plays; round n is for foe[n].spot.
+export function roundProblem(hand, foe, rounds, entry) {
+  if (!Array.isArray(hand) || !Array.isArray(foe) || !Array.isArray(rounds) || rounds.length >= TEAM_SIZE || !isEntry(foe[rounds.length])) return "malformed";
+  if (!isEntry(entry)) return "malformed";
+  if (!CARDS.has(entry.id)) return "unknown_card";
+  if (!FINISHES.includes(entry.finish)) return "bad_finish";
+  if (!hand.some((e) => isEntry(e) && e.id === entry.id && e.finish === entry.finish)) return "not_in_hand";
+  if (!spotFits(CARDS.get(entry.id).pos, foe[rounds.length].spot)) return "bad_slot";
+  if (rounds.some((r) => r.mine.id === entry.id && r.mine.finish === entry.finish)) return "already_played";
+  if (rounds.some((r) => CARDS.get(r.mine.id)?.pid === CARDS.get(entry.id).pid)) return "same_player";
+  return null;
+}
+
+// The cards in a hand that may be played next, best first.
+export function playable(hand, foe, rounds) {
+  return hand.filter((e) => roundProblem(hand, foe, rounds, e) === null).sort(byPower);
+}
+
+// The highest-rated card that may be played next WITHOUT leaving a later spot nobody can fill - a Flex round
+// must not eat the only tight end left when the tight end's round is still to come. The DULL choice on purpose:
+// it is the screen's "Pick for me" and the bot every balance number is measured against.
+export function autoPick(hand, foe, rounds) {
+  const e = playable(hand, foe, rounds).find((x) => leavesAWay(hand, foe, rounds, x));
+  return e ? { id: e.id, finish: e.finish } : null;
+}
+// Would playing `entry` now still leave a card for every spot to come? A hand dealt from a deck always can
+// finish a battle; this is what stops a careless pick (or a bot) spending the card a later spot needs.
+export function leavesAWay(hand, foe, rounds, entry) {
+  const later = foe.slice(rounds.length + 1).map((e) => e.spot);
+  const used = new Set(rounds.map((r) => CARDS.get(r.mine.id).pid));
+  const left = hand.filter((h) => !(h.id === entry.id && h.finish === entry.finish) && !used.has(CARDS.get(h.id).pid) && CARDS.get(h.id).pid !== CARDS.get(entry.id).pid);
+  const have = { QB: 0, RB: 0, WR: 0, TE: 0 };
+  for (const h of left) have[CARDS.get(h.id).pos]++;
+  const need = { QB: 0, RB: 0, WR: 0, TE: 0 };
+  for (const spot of later) if (spot !== "FLEX") need[spot]++;
+  const flex = later.filter((s) => s === "FLEX").length;
+  const spare = ["RB", "WR", "TE"].reduce((n, p) => n + Math.max(0, have[p] - need[p]), 0);
+  return POSITIONS.every((p) => have[p] >= need[p]) && spare >= flex;
+}
+
+// Play the next round: `entry` against the card the other side has in this spot, on `cat`. EXACTLY FOUR DRAWS,
+// yours first. Trusts its input - roundProblem is the door.
+// `foeEdge` is points added to their card - the ladder's, once its teams cannot be made of better cards than
+// the game holds (see ladderEdge).
+export function playRound(foe, rounds, entry, cat, rand, foeEdge = 0) {
+  const i = rounds.length;
+  const last = rounds[i - 1] || null;
+  const side = (mine) => {
+    const e = mine ? entry : foe[i], who = mine ? "mine" : "foe", won = mine ? "me" : "foe";
+    return {
+      entry: e, card: CARDS.get(e.id), syn: playedSynergies(e, rounds.map((r) => r[who])), wins: rounds.filter((r) => r.win === won).length,
+      prevWon: last ? last.win === won : null, qbPlayed: rounds.some((r) => CARDS.get(r[who].id).pos === "QB"), prevArchetype: last ? CARDS.get(last[who].id).archetype : null,
+    };
+  };
+  const sides = [side(true), side(false)];
+  const rolls = sides.map((s) => round1((rand() + rand() - 1) * LUCK_SPREAD * (s.card.archetype === "gunslinger" ? LUCK_WIDE : 1)));
+  const shown = sides.map((me, s) => {
+    const other = sides[1 - s];
+    const ability = abilityOf(me.card);
+    const cancelled = !!abilityOf(other.card)?.cancels;
+    const ctx = { cat, wins: me.wins, losses: other.wins, prevWon: me.prevWon, qbPlayed: me.qbPlayed, foeRating: other.card.rating, rating: me.card.rating };
+    const fires = !!ability && !cancelled && ability.when(ctx) === true;
+    const mods = me.syn.slice();
+    if (me.prevArchetype === "manager") mods.push({ key: "next", label: "Field general", pts: ABILITY_NEXT });
+    if (s === 1 && foeEdge > 0) mods.push({ key: "edge", label: "Top of the ladder", pts: foeEdge });
+    if (fires && ability.pts) mods.push({ key: "ability", label: ability.name, pts: ability.pts });
+    const base = roundBase(me.entry, cat);
+    const total = round1(base + rolls[s] + mods.reduce((n, m) => n + m.pts, 0));
+    return {
+      id: me.card.id, finish: me.entry.finish, rating: me.card.rating + FINISH_BONUS[me.entry.finish], score: me.card.cats[cat], base, roll: rolls[s], mods, total,
+      ability: ability ? { name: ability.name, on: fires || !!ability.next || (!!ability.cancels && !!abilityOf(other.card)), cancelled: cancelled && !!ability && !ability.cancels } : null,
+      line: playLine(me.card, base, total),
+    };
+  });
+  const win = shown[0].total > shown[1].total ? "me" : shown[0].total < shown[1].total ? "foe" : "tie";
+  return { cat, spot: foe[i].spot, mine: shown[0], foe: shown[1], win, score: [sides[0].wins + (win === "me" ? 1 : 0), sides[1].wins + (win === "foe" ? 1 : 0)] };
+}
+
+// Where a battle stands after the rounds played: more rounds wins; level on rounds, the higher total; dead
+// level, you. Meaningful as a RESULT only once all six are in.
+export function battleResult(rounds) {
+  const wins = rounds.filter((r) => r.win === "me").length, losses = rounds.filter((r) => r.win === "foe").length;
+  const total = round1(rounds.reduce((n, r) => n + r.mine.total, 0)), foeTotal = round1(rounds.reduce((n, r) => n + r.foe.total, 0));
+  return { rounds, wins, losses, total, foeTotal, win: wins !== losses ? wins > losses : total >= foeTotal };
+}
+
+// The six categories in a random order. FIVE DRAWS.
+export function shuffleCategories(rand) {
   const order = CATEGORY_IDS.slice();
   for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  return order;
+}
+
+// A whole battle in one go: `mine` is your six in the order of the other side's spots (mine[n] plays round n).
+// What the bots and the pinned checksum use. Twenty-nine draws - five for the categories (made and thrown away
+// when `cats` hands the order in, so the count never depends on who called), then four a round.
+export function scoreBattle(mine, foe, rand, cats = null, foeEdge = 0) {
+  const order = shuffleCategories(rand);
   const play = Array.isArray(cats) && cats.length === TEAM_SIZE ? cats : order;
-  const sides = [mine, foe].map((team) => ({ team, cards: team.map((e) => CARDS.get(e.id)), syn: teamSynergies(team), wins: 0, prevWon: null, qbPlayed: false, prevArchetype: null, total: 0 }));
   const rounds = [];
+  for (let i = 0; i < TEAM_SIZE; i++) rounds.push(playRound(foe, rounds, mine[i], play[i], rand, foeEdge));
+  return battleResult(rounds);
+}
+// Six cards out of a hand for the six rounds against `foe`, by autoPick each round: the dull lineup.
+export function autoLineup(hand, foe) {
+  const picks = [], rounds = [];
   for (let i = 0; i < TEAM_SIZE; i++) {
-    const cat = play[i];
-    const rolls = [];
-    for (const side of sides) {
-      const wide = side.cards[i].archetype === "gunslinger" ? LUCK_WIDE : 1;
-      rolls.push(round1((rand() + rand() - 1) * LUCK_SPREAD * wide));
-    }
-    const shown = sides.map((side, s) => {
-      const other = sides[1 - s];
-      const card = side.cards[i], entry = side.team[i], across = other.cards[i];
-      const ability = abilityOf(card);
-      const cancelled = !!abilityOf(across)?.cancels;
-      const ctx = { cat, wins: side.wins, losses: other.wins, prevWon: side.prevWon, qbPlayed: side.qbPlayed, foeRating: across.rating, rating: card.rating };
-      const fires = !!ability && !cancelled && ability.when(ctx) === true;
-      const mods = side.syn[i].slice();
-      if (side.prevArchetype === "manager") mods.push({ key: "next", label: "Field general", pts: ABILITY_NEXT });
-      if (s === 1 && foeEdge > 0) mods.push({ key: "edge", label: "Top of the ladder", pts: foeEdge });
-      if (fires && ability.pts) mods.push({ key: "ability", label: ability.name, pts: ability.pts });
-      const base = roundBase(entry, cat);
-      const total = round1(base + rolls[s] + mods.reduce((n, m) => n + m.pts, 0));
-      return {
-        id: card.id, finish: entry.finish, rating: card.rating + FINISH_BONUS[entry.finish], score: card.cats[cat], base, roll: rolls[s], mods, total,
-        ability: ability ? { name: ability.name, on: fires || !!ability.next || (!!ability.cancels && !!abilityOf(across)), cancelled: cancelled && !!ability && !ability.cancels } : null,
-        line: playLine(card, base, total),
-      };
-    });
-    const win = shown[0].total > shown[1].total ? "me" : shown[0].total < shown[1].total ? "foe" : "tie";
-    if (win === "me") sides[0].wins++; else if (win === "foe") sides[1].wins++;
-    sides.forEach((side, s) => {
-      side.prevWon = win === (s === 0 ? "me" : "foe");
-      if (side.cards[i].pos === "QB") side.qbPlayed = true;
-      side.prevArchetype = side.cards[i].archetype;
-      side.total = round1(side.total + shown[s].total);
-    });
-    rounds.push({ cat, mine: shown[0], foe: shown[1], win, score: [sides[0].wins, sides[1].wins] });
+    const e = autoPick(hand, foe, rounds);
+    if (!e) return null;
+    picks.push(e); rounds.push({ mine: e });
   }
-  const win = sides[0].wins !== sides[1].wins ? sides[0].wins > sides[1].wins : sides[0].total >= sides[1].total;
-  return { rounds, wins: sides[0].wins, losses: sides[1].wins, total: sides[0].total, foeTotal: sides[1].total, win };
+  return picks;
 }
 
 // ---------- The other side ----------
 // The CPU plays the same kind of cards you collect. A CPU team is built round a target rating: one card of each
 // position and two more, each the nearest to the target the catalog holds (within CPU_BAND, widening only if a
-// position has nobody there), six different men, then put in a random order. ELEVEN DRAWS, always.
+// position has nobody there), six different men. Each card carries the SPOT it plays, and the order they play
+// in is the order of a battle's rounds: random, except that the last is always a Flex. TEN DRAWS, always.
 export const CPU_BAND = 9;
 export function buildTeam(rand, target) {
   const all = [...CARDS.values()].sort((a, b) => a.id - b.id);
   const men = new Set(), team = [];
-  for (const want of ["QB", "RB", "WR", "TE", "FLEX", "FLEX"]) {
+  for (const spot of SPOTS) {
     const x = rand();
     let pool = [];
     for (let band = CPU_BAND; !pool.length; band += CPU_BAND) {
-      pool = all.filter((c) => !men.has(c.pid) && (want === "FLEX" ? c.pos !== "QB" : c.pos === want) && Math.abs(c.rating - target) <= band);
+      pool = all.filter((c) => !men.has(c.pid) && spotFits(c.pos, spot) && Math.abs(c.rating - target) <= band);
     }
     const card = pool[Math.floor(x * pool.length)];
-    men.add(card.pid); team.push({ id: card.id, finish: "base" });
+    men.add(card.pid); team.push({ id: card.id, finish: "base", spot });
   }
-  for (let i = team.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [team[i], team[j]] = [team[j], team[i]]; }
+  // The first five in a random order; the sixth - the second Flex - stays last.
+  for (let i = team.length - 2; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [team[i], team[j]] = [team[j], team[i]]; }
   return team;
 }
 
@@ -421,28 +502,24 @@ export const ladderName = (step) => TIERS[Math.min(TIERS.length - 1, Math.max(0,
 export const DAILY_TARGET = 86;
 export const dailySeed = (date) => `card-daily-${date}`;
 export const dailyFoe = (date) => buildTeam(mulberry32(hashStr(`${dailySeed(date)}|foe`)), DAILY_TARGET);
-export function dailyCategories(date) {
-  const rand = mulberry32(hashStr(`${dailySeed(date)}|cats`));
-  const order = CATEGORY_IDS.slice();
-  for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
-  return order;
-}
-// The twenty-nine draws scoreBattle asks for: five it throws away (the categories are the day's), then for each
-// round your card's own two for the day and the CPU card's own two.
-export function dailyRand(date, mine, foe) {
-  const draws = [0, 0, 0, 0, 0];
-  for (let i = 0; i < TEAM_SIZE; i++) {
-    for (const [tag, entry] of [["you", mine[i]], ["cpu", foe[i]]]) {
-      const own = mulberry32(hashStr(`${dailySeed(date)}|${tag}|card${entry.id}`));
-      draws.push(own(), own());
-    }
+export const dailyCategories = (date) => shuffleCategories(mulberry32(hashStr(`${dailySeed(date)}|cats`)));
+// One round of the day's battle: `entry` against the day's team, on the day's category for that round, with
+// your card's own two draws for the day and then the CPU card's own two.
+export function dailyRound(date, rounds, entry) {
+  const foe = dailyFoe(date);
+  const draws = [];
+  for (const [tag, e] of [["you", entry], ["cpu", foe[rounds.length]]]) {
+    const own = mulberry32(hashStr(`${dailySeed(date)}|${tag}|card${e.id}`));
+    draws.push(own(), own());
   }
   let i = 0;
-  return () => draws[i++];
+  return playRound(foe, rounds, entry, dailyCategories(date)[rounds.length], () => draws[i++]);
 }
+// The whole of it, your six in the order of the day's spots.
 export function dailyBattle(date, mine) {
-  const foe = dailyFoe(date);
-  return scoreBattle(mine, foe, dailyRand(date, mine, foe), dailyCategories(date));
+  const rounds = [];
+  for (const entry of mine) rounds.push(dailyRound(date, rounds, entry));
+  return battleResult(rounds);
 }
 // What a daily battle is ranked by: rounds won first, then your six-round total.
 export const dailyScore = (result) => ({ rounds: result.wins, score: result.total });

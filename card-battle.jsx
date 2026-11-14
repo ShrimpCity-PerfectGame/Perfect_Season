@@ -1,14 +1,15 @@
 // Card battles: the ladder, the daily battle, the deck and the two boards. See CARDS.md 11.
 //
-// OFFENSE AGAINST OFFENSE (v2.27.0, the owner's redesign): a deck of thirty, a hand of twelve dealt from it, six
-// of the hand fielded in an order you choose, against a CPU's six - the same kind of cards you collect. Six
-// rounds, each on a category nobody knows until it is played.
+// OFFENSE AGAINST OFFENSE (v2.27.0, the owner's redesign): a deck of thirty, a hand of twelve dealt from it,
+// against a CPU's six - the same kind of cards you collect. PLAYED A ROUND AT A TIME (v2.28.0): each round is
+// for one spot of the lineup, you play a card from your hand that fits it, and only then is the category
+// revealed.
 //
 // A screen in its own file, like cards.jsx, which mounts it: it styles only its own cb- prefix, reuses the app's
 // .btn / .note / .panel / .lb, and never imports perfect-season.jsx or cards.jsx back.
 //
-// NOTHING HERE DECIDES A BATTLE. The browser picks six cards and their order and sends them; the card-claim Edge
-// Function deals the hand, rolls the luck, orders the categories, says who won and pays. What this file works
+// NOTHING HERE DECIDES A BATTLE. The browser sends one card a round; the card-claim Edge Function deals the
+// hand, rolls the luck, holds the order of the categories, says who won and pays. What this file works
 // out for itself is only what a player needs BEFORE playing - what fits, what a lineup's synergies are - and all
 // of it comes from card-logic.mjs, the module the function scores with.
 //
@@ -16,10 +17,10 @@
 // whose answer was lost. So the screen never replays to find out: it reads card_battle_state, which says where
 // things really stand and carries the latest battle, and shows that. A battle cannot be played twice either way.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchBattleState, fetchCardBoards, startRun, playBattle, endRun, saveDeck, dealDaily, playDaily } from "./storage.js";
+import { fetchBattleState, fetchCardBoards, startRun, playRound, endRun, saveDeck, dealDaily, playDailyRound } from "./storage.js";
 import {
-  CARDS, CATEGORIES, FINISH_BONUS, DECK_SHAPE, HAND_SHAPE, POSITIONS, TEAM_SIZE, archetypeLabel, categoryLabel, abilityOf,
-  deckProblem, bestDeck, teamProblem, bestTeam, teamSynergies, ladderName, dailyFoe,
+  CARDS, CATEGORIES, FINISH_BONUS, DECK_SHAPE, HAND_SHAPE, POSITIONS, archetypeLabel, categoryLabel, spotLabel, abilityOf,
+  deckProblem, bestDeck, playable, autoPick, playedSynergies, battleResult, ladderName, dailyFoe,
 } from "./card-logic.mjs";
 import { COIN_RULES, cardWinCoins } from "./rewards.mjs";
 import { Coins, NameLink } from "./cosmetics.jsx";
@@ -29,10 +30,11 @@ import { CardFace } from "./card-face.jsx";
 // test that holds that map to storage-cards.js's CARD_REFUSALS holds these too.
 export const LINEUP_SENTENCES = {
   incomplete: "Pick six cards first.",
+  already_played: "You've already played that card in this battle. Pick another.",
   unknown_card: "One of those cards isn't one this version of the game knows. Reload the page and pick again.",
   bad_finish: "That didn't go through. Reload the page and pick again.",
-  bad_slot: "A team is one quarterback, and at least one back, one receiver and one tight end.",
-  same_player: "The same player can't be in there twice, even in two different seasons.",
+  bad_slot: "That card can't play this spot. Pick one that fits it.",
+  same_player: "The same player can't play twice in a battle, even in two different seasons.",
   not_owned: "One of those cards isn't in your collection any more. Pick again.",
   not_in_hand: "One of those cards wasn't dealt to you for this battle. Pick from your hand.",
   bad_deck: "A deck is 5 quarterbacks, 10 backs, 10 receivers and 5 tight ends.",
@@ -177,104 +179,28 @@ export function DeckBuilder({ rows, saved, onSaved }) {
   );
 }
 
-// ---------- picking six, and their order ----------
-// hand and foe are [{ id, finish }]; the foe's order is the order they play in. onPlay(team) plays.
-export function TeamPicker({ hand, foe, foeName, kicker, onPlay, busy, playLabel = "Play this battle", confirm = null, children }) {
-  const [team, setTeam] = useState([]);
-  const [asking, setAsking] = useState(false);
-  const held = team.filter((e) => hand.some((h) => same(h, e)));
-  const problem = held.length < TEAM_SIZE ? "incomplete" : teamProblem(held, hand);
-  const synergies = held.length ? teamSynergies(held) : [];
-  const foeSyn = teamSynergies(foe);
-  const count = { QB: 0, RB: 0, WR: 0, TE: 0 };
-  for (const e of held) count[CARDS.get(e.id).pos]++;
-  const toggle = (e) => { setAsking(false); setTeam(held.some((t) => same(t, e)) ? held.filter((t) => !same(t, e)) : held.length < TEAM_SIZE ? [...held, e] : held); };
-  const move = (i, by) => { const j = i + by; if (j < 0 || j >= held.length) return; const next = held.slice(); [next[i], next[j]] = [next[j], next[i]]; setTeam(next); setAsking(false); };
-  const hint = held.length < TEAM_SIZE
-    ? `Pick ${TEAM_SIZE - held.length} more. You need one quarterback and at least one back, one receiver and one tight end.`
-    : problem ? LINEUP_SENTENCES[problem] : "";
-  return (
-    <div className="cb-pick">
-      <section className="cb-foe" aria-labelledby="cb-foe-h">
-        <p className="cb-kick">{kicker}</p>
-        <h2 className="cb-foe-h" id="cb-foe-h">{foeName}</h2>
-        <p className="cb-foe-note">Their six, in the order they play. Your first card meets their first.</p>
-        <ol className="cb-list cb-numbered">
-          {foe.map((e, i) => <li key={keyOf(e)} data-foe={i}><CardRow entry={e} mods={foeSyn[i]} /></li>)}
-        </ol>
-      </section>
-
-      <section className="cb-lineup" aria-labelledby="cb-lu-h">
-        <div className="cb-lu-top">
-          <h3 className="cb-h3" id="cb-lu-h">Your six, in playing order</h3>
-          <button className="btn sm" data-best disabled={busy} onClick={() => { setTeam(bestTeam(hand) || []); setAsking(false); }}>Pick for me</button>
-        </div>
-        <p className="cb-rule">Six rounds, each on a different category: {CATEGORIES.map((c) => c.label).join(", ")}. Each comes up once, in an order nobody knows.</p>
-        {held.length === 0
-          ? <p className="note">Tap cards in your hand to add them.</p>
-          : (
-            <ol className="cb-list cb-numbered" data-team>
-              {held.map((e, i) => (
-                <li key={keyOf(e)} data-spot={i}>
-                  <CardRow entry={e} mods={synergies[i]}>
-                    <span className="cb-row-acts">
-                      <span className="cb-vs">vs {CARDS.get(foe[i].id)?.name}</span>
-                      <button className="btn sm" aria-label={`Move ${CARDS.get(e.id).name} earlier`} data-up disabled={busy || i === 0} onClick={() => move(i, -1)}>↑</button>
-                      <button className="btn sm" aria-label={`Move ${CARDS.get(e.id).name} later`} data-down disabled={busy || i === held.length - 1} onClick={() => move(i, 1)}>↓</button>
-                      <button className="btn sm" aria-label={`Take ${CARDS.get(e.id).name} out`} data-out disabled={busy} onClick={() => toggle(e)}>✕</button>
-                    </span>
-                  </CardRow>
-                </li>
-              ))}
-            </ol>
-          )}
-        {hint && <p className="note" data-hint>{hint}</p>}
-      </section>
-
-      <section className="cb-hand" aria-labelledby="cb-hand-h">
-        <h3 className="cb-h3" id="cb-hand-h">Your hand <span className="cb-count">{hand.length} dealt</span></h3>
-        <ul className="cb-list">
-          {hand.map((e) => {
-            const picked = held.some((t) => same(t, e));
-            const full = !picked && held.length >= TEAM_SIZE;
-            const twoQb = !picked && CARDS.get(e.id).pos === "QB" && count.QB >= 1;
-            return (
-              <li key={keyOf(e)}>
-                <CardRow entry={e} dim={picked}>
-                  <button className="btn sm cb-row-act" data-hand={e.id} data-finish={e.finish} aria-pressed={picked} disabled={busy || full || twoQb} onClick={() => toggle(e)}>{picked ? "In" : "Add"}</button>
-                </CardRow>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-
-      <div className="cb-acts cb-play-bar">
-        <button className="btn solid xl" data-play disabled={busy || !!problem}
-          onClick={() => { if (confirm && !asking) { setAsking(true); return; } onPlay(held); }}>
-          {busy ? "Playing…" : confirm && asking ? confirm : playLabel}
-        </button>
-        {confirm && asking && !busy && <button className="btn" onClick={() => setAsking(false)}>Cancel</button>}
-        {children}
-      </div>
-    </div>
-  );
-}
-
 // ---------- the arena ----------
-// One battle, PLAYED OUT round by round. battle is what the function reported:
-//   { team, foe, edge, rounds: [{ cat, mine, foe, win, score: [you, them] }], wins, losses, total, foeTotal, win }
-//   mine / foe: { id, finish, rating, score, base, roll, mods, total, ability: { name, on, cancelled } | null, line }
+// One battle, PLAYED A ROUND AT A TIME (v2.28.0). Each round is for one spot of the lineup, in the order of the
+// other side's six - random for the battle, with a Flex last. The player sees the spot, the card across from it
+// and which categories are still to come; plays one card from the hand that fits; and only then is the category
+// revealed and the round played out.
+//   hand    [{ id, finish }] the twelve dealt
+//   foe     [{ id, finish, spot }] the other side's six, in playing order
+//   rounds  the rounds played so far, as the function reported them:
+//           { cat, spot, mine, foe, win, score: [you, them] }, mine / foe:
+//           { id, finish, rating, score, base, roll, mods, total, ability: { name, on, cancelled } | null, line }
+//   onPlay(entry)  play a card for the next round; the parent sends it and hands back longer `rounds`
 //
 // The owner's layout (2026-11-14): a centre arena with your active card on the left, theirs on the right and a
 // big VS between, the stat comparison under them and the round's winner called; your six below with the active
 // one lit; and the battle's information - round, score, speed, a log, what is in play.
 //
-// The outcome is the server's and is already known when this draws: the playback only decides WHEN it is shown.
-// So the parent hides the heading, the coins and the next button until onDone. It plays in a browser that says
-// it does not mind motion and is simply finished everywhere else - reduced motion, no matchMedia (jsdom, so
-// every test sees the finished battle), or `instant` for a battle opened again later. Nothing in it fades: text
-// at half opacity is below AA for as long as a fade lasts, so a beaten card is greyed with a filter instead.
+// A round's outcome is the server's and is already known when it draws: the playback only decides WHEN it is
+// shown. A round that was already played when this mounted (a battle resumed, a daily opened again) is not
+// played back - only the ones that arrive while it is on screen. It plays in a browser that says it does not
+// mind motion and is simply shown everywhere else (reduced motion; no matchMedia - jsdom, so every test sees
+// each round the moment it is played). Nothing in it fades: text at half opacity is below AA for as long as a
+// fade lasts, so a beaten card is greyed with a filter instead.
 function plays() {
   try { return typeof window !== "undefined" && typeof window.matchMedia === "function" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
   catch { return false; }
@@ -310,84 +236,122 @@ function Side({ who, card, shot, beat, won, lost }) {
   );
 }
 
-export function Arena({ battle, bench = [], foeName = "CPU", instant = false, onDone }) {
-  const n = battle.rounds.length;
-  const [at, setAt] = useState(() => (instant || !plays() ? { round: n, beat: 0 } : { round: 0, beat: 0 }));
+export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = false, onPlay, onDone }) {
+  const total = foe.length;
+  // How many rounds have finished playing back. Rounds already there at mount are simply shown.
+  const [seen, setSeen] = useState(rounds.length);
+  const [beat, setBeat] = useState(0);
   const [speed, setSpeed] = useState(1);
-  const done = at.round >= n;
+  const animating = seen < rounds.length;
   useEffect(() => {
-    if (done) { onDone?.(); return undefined; }
-    const timer = setTimeout(() => setAt((a) => (a.beat < 3 ? { round: a.round, beat: a.beat + 1 } : { round: a.round + 1, beat: 0 })), BEATS[at.beat] / speed);
+    if (!animating) return undefined;
+    if (!plays()) { setSeen(rounds.length); setBeat(0); return undefined; }
+    const timer = setTimeout(() => { if (beat < 3) setBeat(beat + 1); else { setBeat(0); setSeen(seen + 1); } }, BEATS[beat] / speed);
     return () => clearTimeout(timer);
-  }, [at, done, speed]); // eslint-disable-line react-hooks/exhaustive-deps
-  const shownRound = Math.min(at.round, n - 1);
-  const r = battle.rounds[shownRound];
-  const settled = done ? n : at.beat >= 3 ? at.round + 1 : at.round; // rounds whose result is on the board
-  const score = settled > 0 ? battle.rounds[settled - 1].score : [0, 0];
-  const verdict = battle.win
-    ? `You won, ${battle.wins} rounds to ${battle.losses}.`
-    : `You lost, ${battle.wins} rounds to ${battle.losses}.`;
-  const tied = battle.wins === battle.losses;
+  }, [animating, beat, seen, speed, rounds.length]);
+  const over = rounds.length >= total && !animating;
+  useEffect(() => { if (over) onDone?.(); }, [over]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const settled = animating && beat >= 3 ? seen + 1 : seen; // rounds whose result is on the board
+  const score = settled > 0 ? rounds[settled - 1].score : [0, 0];
+  const result = over ? battleResult(rounds) : null;
   const name = (side) => CARDS.get(side.id)?.name || "A card";
+  const next = rounds.length; // the round to be chosen for, when nothing is animating
+  const options = !animating && next < total ? playable(hand, foe, rounds) : [];
+  const earlier = rounds.map((r) => r.mine);
+  const left = CATEGORIES.filter((c) => !rounds.slice(0, settled).some((r) => r.cat === c.id));
+  const usedMen = new Set(rounds.map((r) => CARDS.get(r.mine.id)?.pid));
+  const inHand = hand.filter((e) => !usedMen.has(CARDS.get(e.id)?.pid));
+  const r = animating ? rounds[seen] : null;
   return (
-    <section className={`cb-arena${done ? (battle.win ? " cb-won" : " cb-lost") : ""}`} aria-label="The battle" data-done={String(done)} data-win={String(!!battle.win)}>
+    <section className={`cb-arena${result ? (result.win ? " cb-won" : " cb-lost") : ""}`} aria-label="The battle" data-done={String(over)} data-rounds={rounds.length} data-win={result ? String(result.win) : undefined}>
       <div className="cb-sb">
         <div className="cb-sb-you"><span>You</span><b data-you>{score[0]}</b></div>
         <div className="cb-sb-mid">
-          <span data-round>{done ? "Final" : `Round ${at.round + 1} of ${n}`}</span>
-          {!done && (
+          <span data-round>{over ? "Final" : `Round ${Math.min(total, (animating ? seen : next) + 1)} of ${total}`}</span>
+          {animating && (
             <span className="cb-speed" role="group" aria-label="Speed">
               {SPEEDS.map(([s, label]) => <button key={s} className="cb-spd" aria-pressed={speed === s} onClick={() => setSpeed(s)}>{label}</button>)}
-              <button className="cb-spd" data-skip onClick={() => setAt({ round: n, beat: 0 })}>Skip</button>
+              <button className="cb-spd" data-skip onClick={() => { setSeen(rounds.length); setBeat(0); }}>Skip</button>
             </span>
           )}
         </div>
         <div className="cb-sb-cpu"><span>{foeName}</span><b data-cpu>{score[1]}</b></div>
       </div>
 
-      {!done && (
-        <div className="cb-ring" key={at.round} data-beat={at.beat}>
-          <p className="cb-cat"><span>Round {at.round + 1}</span><b>{categoryLabel(r.cat)}</b></p>
+      {animating && (
+        <div className="cb-ring" key={seen} data-beat={beat}>
+          <p className="cb-cat"><span>Round {seen + 1} · {spotLabel(r.spot)}</span><b>{categoryLabel(r.cat)}</b></p>
           <div className="cb-duel">
-            <Side who="you" card={battle.team[at.round]} shot={r.mine} beat={at.beat} won={r.win === "me"} lost={r.win === "foe"} />
-            <div className="cb-vsbig" aria-hidden="true"><span>VS</span>{at.beat === 2 && <i className="cb-burst" />}</div>
-            <Side who="cpu" card={battle.foe[at.round]} shot={r.foe} beat={at.beat} won={r.win === "foe"} lost={r.win === "me"} />
+            <Side who="you" card={r.mine} shot={r.mine} beat={beat} won={r.win === "me"} lost={r.win === "foe"} />
+            <div className="cb-vsbig" aria-hidden="true"><span>VS</span>{beat === 2 && <i className="cb-burst" />}</div>
+            <Side who="cpu" card={r.foe} shot={r.foe} beat={beat} won={r.win === "foe"} lost={r.win === "me"} />
           </div>
-          {at.beat >= 3 && <p className="cb-call" aria-hidden="true">{r.win === "me" ? "Round to you" : r.win === "foe" ? `Round to ${foeName}` : "Dead heat"}</p>}
+          {beat >= 3 && <p className="cb-call" aria-hidden="true">{r.win === "me" ? "Round to you" : r.win === "foe" ? `Round to ${foeName}` : "Dead heat"}</p>}
         </div>
       )}
 
-      {done && (
+      {!animating && next < total && (
+        <div className="cb-choose" data-choose={next} data-spot={foe[next].spot}>
+          <p className="cb-cat"><span>Round {next + 1} of {total}</span><b>{spotLabel(foe[next].spot)}</b></p>
+          <div className="cb-facing">
+            <h3 className="cb-h3">You're facing</h3>
+            <CardRow entry={foe[next]} mods={playedSynergies(foe[next], rounds.map((x) => x.foe))} />
+          </div>
+          <p className="cb-left" data-left><b>Still to come:</b> {left.map((c) => c.label).join(", ")}. You'll see which one after you play.</p>
+          <div className="cb-lu-top">
+            <h3 className="cb-h3">Play a {spotLabel(foe[next].spot).toLowerCase()}</h3>
+            <button className="btn sm" data-best disabled={busy || !options.length} onClick={() => { const e = autoPick(hand, foe, rounds); if (e) onPlay(e); }}>Pick for me</button>
+          </div>
+          <ul className="cb-list">
+            {options.length === 0 && <li className="note">You have nobody left for this spot.</li>}
+            {options.map((e) => (
+              <li key={keyOf(e)}>
+                <CardRow entry={e} mods={playedSynergies(e, earlier)}>
+                  <button className="btn solid sm cb-row-act" data-play-card={e.id} data-finish={e.finish} disabled={busy} onClick={() => onPlay(e)}>{busy ? "…" : "Play"}</button>
+                </CardRow>
+              </li>
+            ))}
+          </ul>
+          {next + 1 < total && (
+            <p className="cb-coming"><b>Then:</b> {foe.slice(next + 1).map((e, i) => `${spotLabel(e.spot)} vs ${CARDS.get(e.id)?.name}${i === total - next - 2 ? "" : ", "}`).join("")}.</p>
+          )}
+        </div>
+      )}
+
+      {result && (
         <div className="cb-finale">
-          <p className="cb-stamp" aria-hidden="true">{battle.win ? "\u{1F3C8} Win" : "\u{1F480} Beaten"}</p>
-          <p className="cb-verdict" role="status" data-verdict>{verdict}</p>
-          <p className="cb-margin">{tied ? `Level on rounds, so it went to total points: ${fmt(battle.total)} to ${fmt(battle.foeTotal)}.` : `Total points ${fmt(battle.total)} to ${fmt(battle.foeTotal)}.`}{battle.edge > 0 ? ` Their cards played ${fmt(battle.edge)} points up - the top of the ladder.` : ""}</p>
+          <p className="cb-stamp" aria-hidden="true">{result.win ? "\u{1F3C8} Win" : "\u{1F480} Beaten"}</p>
+          <p className="cb-verdict" role="status" data-verdict>{result.win ? `You won, ${result.wins} rounds to ${result.losses}.` : `You lost, ${result.wins} rounds to ${result.losses}.`}</p>
+          <p className="cb-margin">{result.wins === result.losses ? `Level on rounds, so it went to total points: ${fmt(result.total)} to ${fmt(result.foeTotal)}.` : `Total points ${fmt(result.total)} to ${fmt(result.foeTotal)}.`}{edge > 0 ? ` Their cards played ${fmt(edge)} points up - the top of the ladder.` : ""}</p>
         </div>
       )}
 
-      <ol className="cb-strip" aria-label="Your six">
-        {battle.team.map((e, i) => {
-          const c = CARDS.get(e.id);
-          const res = i < settled ? battle.rounds[i].win : null;
-          const state = res === "me" ? "cb-s-won" : res === "foe" ? "cb-s-lost" : res === "tie" ? "cb-s-tie" : !done && i === at.round ? "cb-s-now" : "cb-s-wait";
+      <ol className="cb-strip" aria-label="The six rounds">
+        {foe.map((f, i) => {
+          const played = rounds[i];
+          const c = played ? CARDS.get(played.mine.id) : null;
+          const res = i < settled ? rounds[i].win : null;
+          const now = !over && i === (animating ? seen : next);
+          const state = res === "me" ? "cb-s-won" : res === "foe" ? "cb-s-lost" : res === "tie" ? "cb-s-tie" : now ? "cb-s-now" : "cb-s-wait";
           return (
-            <li key={keyOf(e)} className={`cb-s ${state} cb-f-${e.finish}`}>
-              <span className="cb-s-pos">{c?.pos}</span>
-              <span className="cb-s-nm">{c ? c.name.split(" ").slice(-1)[0] : "?"}</span>
-              <span className="cb-s-res">{res === "me" ? "Won" : res === "foe" ? "Lost" : res === "tie" ? "Tied" : !done && i === at.round ? "Up now" : `${i + 1}`}</span>
+            <li key={i} className={`cb-s ${state}${played ? ` cb-f-${played.mine.finish}` : ""}`}>
+              <span className="cb-s-pos">{f.spot === "FLEX" ? "Flex" : f.spot}</span>
+              <span className="cb-s-nm">{c ? c.name.split(" ").slice(-1)[0] : "—"}</span>
+              <span className="cb-s-res">{res === "me" ? "Won" : res === "foe" ? "Lost" : res === "tie" ? "Tied" : now ? "Up now" : `${i + 1}`}</span>
             </li>
           );
         })}
       </ol>
-      {bench.length > 0 && (
-        <p className="cb-bench"><b>Bench:</b> {bench.map((e) => CARDS.get(e.id)?.name).filter(Boolean).join(", ")}</p>
+      {inHand.length > 0 && !over && (
+        <p className="cb-bench"><b>Still in your hand:</b> {inHand.map((e) => CARDS.get(e.id)?.name).filter(Boolean).join(", ")}</p>
       )}
 
       {settled > 0 && (
         <div className="cb-log">
           <h3 className="cb-h3">Battle log</h3>
           <ol className="cb-rounds">
-            {battle.rounds.slice(0, settled).map((x, i) => (
+            {rounds.slice(0, settled).map((x, i) => (
               <li key={i} className={`cb-round cb-round-${x.win}`} data-round-win={x.win}>
                 <span className="cb-round-cat">{categoryLabel(x.cat)}</span>
                 <span className="cb-round-line">
@@ -445,11 +409,12 @@ function Boards() {
 // mode: "run" (the ladder) | "daily" | "deck" | "boards". rows: the collection, [{ id, finish, count, card }].
 export function BattleArea({ mode, rows, onBalance }) {
   const [st, setSt] = useState(null); // null: loading. "error" | "signed_out". Or the battle state.
-  const [shown, setShown] = useState(null); // the ladder battle just played: { battle, coins, wins, over, bench }
+  // The ladder battle that just ENDED: { id, step, hand, battle, coins, wins, over }. Kept so the arena stays on
+  // screen through its sixth round - the server has already dealt the next hand by then.
+  const [shown, setShown] = useState(null);
   // WHICH battle has finished playing out - the battle itself, not a flag. A flag reset in an effect on `shown`
   // is reset AFTER the child's own effect has reported it done (children's effects run first), and stuck at false.
   const [seenBattle, setSeenBattle] = useState(null);
-  const [freshDay, setFreshDay] = useState(false); // today's battle was played just now, on this screen
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const live = useRef(true);
@@ -468,7 +433,6 @@ export function BattleArea({ mode, rows, onBalance }) {
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setNotice(""); }, [mode]);
-  useEffect(() => { if (shown) top.current?.focus(); }, [shown]);
 
   if (mode === "boards") return <Boards />;
   if (st === null) return <p className="note" role="status">Loading…</p>;
@@ -490,19 +454,27 @@ export function BattleArea({ mode, rows, onBalance }) {
   }
   if (mode === "deck") return <DeckBuilder rows={rows} saved={st.deck} onSaved={(deck) => setSt((s) => ({ ...s, deck }))} />;
 
-  // After a play whose answer never came, or one the function called stale: ask where things really stand.
-  async function settle(reason, run) {
+  // After a play whose answer never came, or one the function called stale: ask where things really stand. The
+  // state carries the rounds played so far, so a round that DID go through simply appears.
+  async function settle(reason, run, round) {
     const fresh = await fetchBattleState();
     if (!live.current) return;
     if (fresh.status !== "ok") { setNotice(UNCONFIRMED); return; }
     setSt(fresh);
-    const moved = run && fresh.run && fresh.run.id === run.id && (fresh.run.wins !== run.wins || fresh.run.status !== "live");
-    if (moved && fresh.run.last) {
-      setShown({ battle: fresh.run.last, coins: null, wins: fresh.run.wins, over: fresh.run.status !== "live", bench: [] });
-      setNotice("That battle was played - its answer just didn't reach this page. Here is how it went.");
+    const same = run && fresh.run && fresh.run.id === run.id;
+    if (same && fresh.run.status === "live" && fresh.run.wins === run.wins) {
+      setNotice(fresh.run.rounds.length > round
+        ? "That round was played - its answer just didn't reach this page. Here is how it went."
+        : UNKNOWN.includes(reason) ? `${say(reason)} That round was not played.` : say(reason));
       return;
     }
-    setNotice(UNKNOWN.includes(reason) ? `${say(reason)} That battle was not played.` : say(reason));
+    if (same && fresh.run.last) {
+      // The battle ended while this page was not looking: show it finished.
+      setShown({ id: run.id, step: run.wins, hand: run.hand, battle: fresh.run.last, coins: null, wins: fresh.run.wins, over: fresh.run.status !== "live" });
+      setNotice("That battle was finished - its answer just didn't reach this page. Here is how it went.");
+      return;
+    }
+    setNotice(say(reason));
   }
 
   async function begin() {
@@ -520,21 +492,23 @@ export function BattleArea({ mode, rows, onBalance }) {
     setSt(fresh);
     if (fresh.run?.status !== "live") setNotice(say(res.reason));
   }
-  async function fight(team) {
+  async function playCard(entry) {
     const run = st.run;
     if (busy || !run) return;
+    const round = run.rounds.length;
     setBusy(true); setNotice("");
-    const res = await playBattle(run.id, run.wins, team);
+    const res = await playRound(run.id, run.wins, round, entry);
     if (!live.current) return;
     if (res.ok) {
       setBusy(false);
+      if (!res.done) { setSt((s) => ({ ...s, run: { ...s.run, rounds: res.run.rounds } })); return; }
       if (typeof res.coins?.balance === "number") onBalance?.(res.coins.balance);
-      const bench = run.hand.filter((h) => !team.some((t) => same(t, h)));
+      // The sixth round: the battle is over. Keep it on screen; the state already holds the next hand.
+      setShown({ id: run.id, step: run.wins, hand: run.hand, battle: res.battle, coins: res.coins, wins: res.run.wins, over: res.run.status !== "live" });
       setSt((s) => ({ ...s, run: { ...res.run, last: res.battle }, best: Math.max(s.best, res.run.wins), paidToday: s.paidToday + (res.coins?.credited > 0 ? 1 : 0) }));
-      setShown({ battle: res.battle, coins: res.coins, wins: res.run.wins, over: res.run.status !== "live", bench });
       return;
     }
-    if (UNKNOWN.includes(res.reason) || res.reason === "stale" || res.reason === "no_run") await settle(res.reason, run);
+    if (UNKNOWN.includes(res.reason) || res.reason === "stale" || res.reason === "no_run") await settle(res.reason, run, round);
     else setNotice(say(res.reason));
     if (live.current) setBusy(false);
   }
@@ -556,18 +530,23 @@ export function BattleArea({ mode, rows, onBalance }) {
     // Dealing twice deals once, so there is nothing to confirm here - only to say it did not come back.
     setNotice(say(res.reason));
   }
-  async function playDay(team) {
-    if (busy) return;
+  async function playDay(entry) {
+    const day = st.daily;
+    if (busy || !day) return;
     setBusy(true); setNotice("");
-    const res = await playDaily(team);
+    const res = await playDailyRound(day.log.length, entry);
     if (!live.current) return;
-    if (res.ok) { setBusy(false); setFreshDay(true); setSt((s) => ({ ...s, daily: res.daily })); return; }
-    if (UNKNOWN.includes(res.reason) || res.reason === "duplicate") {
-      // Either it went through and the answer was lost, or it was already played somewhere else: the state says.
+    if (res.ok) { setBusy(false); setSt((s) => ({ ...s, daily: res.daily })); return; }
+    if (UNKNOWN.includes(res.reason) || res.reason === "stale" || res.reason === "duplicate") {
+      // Either it went through and the answer was lost, or it was played somewhere else: the state says.
       const fresh = await fetchBattleState();
       if (!live.current) return;
-      if (fresh.status === "ok") { setSt(fresh); setNotice(fresh.daily?.played ? "" : `${say(res.reason)} Today's battle was not played.`); }
-      else setNotice(UNCONFIRMED);
+      if (fresh.status === "ok") {
+        setSt(fresh);
+        const moved = (fresh.daily?.log.length || 0) > day.log.length || fresh.daily?.played;
+        setNotice(moved ? "That round was played - its answer just didn't reach this page. Here is how it went."
+          : UNKNOWN.includes(res.reason) ? `${say(res.reason)} That round was not played.` : say(res.reason));
+      } else setNotice(UNCONFIRMED);
     } else setNotice(say(res.reason));
     setBusy(false);
   }
@@ -577,29 +556,20 @@ export function BattleArea({ mode, rows, onBalance }) {
 
   if (mode === "daily") {
     const day = st.daily;
-    const foe = dailyFoe(st.today);
+    const foe = day?.played && day.shown?.foe ? day.shown.foe : dailyFoe(st.today);
     return (
-      <div className="cb-area" data-mode="daily" data-phase={!day ? "deal" : day.played ? "played" : "pick"}>
+      <div className="cb-area" data-mode="daily" data-phase={!day ? "deal" : day.played ? "played" : "play"}>
+        <h2 className="cb-h2">Today's battle</h2>
         {!day && (
           <>
-            <h2 className="cb-h2">Today's battle</h2>
-            <p className="cb-lead">One CPU team a day, the same for everyone, and one go at it. Every card has the same luck today whoever plays it, so the board is about the six you pick and the order you put them in.</p>
+            <p className="cb-lead">One CPU team a day, the same for everyone, and one go at it. Every card has the same luck today whoever plays it, so the board is about which cards you play, and where.</p>
             <p className="cb-lead">Your hand is dealt once. Set your deck first if you want to - it can't be re-dealt.</p>
             <div className="cb-acts"><button className="btn solid xl" data-deal disabled={busy} onClick={deal}>{busy ? "Dealing…" : "Deal today's hand"}</button></div>
           </>
         )}
-        {day && !day.played && (
-          <TeamPicker hand={day.hand} foe={foe} foeName="Today's team" kicker="Today's battle · one go" busy={busy} onPlay={playDay}
-            playLabel="Play today's battle" confirm="Confirm: this is my one go" />
-        )}
-        {day && day.played && (
-          <>
-            <h2 className="cb-h2">Today's battle</h2>
-            <p className="cb-lead" data-played>You took <b>{day.rounds}</b> of 6 rounds for <b>{fmt(day.score)}</b> points. One go a day - the next opens at midnight UTC.</p>
-            {day.shown?.rounds && <Arena battle={day.shown} foeName="CPU" instant={!freshDay} bench={day.hand.filter((h) => !day.shown.team.some((t) => same(t, h)))} />}
-          </>
-        )}
+        {day && day.played && <p className="cb-lead" data-played>You took <b>{day.rounds}</b> of 6 rounds for <b>{fmt(day.score)}</b> points. One go a day - the next opens at midnight UTC.</p>}
         {alert}
+        {day && <Arena key={st.today} hand={day.hand} foe={foe} rounds={day.played && day.shown?.rounds ? day.shown.rounds : day.log} foeName="CPU" busy={busy} onPlay={playDay} />}
       </div>
     );
   }
@@ -609,12 +579,14 @@ export function BattleArea({ mode, rows, onBalance }) {
   if (shown) {
     const seen = seenBattle === shown.battle;
     const paid = shown.coins?.credited > 0;
-    const number = shown.battle.win ? shown.wins : shown.wins + 1;
     return (
       <div className="cb-area" data-mode="run" data-phase="result">
-        <h2 className="cb-h2 cb-result-h" tabIndex={-1} ref={top}>{!seen ? `Battle ${number}` : shown.battle.win ? `Win ${shown.wins}` : "Beaten"}</h2>
+        <h2 className="cb-h2 cb-result-h" tabIndex={-1} ref={top}>{!seen ? `Battle ${shown.step + 1}` : shown.battle.win ? `Win ${shown.wins}` : "Beaten"}</h2>
         {alert}
-        <Arena key={`${shown.wins}:${shown.battle.total}`} battle={shown.battle} bench={shown.bench} foeName={ladderName(number - 1)} onDone={() => setSeenBattle(shown.battle)} />
+        {/* The same key the battle had while it was being played, so this is the SAME arena carrying on into its
+            sixth round rather than a new one that would show it already finished. */}
+        <Arena key={`${shown.id}:${shown.step}`} hand={shown.hand} foe={shown.battle.foe} rounds={shown.battle.rounds} edge={shown.battle.edge} foeName={ladderName(shown.step)}
+          onDone={() => { setSeenBattle(shown.battle); top.current?.focus(); }} />
         {seen && shown.battle.win && shown.coins && (
           <p className="cb-lead" data-paid>{paid
             ? <>You earned <Coins amount={shown.coins.credited} size={16} />.</>
@@ -644,22 +616,24 @@ export function BattleArea({ mode, rows, onBalance }) {
         {alert}
         <h3 className="cb-h3">How a battle works</h3>
         <ul className="cb-how">
-          <li>You're dealt twelve cards from your deck. Pick six, and the order they play in.</li>
-          <li>You see the other team's six, and their order, before you choose.</li>
-          <li>Six rounds, each on a different category. Win more rounds than they do.</li>
-          <li>One loss ends the run. A win pays {cardWinCoins(1)} coins, plus one for every win the run already has, up to {cardWinCoins(99)}. The first {COIN_RULES.paidCardWinsPerDay} wins of a day pay.</li>
+          <li>You're dealt twelve cards from your deck: 2 quarterbacks, 4 backs, 4 receivers, 2 tight ends.</li>
+          <li>Six rounds, one for each spot - quarterback, back, receiver, tight end and two flex - in a random order, a flex last.</li>
+          <li>Each round you see who you're facing and play a card. Then the category is revealed: each of the six comes up once.</li>
+          <li>Win more rounds than they do. One lost battle ends the run.</li>
+          <li>A win pays {cardWinCoins(1)} coins, plus one for every win the run already has, up to {cardWinCoins(99)}. The first {COIN_RULES.paidCardWinsPerDay} wins of a day pay.</li>
         </ul>
       </div>
     );
   }
   return (
-    <div className="cb-area" data-mode="run" data-phase="pick">
-      <TeamPicker key={`${run.id}:${run.wins}`} hand={run.hand} foe={run.foe} foeName={ladderName(run.wins)}
-        kicker={`Battle ${run.wins + 1} of your run · ${run.wins} ${run.wins === 1 ? "win" : "wins"} so far`} busy={busy} onPlay={fight}>
-        <button className="linkbtn" data-quit disabled={busy} onClick={walkAway}>End the run here</button>
-      </TeamPicker>
-      <p className="cb-foot">{paidLeft > 0 ? `A win here pays ${cardWinCoins(run.wins + 1)} coins. ${paidLeft} paid ${paidLeft === 1 ? "win" : "wins"} left today.` : "Today's paid wins are used up. Wins still count for your run."}</p>
+    <div className="cb-area" data-mode="run" data-phase="play">
+      <h2 className="cb-h2 cb-result-h">Battle {run.wins + 1} <span className="cb-count">{run.wins} {run.wins === 1 ? "win" : "wins"} so far</span></h2>
       {alert}
+      <Arena key={`${run.id}:${run.wins}`} hand={run.hand} foe={run.foe} rounds={run.rounds} edge={0} foeName={ladderName(run.wins)} busy={busy} onPlay={playCard} />
+      <div className="cb-acts">
+        <button className="linkbtn" data-quit disabled={busy} onClick={walkAway}>End the run here</button>
+      </div>
+      <p className="cb-foot">{paidLeft > 0 ? `Winning this battle pays ${cardWinCoins(run.wins + 1)} coins. ${paidLeft} paid ${paidLeft === 1 ? "win" : "wins"} left today.` : "Today's paid wins are used up. Wins still count for your run."}</p>
     </div>
   );
 }
@@ -723,6 +697,12 @@ export const CARD_BATTLE_CSS = `
 .cb-lu-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .cb-play-bar{position:sticky;bottom:calc(8px + var(--sa-bottom,0px));z-index:2;background:var(--bg);border:2px solid var(--ink);border-radius:14px;padding:10px 12px;box-shadow:4px 4px 0 var(--hard)}
 /* ---- the arena ---- */
+.cb-choose{display:grid;gap:12px}
+.cb-facing{display:grid;gap:8px;background:var(--ink);border-radius:14px;padding:12px}
+.cb-facing .cb-h3{color:var(--accent)}
+.cb-left,.cb-coming{margin:0;font-size:14px;line-height:1.45;color:var(--muted)}
+.cb-left b,.cb-coming b{color:var(--ink)}
+.cb-result-h .cb-count{vertical-align:middle}
 .cb-arena{display:grid;gap:14px}
 .cb-sb{position:sticky;top:calc(8px + var(--sa-top,0px));z-index:3;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;background:var(--ink);color:var(--bg);border-radius:14px;padding:10px 14px;box-shadow:4px 4px 0 var(--hard)}
 .cb-sb span{display:block;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--surface2)}

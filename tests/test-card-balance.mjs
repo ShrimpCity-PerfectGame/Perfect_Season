@@ -1,14 +1,14 @@
 // Plays thousands of card battles and PRINTS what the rules do, then holds the game to a few promises.
-// Offense against offense (CARDS.md 5): a deck of thirty, a hand of twelve, six cards in an order you choose,
-// six rounds each on a category. This file is the only thing that knows whether the numbers in card-logic.mjs
+// Offense against offense (CARDS.md 5): a deck of thirty, a hand of twelve, six rounds - one for each spot of the
+// lineup - played one card at a time, each on a category revealed after the card is down. This file is the only thing that knows whether the numbers in card-logic.mjs
 // make a GAME: that a new player wins sometimes, that a great collection can still lose, and - the one that
 // matters most - that what you do with the hand beats just fielding your six best.
 //
 //   node tests/test-card-balance.mjs [runs] [seed]
 //
 // THREE COLLECTIONS: a starter deck (thirty Base cards rated under 60), sixty random cards, and the sixty best.
-// TWO PLAYERS: one fields the six highest ratings in rating order; one picks the six and the order that the
-// numbers on screen say are best (it cannot see the category order or the luck - nobody can).
+// TWO PLAYERS: one plays the highest-rated card that fits each spot; one reads what is on the screen each round
+// (it cannot see which category the round is, or the luck - nobody can).
 import { readFileSync } from "node:fs";
 import * as C from "../card-logic.mjs";
 import { mulberry32 } from "../game-logic.mjs";
@@ -44,41 +44,42 @@ function bestSixty() {
 }
 
 // ---- players ----
-const dull = (hand) => C.bestTeam(hand);
-// What a card is worth in an average round, before luck: its base averaged over the six categories.
-const avgBase = (e) => C.CATEGORY_IDS.reduce((s, cat) => s + C.roundBase(e, cat), 0) / 6;
+// A battle is played a round at a time, so a player is a function that picks the next card.
+// THE DULL ONE plays the highest-rated card that fits the spot (card-logic.mjs's autoPick - "Pick for me").
+const dull = (hand, foe, rounds) => C.autoPick(hand, foe, rounds);
+// THE SHARP ONE reads what is on the screen: every card it will face and in which spot (the other side's six are
+// shown from the start), which categories are still to come, and what its cards have already done for each
+// other. It cannot see which category a round is, or the luck - nobody can. So it plans the rest of the battle:
+// which of its cards to put against which of theirs to win the most rounds, on what each card is worth across
+// the categories left - then plays the first card of that plan, and plans again next round.
 const chance = (diff) => 1 / (1 + Math.exp(-diff / 9)); // roughly how often a lead of `diff` holds up
-// Every legal six out of the hand, scored by average base plus synergy; then the best of the 720 orders against
-// the CPU's six, each of whose cards is known and whose order is known.
-function sharp(hand, foe) {
-  const by = (pos) => hand.filter((e) => C.CARDS.get(e.id).pos === pos);
-  const [qbs, rbs, wrs, tes] = ["QB", "RB", "WR", "TE"].map(by);
-  let bestSix = null, bestWorth = -Infinity;
-  const others = [...rbs, ...wrs, ...tes];
-  for (const qb of qbs) for (let a = 0; a < others.length; a++) for (let b = a + 1; b < others.length; b++) for (let c = b + 1; c < others.length; c++) for (let d = c + 1; d < others.length; d++) for (let e = d + 1; e < others.length; e++) {
-    const team = [qb, others[a], others[b], others[c], others[d], others[e]];
-    if (C.teamProblem(team, null)) continue;
-    const syn = C.teamSynergies(team);
-    const worth = team.reduce((s, x, i) => s + avgBase(x) + syn[i].reduce((n, m) => n + m.pts, 0), 0);
-    if (worth > bestWorth) { bestWorth = worth; bestSix = team; }
-  }
-  if (!bestSix) return dull(hand);
-  const syn = C.teamSynergies(bestSix);
-  const mine = bestSix.map((e, i) => avgBase(e) + syn[i].reduce((n, m) => n + m.pts, 0));
-  const fsyn = C.teamSynergies(foe);
-  const theirs = foe.map((e, i) => avgBase(e) + fsyn[i].reduce((n, m) => n + m.pts, 0));
-  let bestOrder = null, bestWins = -Infinity;
-  const idx = [0, 1, 2, 3, 4, 5];
-  const walk = (k) => {
-    if (k === 6) {
-      const wins = idx.reduce((s, card, spot) => s + chance(mine[card] - theirs[spot]), 0);
-      if (wins > bestWins) { bestWins = wins; bestOrder = idx.slice(); }
-      return;
+function sharp(hand, foe, rounds) {
+  const start = rounds.length;
+  const left = C.CATEGORY_IDS.filter((c) => !rounds.some((r) => r.cat === c));
+  const mean = (e) => left.reduce((s, cat) => s + C.roundBase(e, cat), 0) / left.length;
+  const usedMen = new Set(rounds.map((r) => C.CARDS.get(r.mine.id).pid));
+  const mine = hand.filter((e) => !usedMen.has(C.CARDS.get(e.id).pid)).map((e) => ({ e, pos: C.CARDS.get(e.id).pos, v: mean(e) + C.playedSynergies(e, rounds.map((r) => r.mine)).reduce((n, m) => n + m.pts, 0) }));
+  const theirs = foe.map((e, i) => (i >= start ? mean(e) + C.playedSynergies(e, foe.slice(0, i)).reduce((n, m) => n + m.pts, 0) : 0));
+  let best = -1, first = null;
+  const taken = new Array(mine.length).fill(false);
+  const walk = (i, sum, lead) => {
+    if (i === foe.length) { if (sum > best) { best = sum; first = lead; } return; }
+    if (sum + (foe.length - i) <= best) return; // cannot beat the best plan found
+    for (let k = 0; k < mine.length; k++) {
+      if (taken[k] || !C.spotFits(mine[k].pos, foe[i].spot)) continue;
+      taken[k] = true;
+      walk(i + 1, sum + chance(mine[k].v - theirs[i]), i === start ? mine[k].e : lead);
+      taken[k] = false;
     }
-    for (let i = k; i < 6; i++) { [idx[k], idx[i]] = [idx[i], idx[k]]; walk(k + 1); [idx[k], idx[i]] = [idx[i], idx[k]]; }
   };
-  walk(0);
-  return bestOrder.map((i) => bestSix[i]);
+  walk(start, 0, null);
+  return first || C.autoPick(hand, foe, rounds);
+}
+function playBattle(hand, foe, pick, rand, edge) {
+  const cats = C.shuffleCategories(rand);
+  const rounds = [];
+  for (let i = 0; i < 6; i++) rounds.push(C.playRound(foe, rounds, pick(hand, foe, rounds), cats[i], rand, edge));
+  return C.battleResult(rounds);
 }
 
 // ---- a run up the ladder ----
@@ -87,11 +88,10 @@ function climb(deck, pick, rand, seed) {
   for (; wins < 60; ) {
     const foe = C.ladderFoe(seed, wins);
     const hand = C.dealHand(deck, rand);
-    const team = pick(hand, foe);
-    const plain = dull(hand);
+    const result = playBattle(hand, foe, pick, rand, C.ladderEdge(wins));
+    const plain = C.autoLineup(hand, foe);
     battles++;
-    if (team.map((e) => e.id).sort().join() !== plain.map((e) => e.id).sort().join()) changed++;
-    const result = C.scoreBattle(team, foe, rand, null, C.ladderEdge(wins));
+    if (result.rounds.map((r) => r.mine.id).sort().join() !== plain.map((e) => e.id).sort().join()) changed++;
     // a round a lower-rated card took off a higher-rated one
     upsets += result.rounds.filter((r) => r.win === "me" && r.mine.rating < r.foe.rating).length;
     sixes += result.wins;
@@ -102,7 +102,7 @@ function climb(deck, pick, rand, seed) {
 }
 function measure(name, makeDeck) {
   const out = {};
-  for (const [who, pick] of [["dull", (hand) => dull(hand)], ["sharp", sharp]]) {
+  for (const [who, pick] of [["dull", dull], ["sharp", sharp]]) {
     const rand = mulberry32(SEED);
     let total = 0, zero = 0, long = 0, changed = 0, battles = 0, upsets = 0;
     const lengths = [];
@@ -137,11 +137,10 @@ const b = measure("The sixty best cards in the game", () => bestSixty());
     const deck = C.bestDeck(randomSixty(mulberry32(SEED + 2000 + i)));
     const hand = C.dealHand(deck, rand);
     // an even match: a CPU team built at the rating this hand's best six average
-    const even = dull(hand).reduce((sum, e) => sum + C.CARDS.get(e.id).rating, 0) / 6;
+    const even = C.bestTeam(hand).reduce((sum, e) => sum + C.CARDS.get(e.id).rating, 0) / 6;
     const foe = C.buildTeam(rand, even);
-    const team = sharp(hand, foe);
     let w = 0;
-    for (let k = 0; k < 20; k++) if (C.scoreBattle(team, foe, rand).win) w++;
+    for (let k = 0; k < 20; k++) if (playBattle(hand, foe, sharp, rand, 0).win) w++;
     games += 20; flips += Math.min(w, 20 - w);
   }
   var luck = flips / games;
@@ -154,7 +153,7 @@ hold(s.dull.zero <= 0.4, `...and loses its very first battle ${(100 * s.dull.zer
 hold(r.sharp.avg >= 4 && r.sharp.avg <= 9, `sixty random cards win ${r.sharp.avg.toFixed(2)} a run (4 to 9)`);
 hold(b.sharp.avg >= 8 && b.sharp.avg <= 16, `the sixty best win ${b.sharp.avg.toFixed(2)} a run (8 to 16)`);
 hold(b.sharp.long === 0 && b.dull.long === 0, "no run reaches forty wins");
-hold(r.sharp.avg - r.dull.avg >= 0.3, `choosing and ordering the six is worth ${(r.sharp.avg - r.dull.avg).toFixed(2)} wins a run over the six best in rating order (at least 0.3)`);
+hold(r.sharp.avg - r.dull.avg >= 0.3, `reading each round is worth ${(r.sharp.avg - r.dull.avg).toFixed(2)} wins a run over playing the highest rating every time (at least 0.3)`);
 hold(r.sharp.changed >= 0.25, `the sharp player fields a different six ${(100 * r.sharp.changed).toFixed(0)}% of the time (at least 25%)`);
 hold(r.sharp.upsets >= 0.3, `a lower-rated card takes ${r.sharp.upsets.toFixed(2)} rounds a battle off a higher-rated one (at least 0.3)`);
 hold(luck >= 0.08 && luck <= 0.35, `luck turns ${(100 * luck).toFixed(0)}% of rematches (8% to 35%)`);

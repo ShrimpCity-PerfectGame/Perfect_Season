@@ -6,7 +6,7 @@
 // No Node-only import here: tests/mock-supabase.mjs is bundled into a browser page by tools/ui-harness. The
 // card catalog is therefore whatever card-logic.mjs has been initialised with - tests/helpers.mjs does it for
 // the jsdom suites, and in the harness the app's own loadCardData does.
-import { CARDS, starterFill, deckProblem, bestDeck, dealHand, teamProblem, scoreBattle, ladderFoe, ladderEdge, dailyFoe, dailyBattle, dailyScore, ownKey } from "../card-logic.mjs";
+import { CARDS, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, shuffleCategories, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey } from "../card-logic.mjs";
 import { COIN_RULES, cardWinCoins, cardSellCoins } from "../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../card-packs.mjs";
 
@@ -54,7 +54,7 @@ export function makeCards(state, { wallet = null } = {}) {
     // ---------- battles (v2.27.0): supabase/migration-cards.sql, raise for raise and in its order ----------
     runs, dailies, decks,
     today: utcDay,
-    nextRolls: null,      // the 29 [0,1) draws the next ladder battle uses instead of fresh ones - for a test that needs to know
+    nextRolls: null,      // [0,1) draws the coming ladder ROUNDS use instead of fresh ones, four a round - for a test that needs to know
     nextHand: null,       // (deck) => hand: how the next hand is dealt, instead of at random
     battleFails: false,   // the next battle HAPPENS and its answer is lost on the way back
     stateFails: false,    // card_battle_state and card_boards answer with an error
@@ -112,35 +112,47 @@ export function makeCards(state, { wallet = null } = {}) {
       return { saved: true };
     },
     // public.card_run_start
-    runStart(userId, seed, hand, foe) {
+    runStart(userId, seed, hand, foe, cats) {
       who(userId);
-      if (typeof seed !== "string" || seed.length < 8 || seed.length > 64) throw new Error("bad_run");
+      if (typeof seed !== "string" || seed.length < 8 || seed.length > 64 || !Array.isArray(cats) || cats.length !== 6) throw new Error("bad_run");
       api.listCheck(hand, 12, "bad_run"); api.listCheck(foe, 6, "bad_run");
       let run = runs.find((r) => r.user_id === userId && r.status === "live");
       const fresh = !run;
-      if (!run) { run = { id: nextRun++, user_id: userId, seed, wins: 0, hand, foe, status: "live", last: null, started_at: stamp(), ended_at: null }; runs.push(run); }
-      return { id: run.id, wins: run.wins, hand: run.hand, foe: run.foe, last: run.last, fresh };
+      if (!run) { run = { id: nextRun++, user_id: userId, seed, wins: 0, hand, foe, cats, rounds: [], status: "live", last: null, started_at: stamp(), ended_at: null }; runs.push(run); }
+      return { id: run.id, wins: run.wins, hand: run.hand, foe: run.foe, rounds: run.rounds, last: run.last, fresh };
+    },
+    // public.card_run_round
+    runRound(userId, runId, step, round, card, rounds) {
+      who(userId);
+      const whole = (n) => typeof n === "number" && Number.isInteger(n);
+      if (!whole(step) || !whole(round) || round < 0 || round > 4 || !Array.isArray(rounds) || rounds.length !== round + 1) throw new Error("bad_battle");
+      const run = runs.find((r) => r.id === runId && r.user_id === userId && r.status === "live");
+      if (!run) throw new Error("no_run");
+      if (run.wins !== step || run.rounds.length !== round) throw new Error("stale");
+      if (!api.lineupOwned(userId, card, 1)) throw new Error("not_owned");
+      run.rounds = rounds;
+      return { rounds };
     },
     // public.card_run_battle
-    runBattle(userId, runId, step, lineup, win, hand, foe, last, coins, cap) {
+    runBattle(userId, runId, step, lineup, win, hand, foe, cats, last, coins, cap) {
       who(userId);
       const whole = (n) => typeof n === "number" && Number.isInteger(n);
       if (typeof win !== "boolean" || !whole(step) || !last || typeof last !== "object" || Array.isArray(last)
         || !whole(coins) || coins < 0 || coins > 100 || !whole(cap) || cap < 0) throw new Error("bad_battle");
-      if (win) { api.listCheck(hand, 12, "bad_battle"); api.listCheck(foe, 6, "bad_battle"); }
+      if (win) { api.listCheck(hand, 12, "bad_battle"); api.listCheck(foe, 6, "bad_battle"); if (!Array.isArray(cats) || cats.length !== 6) throw new Error("bad_battle"); }
       wallet.lock(userId);
       const run = runs.find((r) => r.id === runId && r.user_id === userId && r.status === "live");
       if (!run) throw new Error("no_run");
-      if (run.wins !== step) throw new Error("stale");
+      if (run.wins !== step || run.rounds.length !== 5) throw new Error("stale");
       if (!api.lineupOwned(userId, lineup, 6)) throw new Error("not_owned");
       let credited = 0, capped = false;
       if (win) {
-        run.wins += 1; run.hand = hand; run.foe = foe; run.last = last;
+        run.wins += 1; run.hand = hand; run.foe = foe; run.cats = cats; run.rounds = []; run.last = last;
         if (coins > 0) {
           if (paidToday(userId) >= cap) capped = true;
           else credited = wallet.apply(userId, coins, "card_win", `${run.id}:${run.wins}`);
         }
-      } else { run.status = "over"; run.ended_at = stamp(); run.last = last; }
+      } else { run.status = "over"; run.ended_at = stamp(); run.rounds = []; run.last = last; }
       return { wins: run.wins, status: run.status, hand: run.hand, foe: run.foe, credited, capped, balance: wallet.balanceOf(userId) };
     },
     // public.card_run_end
@@ -156,8 +168,21 @@ export function makeCards(state, { wallet = null } = {}) {
       if (typeof date !== "string") throw new Error("bad_daily");
       api.listCheck(hand, 12, "bad_daily");
       let row = dailies.find((d) => d.date === date && d.user_id === userId);
-      if (!row) { row = { date, user_id: userId, hand, rounds: null, score: null, shown: null, dealt_at: stamp(), played_at: null }; dailies.push(row); }
-      return { hand: row.hand, played: row.played_at !== null, rounds: row.rounds, score: row.score, shown: row.shown };
+      if (!row) { row = { date, user_id: userId, hand, log: [], rounds: null, score: null, shown: null, dealt_at: stamp(), played_at: null }; dailies.push(row); }
+      return { hand: row.hand, log: row.log, played: row.played_at !== null, rounds: row.rounds, score: row.score, shown: row.shown };
+    },
+    // public.card_daily_round
+    dailyRound(userId, date, round, card, rounds) {
+      who(userId);
+      const whole = (n) => typeof n === "number" && Number.isInteger(n);
+      if (typeof date !== "string" || !whole(round) || round < 0 || round > 4 || !Array.isArray(rounds) || rounds.length !== round + 1) throw new Error("bad_daily");
+      const row = dailies.find((d) => d.date === date && d.user_id === userId);
+      if (!row) throw new Error("no_hand");
+      if (row.played_at !== null) throw new Error("duplicate");
+      if (row.log.length !== round) throw new Error("stale");
+      if (!api.lineupOwned(userId, card, 1)) throw new Error("not_owned");
+      row.log = rounds;
+      return { log: rounds };
     },
     // public.card_daily_record
     dailyRecord(userId, date, lineup, rounds, score, shown) {
@@ -168,6 +193,7 @@ export function makeCards(state, { wallet = null } = {}) {
       const row = dailies.find((d) => d.date === date && d.user_id === userId);
       if (!row) throw new Error("no_hand");
       if (row.played_at !== null) return { duplicate: true, rounds: row.rounds, score: row.score, shown: row.shown };
+      if (row.log.length !== 5) throw new Error("stale");
       if (!api.lineupOwned(userId, lineup, 6)) throw new Error("not_owned");
       row.rounds = rounds; row.score = Math.round(score * 10) / 10; row.shown = shown; row.played_at = stamp();
       return { duplicate: false, rounds: row.rounds, score: row.score, shown: row.shown };
@@ -181,10 +207,10 @@ export function makeCards(state, { wallet = null } = {}) {
       return {
         today: utcDay(),
         deck: uid ? decks.get(uid) ?? null : null,
-        run: run ? { id: run.id, wins: run.wins, status: run.status, hand: run.hand, foe: run.foe, last: run.last } : null,
+        run: run ? { id: run.id, wins: run.wins, status: run.status, hand: run.hand, foe: run.foe, rounds: run.rounds, last: run.last } : null,
         best: mine.reduce((m, r) => Math.max(m, r.wins), 0),
         paid_today: uid && wallet ? paidToday(uid) : 0,
-        daily: day ? { hand: day.hand, played: day.played_at !== null, rounds: day.rounds, score: day.score, shown: day.shown } : null,
+        daily: day ? { hand: day.hand, log: day.log, played: day.played_at !== null, rounds: day.rounds, score: day.score, shown: day.shown } : null,
       };
     },
     // public.card_boards
@@ -302,8 +328,9 @@ export function makeCards(state, { wallet = null } = {}) {
     async claimStarter(body) {
       const uid = state.currentUserId();
       if (!uid) return cardHttpError("signed_out", 401);
-      if (!body || !["starter", "open_pack", "sell_copies", "deck_save", "run_start", "run_battle", "run_end", "daily_deal", "daily_play"].includes(body.action)) return cardHttpError("malformed", 400);
-      if (body.action === "run_battle" && (!Number.isInteger(body.run) || !Number.isInteger(body.step) || body.step < 0)) return cardHttpError("malformed", 400);
+      if (!body || !["starter", "open_pack", "sell_copies", "deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round"].includes(body.action)) return cardHttpError("malformed", 400);
+      if (body.action === "run_round" && (!Number.isInteger(body.run) || !Number.isInteger(body.step) || body.step < 0)) return cardHttpError("malformed", 400);
+      if ((body.action === "run_round" || body.action === "daily_round") && (!Number.isInteger(body.round) || body.round < 0 || body.round > 5)) return cardHttpError("malformed", 400);
       if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1 || body.price > 1000000)) return cardHttpError("malformed", 400);
       if (!api.enabled) return cardHttpError("cards_off", 403);
       const profile = state.profiles.get(uid);
@@ -326,7 +353,7 @@ export function makeCards(state, { wallet = null } = {}) {
         if (api.openFails) { api.openFails = false; return { data: null, error: { name: "FunctionsFetchError", message: "Failed to send" } }; }
         return { data: { ok: true, cards: bought.cards.map((c) => (c.sold != null ? { id: c.card, finish: c.finish, sold: c.sold } : { id: c.card, finish: c.finish })), balance: bought.balance, stockLeft: bought.stock_left ?? null, duplicate: bought.duplicate }, error: null };
       }
-      if (["deck_save", "run_start", "run_battle", "run_end", "daily_deal", "daily_play"].includes(body.action)) return api.battle(uid, body);
+      if (["deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round"].includes(body.action)) return api.battle(uid, body);
       if (body.action === "sell_copies") {
         let sold;
         try { sold = api.sellCopies(uid, api.copies(uid).filter((c) => CARDS.has(c.card)).map((c) => ({ card: c.card, finish: c.finish, each: sellFor({ id: c.card, finish: c.finish }) })), "mock-sweep-0001"); }
@@ -364,7 +391,12 @@ export function makeCards(state, { wallet = null } = {}) {
     return saved && deckProblem(saved, map) === null ? saved : bestDeck(have);
   };
   const deal = (deck) => { const how = api.nextHand; api.nextHand = null; return how ? how(deck) : dealHand(deck, Math.random); };
-  const shownBattle = (result, team, foe, edge) => ({ team, foe, edge, rounds: result.rounds, wins: result.wins, losses: result.losses, total: result.total, foeTotal: result.foeTotal, win: result.win });
+  // toSql keeps a CPU card's spot with it: the order of the other side's spots is the order of the rounds.
+  const foeSql = (list) => list.map((e) => ({ card: e.id, finish: e.finish, spot: e.spot }));
+  const foeFrom = (list) => (Array.isArray(list) ? list.map((e) => ({ id: e.card, finish: e.finish, spot: e.spot })) : []);
+  const played = (rounds) => rounds.map((r) => ({ id: r.mine.id, finish: r.mine.finish }));
+  const shownBattle = (result, foe, edge) => ({ team: played(result.rounds), foe, edge, rounds: result.rounds, wins: result.wins, losses: result.losses, total: result.total, foeTotal: result.foeTotal, win: result.win });
+  const REASON_STATUS = { not_in_hand: 409, already_played: 409, same_player: 409 };
   api.battle = async (uid, body) => {
     const refuse = (e) => (BATTLE_REFUSALS[e?.message] ? said(e.message, BATTLE_REFUSALS[e.message]) : said("server", 500));
     if (body.action === "run_end") {
@@ -382,54 +414,66 @@ export function makeCards(state, { wallet = null } = {}) {
       if (!deck) return said("no_deck", 409);
       const seed = Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
       try {
-        const run = api.runStart(uid, seed, toSql(deal(deck)), toSql(ladderFoe(seed, 0)));
-        return { data: { ok: true, run: { id: run.id, wins: run.wins, hand: fromSql(run.hand), foe: fromSql(run.foe), last: run.last } }, error: null };
+        const run = api.runStart(uid, seed, toSql(deal(deck)), foeSql(ladderFoe(seed, 0)), shuffleCategories(Math.random));
+        return { data: { ok: true, run: { id: run.id, wins: run.wins, hand: fromSql(run.hand), foe: foeFrom(run.foe), rounds: run.rounds, last: run.last } }, error: null };
       } catch (e) { return refuse(e); }
     }
+    const shownDaily = (row) => ({ hand: fromSql(row.hand), log: row.log, played: row.played, rounds: row.rounds, score: row.score, shown: row.shown });
     if (body.action === "daily_deal") {
       const date = utcDay();
       const before = dailies.find((d) => d.date === date && d.user_id === uid);
       if (!before && !deck) return said("no_deck", 409);
-      try {
-        const row = api.dailyDeal(uid, date, before ? before.hand : toSql(deal(deck)));
-        return { data: { ok: true, date, daily: { hand: fromSql(row.hand), played: row.played, rounds: row.rounds, score: row.score, shown: row.shown } }, error: null };
-      } catch (e) { return refuse(e); }
+      try { return { data: { ok: true, date, daily: shownDaily(api.dailyDeal(uid, date, before ? before.hand : toSql(deal(deck)))) }, error: null }; }
+      catch (e) { return refuse(e); }
     }
-    if (body.action === "daily_play") {
+    if (body.action === "daily_round") {
       const date = utcDay();
       const row = dailies.find((d) => d.date === date && d.user_id === uid);
       if (!row) return said("no_hand", 409);
-      const problem = teamProblem(body.team, fromSql(row.hand));
-      if (problem) return said(problem, problem === "not_in_hand" ? 409 : 400);
-      const result = dailyBattle(date, body.team);
-      const { rounds, score } = dailyScore(result);
-      let rec;
-      try { rec = api.dailyRecord(uid, date, toSql(body.team), rounds, score, shownBattle(result, body.team, dailyFoe(date), 0)); }
-      catch (e) { return refuse(e); }
+      if (row.played_at !== null) return said("duplicate", 409);
+      if (row.log.length !== body.round) return said("stale", 409);
+      const foe = dailyFoe(date);
+      const problem = roundProblem(fromSql(row.hand), foe, row.log, body.card);
+      if (problem) return said(problem, REASON_STATUS[problem] || 400);
+      const round = dailyRound(date, row.log, body.card);
+      const rounds = [...row.log, round];
+      try {
+        if (rounds.length < 6) api.dailyRound(uid, date, body.round, toSql([body.card]), rounds);
+        else {
+          const result = battleResult(rounds);
+          const { rounds: won, score } = dailyScore(result);
+          api.dailyRecord(uid, date, toSql(played(rounds)), won, score, shownBattle(result, foe, 0));
+        }
+      } catch (e) { return refuse(e); }
       if (api.battleFails) { api.battleFails = false; return lost(); }
-      if (rec.duplicate) return said("duplicate", 409);
-      return { data: { ok: true, date, daily: { hand: fromSql(row.hand), played: true, rounds: rec.rounds, score: rec.score, shown: rec.shown } }, error: null };
+      const now = dailies.find((d) => d.date === date && d.user_id === uid);
+      return { data: { ok: true, date, round, done: rounds.length === 6, daily: shownDaily({ hand: now.hand, log: rounds.length === 6 ? rounds : now.log, played: now.played_at !== null, rounds: now.rounds, score: now.score, shown: now.shown }) }, error: null };
     }
-    // run_battle
+    // run_round
     const run = runs.find((r) => r.user_id === uid && r.status === "live");
     if (!run) return said("no_run", 409);
-    if (run.id !== body.run || run.wins !== body.step) return said("stale", 409);
-    const hand = fromSql(run.hand), foe = fromSql(run.foe);
-    const problem = teamProblem(body.team, hand);
-    if (problem) return said(problem, problem === "not_in_hand" ? 409 : 400);
-    const rolls = api.nextRolls; api.nextRolls = null;
-    let i = 0;
+    if (run.id !== body.run || run.wins !== body.step || run.rounds.length !== body.round) return said("stale", 409);
+    const hand = fromSql(run.hand), foe = foeFrom(run.foe);
+    const problem = roundProblem(hand, foe, run.rounds, body.card);
+    if (problem) return said(problem, REASON_STATUS[problem] || 400);
     const edge = ladderEdge(run.wins);
-    const result = scoreBattle(body.team, foe, rolls ? () => rolls[i++] : Math.random, null, edge);
-    const last = shownBattle(result, body.team, foe, edge);
+    const round = playRound(foe, run.rounds, body.card, run.cats[body.round], api.nextRolls && api.nextRolls.length ? () => api.nextRolls.shift() : Math.random, edge);
+    const rounds = [...run.rounds, round];
+    if (rounds.length < 6) {
+      try { api.runRound(uid, run.id, body.step, body.round, toSql([body.card]), rounds); } catch (e) { return refuse(e); }
+      if (api.battleFails) { api.battleFails = false; return lost(); }
+      return { data: { ok: true, round, done: false, run: { id: run.id, wins: run.wins, status: "live", hand, foe, rounds } }, error: null };
+    }
+    const result = battleResult(rounds);
+    const last = shownBattle(result, foe, edge);
     let rec;
     try {
-      rec = api.runBattle(uid, run.id, body.step, toSql(body.team), result.win,
-        result.win ? toSql(deal(deck || hand)) : null, result.win ? toSql(ladderFoe(run.seed, run.wins + 1)) : null,
+      rec = api.runBattle(uid, run.id, body.step, toSql(played(rounds)), result.win,
+        result.win ? toSql(deal(deck || hand)) : null, result.win ? foeSql(ladderFoe(run.seed, run.wins + 1)) : null, result.win ? shuffleCategories(Math.random) : null,
         last, result.win ? cardWinCoins(run.wins + 1) : 0, COIN_RULES.paidCardWinsPerDay);
     } catch (e) { return refuse(e); }
     if (api.battleFails) { api.battleFails = false; return lost(); }
-    return { data: { ok: true, battle: last, run: { id: run.id, wins: rec.wins, status: rec.status, hand: fromSql(rec.hand), foe: fromSql(rec.foe) }, coins: { credited: rec.credited, capped: rec.capped, balance: rec.balance } }, error: null };
+    return { data: { ok: true, round, done: true, battle: last, run: { id: run.id, wins: rec.wins, status: rec.status, hand: fromSql(rec.hand), foe: foeFrom(rec.foe), rounds: [] }, coins: { credited: rec.credited, capped: rec.capped, balance: rec.balance } }, error: null };
   };
   return api;
 }

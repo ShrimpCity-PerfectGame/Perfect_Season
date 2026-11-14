@@ -95,39 +95,54 @@ card's score in a category is how its real season ranked **at its own position, 
 - Computed in `initCardData` and kept on the card as `cats`. They follow from `data/cards.json`, which is
   frozen, so they do not move unless the formulas in `rawCategories` do.
 
-## 4. Decks, hands and teams
+## 4. Decks, hands and spots
 
 - A **deck** is thirty cards you own: 5 QB, 10 RB, 10 WR, 5 TE, thirty different men. `deckProblem`.
   An account that never saved one plays `bestDeck` of what it owns.
 - A **hand** is twelve of the thirty - 2, 4, 4, 2 - dealt by the server for each battle (`dealHand`, twelve
   draws). So a deck is never a guaranteed lineup.
-- A **team** is six of the hand: exactly one quarterback, at least one back, one receiver and one tight end,
-  six different men. **The order of the six is the order they play in, and it is the player's.**
-  `teamProblem` answers `null` or one of `malformed`, `incomplete`, `unknown_card`, `bad_finish`, `bad_slot`,
-  `same_player`, `not_in_hand`. It never throws.
-- `bestTeam` is the six highest ratings that make a team, best first. It is the DULL choice on purpose - the
-  screen's "Pick for me", the CPU's lineup, and the bot every balance number is measured against.
+- A battle is six **spots**, one a round: `SPOTS` is QB, RB, WR, TE, Flex, Flex. **The first five come up in
+  a random order and the last round is always a Flex** (the owner's rule, v2.28.0: not the quarterback first
+  every time, and the final pick is the open one). The order is the other team's - each of its six cards
+  carries the `spot` it plays, and yours answers in the same spot. `spotFits`: a named spot takes its own
+  position, a Flex anything but a quarterback.
+- **You play one card a round** (v2.28.0), out of the hand, seeing the spot and the card across from it and
+  NOT the category. `roundProblem(hand, foe, rounds, entry)` answers `null` or one of `malformed`,
+  `unknown_card`, `bad_finish`, `not_in_hand`, `bad_slot`, `already_played`, `same_player`. It never throws.
+- A hand always has a way through: 2 QB and 2 TE cover their spots and the four backs and four receivers
+  cover theirs and both Flexes. `leavesAWay` is what stops a play that would strand a later spot, and
+  `playable` lists what may go down now.
+- `autoPick` is the highest rating that may be played. It is the DULL choice on purpose - the screen's
+  "Pick for me" and the bot every balance number is measured against.
 
-## 5. How a battle scores
+**Why a round at a time.** v2.27.0 had the six and their order set before the battle, with every category
+score on show - and the owner's objection was exact: given two tight ends and told which scores more, there
+is no choice. Now the category is hidden until the card is down, the ones already used are known, and the
+card across from you is in view. The choice is what to spend where.
 
-`scoreBattle(mine, foe, rand, cats = null, foeEdge = 0)`. Six rounds, your first card against their first.
-The six categories come up **exactly once each, in an order nobody knows** until it is played. A card's round:
+## 5. How a round scores
+
+`playRound(foe, rounds, entry, cat, rand, foeEdge = 0)` plays one; `scoreBattle` is the same thing six times.
+The six categories come up **exactly once each, in an order nobody is told** - `shuffleCategories` when the
+battle is dealt. A card's round:
 
     RATING_SHARE x (rating + finish)  +  the rest from its category score  +  synergies  +  ability  +  luck
 
 The higher total takes the round. Win more rounds; a 3-3 split goes to the higher six-round total, and a dead
-heat to you. So the overall rating is part of every round and never the whole of one.
+heat to you (`battleResult`). So the overall rating is part of every round and never the whole of one.
 
-- **Draws are counted:** five to order the categories, then four a round (two a card, yours first) -
-  twenty-nine a battle, always. The browser and the Edge Function must walk the generator in step.
-- **Synergies** (`teamSynergies`, worked out once for the lineup): +2 per lineup-mate from the same team (to
-  6), +1 per mate from the same season (to 3), +2 once for a real teammate (both), and the archetype pairs.
+- **Draws are counted:** five to order the categories, then four a round (two a card, yours first). The
+  browser and the Edge Function must walk the generator in step.
+- **Synergies build as you play** (`playedSynergies(entry, earlier)`): a card is lifted by the cards of yours
+  already down - +2 for each from the same team (to 6), +1 for each from the same season (to 3), +2 once for
+  a real teammate, and the archetype pairs. So an early card sets up a later one, and the last card can be
+  worth the most.
 - **Abilities**, one an archetype (`ABILITIES`). Some fire on the category (Gunslinger and Home-run hitter in
   Big play, Goal-line back and Red-zone target in Touchdown threat), some on the battle so far (Workhorse
   after a win, Seam stretcher when behind, Deep threat and Receiving back once the quarterback has played),
   the Scrambler against a higher-rated card. A Game manager lifts the NEXT card his side plays. A Safety
   valve cancels the ability across from him. A card whose ability did not fire is still shown it, as "not
-  this round" - that is how a player learns to order the six.
+  this round".
 - **Luck** is a triangular roll within `LUCK_SPREAD` (14), half as wide again for a Gunslinger.
 - Constants as tuned: `RATING_SHARE 0.4`, `CAT_SCALE 1.3`, `LUCK_SPREAD 14`, `CPU_START 38`, `CPU_STEP 7`,
   `CPU_MAX 124`, `CPU_EDGE 0.6`, `DAILY_TARGET 86`.
@@ -136,36 +151,39 @@ heat to you. So the overall rating is part of every round and never the whole of
 also moves the 2,000-battle checksum in `tests/test-card-logic.mjs`, and then the client and the functions
 must ship together.
 
-## 6. Balance, as measured on 2026-11-14
+## 6. Balance, as measured on 2026-11-14 (round at a time)
 
-Three collections climb the ladder. One player fields the six highest ratings in rating order; one picks the
-six and the order the numbers on screen say are best (it cannot see the category order or the luck).
+Three collections climb the ladder. The dull player plays `autoPick` every round. The sharp one searches the
+plans its hand allows against what it can see - the spots to come, the cards across from them, the categories
+not yet used - and never the category order or the luck.
 
 | | Measured | Band |
 |---|---|---|
-| Starter deck (thirty Base cards under 60): wins a run | 1.45 | 0.8 to 3 |
-| ...loses its very first battle | 17% | at most 40% |
-| Sixty random cards: wins a run | 7.7 | 4 to 9 |
-| The sixty best cards: wins a run | 13.6 | 8 to 16 |
+| Starter deck (thirty Base cards under 60): wins a run | 1.43 | 0.8 to 3 |
+| ...loses its very first battle | 18% | at most 40% |
+| Sixty random cards: wins a run | 7.69 | 4 to 9 |
+| The sixty best cards: wins a run | 13.69 | 8 to 16 |
 | Runs that reach forty wins | none | none |
-| Choosing and ordering beats the six best in rating order by | 0.49 wins a run | at least 0.3 |
-| The sharp player fields a different six | 62% of battles | at least 25% |
-| A lower-rated card takes a round off a higher-rated one | 0.37 a battle | at least 0.3 |
-| An even match replayed: the less likely result | 29% | 8% to 35% |
+| Reading each round beats the highest rating every time by | 0.46 wins a run | at least 0.3 |
+| The sharp player fields a different six | 70% of battles | at least 25% |
+| A lower-rated card takes a round off a higher-rated one | 0.40 a battle | at least 0.3 |
+| An even match replayed: the less likely result | 30% | 8% to 35% |
 
 **What these do not hold:** any single ability, pair or bonus; and whether it is fun. The bands are the
-builder's reading of the design. Luck at 29% of even rematches is at the high end of "a bit" - `LUCK_SPREAD`
+builder's reading of the design. Luck at 30% of even rematches is at the high end of "a bit" - `LUCK_SPREAD`
 is the knob. The sharp bot is a search, not a person.
 
 ## 7. The other side
 
-- `buildTeam(rand, target)`: one card of each position and two more, each within `CPU_BAND` of the target
-  rating (widening only if a position has nobody there), six different men, in a random order. Eleven draws.
+- `buildTeam(rand, target)`: one card for each of the six spots, each within `CPU_BAND` of the target
+  rating (widening only if a position has nobody there), six different men. Each entry carries its `spot`;
+  the first five are shuffled and **the Flex is last**. Ten draws.
 - **The ladder:** `ladderFoe(seed, step)` at `ladderTarget(step)` - 38, then 7 more a win, to 124. Past the
   best cards the game holds it cannot field a stronger team, so `ladderEdge(step)` adds points to every card
   of theirs instead; without it the best collections never met anything that could stop them.
-- **The daily battle:** `dailyFoe(date)`, `dailyCategories(date)` and `dailyRand` - one team, one category
-  order, and **one roll per card per day**, so the board rewards the six and their order and not the roll.
+- **The daily battle:** `dailyFoe(date)`, `dailyCategories(date)` and `dailyRound(date, rounds, entry)` - one
+  team, one category order, and **one roll per card per day**, so the board rewards the six and where they
+  were spent and not the roll.
   Ranked by rounds won, then the six-round total (`dailyScore`).
 - **Accepted gap**, the one every seeded daily here has: the bundle and the seed are public, so the day's
   best lineup for a hand can be worked out offline.
@@ -398,7 +416,7 @@ thing loot-box rules are written about, and that question goes to the owner's la
   kind = 'pack';` then `select ref, card_id, finish from card_grants where user_id = '<uuid>' and kind =
   'pack' and ref like '<open id>:%';`
 
-## 11. Battles: who runs them, and what is written down (v2.27.0, on the test site)
+## 11. Battles: who runs them, and what is written down (v2.28.0, on the test site)
 
 The rules are sections 3 to 7. Stage one of the owner's four modes is here - the **ladder** and the **daily
 battle**; the historical gauntlet and the draft arena are not built.
@@ -409,25 +427,37 @@ battle**; the historical gauntlet and the draft arena are not built.
 |---|---|
 | The deck | the player (`deck_save`); `bestDeck` if none is saved |
 | The hand of twelve | `card-claim`, with the cryptographic generator, **stored before it is shown** |
-| Which six, and their order | the player, in the browser |
-| Whether that six is legal, and came out of the hand | `teamProblem` in `card-claim` |
+| The card for each round | the player, in the browser, one at a time |
+| Whether that card may be played now | `roundProblem` in `card-claim`, against the stored hand and rounds |
 | Whether the cards are theirs | `card_lineup_owned` in SQL, in the transaction that writes |
 | A ladder team | `ladderFoe(seed, step)`; the seed is `card-claim`'s and kept in `card_runs` |
-| A ladder battle's luck and category order | `card-claim`, fresh |
+| A ladder battle's category order | `card-claim`, when the battle is dealt; **stored, and never sent** |
+| A ladder round's luck | `card-claim`, fresh, as the round is played |
 | The daily's team, categories and luck | the UTC date |
-| Whether it counts, and what it pays | `card_run_battle` / `card_daily_record`, one transaction each |
+| Whether a round counts | `card_run_round` / `card_daily_round`, which take the round's number |
+| Whether the battle counts, and what it pays | `card_run_battle` / `card_daily_record`, one transaction each |
 
 Nothing the browser sends about a result is read.
 
 ### 11.2 The database
 
-`card_decks (user_id, cards)`, `card_runs (id, user_id, seed, wins, hand, foe, status, last, ...)`,
-`card_dailies (date, user_id, hand, rounds, score, shown, dealt_at, played_at)`. **RLS on, no policy of any
+`card_decks (user_id, cards)`, `card_runs (id, user_id, seed, wins, hand, foe, cats, rounds, status, last, ...)`,
+`card_dailies (date, user_id, hand, log, rounds, score, shown, dealt_at, played_at)`. On `card_runs`,
+`rounds` is the list of rounds played in the battle in progress; on `card_dailies` that list is `log`,
+because `rounds` there was already the number of rounds won. **RLS on, no policy of any
 kind, no grant to a client role.**
 
 - **A hand is stored, never derived.** A hand that followed from the deck could be re-dealt by editing the
   deck. `card_run_start` keeps the first hand it is handed for a live run, `card_run_battle` stores the next
   one with the win, and `card_daily_deal` keeps the first hand of the day whatever it is handed after.
+- **The category order is stored with the battle and no read returns it** (`cats`). A round's category
+  reaches the browser inside that round's result and not before. `card_battle_state` returns the rounds
+  played, which is everything a browser coming back needs.
+- **A round is written by its number.** `card_run_round` and `card_daily_round` take the index of the round
+  being played and raise `stale` unless it is the next one, under the row's lock - so a double tap, two
+  tabs or a retry cannot play a round twice or re-roll one. The fifth round is the last a round function
+  writes; the sixth goes down with the result, in `card_run_battle` / `card_daily_record`.
+- A run from v2.27.0 has no `cats`; the migration ends any that is live. Test site only.
 - One live run an account (a partial unique index). `last` is the latest battle as it was shown.
 - **No name snapshot**: `card_boards` joins `profiles` when read, so `mod_act`, `claim_username` and the
   `use_account_username` trigger know nothing of these tables. A guest can never own a card.
@@ -436,8 +466,9 @@ kind, no grant to a client role.**
   `card_showdowns` table; the migration recognises that shape by the `defense` column and drops it. It can
   be re-run on any shape and never drops a run of the new kind (a test holds both).
 
-Service role only: `card_deck_read`, `card_deck_save`, `card_run_start`, `card_run_battle`, `card_run_end`,
-`card_daily_deal`, `card_daily_record`, `card_lineup_owned`, `card_list_check`. Signed-in players, as GETs:
+Service role only: `card_deck_read`, `card_deck_save`, `card_run_start`, `card_run_round`, `card_run_battle`,
+`card_run_end`, `card_daily_deal`, `card_daily_round`, `card_daily_record`, `card_lineup_owned`,
+`card_list_check`. Signed-in players, as GETs:
 `card_battle_state()` and `card_boards(limit)`.
 
 - **`card_run_battle` checks the step under a lock**, so a double tap or two tabs cannot both count: the
@@ -447,8 +478,8 @@ Service role only: `card_deck_read`, `card_deck_save`, `card_run_start`, `card_r
 
 ### 11.3 The function
 
-`card-claim` actions: `deck_save { cards }`, `run_start`, `run_battle { run, step, team }`, `run_end`,
-`daily_deal`, `daily_play { team }`. It bundles `card-logic.mjs`, `rewards.mjs` and `data/cards.json`, so **a
+`card-claim` actions: `deck_save { cards }`, `run_start`, `run_round { run, step, round, card }`, `run_end`,
+`daily_deal`, `daily_round { round, card }`. It bundles `card-logic.mjs`, `rewards.mjs` and `data/cards.json`, so **a
 change to any of those ships the function and the client together**.
 
 ### 11.4 Coins
@@ -462,30 +493,27 @@ A ladder win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run alre
 
 - `CardRow` is a card as a row: its six category scores are always on show, because they are the game. A
   strong one is a lime FILL with its own ink, never lime text.
-- `TeamPicker`: their six in order, your six in order with up/down, your hand of twelve.
-- `Arena` is the owner's layout: your active card left, theirs right, a big VS, the stat comparison, the
-  round's winner called; your six as a strip with the active one lit; the score, the round, a speed control
-  and a battle log. Four beats a round. **It plays where `matchMedia` says motion is fine and is simply
-  finished everywhere else** (reduced motion; jsdom, so every test sees the finished battle; a daily opened
-  again later). The parent hides the heading, the coins and the next button until `onDone`. Nothing fades.
+- `Arena` is the whole battle. Before a round: the spot, the card you are facing, the categories still to
+  come, and the cards in your hand that may be played, each with its six scores, plus "Pick for me". After a
+  tap: your card left, theirs right, a big VS, the category revealed, the stat comparison, the round's
+  winner called. Always: the six rounds as a strip, the score, a speed control and a battle log. **The reveal
+  plays where `matchMedia` says motion is fine and is simply finished everywhere else** (reduced motion;
+  jsdom, so every test sees the finished round). Nothing fades.
 - **A failed play is not "not played".** The screen never replays after a lost answer: it reads
-  `card_battle_state` and shows what is there.
+  `card_battle_state`, which carries the rounds played, and shows what is there. A play the page sends from
+  behind is refused as `stale` and the page catches up the same way.
 
 ### 11.6 Runbook
 
 - **End somebody's stuck run:** `select card_run_end('<user uuid>');`
-- **See a run:** `select id, wins, status, hand, foe, last from card_runs where user_id = '<uuid>' order by id desc;`
+- **See a run:** `select id, wins, status, hand, foe, cats, rounds, last from card_runs where user_id = '<uuid>' order by id desc;`
 - **Give a day's battle back:** `delete from card_dailies where date = '<date>' and user_id = '<uuid>';`
 
 ### 11.7 Not built, and known gaps
 
 - The **historical gauntlet** and the **draft arena** (the owner chose all four modes; these are stages two
   and three). No badge, nothing on the profile.
-- **Open design question from the owner (2026-11-14):** whether choosing between two cards feels like a
-  choice. Today the six and their order are set before any category is known. The sharper version is to play
-  a round at a time - commit a card, then see the category - which needs the server to hold a battle in
-  progress.
-- The team picker is long on a phone: twenty-four card rows.
+- A battle is now six requests rather than one. Each is small, and a lost one is recovered from the state.
 - Two accounts are two collections; nothing stops one person climbing twice.
 
 ## 12. Copies (v2.26.0, on the test site)

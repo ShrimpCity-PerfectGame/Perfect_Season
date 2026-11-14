@@ -80,7 +80,9 @@ const SCREENS = [
   // is a lime FILL with its own ink, never lime text), the arena mid-battle - two card images, a scoreboard,
   // chips whose sign is in the text as well as the colour - a finished battle with its log, the deck, the boards.
   ["the ladder before a run", "?screen=cards&tab=run", null],
-  ["the ladder: their six, your hand", "?screen=cards&tab=run&run=1", null],
+  ["the ladder: round one, choosing a card", "?screen=cards&tab=run&run=1", null],
+  ["the ladder: two rounds in", "?screen=cards&tab=run&run=1&rounds=2", null],
+  ["the ladder: a round being revealed", "?screen=cards&tab=run&run=1&rounds=2&anim=1", null],
   ["a card battle being played", "?screen=cards&tab=run&battle=win", null],
   ["a card battle that was lost", "?screen=cards&tab=run&battle=loss", null],
   ["the deck builder", "?screen=cards&tab=deck", null],

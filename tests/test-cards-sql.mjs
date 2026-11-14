@@ -432,11 +432,19 @@ async function both(fn, sqlArgs, casts, mockCall) {
   return a;
 }
 const J = (v) => JSON.stringify(v);
-const start = (u, seed = "seed-0001", hand = HAND, foe = FOE) => both("card_run_start", [u, seed, J(hand), J(foe)], ["::uuid", "::text", "::jsonb", "::jsonb"], () => battleMock.cards.runStart(u, seed, hand, foe));
-const fight = (u, run, step, win, { lineup = SIX, hand = cardsFrom(13, 12), foe = cardsFrom(600, 6), last = { win }, coins = 3, cap = 15 } = {}) =>
-  both("card_run_battle", [u, run, step, J(lineup), win, win ? J(hand) : null, win ? J(foe) : null, J(last), coins, cap],
-    ["::uuid", "::bigint", "::integer", "::jsonb", "::boolean", "::jsonb", "::jsonb", "::jsonb", "::integer", "::integer"],
-    () => battleMock.cards.runBattle(u, run, step, lineup, win, win ? hand : null, win ? foe : null, last, coins, cap));
+const CATS = ["production", "scoring", "bigplay", "workload", "efficiency", "star"];
+const start = (u, seed = "seed-0001", hand = HAND, foe = FOE, cats = CATS) => both("card_run_start", [u, seed, J(hand), J(foe), cats === null ? null : J(cats)], ["::uuid", "::text", "::jsonb", "::jsonb", "::jsonb"], () => battleMock.cards.runStart(u, seed, hand, foe, cats));
+// One round that is not the last: round n of the battle the run is on, with n + 1 rounds in the list after it.
+const roundsTo = (n) => Array.from({ length: n }, (_, i) => ({ n: i }));
+const round = (u, run, step, n, { card = [SIX[n]], rounds = roundsTo(n + 1) } = {}) =>
+  both("card_run_round", [u, run, step, n, J(card), J(rounds)], ["::uuid", "::bigint", "::integer", "::integer", "::jsonb", "::jsonb"],
+    () => battleMock.cards.runRound(u, run, step, n, card, rounds));
+// The first five rounds of a battle, so its sixth - card_run_battle - can be written.
+async function fill(u, run, step) { for (let n = 0; n < 5; n++) assert(!(await round(u, run, step, n)).error, `round ${n} of run ${run} step ${step} is written`); }
+const fight = (u, run, step, win, { lineup = SIX, hand = cardsFrom(13, 12), foe = cardsFrom(600, 6), cats = CATS, last = { win }, coins = 3, cap = 15 } = {}) =>
+  both("card_run_battle", [u, run, step, J(lineup), win, win ? J(hand) : null, win ? J(foe) : null, win ? J(cats) : null, J(last), coins, cap],
+    ["::uuid", "::bigint", "::integer", "::jsonb", "::boolean", "::jsonb", "::jsonb", "::jsonb", "::jsonb", "::integer", "::integer"],
+    () => battleMock.cards.runBattle(u, run, step, lineup, win, win ? hand : null, win ? foe : null, win ? cats : null, last, coins, cap));
 const stateOf = async (u) => {
   const a = (await asUser(db, u, () => db.query("select card_battle_state() as r"))).rows[0].r;
   battleMock.state.me = u;
@@ -465,8 +473,9 @@ await runTest("nobody reads or writes a deck, a run or a daily battle from a bro
       const r = await attempt(who, statement);
       assert(/permission denied/i.test(r.error || ""), `${name} cannot ${what}: ${J(r).slice(0, 120)}`);
     }
-    for (const call of ["card_run_start($1, 'seed-0002', '[]'::jsonb, '[]'::jsonb)", "card_run_end($1)", "card_lineup_owned($1, '[]'::jsonb, 6)", "card_deck_read($1)", "card_deck_save($1, '[]'::jsonb)",
-      "card_run_battle($1, 1, 0, '[]'::jsonb, true, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, 100, 999)", "card_daily_deal($1, current_date, '[]'::jsonb)", "card_daily_record($1, current_date, '[]'::jsonb, 6, 9999, '{}'::jsonb)"]) {
+    for (const call of ["card_run_start($1, 'seed-0002', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb)", "card_run_end($1)", "card_lineup_owned($1, '[]'::jsonb, 6)", "card_deck_read($1)", "card_deck_save($1, '[]'::jsonb)",
+      "card_run_round($1, 1, 0, 0, '[]'::jsonb, '[]'::jsonb)", "card_daily_round($1, current_date, 0, '[]'::jsonb, '[]'::jsonb)",
+      "card_run_battle($1, 1, 0, '[]'::jsonb, true, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, 100, 999)", "card_daily_deal($1, current_date, '[]'::jsonb)", "card_daily_record($1, current_date, '[]'::jsonb, 6, 9999, '{}'::jsonb)"]) {
       const r = await attempt(who, `select ${call}`, [RIVAL]);
       assert(/permission denied/i.test(r.error || ""), `${name} cannot call ${call.split("(")[0]}: ${J(r).slice(0, 120)}`);
     }
@@ -475,6 +484,8 @@ await runTest("nobody reads or writes a deck, a run or a daily battle from a bro
   assert(/permission denied/i.test(anonState.error || "") && /permission denied/i.test(anonBoards.error || ""), "a visitor cannot call the two readers either");
   const seen = (await attempt(RIVAL, "select card_battle_state() as r")).rows[0].r;
   assert(seen.run === null && seen.deck === null && !J(seen).includes("seed"), "and a signed-in player's state is their own, with no seed in it: " + J(seen));
+  const own = (await attempt(RUNNER, "select card_battle_state() as r")).rows[0].r;
+  assert(own.run && Array.isArray(own.run.rounds) && !("cats" in own.run) && !J(own).includes("bigplay"), "the owner's state has the rounds played and NOT the order the categories will come in: " + J(own.run).slice(0, 160));
 });
 
 await runTest("a deck: saved only if every card of it is theirs", async () => {
@@ -498,24 +509,38 @@ await runTest("a run: one at a time, its hand stored, each battle counted once, 
   const before = await stateOf(RUNNER);
   assert(before.run.wins === 0 && before.best === 0 && before.paid_today === 0 && J(before.run.hand) === J(HAND), "it opens at no wins, with the hand it was dealt");
 
+  // A BATTLE IS SIX ROUNDS, written one at a time; the sixth is card_run_battle.
+  assert((await fight(RUNNER, 1, 0, true)).error === "stale", "a battle cannot be ended before its first five rounds are down");
+  assert((await round(RUNNER, 1, 0, 1)).error === "stale", "round two cannot be written before round one");
+  assert((await round(RUNNER, 1, 0, 0, { card: [{ card: 999, finish: "prism" }] })).error === "not_owned", "a round with a card they do not own");
+  assert((await round(RUNNER, 1, 0, 0, { rounds: roundsTo(3) })).error === "bad_battle" && (await round(RUNNER, 1, 0, 5)).error === "bad_battle", "the list has to be one longer than before, and the sixth round is not written here");
+  assert((await round(RIVAL, 1, 0, 0)).error === "no_run" && (await round(RGUEST, 1, 0, 0)).error === "guest_not_allowed", "somebody else's run, and a guest");
+  assert((await round(RUNNER, 1, 0, 0)).data.rounds.length === 1, "round one");
+  assert((await round(RUNNER, 1, 0, 0)).error === "stale", "and the same round again - a double tap - is stale, not a second round");
+  assert((await stateOf(RUNNER)).run.rounds.length === 1, "the player's state shows one round played");
+  for (let n = 1; n < 5; n++) await round(RUNNER, 1, 0, n);
   const w1 = await fight(RUNNER, 1, 0, true, { coins: 3 });
+  assert((await stateOf(RUNNER)).run.rounds.length === 0, "a win starts the next battle with no rounds played");
   assert(w1.data.wins === 1 && w1.data.status === "live" && w1.data.credited === 3 && w1.data.balance === 253, "a win moves the run on and pays: " + J(w1).slice(0, 200));
   assert(J(w1.data.hand) === J(cardsFrom(13, 12)) && J(w1.data.foe) === J(cardsFrom(600, 6)), "and the next hand and the next team are stored with it");
   // The same request again - a double tap, a retry, a second tab that read "no wins yet".
   assert((await fight(RUNNER, 1, 0, true, { coins: 3 })).error === "stale", "the same step twice is refused as stale");
   assert(await balanceOf(RUNNER) === 253 && (await stateOf(RUNNER)).run.wins === 1, "and nothing moved");
+  await fill(RUNNER, 1, 1);
   assert((await fight(RUNNER, 99, 1, true)).error === "no_run", "a run that is not theirs, or not there");
   assert((await fight(RIVAL, 1, 1, true)).error === "no_run", "somebody else cannot play this run");
   assert((await fight(RUNNER, 1, 1, true, { lineup: [{ card: 999, finish: "prism" }, ...SIX.slice(1)] })).error === "not_owned", "a six with a card they do not own");
   assert((await fight(RUNNER, 1, 1, true, { lineup: SIX.slice(1) })).error === "bad_lineup", "five cards is not a six");
   assert((await fight(RUNNER, 1, 1, true, { coins: 500 })).error === "bad_battle", "a win cannot pay more than a win pays");
   assert((await fight(RUNNER, 1, 1, true, { hand: HAND.slice(1) })).error === "bad_battle", "a win has to bring the next hand, whole");
+  assert((await fight(RUNNER, 1, 1, true, { cats: CATS.slice(1) })).error === "bad_battle", "and the next battle's six categories");
   assert((await fight(RGUEST, 1, 1, true)).error === "guest_not_allowed" && (await fight(NOBODY, 1, 1, true)).error === "no_profile", "guests and the nameless are refused first");
   assert((await stateOf(RUNNER)).run.wins === 1 && await balanceOf(RUNNER) === 253, "and after all of that the run is where it was");
 
   const w2 = await fight(RUNNER, 1, 1, true, { coins: 4, last: { win: true, total: 512.5 } });
   assert(w2.data.wins === 2 && w2.data.credited === 4, "the second win");
   assert((await stateOf(RUNNER)).run.last.total === 512.5, "the latest battle is kept on the run for a browser that missed the answer");
+  await fill(RUNNER, 1, 2);
   const loss = await fight(RUNNER, 1, 2, false, { last: { win: false, total: 301 } });
   assert(loss.data.status === "over" && loss.data.wins === 2 && loss.data.credited === 0, "a loss ends it at the wins it has: " + J(loss).slice(0, 160));
   assert((await fight(RUNNER, 1, 2, true)).error === "no_run", "and a finished run cannot be played on");
@@ -523,13 +548,15 @@ await runTest("a run: one at a time, its hand stored, each battle counted once, 
   assert(after.run.status === "over" && after.run.wins === 2 && after.run.last.total === 301 && after.best === 2 && after.paid_today === 2, "the run reads as over, with the battle that ended it; a best of two, two paid wins today: " + J(after).slice(0, 200));
   const next = await start(RUNNER, "seed-0003");
   assert(next.data.id === 2 && next.data.fresh === true && next.data.wins === 0, "the next run starts from zero");
-  assert((await start(RIVAL, "x")).error === "bad_run" && (await start(RIVAL, "seed-0009", HAND.slice(1))).error === "bad_run", "a seed that is not one, a hand that is not twelve");
+  assert((await start(RIVAL, "x")).error === "bad_run" && (await start(RIVAL, "seed-0009", HAND.slice(1))).error === "bad_run" && (await start(RIVAL, "seed-0009", HAND, FOE, CATS.slice(1))).error === "bad_run", "a seed that is not one, a hand that is not twelve, five categories");
 });
 
 await runTest("only so many wins pay in a day, and the rest still count", async () => {
   // A cap of 3: two are already paid today from the run above.
+  await fill(RUNNER, 2, 0);
   const third = await fight(RUNNER, 2, 0, true, { coins: 3, cap: 3 });
   assert(third.data.credited === 3 && third.data.capped === false, "the third paid win");
+  await fill(RUNNER, 2, 1);
   const fourth = await fight(RUNNER, 2, 1, true, { coins: 4, cap: 3 });
   assert(fourth.data.credited === 0 && fourth.data.capped === true && fourth.data.wins === 2, "the fourth wins and pays nothing: " + J(fourth).slice(0, 160));
   assert((await stateOf(RUNNER)).paid_today === 3, "three paid, not four");
@@ -546,12 +573,20 @@ await runTest("the daily battle: a hand dealt once, a battle played once", async
   const record = (u, rounds, score, { lineup = SIX, shown = { total: score } } = {}) =>
     both("card_daily_record", [u, day, J(lineup), rounds, score, J(shown)], ["::uuid", "::date", "::jsonb", "::integer", "::numeric", "::jsonb"],
       () => battleMock.cards.dailyRecord(u, day, lineup, rounds, score, shown));
-  assert((await record(RUNNER, 4, 400)).error === "no_hand", "nothing can be played before a hand is dealt");
+  const dround = (u, n, { card = [SIX[n]], rounds = roundsTo(n + 1) } = {}) =>
+    both("card_daily_round", [u, day, n, J(card), J(rounds)], ["::uuid", "::date", "::integer", "::jsonb", "::jsonb"], () => battleMock.cards.dailyRound(u, day, n, card, rounds));
+  const dfill = async (u) => { for (let n = 0; n < 5; n++) assert(!(await dround(u, n)).error, `the day's round ${n} is written`); };
+  assert((await record(RUNNER, 4, 400)).error === "no_hand" && (await dround(RUNNER, 0)).error === "no_hand", "nothing can be played before a hand is dealt");
   const first = await deal(RUNNER, HAND);
   assert(first.data.played === false && J(first.data.hand) === J(HAND), "dealt");
   const again = await deal(RUNNER, cardsFrom(13, 12));
   assert(J(again.data.hand) === J(HAND), "asking again answers with the FIRST hand - a second deal cannot replace it");
   assert((await stateOf(RUNNER)).daily.played === false, "and the player's state shows it dealt and unplayed");
+  assert((await record(RUNNER, 4, 400)).error === "stale", "the day cannot be finished before its first five rounds");
+  assert((await dround(RUNNER, 2)).error === "stale" && (await dround(RUNNER, 0, { card: [{ card: 999, finish: "base" }] })).error === "not_owned", "rounds go in order, with cards they own");
+  await dround(RUNNER, 0);
+  assert((await dround(RUNNER, 0)).error === "stale" && (await stateOf(RUNNER)).daily.log.length === 1, "the same round twice is one round");
+  for (let n = 1; n < 5; n++) await dround(RUNNER, n);
   assert((await record(RUNNER, 4, 400, { lineup: [{ card: 999, finish: "base" }, ...SIX.slice(1)] })).error === "not_owned", "a six with a card they do not own");
   const played = await record(RUNNER, 4, 512.34);
   assert(played.data.duplicate === false && played.data.rounds === 4 && played.data.score === 512.3, "recorded, the score to one decimal: " + J(played));
@@ -559,15 +594,16 @@ await runTest("the daily battle: a hand dealt once, a battle played once", async
   assert(second.data.duplicate === true && second.data.rounds === 4 && second.data.shown.total === 512.34, "a second go answers with the first: " + J(second));
   assert((await deal(RUNNER, cardsFrom(13, 12))).data.played === true, "and dealing after it is played still answers with the day as it stands");
   assert((await record(RGUEST, 3, 400)).error === "guest_not_allowed" && (await record(RUNNER, 7, 400)).error === "bad_daily" && (await record(RUNNER, 3, 99999)).error === "bad_daily", "who and what it refuses");
-  await giveDeck(RIVAL); await deal(RIVAL, HAND); await record(RIVAL, 4, 512.3);
-  await giveDeck(QUITTER); await deal(QUITTER, HAND); await record(QUITTER, 5, 100);
+  assert((await dround(RUNNER, 0)).error === "duplicate", "and no round can be played on a day that is finished");
+  await giveDeck(RIVAL); await deal(RIVAL, HAND); await dfill(RIVAL); await record(RIVAL, 4, 512.3);
+  await giveDeck(QUITTER); await deal(QUITTER, HAND); await dfill(QUITTER); await record(QUITTER, 5, 100);
   const mine = await stateOf(RUNNER);
   assert(mine.daily.played === true && mine.daily.rounds === 4 && mine.daily.score === 512.3, "each player's state holds their own day");
 });
 
 await runTest("the two boards, in SQL and in the mock", async () => {
   await start(QUITTER, "seed-0004");
-  await fight(QUITTER, 3, 0, true); await fight(QUITTER, 3, 1, true); // level with runner's best, and still live
+  await fill(QUITTER, 3, 0); await fight(QUITTER, 3, 0, true); await fill(QUITTER, 3, 1); await fight(QUITTER, 3, 1, true); // level with runner's best, and still live
   await start(RIVAL, "seed-0005"); // a run with no win is on no board
   for (const limit of [25, 1]) {
     const a = (await asUser(db, RUNNER, () => db.query("select card_boards($1) as r", [limit]))).rows[0].r;
@@ -602,9 +638,13 @@ await runTest("a database with the first version's tables is cleared of them, on
   assert((await old.query("select to_regclass('public.card_showdowns') as t")).rows[0].t === null, "and card_showdowns is gone");
   const U = uuid(91);
   await addAccount(old, { id: U, username: "keeper" });
-  await old.query("select card_run_start($1, 'seed-keep', $2::jsonb, $3::jsonb)", [U, J(HAND), J(FOE)]);
+  await old.query("select card_run_start($1, 'seed-keep', $2::jsonb, $3::jsonb, $4::jsonb)", [U, J(HAND), J(FOE), J(CATS)]);
   await old.exec(sql("migration-cards.sql"));
-  assert((await old.query("select count(*)::int as n from card_runs")).rows[0].n === 1, "re-running the migration does not drop a run of the new kind");
+  assert((await old.query("select count(*)::int as n from card_runs where status = 'live'")).rows[0].n === 1, "re-running the migration does not drop, or end, a run of the new kind");
+  // A run dealt before v2.28.0 has no category order and cannot be played on: the migration ends it.
+  await old.query("update card_runs set cats = null");
+  await old.exec(sql("migration-cards.sql"));
+  assert((await old.query("select status from card_runs")).rows[0].status === "over", "a run with no category order is ended rather than stranded");
 });
 
 // ---------- copies (v2.26.0): one of a card in a finish; the next is sold ----------

@@ -20,6 +20,27 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.28.0] - 2026-11-14
+
+Test site only. **A battle is played a round at a time.**
+
+### Changed
+- Cards: **you play one card a round, and learn the category after it is down.** Before, the six and their
+  order were set up front with every score on show - so given two tight ends and told which scores more,
+  there was nothing to choose. Now each round shows the spot, the card you are facing and the categories
+  still to come; you play a card from your hand; then the category is revealed and the round is called.
+- Cards: **the rounds are lineup spots in a random order, and the last is always a Flex.** Quarterback, back,
+  receiver and tight end come up in any order with one Flex among them; the final pick is the open one.
+- Cards: **synergies build as you play.** A card is lifted by the cards of yours already down, so an early
+  pick sets up a later one.
+- Cards: "Pick for me" plays the highest-rated card that fits.
+
+### Under the hood
+- The category order is stored with the battle and never sent to the browser; a round is written by its
+  number, so a double tap or a retry cannot play one twice or roll it again.
+- Leaving mid-battle and coming back is the same hand, the same rounds and the same score.
+- Any ladder run left in progress from 2.27.0 is ended by the migration.
+
 ## [2.27.0] - 2026-11-14
 
 Test site only. **The battle is rebuilt: offense against offense.** The owner's redesign - "a fast collectible
