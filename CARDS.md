@@ -106,8 +106,11 @@ card's score in a category is how its real season ranked **at its own position, 
   every time, and the final pick is the open one). The order is the other team's - each of its six cards
   carries the `spot` it plays, and yours answers in the same spot. `spotFits`: a named spot takes its own
   position, a Flex anything but a quarterback.
-- **You play one card a round** (v2.28.0), out of the hand, seeing the spot and the card across from it and
-  NOT the category. `roundProblem(hand, foe, rounds, entry)` answers `null` or one of `malformed`,
+- **You play one card a round** (v2.28.0), out of the hand, seeing the spot and NOT the category - and, since
+  v2.28.1, **not the card across from you either**: the owner played it and said seeing their pick first gave
+  the surprise away. `maskFoe(foe, played)` is what every ladder answer and `card_battle_state` send: the
+  cards already met, and for the rest the spot alone. (The daily battle's team follows from the date and the
+  gauntlet's is a real offense named on the screen, so those are hidden by the screen or not at all.) `roundProblem(hand, foe, rounds, entry)` answers `null` or one of `malformed`,
   `unknown_card`, `bad_finish`, `not_in_hand`, `bad_slot`, `already_played`, `same_player`. It never throws.
 - A hand always has a way through: 2 QB and 2 TE cover their spots and the four backs and four receivers
   cover theirs and both Flexes. `leavesAWay` is what stops a play that would strand a later spot, and
@@ -117,8 +120,11 @@ card's score in a category is how its real season ranked **at its own position, 
 
 **Why a round at a time.** v2.27.0 had the six and their order set before the battle, with every category
 score on show - and the owner's objection was exact: given two tight ends and told which scores more, there
-is no choice. Now the category is hidden until the card is down, the ones already used are known, and the
-card across from you is in view. The choice is what to spend where.
+is no choice. Now the category and the other card are hidden until yours is down, and the categories already
+used are known. The choice is what to spend where.
+
+**What the reveal prints** (v2.28.1): `categoryStat(card, cat)` is the real number a category ranks, in words
+("11 TD in 17 games"). Display only; the score is still the rank.
 
 ## 5. How a round scores
 
@@ -126,7 +132,7 @@ card across from you is in view. The choice is what to spend where.
 The six categories come up **exactly once each, in an order nobody is told** - `shuffleCategories` when the
 battle is dealt. A card's round:
 
-    RATING_SHARE x (rating + finish)  +  the rest from its category score  +  synergies  +  ability  +  luck
+    RATING_SHARE x rating  +  the rest from its category score  +  finish  +  synergies  +  ability  +  luck
 
 The higher total takes the round. Win more rounds; a 3-3 split goes to the higher six-round total, and a dead
 heat to you (`battleResult`). So the overall rating is part of every round and never the whole of one.
@@ -143,6 +149,8 @@ heat to you (`battleResult`). So the overall rating is part of every round and n
   the Scrambler against a higher-rated card. A Game manager lifts the NEXT card his side plays. A Safety
   valve cancels the ability across from him. A card whose ability did not fire is still shown it, as "not
   this round".
+- **A finish** adds `FINISH_BONUS` to every round, whole: Silver 5, Gold 10, Prism 15 (v2.28.1; it was 1, 2, 3
+  folded into the rating, so 40% of it counted). It is a `finish` mod on the round, not part of `roundBase`.
 - **Luck** is a triangular roll within `LUCK_SPREAD` (14), half as wide again for a Gunslinger.
 - Constants as tuned: `RATING_SHARE 0.4`, `CAT_SCALE 1.3`, `LUCK_SPREAD 14`, `CPU_START 38`, `CPU_STEP 7`,
   `CPU_MAX 124`, `CPU_EDGE 0.6`, `DAILY_TARGET 86`.
@@ -154,8 +162,8 @@ must ship together.
 ## 6. Balance, as measured on 2026-11-14 (round at a time)
 
 Three collections climb the ladder. The dull player plays `autoPick` every round. The sharp one searches the
-plans its hand allows against what it can see - the spots to come, the cards across from them, the categories
-not yet used - and never the category order or the luck.
+plans its hand allows against what it can see - the spots to come, the cards of theirs already met, the
+categories not yet used - and never the category order, the card it is about to face, or the luck.
 
 | | Measured | Band |
 |---|---|---|
@@ -164,7 +172,7 @@ not yet used - and never the category order or the luck.
 | Sixty random cards: wins a run | 7.69 | 4 to 9 |
 | The sixty best cards: wins a run | 13.69 | 8 to 16 |
 | Runs that reach forty wins | none | none |
-| Reading each round beats the highest rating every time by | 0.46 wins a run | at least 0.3 |
+| Reading each round beats the highest rating every time by | 0.36 wins a run | at least 0.3 |
 | The sharp player fields a different six | 70% of battles | at least 25% |
 | A lower-rated card takes a round off a higher-rated one | 0.40 a battle | at least 0.3 |
 | An even match replayed: the less likely result | 30% | 8% to 35% |

@@ -750,6 +750,9 @@ begin
   if to_regclass('public.card_decks') is not null then
     execute 'delete from public.card_decks where user_id = $1' using v_uid;
   end if;
+  if to_regclass('public.card_gauntlets') is not null then
+    execute 'delete from public.card_gauntlets where user_id = $1' using v_uid;
+  end if;
   if to_regclass('public.card_dailies') is not null then
     execute 'delete from public.card_dailies where user_id = $1' using v_uid;
   end if;

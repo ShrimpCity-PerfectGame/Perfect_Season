@@ -7,13 +7,15 @@ import { getClient, READ } from "./storage-core.js";
 
 // Every reason card-claim can answer with. tests/test-cards-edge.mjs reads the function's source and fails on
 // one that is not here - a reason this list does not know is a rule that would read as "check your connection".
-const BATTLE_ACTIONS = ["deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round", "sell_copies"];
+const BATTLE_ACTIONS = ["deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round", "sell_copies", "gauntlet_start", "gauntlet_round", "gauntlet_quit"];
 const CARD_PAGE = 1000; // PostgREST's default ceiling on one select
 export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "cards_off", "duplicate", "malformed", "server",
   "unknown_pack", "bad_open", "unavailable", "sold_out", "price_changed", "not_enough",
   // battles (v2.27.0): a deck's and a team's own reasons out of card-logic.mjs, a run's, and the daily battle's
   "incomplete", "unknown_card", "bad_finish", "bad_slot", "same_player", "not_owned", "no_run", "stale",
-  "bad_deck", "no_deck", "not_in_hand", "no_hand", "already_played"];
+  "bad_deck", "no_deck", "not_in_hand", "no_hand", "already_played",
+  // the gauntlet (v2.29.0)
+  "locked", "no_battle"];
 
 // A player's collection, and whether they have claimed their starter deck.
 //   { status: "ok", cards: [{ id, finish, count }], starter: boolean }
@@ -86,7 +88,8 @@ async function callClaim(body) {
 // The database says { card, finish }; the rules and the screens say { id, finish }.
 const fromSql = (list) => (Array.isArray(list) ? list.map((e) => ({ id: e.card, finish: e.finish })) : []);
 // A CPU card keeps the spot it plays: the order of the other side's spots is the order of a battle's rounds.
-const foeFrom = (list) => (Array.isArray(list) ? list.map((e) => ({ id: e.card, finish: e.finish, spot: e.spot })) : []);
+// A card not yet played arrives as its spot alone (v2.28.1): their card is a surprise until yours is down.
+const foeFrom = (list) => (Array.isArray(list) ? list.map((e) => (e.card == null ? { spot: e.spot } : { id: e.card, finish: e.finish, spot: e.spot })) : []);
 const dailyOf = (d) => (d ? { hand: Array.isArray(d.hand) && d.hand[0] && "card" in d.hand[0] ? fromSql(d.hand) : d.hand || [], log: Array.isArray(d.log) ? d.log : [], played: d.played === true, rounds: d.rounds ?? null, score: d.score == null ? null : Number(d.score), shown: d.shown ?? null } : null);
 
 // What the battle screens open on:
@@ -108,6 +111,10 @@ export async function fetchBattleState() {
       status: "ok", today: data.today, deck: data.deck ? fromSql(data.deck) : null,
       run: data.run ? { ...data.run, hand: fromSql(data.run.hand), foe: foeFrom(data.run.foe), rounds: Array.isArray(data.run.rounds) ? data.run.rounds : [] } : null,
       best: Number(data.best) || 0, paidToday: Number(data.paid_today) || 0, daily: dailyOf(data.daily),
+      // The gauntlet: stages cleared, the attempt in progress (stage null when there is none), the last one finished.
+      gauntlet: data.gauntlet
+        ? { cleared: Number(data.gauntlet.cleared) || 0, stage: data.gauntlet.stage ?? null, hand: fromSql(data.gauntlet.hand), rounds: Array.isArray(data.gauntlet.rounds) ? data.gauntlet.rounds : [], last: data.gauntlet.last ?? null, lastStage: data.gauntlet.last_stage ?? null }
+        : { cleared: 0, stage: null, hand: [], rounds: [], last: null, lastStage: null },
     };
   } catch {
     return { status: "error" };
@@ -120,7 +127,7 @@ export async function fetchCardBoards(limit = 25) {
   try {
     const { data, error } = await getClient().rpc("card_boards", { p_limit: limit }, READ);
     if (error || !data || !Array.isArray(data.runs) || !Array.isArray(data.daily)) return { status: "error" };
-    return { status: "ok", today: data.today, runs: data.runs, daily: data.daily.map((r) => ({ ...r, score: Number(r.score) })) };
+    return { status: "ok", today: data.today, runs: data.runs, daily: data.daily.map((r) => ({ ...r, score: Number(r.score) })), gauntlet: Array.isArray(data.gauntlet) ? data.gauntlet : [] };
   } catch {
     return { status: "error" };
   }
@@ -137,6 +144,9 @@ export const playRound = (run, step, round, card) => battleCall({ action: "run_r
 export const endRun = () => battleCall({ action: "run_end" });
 export const dealDaily = () => battleCall({ action: "daily_deal" });
 export const playDailyRound = (round, card) => battleCall({ action: "daily_round", round, card });
+export const startGauntlet = (stage) => battleCall({ action: "gauntlet_start", stage });
+export const playGauntletRound = (stage, round, card) => battleCall({ action: "gauntlet_round", stage, round, card });
+export const quitGauntlet = () => battleCall({ action: "gauntlet_quit" });
 
 // Sell every copy past the first: { ok: true, copies, coins, balance } or { ok: false, reason }. Safe to ask
 // again after an answer that never came - a copy already sold is not there to sell twice.

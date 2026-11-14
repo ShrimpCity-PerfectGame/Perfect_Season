@@ -520,7 +520,19 @@ async function openTabOf(id) {
 }
 const liveRun = (uid) => auth._cards.runs.filter((r) => r.user_id === uid).at(-1);
 // A CPU team this account's starter cards cannot beat, or cannot lose to: the test decides, not the ladder.
-const foeAt = (rating) => buildTeam(mulberry32(rating), rating).map((e) => ({ card: e.id, finish: e.finish, spot: e.spot }));
+// Not just by rating: a round is mostly the CATEGORY score, so a low-rated card with one big category could
+// still take a round off a forced roll. The weak team is the six whose best category is lowest; the strong one
+// the six whose worst category is highest.
+const foeAt = (rating) => {
+  const weak = rating < 60, men = new Set();
+  const worth = (c) => (weak ? -Math.max(...Object.values(c.cats)) - c.rating : Math.min(...Object.values(c.cats)) + c.rating);
+  return buildTeam(mulberry32(rating), rating).map((e) => {
+    const pos = (c) => (e.spot === "FLEX" ? c.pos !== "QB" : c.pos === e.spot);
+    const card = [...CARDS.values()].filter((c) => pos(c) && !men.has(c.pid)).sort((a, b) => worth(b) - worth(a) || a.id - b.id)[0];
+    men.add(card.pid);
+    return { card: card.id, finish: "base", spot: e.spot };
+  });
+};
 // Play n rounds with "Pick for me".
 async function playRounds(n) { for (let i = 0; i < n; i++) { await click(q("[data-best]")); await settle(); await settle(); } }
 let bea;
@@ -539,7 +551,7 @@ await runTest("the ladder: a round at a time - see the spot and who you face, pl
   // Round one: the spot, the card across from it, the categories still to come - and NOT which one this is.
   const choose = q("[data-choose]");
   assert(choose && choose.dataset.choose === "0" && choose.dataset.spot === run.foe[0].spot, "round one is for the spot the server's first card plays: " + choose?.dataset.spot);
-  assert(Number(q(".cb-facing [data-card]").dataset.card) === run.foe[0].card, "and shows the card you are facing");
+  assert(q("[data-facing-hidden]") && !q(".cb-facing [data-card]") && !run.foe.some((e) => container.textContent.includes(CARDS.get(e.card).name) && !run.hand.some((h) => h.card === e.card)), "and does NOT show the card you are facing - or any of theirs");
   assert(/Still to come: Production, Touchdown threat, Big play, Workload, Efficiency, Star power\./.test(q("[data-left]").textContent), "all six categories are still to come: " + q("[data-left]").textContent);
   assert(!container.textContent.includes(run.cats.join()) && !q(".cb-ring"), "nothing says which category round one is");
   const options = qa("[data-play-card]");
@@ -589,7 +601,7 @@ await runTest("a battle survives leaving and coming back mid-way - same hand, sa
   const hand = liveRun(bea).hand.map((e) => e.card).sort().join();
   await goHome(); await openTabOf("run");
   assert(area().dataset.phase === "play" && arena().dataset.rounds === "2" && q("[data-choose]").dataset.choose === "2", "the same battle is there on return, two rounds in");
-  assert(qa(".cb-round").length === 2 && q("[data-you]").textContent === "2", "with the two rounds already played, and the score");
+  assert(qa(".cb-round").length === 2 && q("[data-you]").textContent === "2", "with the two rounds already played, and the score: " + qa(".cb-round").length + " " + q("[data-you]")?.textContent + " " + JSON.stringify(liveRun(bea).rounds.map((r) => r.win)));
   assert(liveRun(bea).hand.map((e) => e.card).sort().join() === hand && auth._cards.runs.filter((r) => r.user_id === bea && r.status === "live").length === 1, "the same hand, and still one live run");
   await click(q("[data-quit]")); await settle(); await settle();
   assert(area().dataset.phase === "idle" && q("[data-best-run]").textContent === "1" && q("[data-paid-left]").textContent === "14", "walking away ends it; the best and the day's paid wins are remembered");
@@ -677,7 +689,7 @@ await runTest("the daily battle: deal once, a round at a time, one result", asyn
   await click(q("[data-deal]")); await settle(); await settle();
   const row = auth._cards.dailies.find((d) => d.user_id === bea);
   const foe = dailyFoe(auth._cards.today());
-  assert(area().dataset.phase === "play" && row && q("[data-choose]").dataset.spot === foe[0].spot && Number(q(".cb-facing [data-card]").dataset.card) === foe[0].id, "dealt, and round one is against the day's first card");
+  assert(area().dataset.phase === "play" && row && q("[data-choose]").dataset.spot === foe[0].spot && q("[data-facing-hidden]") && !q(".cb-facing [data-card]"), "dealt, and round one is against the day's first card");
   const hand = row.hand.map((e) => e.card).join();
   await playRounds(2);
   await goHome(); await openTabOf("daily");

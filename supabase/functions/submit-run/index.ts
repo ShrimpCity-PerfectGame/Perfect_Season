@@ -459,7 +459,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     newBadges = [];
   }
 
-  // The daily card (v2.23.0): finishing the daily draft earns one card off the boards that day dealt.
+  // The daily card (v2.23.0): finishing the daily draft earns a card of one of the six players drafted.
   //
   // IT CAN NEVER COST THE SEASON. Everything above has already been written and paid, so this is its own
   // try/catch, exactly as logRun and the coins are: a grant that fails or throws is logged and answered as
@@ -469,7 +469,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   let card: unknown = null;
   if (mode.kind === "daily" && cardsEnabled() && cardsReady) {
     try {
-      const pick = dailyCard(history.map((h: any) => h.key), secureRand);
+      const pick = dailyCard(history, secureRand);
       if (pick) {
         // Raced against a short timer. If the timer wins the grant may still land a moment later - then the
         // card is in the collection and this answer simply did not show it, which is the right way round.

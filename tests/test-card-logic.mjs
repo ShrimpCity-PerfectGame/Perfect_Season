@@ -285,7 +285,14 @@ if (need("playRound")) {
   ok(fixed.rounds.every((x) => x.foe.mods.some((m) => m.key === "edge" && m.pts === 5) && !x.mine.mods.some((m) => m.key === "edge")), "an edge goes on every card of theirs and none of yours");
   const one = E(F("Adrian Peterson", 2012));
   ok(new Set(C.CATEGORY_IDS.map((k) => C.roundBase(one, k))).size >= 4, "one card is worth different amounts in different categories");
-  eq(Math.round(10 * (C.roundBase(E(F("Adrian Peterson", 2012), "prism"), "star") - C.roundBase(one, "star"))) / 10, Math.round(10 * C.RATING_SHARE * C.FINISH_BONUS.prism) / 10, "a finish adds its bonus to the rating's share");
+  eq(Math.round(10 * (C.roundBase(E(F("Adrian Peterson", 2012), "prism"), "star") - C.roundBase(one, "star"))) / 10, 0, "a finish is not in a card's base");
+  {
+    const foeSix = C.buildTeam(mulberry32(5), 60), flat = () => 0.5;
+    const plain = C.playRound(foeSix, [], E(F("Adrian Peterson", 2012)), "star", flat), shiny = C.playRound(foeSix, [], E(F("Adrian Peterson", 2012), "prism"), "star", flat);
+    eq(Math.round(10 * (shiny.mine.total - plain.mine.total)) / 10, 15, "it is added whole to the round: a Prism plays fifteen points up");
+    ok(shiny.mine.mods.some((m) => m.key === "finish" && m.pts === 15 && m.label === "Prism finish") && !plain.mine.mods.some((m) => m.key === "finish"), "and is named as a bonus of its own");
+    eq([C.FINISH_BONUS.base, C.FINISH_BONUS.silver, C.FINISH_BONUS.gold, C.FINISH_BONUS.prism].join(), "0,5,10,15", "five, ten and fifteen");
+  }
 
   // The abilities that depend on the battle so far - which is what makes the next card a decision.
   const mgr = byPos("QB").find((c) => c.archetype === "manager"), deepWr = byPos("WR").find((c) => c.archetype === "deep" && c.team !== mgr.team && c.season !== mgr.season);
@@ -399,6 +406,13 @@ if (need("starterFill")) {
   eq(C.cardBoardKey(C.CARDS.get(dc.id)), "NE|1", "a daily card comes off one of the day's boards");
   eq(draws, 2, "in exactly two draws");
   ok(C.FINISHES.includes(dc.finish), "with a finish");
+  // The card is one of the players DRAFTED, not just somebody off the same board.
+  const brady = BOARDS["NE|1"].find((p) => p.name === "Tom Brady" && p.season === 2007);
+  const kc = BOARDS["KC|0"][0];
+  const picks = [{ key: "NE|1", id: brady.id, season: brady.season }, { key: "KC|0", id: kc.id, season: kc.season }];
+  const got = new Set(Array.from({ length: 200 }, (_, i) => C.dailyCard(picks, mulberry32(i + 1)).id));
+  eq([...got].map((id) => C.CARDS.get(id).name).sort().join(), [brady.name, kc.name].sort().join(), "a daily card is one of the players drafted, and either can come up");
+  eq(C.cardBoardKey(C.CARDS.get(C.dailyCard([{ key: "NE|1", id: -5, season: 1901 }], mulberry32(3)).id)), "NE|1", "a pick with no card falls back to its board rather than earning nothing");
   eq(C.dailyCard([], mulberry32(1)), null, "no boards, no card");
   eq(C.dailyCard(["XX|9"], mulberry32(1)), null, "a board that is not one, no card");
   eq(C.dailyCard(null, mulberry32(1)), null, "nothing at all, no card");

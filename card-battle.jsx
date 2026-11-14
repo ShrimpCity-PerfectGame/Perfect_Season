@@ -20,7 +20,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchBattleState, fetchCardBoards, startRun, playRound, endRun, saveDeck, dealDaily, playDailyRound } from "./storage.js";
 import {
   CARDS, CATEGORIES, FINISH_BONUS, DECK_SHAPE, HAND_SHAPE, POSITIONS, archetypeLabel, categoryLabel, spotLabel, abilityOf,
-  deckProblem, bestDeck, playable, autoPick, playedSynergies, battleResult, ladderName, dailyFoe,
+  deckProblem, bestDeck, playable, autoPick, playedSynergies, battleResult, ladderName, dailyFoe, maskFoe, categoryStat,
+  RATING_SHARE,
 } from "./card-logic.mjs";
 import { COIN_RULES, cardWinCoins } from "./rewards.mjs";
 import { Coins, NameLink } from "./cosmetics.jsx";
@@ -42,6 +43,8 @@ export const LINEUP_SENTENCES = {
   no_hand: "Today's hand hasn't been dealt yet. Deal it first.",
   no_run: "That run is over. Start a new one.",
   stale: "That run has moved on since this page loaded. Here is where it stands now.",
+  locked: "That stage isn't open yet. Beat the one before it first.",
+  no_battle: "That battle is over. Start it again from the gauntlet.",
 };
 // Everything else a battle can be refused for. Not one of these may say a battle was or was not played unless
 // the function itself said so: the three at the bottom are the unknown ones, and the screen only adds "it was
@@ -210,18 +213,23 @@ function plays() {
 const BEATS = [900, 1300, 700, 1300];
 const SPEEDS = [[1, "Normal"], [2, "Fast"]];
 
-function Side({ who, card, shot, beat, won, lost }) {
+function Side({ who, card, shot, cat, beat, won, lost }) {
   const c = CARDS.get(card.id);
   const state = beat >= 3 ? (won ? " cb-win" : lost ? " cb-lose" : "") : beat === 2 ? " cb-charge" : "";
   return (
     <div className={`cb-side cb-side-${who}${state}${card.finish === "prism" || card.finish === "gold" ? " cb-rare" : ""}`}>
       {c ? <CardFace card={c} finish={card.finish} /> : <span className="cb-row-gone">A card this page doesn't know</span>}
       {beat >= 1 && (
+        <p className="cb-real" data-real>{c ? categoryStat(c, cat) : ""}</p>
+      )}
+      {beat >= 1 && (
         <dl className="cb-stats2">
-          <div><dt>Category</dt><dd>{shot.score}</dd></div>
-          <div><dt>Base</dt><dd>{fmt(shot.base)}</dd></div>
+          <div><dt>{categoryLabel(cat)} score</dt><dd>{shot.score}<small> of 99</small></dd></div>
+          <div><dt>Card rating</dt><dd>{Math.round(shot.rating)}</dd></div>
+          <div><dt>Points from both</dt><dd>{fmt(shot.base)}</dd></div>
+          {shot.mods.length > 0 && <div><dt>Bonuses</dt><dd>{signed(shot.mods.reduce((n, m) => n + m.pts, 0))}</dd></div>}
           <div><dt>Luck</dt><dd>{signed(shot.roll)}</dd></div>
-          <div className="cb-tot"><dt>Total</dt><dd>{fmt(shot.total)}</dd></div>
+          <div className="cb-tot"><dt>Round total</dt><dd>{fmt(shot.total)}</dd></div>
         </dl>
       )}
       {beat >= 1 && (
@@ -283,21 +291,26 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
         <div className="cb-ring" key={seen} data-beat={beat}>
           <p className="cb-cat"><span>Round {seen + 1} · {spotLabel(r.spot)}</span><b>{categoryLabel(r.cat)}</b></p>
           <div className="cb-duel">
-            <Side who="you" card={r.mine} shot={r.mine} beat={beat} won={r.win === "me"} lost={r.win === "foe"} />
+            <Side who="you" card={r.mine} shot={r.mine} cat={r.cat} beat={beat} won={r.win === "me"} lost={r.win === "foe"} />
             <div className="cb-vsbig" aria-hidden="true"><span>VS</span>{beat === 2 && <i className="cb-burst" />}</div>
-            <Side who="cpu" card={r.foe} shot={r.foe} beat={beat} won={r.win === "foe"} lost={r.win === "me"} />
+            <Side who="cpu" card={r.foe} shot={r.foe} cat={r.cat} beat={beat} won={r.win === "foe"} lost={r.win === "me"} />
           </div>
-          {beat >= 3 && <p className="cb-call" aria-hidden="true">{r.win === "me" ? "Round to you" : r.win === "foe" ? `Round to ${foeName}` : "Dead heat"}</p>}
+          {beat >= 1 && <p className="cb-rule cb-ring-rule">This round is {categoryLabel(r.cat)}: {CATEGORIES.find((c) => c.id === r.cat)?.blurb.toLowerCase()}, ranked at each player's position in his era. Points are {Math.round((1 - RATING_SHARE) * 100)}% that score and {Math.round(RATING_SHARE * 100)}% card rating, plus bonuses and luck. Higher total takes the round.</p>}
+          {beat >= 3 && <p className="cb-call" aria-hidden="true">{r.win === "me" ? "Round to you" : r.win === "foe" ? `Round to ${foeName}` : "Dead heat"}<small>{fmt(r.mine.total)} to {fmt(r.foe.total)}</small></p>}
         </div>
       )}
 
       {!animating && next < total && (
         <div className="cb-choose" data-choose={next} data-spot={foe[next].spot}>
           <p className="cb-cat"><span>Round {next + 1} of {total}</span><b>{spotLabel(foe[next].spot)}</b></p>
-          <div className="cb-facing">
-            <h3 className="cb-h3">You're facing</h3>
-            <CardRow entry={foe[next]} mods={playedSynergies(foe[next], rounds.map((x) => x.foe))} />
-          </div>
+          {foe[next].id != null ? (
+            <div className="cb-facing" data-facing>
+              <h3 className="cb-h3">You're facing</h3>
+              <CardRow entry={foe[next]} mods={playedSynergies(foe[next], rounds.map((x) => x.foe))} />
+            </div>
+          ) : (
+            <p className="cb-facing cb-hidden" data-facing-hidden><b>{foeName}</b> has a {spotLabel(foe[next].spot).toLowerCase()} waiting. You'll see who when you play yours.</p>
+          )}
           <p className="cb-left" data-left><b>Still to come:</b> {left.map((c) => c.label).join(", ")}. You'll see which one after you play.</p>
           <div className="cb-lu-top">
             <h3 className="cb-h3">Play a {spotLabel(foe[next].spot).toLowerCase()}</h3>
@@ -314,7 +327,7 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
             ))}
           </ul>
           {next + 1 < total && (
-            <p className="cb-coming"><b>Then:</b> {foe.slice(next + 1).map((e, i) => `${spotLabel(e.spot)} vs ${CARDS.get(e.id)?.name}${i === total - next - 2 ? "" : ", "}`).join("")}.</p>
+            <p className="cb-coming"><b>Then:</b> {foe.slice(next + 1).map((e) => (e.id != null ? `${spotLabel(e.spot)} vs ${CARDS.get(e.id)?.name}` : spotLabel(e.spot))).join(", ")}.</p>
           )}
         </div>
       )}
@@ -358,7 +371,7 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
                   <b>{name(x.mine)}</b> {fmt(x.mine.total)} {x.win === "me" ? "beat" : x.win === "foe" ? "lost to" : "tied"} <b>{name(x.foe)}</b> {fmt(x.foe.total)}
                 </span>
                 <span className="cb-round-why">
-                  {x.mine.line}. Category {x.mine.score} to {x.foe.score}, luck {signed(x.mine.roll)} to {signed(x.foe.roll)}.
+                  {categoryStat(CARDS.get(x.mine.id), x.cat)} against {categoryStat(CARDS.get(x.foe.id), x.cat)}. {categoryLabel(x.cat)} score {x.mine.score} to {x.foe.score}, luck {signed(x.mine.roll)} to {signed(x.foe.roll)}.
                   {x.mine.mods.length > 0 && <> You: {x.mine.mods.map((m) => `${signed(m.pts)} ${m.label}`).join(", ")}.</>}
                   {x.foe.mods.length > 0 && <> Them: {x.foe.mods.map((m) => `${signed(m.pts)} ${m.label}`).join(", ")}.</>}
                 </span>
@@ -569,7 +582,8 @@ export function BattleArea({ mode, rows, onBalance }) {
         )}
         {day && day.played && <p className="cb-lead" data-played>You took <b>{day.rounds}</b> of 6 rounds for <b>{fmt(day.score)}</b> points. One go a day - the next opens at midnight UTC.</p>}
         {alert}
-        {day && <Arena key={st.today} hand={day.hand} foe={foe} rounds={day.played && day.shown?.rounds ? day.shown.rounds : day.log} foeName="CPU" busy={busy} onPlay={playDay} />}
+        {/* The day's team is the same for everyone and follows from the date, but it is still not SHOWN before it is played. */}
+        {day && <Arena key={st.today} hand={day.hand} foe={day.played ? foe : maskFoe(foe, day.log.length)} rounds={day.played && day.shown?.rounds ? day.shown.rounds : day.log} foeName="CPU" busy={busy} onPlay={playDay} />}
       </div>
     );
   }
@@ -618,7 +632,7 @@ export function BattleArea({ mode, rows, onBalance }) {
         <ul className="cb-how">
           <li>You're dealt twelve cards from your deck: 2 quarterbacks, 4 backs, 4 receivers, 2 tight ends.</li>
           <li>Six rounds, one for each spot - quarterback, back, receiver, tight end and two flex - in a random order, a flex last.</li>
-          <li>Each round you see who you're facing and play a card. Then the category is revealed: each of the six comes up once.</li>
+          <li>Each round you play a card for the spot without seeing theirs. Then both cards and the category are revealed: each of the six comes up once.</li>
           <li>Win more rounds than they do. One lost battle ends the run.</li>
           <li>A win pays {cardWinCoins(1)} coins, plus one for every win the run already has, up to {cardWinCoins(99)}. The first {COIN_RULES.paidCardWinsPerDay} wins of a day pay.</li>
         </ul>
@@ -699,6 +713,12 @@ export const CARD_BATTLE_CSS = `
 /* ---- the arena ---- */
 .cb-choose{display:grid;gap:12px}
 .cb-facing{display:grid;gap:8px;background:var(--ink);border-radius:14px;padding:12px}
+.cb-facing.cb-hidden{display:block;margin:0;color:var(--bg);font-size:15px;line-height:1.4}
+.cb-facing.cb-hidden b{color:var(--accent)}
+.cb-real{margin:0;font-weight:800;font-size:15px;line-height:1.25;text-align:center;color:var(--ink);animation:cb-pop .35s cubic-bezier(.2,1.4,.4,1) both}
+.cb-ring-rule{text-align:center;font-size:12.5px}
+.cb-stats2 small{font-weight:600;color:var(--muted);font-size:.8em}
+.cb-call small{display:block;font-family:Inter,system-ui,sans-serif;font-weight:800;font-size:13px;letter-spacing:.04em;margin-top:4px}
 .cb-facing .cb-h3{color:var(--accent)}
 .cb-left,.cb-coming{margin:0;font-size:14px;line-height:1.45;color:var(--muted)}
 .cb-left b,.cb-coming b{color:var(--ink)}
@@ -731,7 +751,7 @@ export const CARD_BATTLE_CSS = `
 .cb-side.cb-win .cd-card{transform:scale(1.06);box-shadow:0 0 0 4px var(--accent),0 0 0 7px var(--ink)}
 .cb-side.cb-lose .cd-card{filter:grayscale(1) brightness(.8);animation:cb-shake .45s both}
 .cb-rare .cd-card{box-shadow:0 0 0 3px var(--violet)}
-.cb-vsbig{position:relative;align-self:center;margin-top:60px;font-family:var(--display);font-size:clamp(26px,8vw,40px);line-height:1;color:var(--ink);animation:cb-vs .5s .25s cubic-bezier(.2,1.6,.4,1) both}
+.cb-vsbig{position:relative;align-self:start;margin-top:clamp(64px,22vw,96px);font-family:var(--display);font-size:clamp(26px,8vw,40px);line-height:1;color:var(--ink);animation:cb-vs .5s .25s cubic-bezier(.2,1.6,.4,1) both}
 .cb-burst{position:absolute;left:50%;top:50%;width:90px;height:90px;margin:-45px 0 0 -45px;border-radius:50%;background:radial-gradient(circle,var(--accent) 0 35%,transparent 36%),conic-gradient(from 0deg,var(--orange) 0 10%,transparent 10% 20%,var(--orange) 20% 30%,transparent 30% 40%,var(--orange) 40% 50%,transparent 50% 60%,var(--orange) 60% 70%,transparent 70% 80%,var(--orange) 80% 90%,transparent 90%);z-index:-1;animation:cb-boom .6s both}
 .cb-stats2{margin:0;width:100%;display:grid;gap:2px;animation:cb-pop .35s cubic-bezier(.2,1.4,.4,1) both}
 .cb-stats2 div{display:flex;justify-content:space-between;gap:6px;border-bottom:1px solid var(--line2);padding:2px 2px;font-size:13px}
@@ -796,7 +816,7 @@ export const CARD_BATTLE_CSS = `
   .cb-spd::after{content:"";position:absolute;inset:-8px -2px}
 }
 @media (prefers-reduced-motion:reduce){
-  .cb-cat,.cb-side .cd-card,.cb-vsbig,.cb-burst,.cb-stats2,.cb-trig,.cb-call,.cb-stamp{animation:none}
+  .cb-cat,.cb-side .cd-card,.cb-vsbig,.cb-burst,.cb-stats2,.cb-real,.cb-trig,.cb-call,.cb-stamp{animation:none}
   .cb-side .cd-card{transition:none}
 }
 `;

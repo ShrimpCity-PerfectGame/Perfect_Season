@@ -222,7 +222,7 @@ await runTest("every reason the function can give is one the client knows", asyn
   const battleTable = src.match(/const BATTLE_REFUSALS[^=]*=\s*\{([^}]+)\}/);
   assert(battleTable, "the function's table of battle refusals was found");
   const battleReasons = [...battleTable[1].matchAll(/([a-z_]+)\s*:/g)].map((m) => m[1]);
-  assert(battleReasons.length === 7, "seven of them: " + battleReasons);
+  assert(battleReasons.length === 9, "nine of them: " + battleReasons);
   for (const r of battleReasons) assert(CARD_REFUSALS.includes(r), `storage-cards.js does not know the battle reason "${r}"`);
   const logic = readFileSync(new URL("../card-logic.mjs", import.meta.url), "utf8");
   const body = logic.slice(logic.indexOf("export function deckProblem"), logic.indexOf("// ---------- Synergies")) + logic.slice(logic.indexOf("export function roundProblem"), logic.indexOf("// The cards in a hand that may be played next"));
@@ -311,8 +311,13 @@ await runTest("the ladder: a hand dealt by the function, a battle played a round
   const started = await post({ action: "run_start" });
   assert(started.status === 200 && started.body.run.wins === 0 && started.body.run.rounds.length === 0, "a run: " + JSON.stringify(started.body).slice(0, 160));
   assert(!JSON.stringify(started.body).includes("seed") && !JSON.stringify(started.body).includes("cats"), "the seed and the category order are not in the answer");
-  const run = started.body.run, row = s.cards.runs[0];
-  assert(/^[0-9a-f]{32}$/.test(row.seed) && JSON.stringify(run.foe) === JSON.stringify(ladderFoe(row.seed, 0)), "the first CPU team follows from a seed the function made");
+  const row = s.cards.runs[0];
+  const whole = ladderFoe(row.seed, 0);
+  assert(/^[0-9a-f]{32}$/.test(row.seed) && JSON.stringify(row.foe.map((e) => ({ id: e.card, finish: e.finish, spot: e.spot }))) === JSON.stringify(whole), "the first CPU team follows from a seed the function made");
+  // THEIR CARDS ARE HIDDEN UNTIL PLAYED: the answer carries six spots and not one card.
+  assert(started.body.run.foe.length === 6 && started.body.run.foe.every((e, i) => e.id === undefined && e.finish === undefined && e.spot === whole[i].spot), "the answer says which spots are coming and not who plays them: " + JSON.stringify(started.body.run.foe));
+  assert(!whole.some((e) => JSON.stringify(started.body).includes(`"id":${e.id},`) && !started.body.run.hand.some((h) => h.id === e.id)), "no card of theirs is anywhere in it");
+  const run = { ...started.body.run, foe: whole };
   assert(run.foe[5].spot === "FLEX" && run.foe.map((e) => e.spot).sort().join() === "FLEX,FLEX,QB,RB,TE,WR", "their six carry the six spots, a Flex last");
   assert(row.cats.slice().sort().join() === [...CATEGORY_IDS].sort().join(), "the order of the six categories is drawn and kept with the run");
   const owned = s.cards.owned(ME).map((o) => o.card_id);
@@ -326,6 +331,7 @@ await runTest("the ladder: a hand dealt by the function, a battle played a round
   const r1 = await post({ action: "run_round", run: run.id, step: 0, round: 0, card: first, cat: "star", win: "foe", roll: 99, user: GUEST, p_user: GUEST });
   assert(r1.status === 200 && r1.body.done === false && r1.body.round.cat === cats[0] && r1.body.round.spot === run.foe[0].spot, "round one is played on the run's first category, for the first spot: " + JSON.stringify(r1.body.round).slice(0, 120));
   assert(r1.body.round.mine.id === first.id && r1.body.round.foe.id === run.foe[0].id && r1.body.run.rounds.length === 1 && row.rounds.length === 1, "your card against theirs, and the round is written down");
+  assert(r1.body.run.foe[0].id === run.foe[0].id && r1.body.run.foe.slice(1).every((e) => e.id === undefined && typeof e.spot === "string"), "the card just met is shown now; the five to come are still spots");
   const again = await post({ action: "run_round", run: run.id, step: 0, round: 0, card: first });
   assert(again.status === 409 && again.body.reason === "stale" && row.rounds.length === 1, "the same round again - a double tap - is stale: " + JSON.stringify(again.body));
   // The rest of the battle.
@@ -337,7 +343,7 @@ await runTest("the ladder: a hand dealt by the function, a battle played a round
   assert(b.rounds.map((x) => x.spot).join() === run.foe.map((e) => e.spot).join() && b.team.length === 6, "one round a spot, and the six that were played");
   const call = battleCalls(s, "card_run_battle")[0].args;
   assert(call.p_user === ME && call.p_coins === cardWinCoins(1) && call.p_cap === COIN_RULES.paidCardWinsPerDay && call.p_win === true, "the caller, the first win's pay and the day's cap are the function's own");
-  assert(JSON.stringify(end.run.foe) === JSON.stringify(ladderFoe(row.seed, 1)) && end.run.wins === 1 && end.run.status === "live" && end.run.rounds.length === 0, "the next team follows from the same seed, with no rounds played");
+  assert(JSON.stringify(end.run.foe) === JSON.stringify(ladderFoe(row.seed, 1).map((e) => ({ spot: e.spot }))) && JSON.stringify(row.foe.map((e) => e.card)) === JSON.stringify(ladderFoe(row.seed, 1).map((e) => e.id)) && end.run.wins === 1 && end.run.status === "live" && end.run.rounds.length === 0, "the next team follows from the same seed, with no rounds played");
   assert(end.run.hand.length === 12 && JSON.stringify(end.run.hand) === JSON.stringify(handOf(s, ME)), "and the next hand is dealt and stored with the win");
   assert(end.coins.credited === cardWinCoins(1) && end.coins.balance === s.wallet.balanceOf(ME), "the win was paid: " + JSON.stringify(end.coins));
   assert(s.cards.runs[0].last.total === b.total && JSON.stringify(s.cards.runs[0].cats) !== undefined, "the battle is kept on the run, for a browser that never got this answer");

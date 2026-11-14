@@ -20,6 +20,30 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.28.1] - 2026-11-14
+
+Test site only. Three things the owner found playing 2.28.0.
+
+### Changed
+- Cards: **their card is hidden until you play yours.** A round shows the spot and nothing about who is across
+  from you; both cards and the category are revealed together. The server no longer sends the cards of a
+  ladder team that have not been played, so this is not only the screen being polite.
+- Cards: **the reveal says what the category is about.** Under each card is the real number the category
+  ranks - "11 TD in 17 games" for Touchdown threat, "13.7 yards a completion" for Big play - then that
+  category's score out of 99, the card's rating, the points the two make, bonuses, luck and the round total,
+  with one line saying how they add up. Before, it read "Category 93, Base 113.3" under a card showing yards.
+- Cards: **the daily card is one of the six players you drafted**, not anybody from one of those teams.
+- Cards: **a finish now matters in a battle.** Silver, Gold and Prism add 5, 10 and 15 points to every round the
+  card plays, shown as a bonus of its own. It was 1, 2 and 3 added to the rating, of which 40% reached a round -
+  Silver was worth less than half a point.
+
+### Fixed
+- Cards: the VS burst no longer sits on top of the numbers on a phone.
+
+### Under the hood
+- The database and function for the historical gauntlet are in place (twelve real offenses, a stage at a time)
+  with no screen yet; nothing on the site reaches them.
+
 ## [2.28.0] - 2026-11-14
 
 Test site only. **A battle is played a round at a time.**

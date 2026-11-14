@@ -6,8 +6,8 @@
 // No Node-only import here: tests/mock-supabase.mjs is bundled into a browser page by tools/ui-harness. The
 // card catalog is therefore whatever card-logic.mjs has been initialised with - tests/helpers.mjs does it for
 // the jsdom suites, and in the harness the app's own loadCardData does.
-import { CARDS, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, shuffleCategories, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey } from "../card-logic.mjs";
-import { COIN_RULES, cardWinCoins, cardSellCoins } from "../rewards.mjs";
+import { CARDS, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, shuffleCategories, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey, maskFoe, GAUNTLET, gauntletFoe, gauntletEdge, gauntletRound } from "../card-logic.mjs";
+import { COIN_RULES, cardWinCoins, cardSellCoins, gauntletCoins } from "../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../card-packs.mjs";
 
 const FINISHES = ["base", "silver", "gold", "prism"];
@@ -35,6 +35,7 @@ export function makeCards(state, { wallet = null } = {}) {
   const runs = [];    // { id, user_id, seed, wins, hand, foe, status, last, started_at, ended_at }
   const dailies = []; // { date, user_id, hand, rounds, score, shown, dealt_at, played_at }
   const decks = new Map(); // user_id -> [{ card, finish }]
+  const gauntlets = new Map(); // user_id -> { cleared, stage, hand, cats, rounds, last, last_stage, cleared_at }
   let nextRun = 1, tick = 0;
   const stamp = () => new Date(Date.now() + tick++).toISOString(); // strictly increasing, like now() across statements
   const utcDay = () => new Date().toISOString().slice(0, 10);
@@ -52,7 +53,7 @@ export function makeCards(state, { wallet = null } = {}) {
   const api = {
     enabled: true,
     // ---------- battles (v2.27.0): supabase/migration-cards.sql, raise for raise and in its order ----------
-    runs, dailies, decks,
+    runs, dailies, decks, gauntlets,
     today: utcDay,
     nextRolls: null,      // [0,1) draws the coming ladder ROUNDS use instead of fresh ones, four a round - for a test that needs to know
     nextHand: null,       // (deck) => hand: how the next hand is dealt, instead of at random
@@ -198,6 +199,57 @@ export function makeCards(state, { wallet = null } = {}) {
       row.rounds = rounds; row.score = Math.round(score * 10) / 10; row.shown = shown; row.played_at = stamp();
       return { duplicate: false, rounds: row.rounds, score: row.score, shown: row.shown };
     },
+    // public.card_gauntlet_start
+    gauntletStart(userId, stage, hand, cats) {
+      who(userId);
+      if (typeof stage !== "number" || !Number.isInteger(stage) || stage < 0 || stage > 99 || !Array.isArray(cats) || cats.length !== 6) throw new Error("bad_gauntlet");
+      api.listCheck(hand, 12, "bad_gauntlet");
+      const before = gauntlets.get(userId);
+      const row = before || { cleared: 0, stage: null, hand: null, cats: null, rounds: [], last: null, last_stage: null, cleared_at: null };
+      let fresh = false;
+      if (row.stage === null) {
+        if (stage > row.cleared) throw new Error("locked"); // the SQL's insert is undone by the raise
+        Object.assign(row, { stage, hand, cats, rounds: [] });
+        fresh = true;
+      }
+      gauntlets.set(userId, row);
+      return { cleared: row.cleared, stage: row.stage, hand: row.hand, rounds: row.rounds, fresh };
+    },
+    // public.card_gauntlet_round
+    gauntletRound(userId, stage, round, card, rounds) {
+      who(userId);
+      const whole = (n) => typeof n === "number" && Number.isInteger(n);
+      if (!whole(stage) || !whole(round) || round < 0 || round > 4 || !Array.isArray(rounds) || rounds.length !== round + 1) throw new Error("bad_gauntlet");
+      const row = gauntlets.get(userId);
+      if (!row || row.stage === null) throw new Error("no_battle");
+      if (row.stage !== stage || row.rounds.length !== round) throw new Error("stale");
+      if (!api.lineupOwned(userId, card, 1)) throw new Error("not_owned");
+      row.rounds = rounds;
+      return { rounds };
+    },
+    // public.card_gauntlet_finish
+    gauntletFinish(userId, stage, lineup, win, last, coins) {
+      who(userId);
+      const whole = (n) => typeof n === "number" && Number.isInteger(n);
+      if (!whole(stage) || typeof win !== "boolean" || !last || typeof last !== "object" || Array.isArray(last) || !whole(coins) || coins < 0 || coins > 1000) throw new Error("bad_gauntlet");
+      wallet.lock(userId);
+      const row = gauntlets.get(userId);
+      if (!row || row.stage === null) throw new Error("no_battle");
+      if (row.stage !== stage || row.rounds.length !== 5) throw new Error("stale");
+      if (!api.lineupOwned(userId, lineup, 6)) throw new Error("not_owned");
+      const first = win && row.stage === row.cleared;
+      if (first) { row.cleared += 1; row.cleared_at = stamp(); }
+      Object.assign(row, { stage: null, hand: null, cats: null, rounds: [], last, last_stage: stage });
+      const credited = first && coins > 0 ? wallet.apply(userId, coins, "card_gauntlet", String(stage)) : 0;
+      return { cleared: row.cleared, first, credited, balance: wallet.balanceOf(userId) };
+    },
+    // public.card_gauntlet_quit
+    gauntletQuit(userId) {
+      const row = gauntlets.get(userId);
+      if (!row || row.stage === null) return { ended: false };
+      Object.assign(row, { stage: null, hand: null, cats: null, rounds: [] });
+      return { ended: true };
+    },
     // public.card_battle_state, for whoever is signed in
     battleState() {
       const uid = state.currentUserId();
@@ -207,10 +259,11 @@ export function makeCards(state, { wallet = null } = {}) {
       return {
         today: utcDay(),
         deck: uid ? decks.get(uid) ?? null : null,
-        run: run ? { id: run.id, wins: run.wins, status: run.status, hand: run.hand, foe: run.foe, rounds: run.rounds, last: run.last } : null,
+        run: run ? { id: run.id, wins: run.wins, status: run.status, hand: run.hand, foe: run.foe.map((e, i) => (i < run.rounds.length ? e : { spot: e.spot })), rounds: run.rounds, last: run.last } : null,
         best: mine.reduce((m, r) => Math.max(m, r.wins), 0),
         paid_today: uid && wallet ? paidToday(uid) : 0,
         daily: day ? { hand: day.hand, log: day.log, played: day.played_at !== null, rounds: day.rounds, score: day.score, shown: day.shown } : null,
+        gauntlet: (() => { const g = uid ? gauntlets.get(uid) : null; return g ? { cleared: g.cleared, stage: g.stage, hand: g.hand, rounds: g.rounds, last: g.last, last_stage: g.last_stage } : null; })(),
       };
     },
     // public.card_boards
@@ -228,7 +281,11 @@ export function makeCards(state, { wallet = null } = {}) {
         .map(({ d, p }) => ({ username: p.username, rounds: d.rounds, score: d.score, at: d.played_at }))
         .sort((a, b) => b.rounds - a.rounds || b.score - a.score || (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) || byName(a, b)).slice(0, n)
         .map(({ username, rounds, score }) => ({ username, rounds, score }));
-      return { today: utcDay(), runs: runBoard, daily: day };
+      const gauntlet = [...gauntlets].map(([id, g]) => ({ g, p: state.profiles.get(id) })).filter((x) => x.p && !x.p.guest && x.g.cleared > 0)
+        .map(({ g, p }) => ({ username: p.username, cleared: g.cleared, at: g.cleared_at }))
+        .sort((a, b) => b.cleared - a.cleared || (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) || byName(a, b)).slice(0, n)
+        .map(({ username, cleared }) => ({ username, cleared }));
+      return { today: utcDay(), runs: runBoard, daily: day, gauntlet };
     },
     packs,
     packsReadFail: false, // makes a client select on card_packs answer with an error
@@ -320,17 +377,18 @@ export function makeCards(state, { wallet = null } = {}) {
     // delete_account's cards arm.
     forget(userId) {
       for (const list of [owned, grants, runs, dailies]) for (let i = list.length - 1; i >= 0; i--) if (list[i].user_id === userId) list.splice(i, 1);
-      decks.delete(userId);
+      decks.delete(userId); gauntlets.delete(userId);
     },
-    clear() { owned.length = 0; grants.length = 0; runs.length = 0; dailies.length = 0; decks.clear(); },
+    clear() { owned.length = 0; grants.length = 0; runs.length = 0; dailies.length = 0; decks.clear(); gauntlets.clear(); },
 
     // supabase/functions/card-claim, answer for answer and in its order.
     async claimStarter(body) {
       const uid = state.currentUserId();
       if (!uid) return cardHttpError("signed_out", 401);
-      if (!body || !["starter", "open_pack", "sell_copies", "deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round"].includes(body.action)) return cardHttpError("malformed", 400);
+      if (!body || !["starter", "open_pack", "sell_copies", "deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round", "gauntlet_start", "gauntlet_round", "gauntlet_quit"].includes(body.action)) return cardHttpError("malformed", 400);
       if (body.action === "run_round" && (!Number.isInteger(body.run) || !Number.isInteger(body.step) || body.step < 0)) return cardHttpError("malformed", 400);
-      if ((body.action === "run_round" || body.action === "daily_round") && (!Number.isInteger(body.round) || body.round < 0 || body.round > 5)) return cardHttpError("malformed", 400);
+      if ((body.action === "run_round" || body.action === "daily_round" || body.action === "gauntlet_round") && (!Number.isInteger(body.round) || body.round < 0 || body.round > 5)) return cardHttpError("malformed", 400);
+      if ((body.action === "gauntlet_start" || body.action === "gauntlet_round") && (!Number.isInteger(body.stage) || body.stage < 0 || body.stage >= GAUNTLET.length)) return cardHttpError("malformed", 400);
       if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1 || body.price > 1000000)) return cardHttpError("malformed", 400);
       if (!api.enabled) return cardHttpError("cards_off", 403);
       const profile = state.profiles.get(uid);
@@ -353,7 +411,7 @@ export function makeCards(state, { wallet = null } = {}) {
         if (api.openFails) { api.openFails = false; return { data: null, error: { name: "FunctionsFetchError", message: "Failed to send" } }; }
         return { data: { ok: true, cards: bought.cards.map((c) => (c.sold != null ? { id: c.card, finish: c.finish, sold: c.sold } : { id: c.card, finish: c.finish })), balance: bought.balance, stockLeft: bought.stock_left ?? null, duplicate: bought.duplicate }, error: null };
       }
-      if (["deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round"].includes(body.action)) return api.battle(uid, body);
+      if (["deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round", "gauntlet_start", "gauntlet_round", "gauntlet_quit"].includes(body.action)) return api.battle(uid, body);
       if (body.action === "sell_copies") {
         let sold;
         try { sold = api.sellCopies(uid, api.copies(uid).filter((c) => CARDS.has(c.card)).map((c) => ({ card: c.card, finish: c.finish, each: sellFor({ id: c.card, finish: c.finish }) })), "mock-sweep-0001"); }
@@ -376,7 +434,7 @@ export function makeCards(state, { wallet = null } = {}) {
   api.sellFor = sellFor;
   api.sweepFails = false; // the next sweep HAPPENS and its answer is lost
   // supabase/functions/card-claim's battle half, answer for answer and in its order.
-  const BATTLE_REFUSALS = { no_profile: 400, guest_not_allowed: 403, no_run: 409, stale: 409, not_owned: 409, no_hand: 409 };
+  const BATTLE_REFUSALS = { no_profile: 400, guest_not_allowed: 403, no_run: 409, stale: 409, not_owned: 409, no_hand: 409, locked: 409, no_battle: 409 };
   const toSql = (list) => list.map((e) => ({ card: e.id, finish: e.finish }));
   const fromSql = (list) => (Array.isArray(list) ? list.map((e) => ({ id: e.card, finish: e.finish })) : []);
   const lost = () => ({ data: null, error: { name: "FunctionsFetchError", message: "Failed to send" } });
@@ -409,13 +467,44 @@ export function makeCards(state, { wallet = null } = {}) {
       try { api.deckSave(uid, toSql(body.cards)); } catch (e) { return refuse(e); }
       return { data: { ok: true, saved: true }, error: null };
     }
+    if (body.action === "gauntlet_quit") {
+      return { data: { ok: true, ended: api.gauntletQuit(uid).ended }, error: null };
+    }
     const deck = api.deckOf(uid);
+    if (body.action === "gauntlet_start") {
+      if (!deck) return said("no_deck", 409);
+      try {
+        const g = api.gauntletStart(uid, body.stage, toSql(deal(deck)), shuffleCategories(Math.random));
+        return { data: { ok: true, gauntlet: { cleared: g.cleared, stage: g.stage, hand: fromSql(g.hand), rounds: g.rounds } }, error: null };
+      } catch (e) { return refuse(e); }
+    }
+    if (body.action === "gauntlet_round") {
+      const row = gauntlets.get(uid);
+      if (!row || row.stage === null) return said("no_battle", 409);
+      if (row.stage !== body.stage || row.rounds.length !== body.round) return said("stale", 409);
+      const stage = row.stage, hand = fromSql(row.hand), foe = gauntletFoe(stage);
+      const problem = roundProblem(hand, foe, row.rounds, body.card);
+      if (problem) return said(problem, REASON_STATUS[problem] || 400);
+      const round = gauntletRound(stage, row.rounds, body.card, row.cats[body.round], api.nextRolls && api.nextRolls.length ? () => api.nextRolls.shift() : Math.random);
+      const rounds = [...row.rounds, round];
+      if (rounds.length < 6) {
+        try { api.gauntletRound(uid, stage, body.round, toSql([body.card]), rounds); } catch (e) { return refuse(e); }
+        if (api.battleFails) { api.battleFails = false; return lost(); }
+        return { data: { ok: true, round, done: false, gauntlet: { cleared: row.cleared, stage, hand, rounds } }, error: null };
+      }
+      const result = battleResult(rounds);
+      const last = { ...shownBattle(result, foe, gauntletEdge(stage)), stage };
+      let rec;
+      try { rec = api.gauntletFinish(uid, stage, toSql(played(rounds)), result.win, last, result.win ? gauntletCoins(stage) : 0); } catch (e) { return refuse(e); }
+      if (api.battleFails) { api.battleFails = false; return lost(); }
+      return { data: { ok: true, round, done: true, battle: last, gauntlet: { cleared: rec.cleared, stage: null, hand: [], rounds: [] }, first: rec.first, coins: { credited: rec.credited, balance: rec.balance } }, error: null };
+    }
     if (body.action === "run_start") {
       if (!deck) return said("no_deck", 409);
       const seed = Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
       try {
         const run = api.runStart(uid, seed, toSql(deal(deck)), foeSql(ladderFoe(seed, 0)), shuffleCategories(Math.random));
-        return { data: { ok: true, run: { id: run.id, wins: run.wins, hand: fromSql(run.hand), foe: foeFrom(run.foe), rounds: run.rounds, last: run.last } }, error: null };
+        return { data: { ok: true, run: { id: run.id, wins: run.wins, hand: fromSql(run.hand), foe: maskFoe(foeFrom(run.foe), run.rounds.length), rounds: run.rounds, last: run.last } }, error: null };
       } catch (e) { return refuse(e); }
     }
     const shownDaily = (row) => ({ hand: fromSql(row.hand), log: row.log, played: row.played, rounds: row.rounds, score: row.score, shown: row.shown });
@@ -462,7 +551,7 @@ export function makeCards(state, { wallet = null } = {}) {
     if (rounds.length < 6) {
       try { api.runRound(uid, run.id, body.step, body.round, toSql([body.card]), rounds); } catch (e) { return refuse(e); }
       if (api.battleFails) { api.battleFails = false; return lost(); }
-      return { data: { ok: true, round, done: false, run: { id: run.id, wins: run.wins, status: "live", hand, foe, rounds } }, error: null };
+      return { data: { ok: true, round, done: false, run: { id: run.id, wins: run.wins, status: "live", hand, foe: maskFoe(foe, rounds.length), rounds } }, error: null };
     }
     const result = battleResult(rounds);
     const last = shownBattle(result, foe, edge);
@@ -473,7 +562,7 @@ export function makeCards(state, { wallet = null } = {}) {
         last, result.win ? cardWinCoins(run.wins + 1) : 0, COIN_RULES.paidCardWinsPerDay);
     } catch (e) { return refuse(e); }
     if (api.battleFails) { api.battleFails = false; return lost(); }
-    return { data: { ok: true, round, done: true, battle: last, run: { id: run.id, wins: rec.wins, status: rec.status, hand: fromSql(rec.hand), foe: foeFrom(rec.foe), rounds: [] }, coins: { credited: rec.credited, capped: rec.capped, balance: rec.balance } }, error: null };
+    return { data: { ok: true, round, done: true, battle: last, run: { id: run.id, wins: rec.wins, status: rec.status, hand: fromSql(rec.hand), foe: maskFoe(foeFrom(rec.foe), 0), rounds: [] }, coins: { credited: rec.credited, capped: rec.capped, balance: rec.balance } }, error: null };
   };
   return api;
 }

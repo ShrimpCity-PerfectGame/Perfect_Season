@@ -87,6 +87,9 @@ await runTest("finishing the daily earns one card off that day's boards", async 
   assert(card && CARDS.has(card.id) && FINISHES.includes(card.finish), "and the answer carries a real card: " + JSON.stringify(card));
   const boards = new Set(d.trace.history.map((h) => h.key));
   assert(boards.has(cardBoardKey(CARDS.get(card.id))), `off one of the day's boards (${cardBoardKey(CARDS.get(card.id))} of ${[...boards]})`);
+  // ...and not just anybody on them: one of the six players this draft took.
+  const got = CARDS.get(card.id);
+  assert(d.trace.history.some((h) => h.key === cardBoardKey(got) && h.season === got.season), `it is a player the draft took: ${got.name} ${got.season}`);
   const owned = s.cards.owned(ME);
   assert(owned.length === 1 && owned[0].card_id === card.id && owned[0].finish === card.finish && owned[0].count === 1, "the account now owns it");
   const g = s.cards.grants(ME);

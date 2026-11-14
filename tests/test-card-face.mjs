@@ -102,7 +102,7 @@ await runTest("a card's colours are its team's and its player's", async () => {
 await runTest("a card says who it is, in words", async () => {
   const brady = find("Tom Brady", 2007);
   const label = face.cardLabel(brady, "prism", 3);
-  for (const part of ["2007 Tom Brady", "New England Patriots", "quarterback", `rated ${Math.round(brady.rating)} plus 3`, "Gunslinger", "Prism finish", "passing yards", "touchdowns", "yards per attempt", "3 copies"]) {
+  for (const part of ["2007 Tom Brady", "New England Patriots", "quarterback", `rated ${Math.round(brady.rating)} plus 15`, "Gunslinger", "Prism finish", "passing yards", "touchdowns", "yards per attempt", "3 copies"]) {
     assert(label.includes(part), `the label says "${part}": ${label}`);
   }
   assert(!face.cardLabel(brady, "base", 1).includes("plus") && !face.cardLabel(brady, "base", 1).includes("copies"), "a single Base card mentions neither a bonus nor copies");
@@ -121,7 +121,7 @@ await runTest("the card on screen", async () => {
   const el = container.querySelector("[data-card]");
   assert(el && el.getAttribute("role") === "img" && el.getAttribute("aria-label") === face.cardLabel(brady, "gold", 3), "one image, with the label");
   assert(el.dataset.card === String(brady.id) && el.dataset.finish === "gold" && el.classList.contains("cd-f-gold"), "it says which card and which finish");
-  assert(el.querySelector(".cd-ovr").textContent === `${Math.round(brady.rating)}+2`, "a Gold card shows its +2: " + el.querySelector(".cd-ovr").textContent);
+  assert(el.querySelector(".cd-ovr").textContent === `${Math.round(brady.rating)}+10`, "a Gold card shows its +10: " + el.querySelector(".cd-ovr").textContent);
   assert(el.querySelector(".cd-count").textContent === "x3", "three copies shows x3");
   assert(el.querySelector(".cd-fin").textContent === "Gold" && el.querySelector(".cd-arch").textContent === "Gunslinger", "the finish and the archetype are words on the card");
   assert(el.querySelector(".cd-in").getAttribute("aria-hidden") === "true", "the printed card is hidden from a screen reader, which has the label");

@@ -476,7 +476,25 @@ begin
   end loop;
 end $$;
 alter table public.wallet_ledger add constraint wallet_ledger_kind_check
-  check (kind in ('starting', 'welcome', 'season', 'daily', 'badge', 'minigame', 'purchase', 'pack', 'card_win', 'card_sell'));
+  check (kind in ('starting', 'welcome', 'season', 'daily', 'badge', 'minigame', 'purchase', 'pack', 'card_win', 'card_sell', 'card_gauntlet'));
+
+-- THE HISTORICAL GAUNTLET (v2.29.0, CARDS.md 13). One row an account: how many stages it has cleared, and the
+-- attempt in progress if there is one (stage, hand, the secret category order, the rounds played). WHICH teams
+-- the stages are is card-logic.mjs's - the database holds no catalog - so a stage here is a number.
+create table if not exists public.card_gauntlets (
+  user_id    uuid primary key references public.profiles(id) on delete cascade,
+  cleared    integer not null default 0 check (cleared between 0 and 99),
+  stage      integer check (stage between 0 and 99),   -- null: no attempt in progress
+  hand       jsonb,
+  cats       jsonb,                                    -- never returned by any read
+  rounds     jsonb not null default '[]'::jsonb,
+  last       jsonb,                                    -- the latest finished attempt as it was shown
+  last_stage integer,
+  cleared_at timestamptz,                              -- when `cleared` last went up; the board's tiebreak
+  updated_at timestamptz not null default now()
+);
+alter table public.card_gauntlets enable row level security;
+revoke all on public.card_gauntlets from anon, authenticated;
 
 -- A list of { card, finish } of exactly p_size entries: is it well formed? Raises `p_reason` when it is not.
 create or replace function public.card_list_check(p_list jsonb, p_size integer, p_reason text)
@@ -858,6 +876,140 @@ $$;
 revoke all on function public.card_daily_record(uuid, date, jsonb, integer, numeric, jsonb) from public, anon, authenticated;
 grant execute on function public.card_daily_record(uuid, date, jsonb, integer, numeric, jsonb) to service_role;
 
+-- card_gauntlet_start(user, stage, hand, cats): the attempt in progress - the one already going, WHATEVER stage
+-- it is on, or a new one at p_stage. A stage is open once every one before it is cleared; a cleared stage may be
+-- played again (it pays nothing). The hand and category order are the Edge Function's and are ignored when an
+-- attempt is already going. Returns { cleared, stage, hand, rounds, fresh }.
+-- Raises no_profile, guest_not_allowed, bad_gauntlet, locked.
+create or replace function public.card_gauntlet_start(p_user uuid, p_stage integer, p_hand jsonb, p_cats jsonb)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_guest boolean;
+  v_row public.card_gauntlets;
+  v_fresh boolean := false;
+begin
+  select guest into v_guest from public.profiles where id = p_user;
+  if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
+  if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
+  if p_stage is null or p_stage < 0 or p_stage > 99
+     or p_cats is null or jsonb_typeof(p_cats) <> 'array' or jsonb_array_length(p_cats) <> 6 then
+    raise exception 'bad_gauntlet' using errcode = 'P0001';
+  end if;
+  perform public.card_list_check(p_hand, 12, 'bad_gauntlet');
+  insert into public.card_gauntlets (user_id) values (p_user) on conflict (user_id) do nothing;
+  select * into v_row from public.card_gauntlets where user_id = p_user for update;
+  if v_row.stage is null then
+    if p_stage > v_row.cleared then raise exception 'locked' using errcode = 'P0001'; end if;
+    update public.card_gauntlets set stage = p_stage, hand = p_hand, cats = p_cats, rounds = '[]'::jsonb, updated_at = now()
+     where user_id = p_user returning * into v_row;
+    v_fresh := true;
+  end if;
+  return jsonb_build_object('cleared', v_row.cleared, 'stage', v_row.stage, 'hand', v_row.hand, 'rounds', v_row.rounds, 'fresh', v_fresh);
+end;
+$$;
+revoke all on function public.card_gauntlet_start(uuid, integer, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.card_gauntlet_start(uuid, integer, jsonb, jsonb) to service_role;
+
+-- card_gauntlet_round(user, stage, round, card, rounds): one round that is NOT the last - what card_run_round is
+-- to a run. Returns { rounds }.
+-- Raises no_profile, guest_not_allowed, bad_gauntlet, no_battle, stale, bad_lineup, not_owned - in that order.
+create or replace function public.card_gauntlet_round(p_user uuid, p_stage integer, p_round integer, p_card jsonb, p_rounds jsonb)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_guest boolean;
+  v_row public.card_gauntlets;
+begin
+  select guest into v_guest from public.profiles where id = p_user;
+  if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
+  if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
+  if p_stage is null or p_round is null or p_round < 0 or p_round > 4
+     or p_rounds is null or jsonb_typeof(p_rounds) <> 'array' or jsonb_array_length(p_rounds) <> p_round + 1 then
+    raise exception 'bad_gauntlet' using errcode = 'P0001';
+  end if;
+  select * into v_row from public.card_gauntlets where user_id = p_user and stage is not null for update;
+  if not found then raise exception 'no_battle' using errcode = 'P0001'; end if;
+  if v_row.stage <> p_stage or jsonb_array_length(v_row.rounds) <> p_round then raise exception 'stale' using errcode = 'P0001'; end if;
+  if not public.card_lineup_owned(p_user, p_card, 1) then raise exception 'not_owned' using errcode = 'P0001'; end if;
+  update public.card_gauntlets set rounds = p_rounds, updated_at = now() where user_id = p_user;
+  return jsonb_build_object('rounds', p_rounds);
+end;
+$$;
+revoke all on function public.card_gauntlet_round(uuid, integer, integer, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.card_gauntlet_round(uuid, integer, integer, jsonb, jsonb) to service_role;
+
+-- card_gauntlet_finish: the sixth round - the attempt ends, win or lose, and a stage beaten FOR THE FIRST TIME
+-- moves `cleared` on and pays p_coins. ONE transaction; wallet_lock first. The ledger row is
+-- (user, 'card_gauntlet', '<stage>'), so a stage can pay once whatever else goes wrong.
+-- Returns { cleared, first, credited, balance }.
+-- Raises no_profile, guest_not_allowed, bad_gauntlet, no_battle, stale, bad_lineup, not_owned - in that order.
+create or replace function public.card_gauntlet_finish(p_user uuid, p_stage integer, p_lineup jsonb, p_win boolean, p_last jsonb, p_coins integer)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_guest boolean;
+  v_row public.card_gauntlets;
+  v_first boolean;
+  v_credited bigint := 0;
+begin
+  select guest into v_guest from public.profiles where id = p_user;
+  if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
+  if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
+  if p_stage is null or p_win is null or p_last is null or jsonb_typeof(p_last) <> 'object'
+     or p_coins is null or p_coins < 0 or p_coins > 1000 then
+    raise exception 'bad_gauntlet' using errcode = 'P0001';
+  end if;
+  perform public.wallet_lock(p_user);
+  select * into v_row from public.card_gauntlets where user_id = p_user and stage is not null for update;
+  if not found then raise exception 'no_battle' using errcode = 'P0001'; end if;
+  if v_row.stage <> p_stage or jsonb_array_length(v_row.rounds) <> 5 then raise exception 'stale' using errcode = 'P0001'; end if;
+  if not public.card_lineup_owned(p_user, p_lineup, 6) then raise exception 'not_owned' using errcode = 'P0001'; end if;
+  v_first := p_win and v_row.stage = v_row.cleared;
+  update public.card_gauntlets
+     set cleared = cleared + (case when v_first then 1 else 0 end),
+         cleared_at = case when v_first then now() else cleared_at end,
+         stage = null, hand = null, cats = null, rounds = '[]'::jsonb, last = p_last, last_stage = p_stage, updated_at = now()
+   where user_id = p_user returning * into v_row;
+  if v_first and p_coins > 0 then
+    v_credited := public.wallet_apply(p_user, p_coins::bigint, 'card_gauntlet', p_stage::text);
+  end if;
+  return jsonb_build_object('cleared', v_row.cleared, 'first', v_first, 'credited', v_credited,
+    'balance', (select balance from public.wallets where user_id = p_user));
+end;
+$$;
+revoke all on function public.card_gauntlet_finish(uuid, integer, jsonb, boolean, jsonb, integer) from public, anon, authenticated;
+grant execute on function public.card_gauntlet_finish(uuid, integer, jsonb, boolean, jsonb, integer) to service_role;
+
+-- card_gauntlet_quit(user): give up the attempt in progress. Nothing is lost but the attempt. { ended }.
+create or replace function public.card_gauntlet_quit(p_user uuid)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  update public.card_gauntlets set stage = null, hand = null, cats = null, rounds = '[]'::jsonb, updated_at = now()
+   where user_id = p_user and stage is not null;
+  return jsonb_build_object('ended', found);
+end;
+$$;
+revoke all on function public.card_gauntlet_quit(uuid) from public, anon, authenticated;
+grant execute on function public.card_gauntlet_quit(uuid) to service_role;
+
 -- card_battle_state(): what the signed-in caller's battle screens open on. Read-only, so the browser calls it
 -- as a GET and supabase-js retries it. Nobody signed in, or an account with nothing, gets the same shape empty.
 --   { today, deck, run: { id, wins, status, hand, foe, rounds, last } | null, best, paid_today,
@@ -867,7 +1019,7 @@ grant execute on function public.card_daily_record(uuid, date, jsonb, integer, n
 -- `run` is the account's LATEST run, live or over - a browser whose answer to a battle was lost on the way back
 -- has to be able to learn that the run ended, and be shown the battle that ended it. `daily` is today's row if
 -- a hand has been dealt. `today` is the server's UTC date, so the browser never has to guess the day.
--- The seed is not in here and must never be.
+-- The seed is not in here and must never be. Nor are the cards of the run's team that have not been played.
 create or replace function public.card_battle_state()
 returns jsonb
 language sql
@@ -878,7 +1030,12 @@ as $$
   select jsonb_build_object(
     'today', (now() at time zone 'utc')::date,
     'deck', (select d.cards from public.card_decks d where d.user_id = auth.uid()),
-    'run', (select jsonb_build_object('id', r.id, 'wins', r.wins, 'status', r.status, 'hand', r.hand, 'foe', r.foe, 'rounds', r.rounds, 'last', r.last)
+    -- THEIR CARDS ARE HIDDEN UNTIL PLAYED (v2.28.1): of the run's six, the ones already met are whole and the
+    -- rest are their spot alone - the same thing card-logic.mjs's maskFoe does to every answer of the function.
+    'run', (select jsonb_build_object('id', r.id, 'wins', r.wins, 'status', r.status, 'hand', r.hand,
+                     'foe', (select jsonb_agg(case when f.ord <= jsonb_array_length(r.rounds) then f.e else jsonb_build_object('spot', f.e -> 'spot') end order by f.ord)
+                               from jsonb_array_elements(r.foe) with ordinality as f(e, ord)),
+                     'rounds', r.rounds, 'last', r.last)
               from public.card_runs r where r.user_id = auth.uid() order by r.id desc limit 1),
     'best', coalesce((select max(r.wins) from public.card_runs r where r.user_id = auth.uid()), 0),
     'paid_today', (select count(*) from public.wallet_ledger l
@@ -886,7 +1043,10 @@ as $$
                       and l.created_at >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc')),
     'daily', (select jsonb_build_object('hand', s.hand, 'log', s.log, 'played', s.played_at is not null, 'rounds', s.rounds, 'score', s.score, 'shown', s.shown)
                 from public.card_dailies s
-               where s.user_id = auth.uid() and s.date = (now() at time zone 'utc')::date)
+               where s.user_id = auth.uid() and s.date = (now() at time zone 'utc')::date),
+    -- The gauntlet (v2.29.0): stages cleared, and the attempt in progress if any. `cats` is not here either.
+    'gauntlet', (select jsonb_build_object('cleared', g.cleared, 'stage', g.stage, 'hand', g.hand, 'rounds', g.rounds, 'last', g.last, 'last_stage', g.last_stage)
+                   from public.card_gauntlets g where g.user_id = auth.uid())
   );
 $$;
 revoke all on function public.card_battle_state() from public, anon;
@@ -921,6 +1081,14 @@ as $$
                 from public.card_dailies s join public.profiles p on p.id = s.user_id
                where s.date = (now() at time zone 'utc')::date and s.played_at is not null and not p.guest
                order by s.rounds desc, s.score desc, s.played_at, p.username collate "C"
+               limit greatest(1, least(coalesce(p_limit, 25), 100))) t), '[]'::jsonb),
+    -- The gauntlet (v2.29.0): most stages cleared, then who got there first.
+    'gauntlet', coalesce((
+      select jsonb_agg(jsonb_build_object('username', t.username, 'cleared', t.cleared) order by t.cleared desc, t.cleared_at, t.username collate "C")
+        from (select p.username, g.cleared, g.cleared_at
+                from public.card_gauntlets g join public.profiles p on p.id = g.user_id
+               where g.cleared > 0 and not p.guest
+               order by g.cleared desc, g.cleared_at, p.username collate "C"
                limit greatest(1, least(coalesce(p_limit, 25), 100))) t), '[]'::jsonb)
   );
 $$;

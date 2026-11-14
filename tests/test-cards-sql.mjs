@@ -407,7 +407,9 @@ await addAccount(db, { id: RIVAL, username: "rival" });
 await addAccount(db, { id: QUITTER, username: "quitter" });
 await addGuestAccount(db, RGUEST);
 const cardsFrom = (from, n) => Array.from({ length: n }, (_, i) => ({ card: from + i, finish: "base" }));
-const THIRTY = cardsFrom(1, 30), HAND = cardsFrom(1, 12), SIX = cardsFrom(1, 6), FOE = cardsFrom(500, 6);
+const SPOT_ORDER = ["RB", "QB", "TE", "WR", "FLEX", "FLEX"];
+const foeFrom = (from) => cardsFrom(from, 6).map((e, i) => ({ ...e, spot: SPOT_ORDER[i] }));
+const THIRTY = cardsFrom(1, 30), HAND = cardsFrom(1, 12), SIX = cardsFrom(1, 6), FOE = foeFrom(500);
 const giveThirty = (tag) => [THIRTY.slice(0, 20), THIRTY.slice(20)].map((part, k) => part.map((c, i) => ({ ref: `${tag}:${k}:${i}`, card: c.card, finish: c.finish })));
 const battleMock = (() => {
   const profiles = new Map([[RUNNER, { id: RUNNER, username: "runner", guest: false }], [RIVAL, { id: RIVAL, username: "rival", guest: false }],
@@ -441,7 +443,7 @@ const round = (u, run, step, n, { card = [SIX[n]], rounds = roundsTo(n + 1) } = 
     () => battleMock.cards.runRound(u, run, step, n, card, rounds));
 // The first five rounds of a battle, so its sixth - card_run_battle - can be written.
 async function fill(u, run, step) { for (let n = 0; n < 5; n++) assert(!(await round(u, run, step, n)).error, `round ${n} of run ${run} step ${step} is written`); }
-const fight = (u, run, step, win, { lineup = SIX, hand = cardsFrom(13, 12), foe = cardsFrom(600, 6), cats = CATS, last = { win }, coins = 3, cap = 15 } = {}) =>
+const fight = (u, run, step, win, { lineup = SIX, hand = cardsFrom(13, 12), foe = foeFrom(600), cats = CATS, last = { win }, coins = 3, cap = 15 } = {}) =>
   both("card_run_battle", [u, run, step, J(lineup), win, win ? J(hand) : null, win ? J(foe) : null, win ? J(cats) : null, J(last), coins, cap],
     ["::uuid", "::bigint", "::integer", "::jsonb", "::boolean", "::jsonb", "::jsonb", "::jsonb", "::jsonb", "::integer", "::integer"],
     () => battleMock.cards.runBattle(u, run, step, lineup, win, win ? hand : null, win ? foe : null, win ? cats : null, last, coins, cap));
@@ -505,7 +507,7 @@ await runTest("a deck: saved only if every card of it is theirs", async () => {
 
 await runTest("a run: one at a time, its hand stored, each battle counted once, each win paid once", async () => {
   const again = await start(RUNNER, "seed-other", cardsFrom(13, 12), cardsFrom(700, 6));
-  assert(again.data.id === 1 && again.data.fresh === false && J(again.data.hand) === J(HAND) && J(again.data.foe) === J(FOE), "starting twice is the same run with the same hand - the second deal is ignored: " + J(again).slice(0, 160));
+  assert(again.data.id === 1 && again.data.fresh === false && J(again.data.hand) === J(HAND) && !differs(again.data.foe, FOE), "starting twice is the same run with the same hand - the second deal is ignored: " + J(again).slice(0, 160));
   const before = await stateOf(RUNNER);
   assert(before.run.wins === 0 && before.best === 0 && before.paid_today === 0 && J(before.run.hand) === J(HAND), "it opens at no wins, with the hand it was dealt");
 
@@ -522,7 +524,7 @@ await runTest("a run: one at a time, its hand stored, each battle counted once, 
   const w1 = await fight(RUNNER, 1, 0, true, { coins: 3 });
   assert((await stateOf(RUNNER)).run.rounds.length === 0, "a win starts the next battle with no rounds played");
   assert(w1.data.wins === 1 && w1.data.status === "live" && w1.data.credited === 3 && w1.data.balance === 253, "a win moves the run on and pays: " + J(w1).slice(0, 200));
-  assert(J(w1.data.hand) === J(cardsFrom(13, 12)) && J(w1.data.foe) === J(cardsFrom(600, 6)), "and the next hand and the next team are stored with it");
+  assert(J(w1.data.hand) === J(cardsFrom(13, 12)) && !differs(w1.data.foe, foeFrom(600)), "and the next hand and the next team are stored with it");
   // The same request again - a double tap, a retry, a second tab that read "no wins yet".
   assert((await fight(RUNNER, 1, 0, true, { coins: 3 })).error === "stale", "the same step twice is refused as stale");
   assert(await balanceOf(RUNNER) === 253 && (await stateOf(RUNNER)).run.wins === 1, "and nothing moved");

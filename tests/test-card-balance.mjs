@@ -47,9 +47,10 @@ function bestSixty() {
 // A battle is played a round at a time, so a player is a function that picks the next card.
 // THE DULL ONE plays the highest-rated card that fits the spot (card-logic.mjs's autoPick - "Pick for me").
 const dull = (hand, foe, rounds) => C.autoPick(hand, foe, rounds);
-// THE SHARP ONE reads what is on the screen: every card it will face and in which spot (the other side's six are
-// shown from the start), which categories are still to come, and what its cards have already done for each
-// other. It cannot see which category a round is, or the luck - nobody can. So it plans the rest of the battle:
+// THE SHARP ONE reads what is on the screen: the spots still to come, the cards of theirs it has ALREADY met
+// (v2.28.1: a card across from you is hidden until yours is down), which categories are still to come, and what
+// its cards have already done for each other. It cannot see which category a round is, who it is about to
+// face, or the luck - nobody can. What it will face it guesses from what it has faced. So it plans the rest of the battle:
 // which of its cards to put against which of theirs to win the most rounds, on what each card is worth across
 // the categories left - then plays the first card of that plan, and plans again next round.
 const chance = (diff) => 1 / (1 + Math.exp(-diff / 9)); // roughly how often a lead of `diff` holds up
@@ -59,7 +60,10 @@ function sharp(hand, foe, rounds) {
   const mean = (e) => left.reduce((s, cat) => s + C.roundBase(e, cat), 0) / left.length;
   const usedMen = new Set(rounds.map((r) => C.CARDS.get(r.mine.id).pid));
   const mine = hand.filter((e) => !usedMen.has(C.CARDS.get(e.id).pid)).map((e) => ({ e, pos: C.CARDS.get(e.id).pos, v: mean(e) + C.playedSynergies(e, rounds.map((r) => r.mine)).reduce((n, m) => n + m.pts, 0) }));
-  const theirs = foe.map((e, i) => (i >= start ? mean(e) + C.playedSynergies(e, foe.slice(0, i)).reduce((n, m) => n + m.pts, 0) : 0));
+  // Their cards to come are unseen: guess each at the level of the ones already met, or of its own hand before any.
+  const met = rounds.map((r) => r.foe.base);
+  const guess = met.length ? met.reduce((a, b) => a + b, 0) / met.length : mine.reduce((a, m) => a + m.v, 0) / Math.max(1, mine.length);
+  const theirs = foe.map(() => guess);
   let best = -1, first = null;
   const taken = new Array(mine.length).fill(false);
   const walk = (i, sum, lead) => {

@@ -19,6 +19,7 @@ await runTest("COIN_RULES are the contract's numbers, and can't be changed at ru
     season: 20, dailySeason: 40, win: 2, playoffs: 10, title: 50, perfect: 150, pointsPer: 10,
     streakPerDay: 5, streakMax: 50, minigame: 15, paidSeasonsPerDay: 20, welcome: 250, startingCap: 10000,
     cardWin: 3, cardWinStep: 1, cardWinStepMax: 9, paidCardWinsPerDay: 15,
+    gauntletWin: 20, gauntletStep: 10,
   };
   // A win in a card run (CARDS.md 11): 3, and one more for every win the run already had, up to 12.
   assert([1, 2, 3, 10, 11, 40].map(cardWinCoins).join() === "3,4,5,12,12,12", "what each win of a run pays: " + [1, 2, 3, 10, 11, 40].map(cardWinCoins));

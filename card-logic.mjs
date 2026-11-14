@@ -11,7 +11,7 @@
 //
 // The reference is CARDS.md; the design is docs/superpowers/specs/2026-11-13-card-collection-design.md.
 
-import { WINDOWS, hashStr, mulberry32 } from "./game-logic.mjs";
+import { WINDOWS, BOARDS, hashStr, mulberry32 } from "./game-logic.mjs";
 
 // ---------- Cards ----------
 export let CARDS = new Map(); // id -> card
@@ -88,6 +88,28 @@ function rawCategories(c) {
       : (c.rcy + 20 * c.rctd - 40 * c.fl + 9.5 * 40) / (c.rec + 40);
   return { production: yards, scoring: tds / g, bigplay, workload: touches / g, efficiency, star: c.rating };
 }
+// THE NUMBER BEHIND A CATEGORY, in words: what the season really was, for the screen to print beside the score.
+// A category score is a RANK (0-99, at his position, in his era); this is the thing that was ranked. Display
+// only - nothing is scored from it. The per-touch ones are printed as they were, without the shrinkage the
+// ranking uses, because "13.2 yards a catch" is the number a fan knows.
+const one = (n) => (Math.round(n * 10) / 10).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+export function categoryStat(card, cat) {
+  const c = card;
+  if (!c) return "";
+  const qb = c.pos === "QB", rb = c.pos === "RB";
+  const yards = qb ? c.py + c.ry : c.ry + c.rcy;
+  const tds = qb ? c.ptd + c.rtd : c.rtd + c.rctd;
+  const touches = qb ? c.att + c.car : c.car + c.rec;
+  const g = c.g > 0 ? c.g : 1;
+  const per = (a, b) => (b > 0 ? a / b : 0);
+  if (cat === "production") return `${yards.toLocaleString("en-US")} total yards`;
+  if (cat === "scoring") return `${tds} TD in ${c.g} ${c.g === 1 ? "game" : "games"}`;
+  if (cat === "bigplay") return qb ? `${one(per(c.py, c.cmp))} yards a completion` : rb ? `${one(per(c.ry, c.car))} yards a carry` : `${one(per(c.rcy, c.rec))} yards a catch`;
+  if (cat === "workload") return `${one(touches / g)} ${qb ? "throws and runs" : "touches"} a game`;
+  if (cat === "efficiency") return qb ? `${one(per(c.py, c.att))} yards a throw, ${c.ptd} TD, ${c.int} INT` : `${one(per(yards, touches))} yards a touch, ${tds} TD, ${c.fl} lost`;
+  if (cat === "star") return `Rated ${Math.round(c.rating)} overall`;
+  return "";
+}
 const eraOf = (season) => Math.max(0, WINDOWS.findIndex(([from, to]) => season >= from && season <= to));
 
 // Expands data/cards.json. The file stores positional rows behind a `columns` list, so the shape is read from
@@ -133,7 +155,9 @@ export function initCardData(catalog) {
 // with the hand is the game. A team is a list of { id, finish }, in playing order.
 export const FINISHES = ["base", "silver", "gold", "prism"];
 // What a finish adds to the card's rating in a round. Small on purpose: a finish is a flex and a tiebreaker.
-export const FINISH_BONUS = { base: 0, silver: 1, gold: 2, prism: 3 };
+// What a finish adds to EVERY round the card plays, whole (the owner's numbers, v2.28.1: "5 10 15"). The card
+// face prints it beside the rating and the battle names it as a bonus.
+export const FINISH_BONUS = { base: 0, silver: 5, gold: 10, prism: 15 };
 export const ownKey = (id, finish) => `${id}:${finish}`;
 export const POSITIONS = ["QB", "RB", "WR", "TE"];
 export const DECK_SHAPE = { QB: 5, RB: 10, WR: 10, TE: 5 };
@@ -320,7 +344,11 @@ function playLine(card, base, total) {
 }
 
 // A card's round before luck: what the screen shows a player who is deciding where to play him.
-export const roundBase = (entry, cat) => round1(RATING_SHARE * (CARDS.get(entry.id).rating + FINISH_BONUS[entry.finish]) + (1 - RATING_SHARE) * CAT_SCALE * CARDS.get(entry.id).cats[cat]);
+// A FINISH IS NOT IN HERE (v2.28.1). It used to be added to the rating, so only RATING_SHARE of it reached a
+// round - Silver was worth 0.4 of a point. The owner asked what the "+1" on a card does in a battle; now it does
+// what it says: playRound adds FINISH_BONUS whole, as a bonus of its own that the screen names.
+export const roundBase = (entry, cat) => round1(RATING_SHARE * CARDS.get(entry.id).rating + (1 - RATING_SHARE) * CAT_SCALE * CARDS.get(entry.id).cats[cat]);
+const FINISH_LABEL = { silver: "Silver finish", gold: "Gold finish", prism: "Prism finish" };
 
 // ONE ROUND AT A TIME, ONE SPOT A ROUND (v2.28.0). The owner's question about the first version was the right
 // one: if you set all six and their order before anything is known, where is the choice? So a battle is PLAYED
@@ -338,7 +366,7 @@ export const spotLabel = (spot) => SPOT_LABEL[spot] || spot;
 // knocks on. The card has to be in the hand, fit the round's spot, and be a man not already played.
 // `foe` is the other side's six, each carrying the `spot` it plays; round n is for foe[n].spot.
 export function roundProblem(hand, foe, rounds, entry) {
-  if (!Array.isArray(hand) || !Array.isArray(foe) || !Array.isArray(rounds) || rounds.length >= TEAM_SIZE || !isEntry(foe[rounds.length])) return "malformed";
+  if (!Array.isArray(hand) || !Array.isArray(foe) || !Array.isArray(rounds) || rounds.length >= TEAM_SIZE || !isEntry(foe[rounds.length]) || !SPOTS.includes(foe[rounds.length].spot)) return "malformed";
   if (!isEntry(entry)) return "malformed";
   if (!CARDS.has(entry.id)) return "unknown_card";
   if (!FINISHES.includes(entry.finish)) return "bad_finish";
@@ -380,7 +408,7 @@ export function leavesAWay(hand, foe, rounds, entry) {
 // yours first. Trusts its input - roundProblem is the door.
 // `foeEdge` is points added to their card - the ladder's, once its teams cannot be made of better cards than
 // the game holds (see ladderEdge).
-export function playRound(foe, rounds, entry, cat, rand, foeEdge = 0) {
+export function playRound(foe, rounds, entry, cat, rand, foeEdge = 0, edgeLabel = null) {
   const i = rounds.length;
   const last = rounds[i - 1] || null;
   const side = (mine) => {
@@ -399,13 +427,14 @@ export function playRound(foe, rounds, entry, cat, rand, foeEdge = 0) {
     const ctx = { cat, wins: me.wins, losses: other.wins, prevWon: me.prevWon, qbPlayed: me.qbPlayed, foeRating: other.card.rating, rating: me.card.rating };
     const fires = !!ability && !cancelled && ability.when(ctx) === true;
     const mods = me.syn.slice();
+    if (FINISH_BONUS[me.entry.finish] > 0) mods.push({ key: "finish", label: FINISH_LABEL[me.entry.finish], pts: FINISH_BONUS[me.entry.finish] });
     if (me.prevArchetype === "manager") mods.push({ key: "next", label: "Field general", pts: ABILITY_NEXT });
-    if (s === 1 && foeEdge > 0) mods.push({ key: "edge", label: "Top of the ladder", pts: foeEdge });
+    if (s === 1 && (foeEdge > 0 || (foeEdge < 0 && edgeLabel))) mods.push({ key: "edge", label: edgeLabel || "Top of the ladder", pts: foeEdge });
     if (fires && ability.pts) mods.push({ key: "ability", label: ability.name, pts: ability.pts });
     const base = roundBase(me.entry, cat);
     const total = round1(base + rolls[s] + mods.reduce((n, m) => n + m.pts, 0));
     return {
-      id: me.card.id, finish: me.entry.finish, rating: me.card.rating + FINISH_BONUS[me.entry.finish], score: me.card.cats[cat], base, roll: rolls[s], mods, total,
+      id: me.card.id, finish: me.entry.finish, rating: me.card.rating, score: me.card.cats[cat], base, roll: rolls[s], mods, total,
       ability: ability ? { name: ability.name, on: fires || !!ability.next || (!!ability.cancels && !!abilityOf(other.card)), cancelled: cancelled && !!ability && !ability.cancels } : null,
       line: playLine(me.card, base, total),
     };
@@ -449,6 +478,11 @@ export function autoLineup(hand, foe) {
   }
   return picks;
 }
+
+// THEIR CARD IS A SURPRISE (v2.28.1, the owner's call after playing it): you are shown the SPOT a round is for
+// and not the card across from you until yours is down. So what a browser is handed of the other side is the
+// cards already played and, for the rest, the spot alone. Server and mock both send a team through this.
+export const maskFoe = (foe, played) => foe.map((e, i) => (i < played ? e : { spot: e.spot }));
 
 // ---------- The other side ----------
 // The CPU plays the same kind of cards you collect. A CPU team is built round a target rating: one card of each
@@ -524,6 +558,50 @@ export function dailyBattle(date, mine) {
 // What a daily battle is ranked by: rounds won first, then your six-round total.
 export const dailyScore = (result) => ({ rounds: result.wins, score: result.total });
 
+// THE HISTORICAL GAUNTLET (v2.29.0). Twelve real offenses, weakest first: each is one franchise in one of the
+// game's five-year eras, fielding the best card it has for each spot - the same boards the draft spins, so
+// "KC 1999-2005" is Green, Holmes, Gonzalez and company. Beat one to open the next; a stage may be tried as
+// often as it takes, with a new hand each time, and pays once.
+//
+// THE LIST IS WRITTEN OUT, NOT COMPUTED. Progress is kept as a number of stages cleared, so the list may only
+// ever be ADDED TO AT THE END: a list worked out from the catalog would reorder itself the day a season is
+// added, and stage five would quietly become another team. It was chosen by ranking all 160 team-eras by the
+// average rating of their best six and taking twelve spread evenly from the bottom to the top, no franchise
+// twice. tests/test-card-logic.mjs holds every one to fielding a full six and the strengths to rising.
+export const GAUNTLET = [
+  ["NYJ", 3], ["JAX", 3], ["TEN", 2], ["SEA", 2], ["HOU", 3], ["BAL", 0],
+  ["ATL", 1], ["NYG", 0], ["LV", 4], ["GB", 3], ["DEN", 2], ["KC", 0],
+];
+const stageOf = (stage) => (Number.isInteger(stage) && stage >= 0 && stage < GAUNTLET.length ? GAUNTLET[stage] : null);
+export const gauntletName = (stage) => { const g = stageOf(stage); return g ? `${g[0]} ${WINDOWS[g[1]][0]}\u2013${WINDOWS[g[1]][1]}` : ""; };
+// The six a stage fields: the best card that franchise has in that era for each spot (rating, then id), six
+// different men, Base finish. The first five spots in an order that follows from the stage alone; the Flex last.
+const gauntletTeams = new Map();
+export function gauntletFoe(stage) {
+  const g = stageOf(stage);
+  if (!g) return null;
+  if (gauntletTeams.has(stage)) return gauntletTeams.get(stage).map((e) => ({ ...e }));
+  const pool = [...CARDS.values()].filter((c) => c.team === g[0] && eraOf(c.season) === g[1]).sort((a, b) => b.rating - a.rating || a.id - b.id);
+  const men = new Set(), team = [];
+  for (const spot of SPOTS) {
+    const card = pool.find((c) => !men.has(c.pid) && spotFits(c.pos, spot));
+    if (!card) return null;
+    men.add(card.pid); team.push({ id: card.id, finish: "base", spot });
+  }
+  const rand = mulberry32(hashStr(`gauntlet|${g[0]}|${g[1]}`));
+  for (let i = team.length - 2; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [team[i], team[j]] = [team[j], team[i]]; }
+  gauntletTeams.set(stage, team);
+  return team.map((e) => ({ ...e }));
+}
+// THE HEAD START. The weakest real offense in the game is still better than a starter deck, so the early
+// stages give points back: every card of theirs plays this many points SHORT, shown on the card as a modifier.
+// It shrinks a stage at a time and is gone by GAUNTLET_EVEN, after which a team is exactly as good as it was.
+export const GAUNTLET_HEAD_START = -32, GAUNTLET_EVEN = 8;
+export const gauntletEdge = (stage) => (stageOf(stage) && stage < GAUNTLET_EVEN ? Math.round(GAUNTLET_HEAD_START * (1 - stage / GAUNTLET_EVEN)) : 0);
+export const GAUNTLET_EDGE_LABEL = "Head start";
+// One round of a gauntlet battle: playRound with the stage's team and its head start.
+export const gauntletRound = (stage, rounds, entry, cat, rand) => playRound(gauntletFoe(stage), rounds, entry, cat, rand, gauntletEdge(stage), GAUNTLET_EDGE_LABEL);
+
 // ---------- Getting cards ----------
 // The rules for which cards a player is handed. The CHOOSING happens on the server - the card-claim Edge
 // Function for a starter deck, submit-run for the daily card - with a cryptographic `rand`; these functions
@@ -575,9 +653,23 @@ export function cardBoardKey(card) {
 // The card a finished daily draft earns: any card off any of the boards that day dealt, at equal odds, then a
 // finish. Exactly two draws when it returns a card. null when the boards hold no card - which a real daily's
 // never do, and which the caller treats as "no card today" rather than as an error.
-export function dailyCard(boardKeys, rand) {
-  const keys = new Set(Array.isArray(boardKeys) ? boardKeys : []);
-  const able = [...CARDS.values()].filter((c) => keys.has(cardBoardKey(c))).sort((a, b) => a.id - b.id);
+// THE CARD IS ONE OF THE SIX YOU DRAFTED (v2.28.1 - the owner drafted Melvin Gordon and was handed Marvin Mims,
+// "this followed the team but not the player"). `picks` is the draft's history: [{ key, id, season }], a board
+// and the row taken off it. Each is matched to its card by board, name and season. Only when NONE of the six
+// has a card - the pool was rebuilt and a row left it - does it fall back to anybody on those boards, so a
+// finished daily always earns something. A bare board key (a string) is accepted and means just that fallback.
+export function dailyCard(picks, rand) {
+  const list = Array.isArray(picks) ? picks : [];
+  const keys = new Set(list.map((p) => (typeof p === "string" ? p : p?.key)).filter((k) => typeof k === "string"));
+  const onBoards = [...CARDS.values()].filter((c) => keys.has(cardBoardKey(c))).sort((a, b) => a.id - b.id);
+  const drafted = new Set();
+  for (const p of list) {
+    if (!p || typeof p !== "object") continue;
+    const row = (BOARDS[p.key] || []).find((x) => x.id === p.id && x.season === p.season);
+    if (row) drafted.add(`${p.key}|${row.name}|${row.season}`);
+  }
+  const mine = onBoards.filter((c) => drafted.has(`${cardBoardKey(c)}|${c.name}|${c.season}`));
+  const able = mine.length ? mine : onBoards;
   if (!able.length) return null;
   const card = able[Math.floor(rand() * able.length)];
   return { id: card.id, finish: rollFinish(rand) };

@@ -29,12 +29,21 @@ export const COIN_RULES = Object.freeze({
   cardWinStep: 1,
   cardWinStepMax: 9,
   paidCardWinsPerDay: 15, // wins that pay per UTC day; past it runs still play and still count
+  // The historical gauntlet (CARDS.md 13): a stage pays ONCE, the first time it is beaten - gauntletWin for the
+  // first and gauntletStep more for each one after it. Twelve stages come to 900 coins, ever.
+  gauntletWin: 20,
+  gauntletStep: 10,
   paidSeasonsPerDay: 20, // Unlimited/Genius/GM seasons that pay per UTC day; Dailies don't count toward it
   welcome: 250, // a new account (SQL: create_wallet)
   startingCap: 10000, // the one-time starting balance's cap (SQL: the backfill)
 });
 
 // What the win that takes a run to `wins` wins pays (1 for the first). Nothing for anything that is not a win.
+// What clearing a gauntlet stage (0-based) pays, the first time.
+export function gauntletCoins(stage) {
+  if (!Number.isInteger(stage) || stage < 0) return 0;
+  return COIN_RULES.gauntletWin + COIN_RULES.gauntletStep * stage;
+}
 export function cardWinCoins(wins) {
   const n = Number(wins);
   if (!Number.isFinite(n) || n < 1) return 0;
