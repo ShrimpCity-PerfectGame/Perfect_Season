@@ -49,6 +49,33 @@ await runTest("recolouring changes what a pixel is a shade OF, and nothing else"
   assert(sprites.recolourPixels(new Uint8ClampedArray(0), { jersey: "#000000", metal: "#000000", skin: "#000000" }).length === 0, "an empty image is an empty image");
 });
 
+await runTest("grey and tan are decided a region at a time, so nothing is scrubbed and nothing bleeds", async () => {
+  // Reported from the owner's phone on the test site (v2.24.1): helmets with their highlights left grey, the
+  // helmet colour on gloves and cleats, a pale rim round dark skin. One pixel cannot say which grey it is.
+  const K = [16, 16, 18, 255], grey = [172, 172, 172, 255], shine = [226, 226, 226, 255], white = [252, 252, 250, 255];
+  const shadow = [190, 190, 190, 255], tan = [198, 140, 96, 255], edge = [120, 80, 52, 255], ball = [110, 60, 36, 255];
+  // row 0: a helmet - four greys and its highlight | outline | a glove - four whites and its shadow
+  // row 1: an arm - four tans and its darker edge  | outline | the ball - five browns
+  const rows = [[grey, grey, shine, grey, grey, K, white, white, shadow, white, white], [tan, tan, tan, tan, edge, K, ball, ball, ball, ball, ball]];
+  const data = new Uint8ClampedArray(rows.flat().flat());
+  const out = sprites.recolourPixels(data, { jersey: "#4f2683", metal: "#c60c30", skin: "#5f3b26" }, 11);
+  const at = (x, y) => [...out.slice((y * 11 + x) * 4, (y * 11 + x) * 4 + 3)];
+  const same = (x, y) => JSON.stringify(at(x, y)) === JSON.stringify(rows[y][x].slice(0, 3));
+  const red = hueOf(0xc6, 0x0c, 0x30), brown = hueOf(0x5f, 0x3b, 0x26);
+  const hueNear = (p, want) => Math.min(Math.abs(hueOf(...p) - want), 360 - Math.abs(hueOf(...p) - want)) < 6;
+  assert(hueNear(at(0, 0), red), "the helmet takes the helmet colour: " + at(0, 0));
+  assert(hueNear(at(2, 0), red) && at(2, 0)[0] - at(2, 0)[1] > 40, "and so does its highlight - left grey, that is the scrubbed helmet: " + at(2, 0));
+  assert(at(2, 0)[1] > at(0, 0)[1], "which is still lighter than the helmet round it");
+  assert(same(8, 0), "a white glove's shadow is the same grey as a helmet and is left alone: " + at(8, 0));
+  assert(same(6, 0), "and the glove is still white");
+  assert(hueNear(at(4, 1), brown) && at(4, 1)[0] < at(0, 1)[0], "the dark edge of an arm takes the skin tone too, darker - left tan, that is the pale rim: " + at(4, 1));
+  assert(same(6, 1), "the ball is brown, and is nobody's skin: " + at(6, 1));
+  // a helmet's own white - a stripe drawn against it with no outline between - stays white
+  const strip = new Uint8ClampedArray([grey, grey, grey, grey, white, grey, grey, grey].flat());
+  const s = sprites.recolourPixels(strip, { jersey: "#4f2683", metal: "#c60c30", skin: "#5f3b26" }, 8);
+  assert(JSON.stringify([...s.slice(16, 19)]) === JSON.stringify(white.slice(0, 3)), "a white stripe inside the pants stays white");
+});
+
 await runTest("a card's colours are its team's and its player's", async () => {
   const peterson = find("Adrian Peterson", 2012);
   const c = sprites.cardColours(peterson);

@@ -20,6 +20,16 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.24.2] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: a player's colours no longer scrub or bleed. Helmets kept grey patches where their highlights were,
+  the helmet colour ran onto white gloves and cleats, and darker skin had a pale dotted rim. The recolouring
+  decided each pixel alone, and a helmet's highlight is the same grey as a glove's shadow; it decides a whole
+  outlined region at a time now. Reported from the owner's phone.
+
 ## [2.24.1] - 2026-11-13
 
 Test site only.

@@ -5,16 +5,26 @@
 // player - that team's two colours and that player's skin tone - so fourteen images serve all 3,124 cards and
 // there is no file per team.
 //
-// It keeps every pixel's SHADING and changes what it is a shade OF: a pixel is recognised by its hue, and its
-// new colour takes the target's hue and saturation with the pixel's own lightness scaled against the middle
-// tone of its region. So a fold in the jersey is still a fold, in purple.
+// It keeps every pixel's SHADING and changes what it is a shade OF: its new colour takes the target's hue and
+// saturation with the pixel's own lightness scaled against the middle tone of its region. So a fold in the
+// jersey is still a fold, in purple.
+//
+// GREY AND TAN ARE DECIDED A REGION AT A TIME, NOT A PIXEL AT A TIME (v2.24.2). A helmet's highlight and a white
+// glove's shadow are the same grey, and a ball's shine is the same tan as a forearm, so no test on one pixel
+// can tell them apart - the first version tried, and the owner's phone showed the result: helmets with their
+// highlights scrubbed back to grey, the helmet colour bleeding onto gloves and cleats, and a pale dotted rim
+// round every dark-skinned arm where the edge pixels fell outside the range. So the grey pixels are cut into
+// connected regions (the black outlines are what separate them) and each region is helmet-or-pants as a WHOLE
+// when enough of it is mid grey, or white kit as a whole when it is not. Skin and the ball go the same way.
 //
 // recolourPixels is pure - a typed array in, a typed array out - so tests/test-card-face.mjs holds the mapping
 // with no canvas. paintSprite is the only part that touches the DOM, and it answers null rather than throw when
 // there is no canvas to be had, so a card whose sprite cannot be painted still draws with the neutral one.
 //
-// KNOWN LIMIT: the helmet and the pants are the same grey on the owner's sheets, so they take the same colour.
-// Telling them apart needs a sheet that paints them differently.
+// KNOWN LIMITS: the helmet and the pants are the same grey on the owner's sheets, so they take the same colour;
+// telling them apart needs a sheet that paints them differently. And a region is only as good as its outline:
+// where a sheet draws a white stripe against the pants with no line between, they are one region, and the
+// stripe stays white only because of the fade.
 import { TEAMS } from "./game-logic.mjs";
 import { ROLE_PLAYER } from "./card-logic.mjs";
 import skinData from "./data/card-skin.json" with { type: "json" };
@@ -40,26 +50,63 @@ const rgb = (h, s, l) => {
 const hex = (x) => [parseInt(x.slice(1, 3), 16), parseInt(x.slice(3, 5), 16), parseInt(x.slice(5, 7), 16)];
 const median = (xs) => { if (!xs.length) return 0.5; xs.sort((a, b) => a - b); return xs[xs.length >> 1]; };
 
-// What a neutral pixel IS, by its colour. The ranges are the sheets': measured on the owner's blue, grey and tan.
+// What a neutral pixel MIGHT be, by its colour. The ranges are the sheets': measured on the owner's blue, grey
+// and tan. Blue is always jersey. Grey and warm are only families - the region decides (see the top of the file).
 const JERSEY = 1, METAL = 2, SKIN = 3;
-function kindOf(h, s, l) {
+const GREY = 2, WARM = 3; // a family shares its number with the kind it may become
+function familyOf(r, g, b, h, s, l) {
   if (h > 195 && h < 250 && s > 0.28 && l > 0.12 && l < 0.8) return JERSEY;
-  if (h > 14 && h < 42 && s > 0.28 && l > 0.45 && l < 0.85) return SKIN;
-  if (s < 0.1 && l > 0.3 && l < 0.85) return METAL;
-  return 0; // outlines, white gloves and cleats, the ball: left exactly as drawn
+  if (l > 0.3 && Math.max(r, g, b) - Math.min(r, g, b) < 40) return GREY; // helmet, pants - and every white thing
+  if (h > 8 && h < 48 && s > 0.2 && l > 0.15 && l < 0.9) return WARM;      // skin - and the ball
+  return 0; // outlines and anything else: left exactly as drawn
 }
-const METAL_MID = 0.68; // the helmet's middle grey on the sheets; skin and jersey take theirs from the sprite
+const METAL_MID = 0.68;   // the helmet's middle grey on the sheets; skin and jersey take theirs from the sprite
+const GREY_IS_MID = 0.86; // darker than this is a grey; lighter is a white, or a highlight
+const METAL_SHARE = 0.42; // a grey region this much mid grey is helmet or pants. Measured over the fourteen
+                          // sheets: helmets and pants run 47-100%, gloves, cleats and facemasks 1-37%.
+const WHITE_FROM = 0.84, WHITE_TO = 0.95; // inside a helmet, a grey fades back to white across this range, so a
+                                          // highlight has no hard edge and a white stripe in the pants stays white
+const SKIN_IS_LIGHT = 0.4, SKIN_SHARE = 0.5;  // a warm region mostly lighter than this is skin (its shadow under a
+                                              // facemask included); the ball is darker still
 
-// data: RGBA bytes. colours: { jersey, metal, skin } as "#rrggbb". Returns a NEW array; alpha is never touched.
-export function recolourPixels(data, colours) {
-  const n = data.length / 4;
-  const kind = new Uint8Array(n), light = new Float32Array(n);
-  const jerseyL = [], skinL = [];
+// Cut one family's pixels into connected regions and call `decide` on each (a list of pixel indexes).
+function eachRegion(family, want, w, n, decide) {
+  const seen = new Uint8Array(n);
+  for (let start = 0; start < n; start++) {
+    if (family[start] !== want || seen[start]) continue;
+    const region = [start]; seen[start] = 1;
+    for (let at = 0; at < region.length; at++) {
+      const i = region[at], x = i % w;
+      const near = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w];
+      for (const j of near) if (j >= 0 && j < n && family[j] === want && !seen[j]) { seen[j] = 1; region.push(j); }
+    }
+    decide(region);
+  }
+}
+
+// data: RGBA bytes, `width` pixels to a row (one row if not given). colours: { jersey, metal, skin } as "#rrggbb".
+// Returns a NEW array; alpha is never touched.
+export function recolourPixels(data, colours, width) {
+  const n = data.length / 4, w = width > 0 ? width : n || 1;
+  const family = new Uint8Array(n), kind = new Uint8Array(n), light = new Float32Array(n);
   for (let p = 0; p < n; p++) {
     if (data[p * 4 + 3] === 0) continue;
-    const [h, s, l] = hsl(data[p * 4], data[p * 4 + 1], data[p * 4 + 2]);
-    kind[p] = kindOf(h, s, l); light[p] = l;
-    if (kind[p] === JERSEY) jerseyL.push(l); else if (kind[p] === SKIN) skinL.push(l);
+    const r = data[p * 4], g = data[p * 4 + 1], b = data[p * 4 + 2];
+    const [h, s, l] = hsl(r, g, b);
+    family[p] = familyOf(r, g, b, h, s, l); light[p] = l;
+    if (family[p] === JERSEY) kind[p] = JERSEY;
+  }
+  const share = (region, test) => region.reduce((c, i) => c + (test(light[i]) ? 1 : 0), 0) / region.length;
+  eachRegion(family, GREY, w, n, (region) => {
+    if (share(region, (l) => l < GREY_IS_MID) >= METAL_SHARE) for (const i of region) kind[i] = METAL;
+  });
+  eachRegion(family, WARM, w, n, (region) => {
+    if (share(region, (l) => l > SKIN_IS_LIGHT) >= SKIN_SHARE) for (const i of region) kind[i] = SKIN;
+  });
+  const jerseyL = [], skinL = [];
+  for (let p = 0; p < n; p++) {
+    if (kind[p] === JERSEY) jerseyL.push(light[p]);
+    else if (kind[p] === SKIN && light[p] > 0.45) skinL.push(light[p]); // the lit skin, not its shadow or its edge
   }
   const mid = { [JERSEY]: median(jerseyL), [SKIN]: median(skinL), [METAL]: METAL_MID };
   const to = { [JERSEY]: hsl(...hex(colours.jersey)), [METAL]: hsl(...hex(colours.metal)), [SKIN]: hsl(...hex(colours.skin)) };
@@ -69,7 +116,9 @@ export function recolourPixels(data, colours) {
     if (!k) continue;
     const [h, s, l] = to[k];
     const c = rgb(h, s, Math.min(0.95, Math.max(0.03, l * light[p] / mid[k])));
-    out[p * 4] = c[0]; out[p * 4 + 1] = c[1]; out[p * 4 + 2] = c[2];
+    // how much of the new colour this pixel takes: all of it, except a helmet's whites
+    const keep = k === METAL ? Math.min(1, Math.max(0, (light[p] - WHITE_FROM) / (WHITE_TO - WHITE_FROM))) : 0;
+    for (let ch = 0; ch < 3; ch++) out[p * 4 + ch] = c[ch] * (1 - keep) + data[p * 4 + ch] * keep;
   }
   return out;
 }
@@ -120,7 +169,7 @@ export function paintSprite(img, colours, path = img.src) {
     const g = canvas.getContext("2d", { willReadFrequently: true });
     g.drawImage(img, 0, 0);
     const image = g.getImageData(0, 0, canvas.width, canvas.height);
-    image.data.set(recolourPixels(image.data, colours));
+    image.data.set(recolourPixels(image.data, colours, canvas.width));
     g.putImageData(image, 0, 0);
     url = canvas.toDataURL("image/png");
   } catch {
