@@ -324,9 +324,8 @@ surface. `CARD_TEXT_PAIRS` lists every text colour and what it sits on; the test
 
 ## 8b. Not built
 
-The server side of battles and runs, the battle screen, badges, the profile's best card, boards, the real
-skin-tone list. Packs exist (section 9) but nothing a player does with a card exists yet, so a pack today is
-only something to own. No pack-opening animation: the cards simply appear. The Standard pack's picture has
+Badges, the profile's best card, the real skin-tone list. Battles exist (section 11) and **nobody has played
+one against a person's judgement yet**: every number in them is the builder's. No pack-opening animation: the cards simply appear. The Standard pack's picture has
 words painted into it that are not this game's ("FOOTBALL BOOSTER", "COMMON TIER") and a wordless one is owed
 before production. `/privacy` and `/terms` do not mention cards yet; they change in the release
 that switches cards on for production. The owner's full 50-pose sprite set arrived at about 100x135 pixels a
@@ -443,6 +442,92 @@ thing loot-box rules are written about, and that question goes to the owner's la
   kind = 'pack';` then `select ref, card_id, finish from card_grants where user_id = '<uuid>' and kind =
   'pack' and ref like '<open id>:%';`
 
+## 11. Battles (v2.25.0, on the test site)
+
+Two ways to play six cards against a defense, and two boards. The rules are sections 3 to 7; this is who runs
+them and what is written down.
+
+### 11.1 Who decides what
+
+| | Decided by |
+|---|---|
+| Which six cards | the player, in the browser |
+| Whether that lineup is legal | `lineupProblem` in `card-claim` (shape) and `card_lineup_owned` in SQL (ownership) |
+| A run's defenses | `runDefense(seed, step)`; the seed is made by `card-claim` when the run starts and kept in `card_runs` |
+| A run battle's luck | `card-claim`, fresh, with the cryptographic generator |
+| The showdown's defense and luck | the UTC date (section 7) |
+| Whether it counts, and what it pays | `card_run_battle` / `card_showdown_record`, one transaction each |
+
+The browser computes only what a player needs before playing: which cards fit a slot, what a trait does to
+each, and `lineupProjection` - the score with the luck at zero. Nothing it sends about a result is read.
+
+### 11.2 The database
+
+`card_runs (id, user_id, seed, wins, defense, status, last, started_at, ended_at)` and
+`card_showdowns (date, user_id, defense, lineup, score)`. **RLS on, no policy of any kind, no grant to a
+client role**: the seed says which defenses are still to come, and a lineup is a list of what somebody owns.
+
+- One live run an account (a partial unique index). `defense` is the one to beat next while the run is
+  live, and the one that ended it afterwards. `last` is the latest battle as the browser was shown it.
+- **No name snapshot**, unlike every older board: `card_boards` joins `profiles` when it is read. A guest
+  can never own a card, so there is no guest row to mark, and a rename cannot leave a name behind. So
+  `mod_act`, `claim_username` and the `use_account_username` trigger know nothing of these tables.
+- `delete_account` erases both tables' rows: they are the person's, like the cards.
+
+Service role only: `card_run_start`, `card_run_battle`, `card_run_end`, `card_showdown_record`,
+`card_lineup_owned`. Signed-in players, as GETs: `card_battle_state()` and `card_boards(limit)`.
+
+- **`card_run_battle` checks the step under a lock.** The function reads the run, rolls, and hands back the
+  run id and the wins it read; the row is locked and both are checked again. Two requests that overlap - a
+  double tap, two tabs - cannot both count: the second raises `stale` having changed nothing.
+- `card_battle_state` returns the account's **latest** run, live or over, with `last`. That is what lets a
+  browser whose answer was lost learn that it lost, and be shown the battle.
+- `today` in both readers is the server's UTC date. The browser never works out the showdown's day itself.
+
+### 11.3 The function
+
+`card-claim` gained four actions: `run_start`, `run_battle { run, step, lineup }`, `run_end`,
+`showdown { lineup }`. New reasons: the seven from `lineupProblem`, `no_run`, `stale`. It bundles
+`data/versus-pool.json` and `data/card-defense.json` now, with `card-logic.mjs` and `rewards.mjs` -
+so **a change to any of those ships the function and the client together**.
+
+### 11.4 Coins
+
+`rewards.mjs`: a win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run already had, up to
+`cardWinStepMax` (9) of them - 3, 4, 5 ... 12. `paidCardWinsPerDay` (15) wins pay per UTC day; past it a
+win still moves the run. Ledger kind `card_win`, ref `<run id>:<wins>`. A showdown pays nothing.
+
+From the balance table: a starter deck wins about 1.6 battles a run, so about 7 coins a run; sixty cards about
+9, so about 63. Fifteen paid wins is roughly 50 to 110 coins a day - under a Daily's 40-plus-wins, and a
+Standard pack (150) every day or two for somebody who plays both. **These are the builder's numbers.**
+
+### 11.5 The screens
+
+`card-battle.jsx`, mounted by `cards.jsx` under three more tabs: Run, Showdown, Boards.
+
+- A defense is shown, with what each trait does, **before** the lineup is picked.
+- The clash is CSS only: six cards appear one after another and a meter runs to the total. Nothing fades -
+  half-opacity text is below AA for as long as the fade lasts, and axe caught exactly that.
+- **A failed play is not "not played".** `offline`, `network` and `server` may follow a battle that was
+  played. The screen never replays to find out: it reads `card_battle_state` and shows what is there. Only
+  when that confirms the run did not move does it say the battle was not played; when the state cannot be
+  read either it says so, and promises only that a battle is never played twice.
+- `/data/card-defense.json` is fetched like the catalog (build.mjs copies it where cards are on).
+
+### 11.6 Runbook
+
+- **End somebody's stuck run:** `select card_run_end('<user uuid>');`
+- **See a run:** `select id, wins, status, defense, last from card_runs where user_id = '<uuid>' order by id desc;`
+- **Take a showdown back:** `delete from card_showdowns where date = '<date>' and user_id = '<uuid>';`
+
+### 11.7 Not built, and known gaps
+
+- No badge, nothing on the profile (part 5). No history of battles: a run keeps only its latest.
+- Two accounts are two collections, so nothing stops one person running two. It moves only these two boards.
+- The showdown's gap is section 7's: the day's best lineup can be worked out offline.
+- A run's seed never leaves the server, but each defense is known once it is shown - walking away from a bad
+  draw costs the streak, which is the price the design set on it.
+
 ## 10. Tests
 
 ```bash
@@ -457,4 +542,6 @@ node tests/test-card-sprites.mjs   # fourteen PNGs of the size a card draws
 node tests/test-card-face.mjs      # the recolouring maths, the spoken label, contrast, a card with no sprite
 node tests/test-cards-screen.mjs   # the tile, the starter deck, the collection, the pack shop, the daily card on the result
 node tests/test-card-packs.mjs     # what is in a pack: the odds add up, and 20,000 rolls match what is stated
+# Battles ride in the same files: test-cards-sql (runs, the showdown, the boards, SQL == mock), test-cards-edge
+# (the function plays them), test-cards-screen (the buttons), test-card-logic (runDefense, the projection).
 ```

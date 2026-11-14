@@ -1,4 +1,4 @@
-// card-claim: hands a player their starter deck, and opens a pack they buy. See CARDS.md.
+// card-claim: hands a player their starter deck, opens a pack they buy, and plays their battles. See CARDS.md.
 //
 // card_owned and card_grants have no client write policy at all (supabase/migration-cards.sql). This function's
 // service role, calling grant_cards and buy_pack, is one of the two writers - submit-run is the other, for the
@@ -32,17 +32,44 @@
 // sending it again is answered with the cards from the first time and `duplicate: true`, and charges nothing, so
 // a response that never arrived can simply be asked for again.
 //
+// BATTLES (v2.25.0, CARDS.md 11) answer the first six the same way too, then:
+//   { action: "run_start" }
+//     200 { ok, run: { id, wins, defense, last } }   the live run - the one already going, or a new one
+//   { action: "run_battle", run, step, lineup }
+//     400 malformed | incomplete | unknown_card | bad_finish | bad_slot | same_player   the lineup, by the rules
+//     409 no_run            this account has no live run
+//     409 stale             the run is not the one, or not at the step, the browser thinks - it must read again
+//     409 not_owned         one of the six is not theirs
+//     200 { ok, battle, run: { id, wins, status, defense }, coins: { credited, capped, balance } }
+//   { action: "run_end" }
+//     200 { ok, ended, wins }
+//   { action: "showdown", lineup }
+//     400 (the lineup reasons)   409 not_owned   409 duplicate (already played today)
+//     200 { ok, date, showdown: { defense, lineup, score } }
+// The rules are card-logic.mjs's and the luck is drawn HERE, fresh, with the cryptographic generator - except
+// the showdown's, which is seeded from the day so everybody's cards have the same game. Which defense a run
+// meets next follows from a seed made when the run began and kept in card_runs, a table no browser can read.
+// The lineup's SHAPE is checked here against the rules; who OWNS the cards is checked in SQL, in the same
+// transaction that writes the battle down.
+//
 // cards_off is asked BEFORE the profile on purpose: with the switch off this function must not touch the
 // database at all, so that deploying it to production ahead of the feature is inert.
 //
 // The starter deck pays no coins and touches no other table; a pack moves coins only inside buy_pack. Every reason above has to be in storage-cards.js's
 // CARD_REFUSALS - tests/test-cards-edge.mjs reads this file and fails on one that is not.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { initCardData, starterDeck } from "../../../card-logic.mjs";
+import { initCardData, initDefenses, starterDeck, defenseByKey, lineupProblem, scoreBattle, runDefense, showdownDefense, showdownScore } from "../../../card-logic.mjs";
+import { SLOTS } from "../../../game-logic.mjs";
+import { COIN_RULES, cardWinCoins } from "../../../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../../../card-packs.mjs";
 import catalog from "../../../data/cards.json" with { type: "json" };
+import versusPool from "../../../data/versus-pool.json" with { type: "json" };
+import cardDefense from "../../../data/card-defense.json" with { type: "json" };
 
 initCardData(catalog);
+initDefenses(versusPool, cardDefense);
+const ACTIONS = ["starter", "open_pack", "run_start", "run_battle", "run_end", "showdown"];
+const BATTLE_ACTIONS = ["run_start", "run_battle", "run_end", "showdown"];
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -89,7 +116,10 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
 
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "invalid JSON", reason: "malformed" }, 400); }
-  if (body?.action !== "starter" && body?.action !== "open_pack") return json({ error: "unknown action", reason: "malformed" }, 400);
+  if (!ACTIONS.includes(body?.action)) return json({ error: "unknown action", reason: "malformed" }, 400);
+  if (body.action === "run_battle" && (!Number.isInteger(body.run) || !Number.isInteger(body.step) || body.step < 0)) {
+    return json({ error: "a run and the step it is on are both needed", reason: "malformed" }, 400);
+  }
   if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1 || body.price > 1000000)) {
     return json({ error: "a pack, an open id and the price shown are all needed", reason: "malformed" }, 400);
   }
@@ -107,6 +137,7 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   if (profile.guest) return json({ error: "cards are for accounts", reason: "guest_not_allowed" }, 403);
 
   if (body.action === "open_pack") return openPack(service, user.id, body, json);
+  if (BATTLE_ACTIONS.includes(body.action)) return battle(service, user.id, body, json);
 
   // The refs are fixed - starter:0 to starter:7 - and the cards are fresh each time. So a second claim deals a
   // different deck and grants none of it: the refs are what was claimed, and grant_cards is one transaction.
@@ -126,6 +157,86 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
 // What buy_pack may refuse a purchase for, and the status each travels under. Anything it raises that is not
 // here (bad_grant, purchase_conflict) is this function's fault rather than the player's, and is a 500.
 const PACK_REFUSALS: Record<string, number> = { unavailable: 409, sold_out: 409, price_changed: 409, not_enough: 409, bad_open: 400, no_profile: 400, guest_not_allowed: 403 };
+
+// What the battle functions may refuse for, and the status each travels under. Anything else they raise
+// (bad_battle, bad_run, bad_showdown, bad_lineup) is this function's fault rather than the player's: a 500.
+const BATTLE_REFUSALS: Record<string, number> = { no_profile: 400, guest_not_allowed: 403, no_run: 409, stale: 409, not_owned: 409 };
+function refusal(error: any) {
+  const said = String(error?.message || "");
+  return error?.code === "P0001" && Object.hasOwn(BATTLE_REFUSALS, said) ? said : null;
+}
+// A battle as the browser is shown it, and as the row keeps it for a browser whose answer was lost.
+const shownBattle = (result: any, defense: any) => ({ defense: defense.key, cards: result.cards, offense: result.offense, target: result.target, win: result.win });
+const sqlLineup = (lineup: any) => SLOTS.map((slot: string) => ({ card: lineup[slot].id, finish: lineup[slot].finish }));
+
+async function battle(service: any, userId: string, body: any, json: (body: unknown, status?: number) => Response) {
+  const failed = (what: string, error: unknown) => { console.error(`card-claim ${what}:`, error); return json({ error: "failed", reason: "server" }, 500); };
+
+  if (body.action === "run_start") {
+    const seed = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+    const { data, error } = await service.rpc("card_run_start", { p_user: userId, p_seed: seed, p_defense: runDefense(seed, 0).key });
+    if (error || !data) {
+      const reason = refusal(error);
+      return reason ? json({ error: "refused", reason }, BATTLE_REFUSALS[reason]) : failed("card_run_start", error);
+    }
+    return json({ ok: true, run: { id: data.id, wins: data.wins, defense: data.defense, last: data.last ?? null } });
+  }
+
+  if (body.action === "run_end") {
+    const { data, error } = await service.rpc("card_run_end", { p_user: userId });
+    if (error || !data) return failed("card_run_end", error);
+    return json({ ok: true, ended: data.ended === true, wins: data.wins ?? 0 });
+  }
+
+  // Both of the others play a lineup. Its shape is the rules' to judge; ownership is SQL's, below.
+  const problem = lineupProblem(body.lineup, null);
+  if (problem) return json({ error: "that lineup cannot be played", reason: problem }, 400);
+
+  if (body.action === "showdown") {
+    // The day is THIS function's clock, in UTC - the same day card_battle_state calls today.
+    const date = new Date().toISOString().slice(0, 10);
+    const defense = showdownDefense(date);
+    const result = showdownScore(date, body.lineup);
+    const { data, error } = await service.rpc("card_showdown_record", {
+      p_user: userId, p_date: date, p_defense: defense.key, p_lineup: sqlLineup(body.lineup),
+      p_score: result.score, p_shown: shownBattle(result, defense),
+    });
+    if (error || !data) {
+      const reason = refusal(error);
+      return reason ? json({ error: "refused", reason }, BATTLE_REFUSALS[reason]) : failed("card_showdown_record", error);
+    }
+    if (data.duplicate) return json({ error: "today's showdown is already played", reason: "duplicate" }, 409);
+    return json({ ok: true, date, showdown: { defense: data.defense, lineup: data.lineup, score: Number(data.score) } });
+  }
+
+  // run_battle. The run is read here for its defense and its seed, and checked AGAIN under a lock by
+  // card_run_battle - so two requests that both read "three wins" cannot both play the fourth battle.
+  const { data: run, error: runError } = await service
+    .from("card_runs").select("id, wins, defense, seed").eq("user_id", userId).eq("status", "live").maybeSingle();
+  if (runError) return failed("run read", runError);
+  if (!run) return json({ error: "no run is going", reason: "no_run" }, 409);
+  if (run.id !== body.run || run.wins !== body.step) return json({ error: "the run has moved on", reason: "stale" }, 409);
+  const defense = defenseByKey(run.defense);
+  if (!defense) return failed("run defense", `no defense ${run.defense}`);
+
+  const result = scoreBattle(body.lineup, defense, secureRand, run.wins);
+  const last = shownBattle(result, defense);
+  const { data, error } = await service.rpc("card_run_battle", {
+    p_user: userId, p_run: run.id, p_step: run.wins, p_lineup: sqlLineup(body.lineup),
+    p_win: result.win, p_next: result.win ? runDefense(run.seed, run.wins + 1).key : null, p_last: last,
+    p_coins: result.win ? cardWinCoins(run.wins + 1) : 0, p_cap: COIN_RULES.paidCardWinsPerDay,
+  });
+  if (error || !data) {
+    const reason = refusal(error);
+    return reason ? json({ error: "refused", reason }, BATTLE_REFUSALS[reason]) : failed("card_run_battle", error);
+  }
+  return json({
+    ok: true,
+    battle: last,
+    run: { id: run.id, wins: data.wins, status: data.status, defense: data.defense },
+    coins: { credited: data.credited ?? 0, capped: data.capped === true, balance: data.balance ?? null },
+  });
+}
 
 async function openPack(service: any, userId: string, body: any, json: (body: unknown, status?: number) => Response) {
   // hasOwn, not a plain lookup: "constructor" is a key every object answers to.

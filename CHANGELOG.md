@@ -20,6 +20,40 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.25.0] - 2026-11-13
+
+Test site only. Part 4 of 5 of the card update: battles.
+
+### Added
+- Cards: **runs**. Start a run and defenses come one after another until one stops you. You see each defense
+  and what its traits do before you pick your six, the bar goes up with every win, and each battle plays out
+  card by card - a football line, the luck, the matchups - against the bar. A win pays 3 coins and one more
+  for every win the run already has, up to 12, for the first 15 wins of a day; past that wins still count.
+  A run left half-way is still there when you come back.
+- Cards: **the daily showdown**. One defense a day, the same for everyone, and one go at it for a score.
+  Every card has the same game that day whoever plays it, so the board is about the six you pick.
+- Cards: **two boards** in the card area - longest runs, and today's showdown.
+- The battle is played by the server: the browser sends six cards and is told what happened. A battle whose
+  answer is lost on the way back is shown as it was played, never played again.
+
+- Cards: the collection can be narrowed by **finish** and by **team** as well as by position, and says how
+  many of your cards are showing.
+
+### Fixed
+- Cards: the gleam on a Silver or Gold card no longer cuts off half-way across. Its gradient was tiling, so
+  the loop restarted with a second band in the middle of the card. Reported from the owner's phone.
+
+### Changed
+- `card_battle_state`, `card_boards` and five service-only functions in `migration-cards.sql`; the
+  wallet's ledger gains the kind `card_win`; `delete_account` erases an account's runs and showdowns.
+  The `card-claim` function gains four actions and now bundles the defense data.
+- **Duel's defenses and kickers are fetched, not carried in the page** (`versus-data.mjs`,
+  `/data/versus-pool.json`). The battle screens took the bundle 28 KB over the ceiling
+  `tests/test-build-seo.mjs` holds it to, and that ceiling has named this file as the next thing to move
+  out since v2.14.0. The page asks for it as soon as it loads; the duel screen waits on it and says so if it
+  could not be fetched. The bundle is about 40 KB smaller than before this release. This part reaches
+  production with the next promotion, cards or no cards.
+
 ## [2.24.7] - 2026-11-13
 
 Test site only.

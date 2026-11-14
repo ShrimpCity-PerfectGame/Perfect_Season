@@ -397,4 +397,168 @@ await runTest("the ledger's list of kinds is replaced whatever the old check was
   assert(r.duplicate === false && r.cards.length === 3, "and a pack can be bought on that database");
 });
 
+// ---------- battles (v2.25.0): runs and the daily showdown ----------
+// One sequence through the real SQL and through tests/mock-cards.mjs, compared answer for answer. The Edge
+// Function decides what a battle came to; these functions decide whether it may be written down, once.
+const RUNNER = uuid(31), RIVAL = uuid(32), RGUEST = uuid(33), QUITTER = "11111111-0000-4000-8000-000000000034"; // its own first eight hex: a closed account's tombstone is named from them
+await addAccount(db, { id: RUNNER, username: "runner" });
+await addAccount(db, { id: RIVAL, username: "rival" });
+await addAccount(db, { id: QUITTER, username: "quitter" });
+await addGuestAccount(db, RGUEST);
+const SIX = [1, 2, 3, 4, 5, 6].map((card) => ({ card, finish: "base" }));
+const sixGrants = (tag) => SIX.map((c, i) => ({ ref: `${tag}:${i}`, card: c.card, finish: c.finish }));
+const battleMock = (() => {
+  const profiles = new Map([[RUNNER, { id: RUNNER, username: "runner", guest: false }], [RIVAL, { id: RIVAL, username: "rival", guest: false }],
+    [QUITTER, { id: QUITTER, username: "quitter", guest: false }], [RGUEST, { id: RGUEST, username: "Guest_x", guest: true }]]);
+  const state = { profiles, me: null, currentUserId: () => state.me };
+  const wallet = makeWallet(state);
+  for (const u of [RUNNER, RIVAL, QUITTER]) wallet.welcome(u);
+  return { state, wallet, cards: makeCards(state, { wallet }) };
+})();
+// Call one of the service-role functions in SQL and its twin in the mock; a raise is { error: reason } in both.
+async function both(fn, sqlArgs, casts, mockCall) {
+  let a, b;
+  try { a = { data: (await owner(`select ${fn}(${casts.map((c, i) => `$${i + 1}${c}`).join(", ")}) as r`, sqlArgs))[0].r }; }
+  catch (e) { a = { error: String(e?.message || e).replace(/^.*?([a-z_]+)$/s, "$1") }; }
+  try { b = { data: mockCall() }; } catch (e) { b = { error: e.message }; }
+  if (a.data && typeof a.data === "object" && "balance" in a.data) a.data.balance = Number(a.data.balance);
+  if (a.data && typeof a.data === "object" && "score" in a.data) a.data.score = Number(a.data.score);
+  const d = differs(a, b);
+  assert(!d, `${fn}: the SQL and the mock disagree - ${d}`);
+  return a;
+}
+const J = (v) => JSON.stringify(v);
+const start = (u, seed = "seed-0001", def = "2000|BAL") => both("card_run_start", [u, seed, def], ["::uuid", "::text", "::text"], () => battleMock.cards.runStart(u, seed, def));
+const fight = (u, run, step, win, { lineup = SIX, next = "2002|TB", last = { win }, coins = 3, cap = 15 } = {}) =>
+  both("card_run_battle", [u, run, step, J(lineup), win, win ? next : null, J(last), coins, cap], ["::uuid", "::bigint", "::integer", "::jsonb", "::boolean", "::text", "::jsonb", "::integer", "::integer"],
+    () => battleMock.cards.runBattle(u, run, step, lineup, win, win ? next : null, last, coins, cap));
+const stateOf = async (u) => {
+  const a = (await asUser(db, u, () => db.query("select card_battle_state() as r"))).rows[0].r;
+  battleMock.state.me = u;
+  const b = battleMock.cards.battleState();
+  a.paid_today = Number(a.paid_today); if (a.showdown) a.showdown.score = Number(a.showdown.score);
+  delete a.today; delete b.today; // the day itself is the clock's, and the two clocks are the same machine's
+  assert(!differs(a, b), "card_battle_state: the SQL and the mock disagree - " + differs(a, b));
+  return a;
+};
+
+await runTest("nobody reads or writes a run or a showdown from a browser", async () => {
+  await owner("select grant_cards($1, 'gift', $2::jsonb)", [RUNNER, J(sixGrants("six"))]);
+  battleMock.cards.grantCards(RUNNER, "gift", sixGrants("six"));
+  await start(RUNNER);
+  for (const who of [RIVAL, RUNNER, null]) {
+    const name = who ? "a signed-in player" : "a visitor";
+    for (const [what, statement] of [
+      ["read card_runs", "select seed from card_runs"],
+      ["read card_showdowns", "select lineup from card_showdowns"],
+      ["insert a run", `insert into card_runs (user_id, seed, defense, wins) values ('${RIVAL}', 'seed-9999', '2000|BAL', 99)`],
+      ["update a run", "update card_runs set wins = 99"],
+      ["delete a run", "delete from card_runs"],
+      ["insert a showdown", `insert into card_showdowns (date, user_id, defense, lineup, score) values (current_date, '${RIVAL}', '2000|BAL', '{}', 9999)`],
+    ]) {
+      const r = await attempt(who, statement);
+      assert(/permission denied/i.test(r.error || ""), `${name} cannot ${what}: ${J(r).slice(0, 120)}`);
+    }
+    for (const call of ["card_run_start($1, 'seed-0002', '2000|BAL')", "card_run_end($1)", "card_lineup_owned($1, '[]'::jsonb)",
+      "card_run_battle($1, 1, 0, '[]'::jsonb, true, '2000|BAL', '{}'::jsonb, 100, 999)", "card_showdown_record($1, current_date, '2000|BAL', '[]'::jsonb, 9999, '{}'::jsonb)"]) {
+      const r = await attempt(who, `select ${call}`, [RIVAL]);
+      assert(/permission denied/i.test(r.error || ""), `${name} cannot call ${call.split("(")[0]}: ${J(r).slice(0, 120)}`);
+    }
+  }
+  const anonState = await attempt(null, "select card_battle_state()"), anonBoards = await attempt(null, "select card_boards(10)");
+  assert(/permission denied/i.test(anonState.error || "") && /permission denied/i.test(anonBoards.error || ""), "a visitor cannot call the two readers either");
+  const seen = (await attempt(RIVAL, "select card_battle_state() as r")).rows[0].r;
+  assert(seen.run === null && !J(seen).includes("seed"), "and a signed-in player's state is their own, with no seed in it: " + J(seen));
+});
+
+await runTest("a run: one at a time, each battle counted once, each win paid once", async () => {
+  const again = await start(RUNNER, "seed-other", "1999|ARI");
+  assert(again.data.id === 1 && again.data.fresh === false && again.data.defense === "2000|BAL", "starting twice is the same run, and the second seed is ignored: " + J(again));
+  const before = (await stateOf(RUNNER));
+  assert(before.run.wins === 0 && before.best === 0 && before.paid_today === 0, "it opens at no wins");
+
+  const w1 = await fight(RUNNER, 1, 0, true, { coins: 3 });
+  assert(w1.data.wins === 1 && w1.data.status === "live" && w1.data.defense === "2002|TB" && w1.data.credited === 3 && w1.data.balance === 253, "a win moves the run on and pays: " + J(w1));
+  // The same request again - a double tap, a retry, a second tab that read "no wins yet".
+  const dup = await fight(RUNNER, 1, 0, true, { coins: 3 });
+  assert(dup.error === "stale", "the same step twice is refused as stale: " + J(dup));
+  assert(await balanceOf(RUNNER) === 253 && (await stateOf(RUNNER)).run.wins === 1, "and nothing moved");
+  assert((await fight(RUNNER, 99, 1, true)).error === "no_run", "a run that is not theirs, or not there");
+  assert((await fight(RIVAL, 1, 1, true)).error === "no_run", "somebody else cannot play this run");
+  const notMine = [{ card: 999, finish: "prism" }, ...SIX.slice(1)];
+  assert((await fight(RUNNER, 1, 1, true, { lineup: notMine })).error === "not_owned", "a lineup with a card they do not own");
+  assert((await fight(RUNNER, 1, 1, true, { lineup: SIX.slice(1) })).error === "bad_lineup", "five cards is not a lineup");
+  assert((await fight(RUNNER, 1, 1, true, { coins: 500 })).error === "bad_battle", "a win cannot pay more than a win pays");
+  assert((await fight(RGUEST, 1, 1, true)).error === "guest_not_allowed" && (await fight(NOBODY, 1, 1, true)).error === "no_profile", "guests and the nameless are refused first");
+  assert((await stateOf(RUNNER)).run.wins === 1 && await balanceOf(RUNNER) === 253, "and after all of that the run is where it was");
+
+  const w2 = await fight(RUNNER, 1, 1, true, { coins: 4, next: "2013|SEA", last: { win: true, offense: 512.5 } });
+  assert(w2.data.wins === 2 && w2.data.credited === 4, "the second win");
+  assert((await stateOf(RUNNER)).run.last.offense === 512.5, "the latest battle is kept on the run for a browser that missed the answer");
+  const loss = await fight(RUNNER, 1, 2, false, { last: { win: false, offense: 301 } });
+  assert(loss.data.status === "over" && loss.data.wins === 2 && loss.data.credited === 0 && loss.data.defense === "2013|SEA", "a loss ends it at the wins it has, facing the defense that beat it: " + J(loss));
+  assert((await fight(RUNNER, 1, 2, true)).error === "no_run", "and a finished run cannot be played on");
+  const after = await stateOf(RUNNER);
+  assert(after.run.status === "over" && after.run.wins === 2 && after.run.last.offense === 301 && after.best === 2 && after.paid_today === 2, "the run reads as over, with the battle that ended it; a best of two, two paid wins today: " + J(after));
+  const next = await start(RUNNER, "seed-0003", "2015|DEN");
+  assert(next.data.id === 2 && next.data.fresh === true && next.data.wins === 0, "the next run starts from zero");
+});
+
+await runTest("only so many wins pay in a day, and the rest still count", async () => {
+  // A cap of 3: two are already paid today from the run above.
+  const third = await fight(RUNNER, 2, 0, true, { coins: 3, cap: 3 });
+  assert(third.data.credited === 3 && third.data.capped === false, "the third paid win");
+  const fourth = await fight(RUNNER, 2, 1, true, { coins: 4, cap: 3 });
+  assert(fourth.data.credited === 0 && fourth.data.capped === true && fourth.data.wins === 2, "the fourth wins and pays nothing: " + J(fourth));
+  assert((await stateOf(RUNNER)).paid_today === 3, "three paid, not four");
+  const ended = await both("card_run_end", [RUNNER], ["::uuid"], () => battleMock.cards.runEnd(RUNNER));
+  assert(ended.data.ended === true && ended.data.wins === 2, "walking away ends it at two");
+  const nothing = await both("card_run_end", [RUNNER], ["::uuid"], () => battleMock.cards.runEnd(RUNNER));
+  assert(nothing.data.ended === false, "and there is nothing to walk away from twice");
+});
+
+await runTest("the showdown: once a day, and the first one stands", async () => {
+  const day = (await owner("select (now() at time zone 'utc')::date::text as d"))[0].d;
+  assert(day === battleMock.cards.today(), "the two clocks agree on the day");
+  const record = (u, score, { lineup = SIX, shown = { offense: score }, def = "2000|BAL" } = {}) =>
+    both("card_showdown_record", [u, day, def, J(lineup), score, J(shown)], ["::uuid", "::date", "::text", "::jsonb", "::numeric", "::jsonb"],
+      () => battleMock.cards.showdownRecord(u, day, def, lineup, score, shown));
+  assert((await record(RIVAL, 400)).error === "not_owned", "a lineup they do not own is refused");
+  await owner("select grant_cards($1, 'gift', $2::jsonb)", [RIVAL, J(sixGrants("six"))]);
+  battleMock.cards.grantCards(RIVAL, "gift", sixGrants("six"));
+  const first = await record(RUNNER, 512.34);
+  assert(first.data.duplicate === false && first.data.score === 512.3, "recorded, to one decimal: " + J(first));
+  const second = await record(RUNNER, 9000, { shown: { offense: 9000 } });
+  assert(second.data.duplicate === true && second.data.score === 512.3 && second.data.lineup.offense === 512.34, "a second go answers with the first: " + J(second));
+  assert((await record(RGUEST, 400)).error === "guest_not_allowed" && (await record(RUNNER, 99999)).error === "bad_showdown", "who and what it refuses");
+  await record(RIVAL, 512.3);
+  assert((await stateOf(RUNNER)).showdown.score === 512.3 && (await stateOf(QUITTER)).showdown === null, "each player's state holds their own");
+});
+
+await runTest("the two boards, in SQL and in the mock", async () => {
+  await owner("select grant_cards($1, 'gift', $2::jsonb)", [QUITTER, J(sixGrants("six"))]);
+  battleMock.cards.grantCards(QUITTER, "gift", sixGrants("six"));
+  await start(QUITTER, "seed-0004", "2000|BAL");
+  await fight(QUITTER, 3, 0, true); await fight(QUITTER, 3, 1, true); // level with runner's best, and still live
+  await start(RIVAL, "seed-0005", "2000|BAL"); // a run with no win is on no board
+  for (const limit of [25, 1]) {
+    const a = (await asUser(db, RUNNER, () => db.query("select card_boards($1) as r", [limit]))).rows[0].r;
+    const b = battleMock.cards.boards(limit);
+    for (const row of a.showdown) row.score = Number(row.score);
+    delete a.today; delete b.today;
+    assert(!differs(a, b), `card_boards(${limit}): the SQL and the mock disagree - ${differs(a, b)}`);
+    if (limit === 25) {
+      assert(!differs(a.runs, [{ username: "quitter", wins: 2 }, { username: "runner", wins: 2 }]), "longest runs, ties by name, a live run counted, nobody on it with none: " + J(a.runs));
+      assert(!differs(a.showdown, [{ username: "runner", score: 512.3 }, { username: "rival", score: 512.3 }]), "the showdown, ties to whoever got there first: " + J(a.showdown));
+    }
+  }
+});
+
+await runTest("closing an account takes its battles with it", async () => {
+  await owner("select delete_account($1)", [QUITTER]);
+  assert((await owner("select count(*)::int as n from card_runs where user_id = $1", [QUITTER]))[0].n === 0, "its runs are gone");
+  const board = (await asUser(db, RUNNER, () => db.query("select card_boards(25) as r"))).rows[0].r;
+  assert(!differs(board.runs, [{ username: "runner", wins: 2 }]), "and the board no longer lists it: " + J(board.runs));
+});
+
 console.log("test-cards-sql.mjs done");

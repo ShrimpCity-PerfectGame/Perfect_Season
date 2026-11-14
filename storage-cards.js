@@ -3,13 +3,16 @@
 // The browser never writes a card. card_owned and card_grants have an own-rows-only select and no write policy
 // (supabase/migration-cards.sql); the card-claim Edge Function and submit-run grant them. So this module is
 // reads and requests: the collection, the starter deck, and since v2.24.0 the pack shop.
-import { getClient } from "./storage-core.js";
+import { getClient, READ } from "./storage-core.js";
 
 // Every reason card-claim can answer with. tests/test-cards-edge.mjs reads the function's source and fails on
 // one that is not here - a reason this list does not know is a rule that would read as "check your connection".
+const BATTLE_ACTIONS = ["run_start", "run_battle", "run_end", "showdown"];
 const CARD_PAGE = 1000; // PostgREST's default ceiling on one select
 export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "cards_off", "duplicate", "malformed", "server",
-  "unknown_pack", "bad_open", "unavailable", "sold_out", "price_changed", "not_enough"];
+  "unknown_pack", "bad_open", "unavailable", "sold_out", "price_changed", "not_enough",
+  // battles (v2.25.0): the lineup's own reasons out of card-logic.mjs's lineupProblem, and a run's
+  "incomplete", "unknown_card", "bad_finish", "bad_slot", "same_player", "not_owned", "no_run", "stale"];
 
 // A player's collection, and whether they have claimed their starter deck.
 //   { status: "ok", cards: [{ id, finish, count }], starter: boolean }
@@ -71,12 +74,56 @@ async function callClaim(body) {
       if (CARD_REFUSALS.includes(said.reason)) return failed(said.reason);
       return failed(said.reason ? "network" : "server");
     }
-    if (data?.ok === true && Array.isArray(data.cards)) return { ok: true, data };
+    if (data?.ok === true && (Array.isArray(data.cards) || BATTLE_ACTIONS.includes(body?.action))) return { ok: true, data };
     return failed("server");
   } catch {
     return failed("offline");
   }
 }
+
+// ---------- battles (v2.25.0, CARDS.md 11) ----------
+// What the battle screens open on:
+//   { status: "ok", today, run: { id, wins, status, defense, last } | null, best, paidToday, showdown | null }
+//   { status: "signed_out" } | { status: "error" }
+// `run` is the account's LATEST run, live or over. Three answers, for the reason fetchMyCards has three: a read
+// that failed is not "no run going" - saying so would offer to start a run over the top of one already live.
+export async function fetchBattleState() {
+  try {
+    const client = getClient();
+    const { data: sessionData } = await client.auth.getSession();
+    if (!sessionData?.session?.user?.id) return { status: "signed_out" };
+    const { data, error } = await client.rpc("card_battle_state", {}, READ);
+    if (error || !data || typeof data !== "object" || typeof data.today !== "string") return { status: "error" };
+    return {
+      status: "ok", today: data.today, run: data.run || null, best: Number(data.best) || 0, paidToday: Number(data.paid_today) || 0,
+      showdown: data.showdown ? { ...data.showdown, score: Number(data.showdown.score) } : null,
+    };
+  } catch {
+    return { status: "error" };
+  }
+}
+
+// The card area's two boards: { status: "ok", today, runs: [{ username, wins }], showdown: [{ username, score }] }
+// or { status: "error" }.
+export async function fetchCardBoards(limit = 25) {
+  try {
+    const { data, error } = await getClient().rpc("card_boards", { p_limit: limit }, READ);
+    if (error || !data || !Array.isArray(data.runs) || !Array.isArray(data.showdown)) return { status: "error" };
+    return { status: "ok", today: data.today, runs: data.runs, showdown: data.showdown.map((r) => ({ ...r, score: Number(r.score) })) };
+  } catch {
+    return { status: "error" };
+  }
+}
+
+// The four things a player DOES in a battle. Each answers { ok: true, ...what the function said } or
+// { ok: false, reason }. "offline", "network" and "server" mean the outcome is UNKNOWN: the battle may have
+// been played and its answer lost. Nothing is ever replayed to find out - the screen reads fetchBattleState,
+// which says where the run really stands and carries its latest battle.
+const battleCall = async (body) => { const res = await callClaim(body); return res.ok ? { ...res.data, ok: true } : res; };
+export const startRun = () => battleCall({ action: "run_start" });
+export const playBattle = (run, step, lineup) => battleCall({ action: "run_battle", run, step, lineup });
+export const endRun = () => battleCall({ action: "run_end" });
+export const playShowdown = (lineup) => battleCall({ action: "showdown", lineup });
 
 // What the pack shop is selling: { status: "ok", packs: [{ id, price, size, active, stockTotal, stockLeft }] }
 // in shelf order, or { status: "error" }. Prices are public, so this works signed out. What is IN a pack is not

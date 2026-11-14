@@ -23,6 +23,7 @@ function build(env) {
   return {
     html: read("page.html"), robots: read("robots.txt"), sitemap: read("sitemap.xml"), js: read("page.js"),
     pool: read(path.join("data", "guess-pool.json")),
+    versus: read(path.join("data", "versus-pool.json")),
     cards: read(path.join("data", "cards.json")),
     env,
     pages: Object.fromEntries(SITE_PAGES.map((p) => [p.id, read(p.file)])),
@@ -78,7 +79,12 @@ check("the share link people see stays gridspin.app", prod.js.includes('"https:/
 // THE NEXT RECLAIM IS NAMED AND UNCHANGED: data/versus-pool.json, 67 KB of defenses and kickers that only the
 // duel screen reads, still shipped to everybody at startup. Doing to it what was done to the guess pool would
 // give back more than this release took. Do that before raising this number again.
+//
+// DONE in v2.25.0 (versus-data.mjs): the card battle screens took the bundle to 1,328,187, and instead of raising
+// this the duel pool was moved out, as written above. The ceiling stays where it was. The next thing to ask of a
+// release that reaches it is whether a SCREEN can load on demand - there is no data file left to move.
 check("the bundle is minified", prod.js.length < 1_300_000, `${prod.js.length} bytes`);
+check("Duel's pool is served from the site root, not carried in the bundle", (prod.versus || "").length > 50_000, `${(prod.versus || "").length} bytes`);
 // Guess the Player's pool is the one data file the bundle does NOT carry (guess-pool.mjs), because page.js sits
 // a few KB under the ceiling above. Its SIZE moves with the football season - the pool is the men currently
 // taking snaps, so it grows every week and starts again each September - hence a floor rather than a range.

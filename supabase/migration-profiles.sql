@@ -741,6 +741,12 @@ begin
     execute 'delete from public.card_owned where user_id = $1' using v_uid;
     execute 'delete from public.card_grants where user_id = $1' using v_uid;
   end if;
+  -- Their battles (v2.25.0) go with the cards: a showdown row is a list of six cards they owned, and a board
+  -- that reads names live would otherwise show the tombstone holding a streak.
+  if to_regclass('public.card_runs') is not null then
+    execute 'delete from public.card_runs where user_id = $1' using v_uid;
+    execute 'delete from public.card_showdowns where user_id = $1' using v_uid;
+  end if;
   -- Reports they filed and reports about them: both name a person, and a closed account cannot answer one.
   delete from public.reports where reporter_id = v_uid or target_id = v_uid;
 

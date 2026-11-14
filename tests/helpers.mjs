@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import * as GL from "../game-logic.mjs";
 import * as V from "../versus-logic.mjs";
-import { initCardData } from "../card-logic.mjs";
+import { initCardData, initDefenses } from "../card-logic.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const root = path.resolve(__dirname, "..");
@@ -29,6 +29,14 @@ V.initVersusData(versusPool);
 // it is bundled into a browser page by tools/ui-harness). This is the Node copy of card-logic.mjs the mock
 // imports - the app under test has its own copy inside its bundle and loads the catalog by fetch.
 initCardData(JSON.parse(readFileSync(path.join(root, "data", "cards.json"), "utf8")));
+// ...and the defenses a card battle is played against, for the mock's run and showdown.
+initDefenses(versusPool, JSON.parse(readFileSync(path.join(root, "data", "card-defense.json"), "utf8")));
+
+const NODE_FETCH = globalThis.fetch;
+const FETCHED_DATA = {
+  "/data/versus-pool.json": versusPool,
+  "/data/card-defense.json": JSON.parse(readFileSync(path.join(root, "data", "card-defense.json"), "utf8")),
+};
 
 export { makeMockAuth } from "./mock-supabase.mjs";
 
@@ -51,6 +59,20 @@ export function setupDom(url = "http://localhost/") {
   window.crypto.subtle = webcrypto.subtle;
   Object.defineProperty(global, "localStorage", { value: window.localStorage, configurable: true });
   global.IS_REACT_ACT_ENVIRONMENT = true;
+  // The data files the app FETCHES rather than carries (versus-data.mjs, card-data.mjs), answered from disk.
+  // Anything else is a 404 - never the real network, which Node's own fetch would otherwise reach for. A suite
+  // that needs a load to fail, or serves a file of its own, replaces this after calling setupDom.
+  // A fetch a suite installed BEFORE opening a page is left alone - only Node's own, or this default from an
+  // earlier setupDom, is replaced.
+  if (!global.fetch || global.fetch === NODE_FETCH || global.fetch.__psDefault) {
+    const dataFetch = async (url) => {
+      const file = FETCHED_DATA[String(url).replace(/^https?:\/\/[^/]+/, "")];
+      return file ? { ok: true, status: 200, json: async () => file } : { ok: false, status: 404, json: async () => ({}) };
+    };
+    dataFetch.__psDefault = true;
+    global.fetch = dataFetch;
+  }
+  window.fetch = global.fetch;
   // jsdom's Document doesn't expose oninput, so React's isEventSupported('input') check comes
   // back false and it falls back to its legacy IE input-event polyfill, which calls the
   // long-gone attachEvent/detachEvent and throws. Stubbing the property short-circuits that.

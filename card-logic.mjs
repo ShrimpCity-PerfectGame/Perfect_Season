@@ -273,6 +273,20 @@ export function scoreBattle(lineup, defense, rand, step = 0) {
   return { cards: plays, offense, target, win: offense >= target };
 }
 
+// ---------- Runs ----------
+// A run is random defenses one after another until a loss. WHICH defense comes at each step follows from a seed
+// the server made when the run began and from nothing else, so leaving, reloading or abandoning can never
+// re-roll an opponent - the server stores the seed and the browser is only ever told the next defense's key.
+// The battle's LUCK is not seeded at all: the server draws it fresh when the battle is played.
+// By position in DEFENSES, like showdownDefense - so whatever stores a run stores the defense's KEY as well.
+export const runDefense = (seed, step) => DEFENSES[Math.floor(mulberry32(hashStr(`run-${seed}|${Number.isFinite(step) && step > 0 ? Math.floor(step) : 0}`))() * DEFENSES.length)];
+
+// A lineup's score with the luck taken out: what the screen shows beside the bar before a battle is played.
+export function lineupProjection(lineup, defense, step = 0) {
+  const r = scoreBattle(lineup, defense, () => 0.5, step);
+  return { offense: r.offense, target: r.target, cards: r.cards };
+}
+
 // ---------- The daily showdown ----------
 // One defense a day, the same for everyone, and ONE ROLL PER CARD PER DAY: 2007 Brady has the same game today
 // in every lineup that fields him, in any slot, in any finish. So two people with the same six cards get the

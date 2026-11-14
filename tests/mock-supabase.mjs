@@ -778,6 +778,10 @@ export function makeMockAuth() {
   const rpcs = {
     site_totals: siteTotals, site_stats: siteStats, ladder_best: ladderBest,
     ...century.rpcs, ...guess.rpcs,
+    // Cards' two read-only functions (v2.25.0). A failed read is thrown as a code, which rpc() below hands back
+    // as an error object the way PostgREST would.
+    card_battle_state: () => { if (cards.stateFails) throw new Error("read_failed"); return cards.battleState(); },
+    card_boards: ({ p_limit } = {}) => { if (cards.stateFails) throw new Error("read_failed"); return cards.boards(p_limit); },
     player_stats: ({ p_user_id } = {}) => playerStats(state, p_user_id),
     ...profileData.rpcs, ...moderation.rpcs, ...wallet.rpcs, ...shop.rpcs, ...versus.rpcs,
   };

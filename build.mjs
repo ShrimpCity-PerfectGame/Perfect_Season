@@ -103,11 +103,13 @@ if (!existsSync("data/guess-pool.json")) {
   throw new Error("data/guess-pool.json is missing - run node tools/data/build-guess-pool.mjs");
 }
 cpSync("data/guess-pool.json", "public/data/guess-pool.json");
+// Duel's defenses and kickers, fetched the same way since v2.25.0 (versus-data.mjs) - on every build, cards on or off.
+cpSync("data/versus-pool.json", "public/data/versus-pool.json");
 // The card catalog, fetched like the guess pool (card-data.mjs) - but ONLY where cards are switched on. With
 // them off the file is not shipped at all: nothing would read it, and a catalog sitting on production ahead of
 // the feature is a thing somebody finds.
-if (cardsOn) cpSync("data/cards.json", "public/data/cards.json");
-else rmSync("public/data/cards.json", { force: true });
+if (cardsOn) { cpSync("data/cards.json", "public/data/cards.json"); cpSync("data/card-defense.json", "public/data/card-defense.json"); }
+else { rmSync("public/data/cards.json", { force: true }); rmSync("public/data/card-defense.json", { force: true }); }
 
 // The service worker, which is what makes the site installable and what lets a draft carry on with no signal
 // (service-worker.js, sw-rules.mjs; entry.jsx registers it). Its store is named after this exact build - the

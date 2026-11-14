@@ -76,6 +76,14 @@ const SCREENS = [
   // The pack shop, with a pack's contents open: three tables of odds, and a pack nobody can afford.
   ["the pack shop", "?screen=cards&tab=packs&inside=1&coins=300", null],
   ["the pack shop with a pack sold out", "?screen=cards&tab=packs&soldout=1&coins=9000", null],
+  // Battles (CARDS.md 11): the dark defense panel and the lineup's slots, a played battle - six card images
+  // each with its game, chips whose sign is in the text as well as the colour - the showdown and the boards.
+  ["a card run before it starts", "?screen=cards&tab=run", null],
+  ["a card run: the defense and the lineup", "?screen=cards&tab=run&run=1", null],
+  ["a card battle that was won", "?screen=cards&tab=run&battle=win", null],
+  ["a card battle that was lost", "?screen=cards&tab=run&battle=loss", null],
+  ["the daily showdown, played", "?screen=cards&tab=showdown&played=1", null],
+  ["the card boards", "?screen=cards&tab=boards&played=1", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {

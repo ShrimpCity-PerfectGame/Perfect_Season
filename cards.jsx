@@ -17,10 +17,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId, fetchWallet } from "./storage.js";
 import { loadCardData } from "./card-data.mjs";
 import { CARDS, FINISHES } from "./card-logic.mjs";
+import { TEAMS } from "./game-logic.mjs";
 import { PACKS, packCards, packOdds } from "./card-packs.mjs";
 import { Coins } from "./cosmetics.jsx";
 import { packArt } from "./card-sprites.mjs";
 import { CardFace, CARD_FACE_CSS } from "./card-face.jsx";
+import { BattleArea, CARD_BATTLE_CSS, LINEUP_SENTENCES } from "./card-battle.jsx";
 
 // Every reason claimStarter can answer with, as a sentence. A reason missing from here would reach the player
 // as nothing at all, so tests/test-cards-screen.mjs holds this to CARD_REFUSALS plus the two the client adds.
@@ -40,6 +42,8 @@ export const CARD_SENTENCES = {
   sold_out: "That pack has sold out. Nothing was charged.",
   price_changed: "That pack's price has gone up since this page loaded. Nothing was charged.",
   not_enough: "You don't have enough coins for that pack. Nothing was charged.",
+  // A lineup's and a run's refusals (card-battle.jsx, which says them on its own screens).
+  ...LINEUP_SENTENCES,
 };
 export const CARD_SENTENCE_KEYS = [...CARD_REFUSALS, "offline", "network"];
 
@@ -288,15 +292,18 @@ function toCards(rows) {
     .sort((a, b) => b.card.rating - a.card.rating || FINISH_ORDER[a.finish] - FINISH_ORDER[b.finish] || a.id - b.id);
 }
 
-// initialTab is the UI harness's, so the pack shop can be looked at and audited without a click.
+const TABS = [["collection", "Collection"], ["packs", "Packs"], ["run", "Run"], ["showdown", "Showdown"], ["boards", "Boards"]];
+// initialTab is the UI harness's, so the pack shop and the battle screens can be looked at and audited without a click.
 export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, balance = null, onBalance, initialTab = "collection" }) {
   const [phase, setPhase] = useState("loading");
-  const [tab, setTab] = useState(initialTab === "packs" ? "packs" : "collection"); // "collection" | "packs"
+  const [tab, setTab] = useState(TABS.some(([id]) => id === initialTab) ? initialTab : "collection");
   const [owned, setOwned] = useState([]);
   const [fresh, setFresh] = useState(null); // the eight just dealt, shown once above the collection
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [pos, setPos] = useState("All");
+  const [fin, setFin] = useState("All");   // a finish, or "All"
+  const [team, setTeam] = useState("All"); // a team code, or "All"
   const [stale, setStale] = useState(false); // an owned card this page's catalog does not know
   const pendingBuys = useRef(new Map()); // PackShop's unanswered purchases - held here so a tab switch keeps them
 
@@ -352,7 +359,12 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
     setNotice(CARD_SENTENCES[res.reason] || CARD_SENTENCES.network);
   }
 
-  const shown = pos === "All" ? owned : owned.filter((r) => r.card.pos === pos);
+  // The three filters narrow together. The team list is the teams actually in the collection, so no choice
+  // in it can come back empty by itself - and a team that has left the collection falls back to All.
+  const teams = [...new Set(owned.map((r) => r.card.team))].sort();
+  const teamOn = teams.includes(team) ? team : "All";
+  const shown = owned.filter((r) => (pos === "All" || r.card.pos === pos) && (fin === "All" || r.finish === fin) && (teamOn === "All" || r.card.team === teamOn));
+  const filtered = pos !== "All" || fin !== "All" || teamOn !== "All";
   const total = owned.reduce((n, r) => n + r.count, 0);
 
   return (
@@ -380,12 +392,18 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
         <div className="cd-tabs" role="group" aria-label="Cards">
           {/* Coming back to the collection re-reads it, quietly: a pack opened a moment ago - or one whose answer
               was lost - is in it by now, and the read made at the time may have failed. */}
-          <button className="cd-chip" aria-pressed={tab === "collection"} onClick={() => { if (tab !== "collection") { setTab("collection"); load(true); } }}>Collection</button>
-          <button className="cd-chip" aria-pressed={tab === "packs"} onClick={() => setTab("packs")}>Packs</button>
+          {TABS.map(([id, name]) => (
+            <button key={id} className="cd-chip" data-tab={id} aria-pressed={tab === id}
+              onClick={() => { if (tab !== id) { setTab(id); if (id === "collection") load(true); } }}>{name}</button>
+          ))}
         </div>
       )}
       {(phase === "collection" || phase === "starter") && tab === "packs" && (
         <PackShop balance={balance} onBalance={onBalance} onOpened={() => load(true)} pendingRef={pendingBuys} />
+      )}
+
+      {(phase === "collection" || phase === "starter") && (tab === "run" || tab === "showdown" || tab === "boards") && (
+        <BattleArea mode={tab} rows={owned} onBalance={onBalance} />
       )}
 
       {phase === "account" && (
@@ -427,8 +445,23 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
                 <button key={p} className="cd-chip" aria-pressed={pos === p} onClick={() => setPos(p)}>{p}</button>
               ))}
             </div>
+            <div className="cd-filter" role="group" aria-label="Show a finish">
+              {["All", ...FINISHES].map((f) => (
+                <button key={f} className="cd-chip" data-finish-filter={f} aria-pressed={fin === f} onClick={() => setFin(f)}>{f === "All" ? "Any finish" : FINISH_NAME[f]}</button>
+              ))}
+            </div>
+            {teams.length > 1 && (
+              <label className="cd-team">
+                <span>Team</span>
+                <select value={teamOn} onChange={(e) => setTeam(e.target.value)} data-team-filter>
+                  <option value="All">Every team</option>
+                  {teams.map((t) => <option key={t} value={t}>{TEAMS[t] ? `${TEAMS[t][1]} ${TEAMS[t][0]}` : t}</option>)}
+                </select>
+              </label>
+            )}
+            {filtered && shown.length > 0 && <p className="note" data-shown>Showing {shown.reduce((n, r) => n + r.count, 0)} of {total}.</p>}
             {shown.length === 0
-              ? <p className="note">{owned.length === 0 ? (stale ? "Reload the page to see your cards." : "No cards yet. Finish today's daily draft to earn one.") : `No ${pos} cards yet.`}</p>
+              ? <p className="note">{owned.length === 0 ? (stale ? "Reload the page to see your cards." : "No cards yet. Finish today's daily draft to earn one.") : (fin === "All" && teamOn === "All" ? `No ${pos} cards yet.` : "No cards match those filters.")}</p>
               : (
                 <div className="cd-grid">
                   {shown.map((r) => <CardFace key={`${r.id}:${r.finish}`} card={r.card} finish={r.finish} count={r.count} />)}
@@ -462,13 +495,16 @@ export function SeasonCard({ card, onOpenCards }) {
   );
 }
 
-export const CARDS_CSS = CARD_FACE_CSS + `
+export const CARDS_CSS = CARD_FACE_CSS + CARD_BATTLE_CSS + `
 .cd-area{display:grid;gap:16px}
 .cd-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .cd-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.02em;font-size:clamp(22px,5vw,28px);line-height:1.1;margin:0 0 10px;color:var(--ink)}
 .cd-area .panel p{margin:0 0 12px}
 .cd-starter .note{margin-top:12px}
-.cd-filter{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
+.cd-filter{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.cd-team{display:flex;align-items:center;gap:10px;margin:0 0 16px;font-weight:700;color:var(--ink)}
+.cd-team select{font:inherit;font-size:16px;font-weight:600;color:var(--ink);background:var(--surface);border:2px solid var(--btn-line);border-radius:10px;padding:8px 10px;min-height:44px;max-width:100%}
+.cd-team select:focus-visible{outline:3px solid var(--accent-ink);outline-offset:2px}
 .cd-chip{border:2px solid var(--btn-line);background:var(--surface);color:var(--ink);font-weight:700;font-size:14px;padding:6px 14px;border-radius:999px;position:relative}
 .cd-chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .cd-chip:focus-visible{outline:3px solid var(--accent-ink);outline-offset:2px}
@@ -478,7 +514,7 @@ export const CARDS_CSS = CARD_FACE_CSS + `
 .cd-earned{display:grid;justify-items:center;gap:10px;margin:18px 0 6px}
 .cd-earned-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:18px;margin:0;color:var(--ink)}
 .cd-earned .cd-card{--cd-w:150px}
-.cd-tabs{display:flex;gap:8px}
+.cd-tabs{display:flex;flex-wrap:wrap;gap:8px}
 /* "You pulled" takes focus so a screen reader lands on what just happened; it is not a control, so no ring. */
 .cd-h[tabindex="-1"]:focus,.cd-inside:focus{outline:none}
 .cd-shop{display:grid;gap:18px}

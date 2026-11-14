@@ -64,7 +64,7 @@ export const BUNDLE = "/page.js";
 // The card catalog (v2.23.0) is here for the same reason: card-claim and submit-run choose cards out of THEIR copy
 // of it, so a browser holding last release's would be told it owns a card it cannot draw. It exists only where
 // cards are switched on; this is a rule about how to fetch it, never a file the worker fetches for itself.
-export const DATA = new Set(["/data/guess-pool.json", "/data/cards.json"]);
+export const DATA = new Set(["/data/guess-pool.json", "/data/versus-pool.json", "/data/cards.json", "/data/card-defense.json"]);
 
 // "page" and "bundle" are fetched first and only fall back to what's stored; "asset" and "font" are served
 // from store and refreshed behind the player's back; null means the worker never touches the request.

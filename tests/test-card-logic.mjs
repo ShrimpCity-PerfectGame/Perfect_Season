@@ -299,5 +299,25 @@ if (need("starterDeck")) {
   ok(seen.size > 15 && [...seen].every((id) => ["NE|1", "KC|0"].includes(C.cardBoardKey(C.CARDS.get(id)))), "any card on those boards can come up, and no other");
 }
 
+// ---------- Runs ----------
+if (need("runDefense")) {
+  eq(C.runDefense("a-seed-of-some-kind", 3).key, C.runDefense("a-seed-of-some-kind", 3).key, "a run's defense at a step follows from the seed and the step");
+  const walk = (seed) => Array.from({ length: 12 }, (_, i) => C.runDefense(seed, i).key);
+  ok(new Set(walk("seed-one")).size >= 10, "a run meets different defenses, not one over and over");
+  ok(walk("seed-one").join() !== walk("seed-two").join(), "and two runs meet different ones");
+  eq(C.runDefense("s", -4).key, C.runDefense("s", 0).key, "a step that is not one is read as the first");
+  eq(C.runDefense("s", 2.9).key, C.runDefense("s", 2).key, "and a fraction as the step it is in");
+  const lineup = { QB: { id: all.find((c) => c.pos === "QB").id, finish: "gold" }, RB: { id: all.find((c) => c.pos === "RB").id, finish: "base" }, WR: { id: all.find((c) => c.pos === "WR").id, finish: "base" },
+    TE: { id: all.find((c) => c.pos === "TE").id, finish: "base" }, FLEX1: { id: all.filter((c) => c.pos === "WR")[40].id, finish: "base" }, FLEX2: { id: all.filter((c) => c.pos === "RB")[40].id, finish: "base" } };
+  if (C.lineupProblem(lineup, null) === null) {
+    const d = C.DEFENSES[100];
+    const proj = C.lineupProjection(lineup, d, 2);
+    const flat = C.scoreBattle(lineup, d, () => 0.5, 2);
+    eq(proj.offense, flat.offense, "the projection is the battle with the luck at zero");
+    eq(proj.target, C.battleTarget(d, 2), "against the bar for that step");
+    ok(proj.cards.every((c) => c.roll === 0), "and no card rolled");
+  } else ok(false, "the test lineup should be legal: " + C.lineupProblem(lineup, null));
+}
+
 console.log(fails ? `\n${fails} FAILED` : "card logic: all checks passed");
 process.exit(fails ? 1 : 0);

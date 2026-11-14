@@ -10,7 +10,8 @@ import { loadEdgeFunction } from "./edge-harness.mjs";
 import { makeCards } from "./mock-cards.mjs";
 import { makeWallet } from "./mock-wallet.mjs";
 import { PACK_BY_ID, packCards } from "../card-packs.mjs";
-import { initCardData, CARDS, STARTER_MAX_RATING, lineupProblem } from "../card-logic.mjs";
+import { initCardData, initDefenses, CARDS, STARTER_MAX_RATING, lineupProblem, defenseByKey, runDefense, battleTarget, showdownScore, showdownDefense, LUCK_SPREAD } from "../card-logic.mjs";
+import { COIN_RULES, cardWinCoins } from "../rewards.mjs";
 import { SLOTS } from "../game-logic.mjs";
 import { CARD_REFUSALS } from "../storage-cards.js";
 
@@ -34,12 +35,19 @@ function store({ on = true } = {}) {
     users: { has: (id) => id === ME || id === GUEST || id === NAMELESS },
     readFails: {}, writeFails: {}, rpcFails: {}, throwOn: {}, beforeWrite: null, rpcCalls: [],
     profiles, cards, wallet,
-    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : []),
+    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : table === "card_runs" ? cards.runs : []),
     insert: (_table, row) => ({ row }),
     remove() {},
     rpcs: {
       grant_cards: (args) => cards.grantCards(args.p_user, args.p_kind, args.p_grants),
       // A raise comes back as an error object, the way PostgREST reports one.
+      // The battle functions, the same way: a raise is an error object carrying the reason.
+      ...Object.fromEntries(Object.entries({
+        card_run_start: (a) => cards.runStart(a.p_user, a.p_seed, a.p_defense),
+        card_run_battle: (a) => cards.runBattle(a.p_user, a.p_run, a.p_step, a.p_lineup, a.p_win, a.p_next, a.p_last, a.p_coins, a.p_cap),
+        card_run_end: (a) => cards.runEnd(a.p_user),
+        card_showdown_record: (a) => cards.showdownRecord(a.p_user, a.p_date, a.p_defense, a.p_lineup, a.p_score, a.p_shown),
+      }).map(([name, fn]) => [name, (args) => { try { return fn(args); } catch (e) { return { __rpcError: { message: e.message, code: "P0001" } }; } }])),
       buy_pack: (args) => {
         try { return cards.buyPack(args.p_user, args.p_pack, args.p_open, args.p_cards, args.p_price); }
         catch (e) { return { __rpcError: { message: e.message, code: "P0001" } }; }
@@ -233,6 +241,175 @@ await runTest("every reason the function can give is one the client knows", asyn
   const packReasons = [...table[1].matchAll(/([a-z_]+)\s*:/g)].map((m) => m[1]);
   assert(packReasons.length === 7, "seven of them: " + packReasons);
   for (const r of packReasons) assert(CARD_REFUSALS.includes(r), `storage-cards.js does not know the pack reason "${r}"`);
+  // The battle refusals are a table of their own, and a lineup's reasons come out of card-logic.mjs.
+  const battleTable = src.match(/const BATTLE_REFUSALS[^=]*=\s*\{([^}]+)\}/);
+  assert(battleTable, "the function's table of battle refusals was found");
+  const battleReasons = [...battleTable[1].matchAll(/([a-z_]+)\s*:/g)].map((m) => m[1]);
+  assert(battleReasons.length === 5, "five of them: " + battleReasons);
+  for (const r of battleReasons) assert(CARD_REFUSALS.includes(r), `storage-cards.js does not know the battle reason "${r}"`);
+  const logic = readFileSync(new URL("../card-logic.mjs", import.meta.url), "utf8");
+  const body = logic.slice(logic.indexOf("export function lineupProblem"), logic.indexOf("// ---------- Battles"));
+  const lineupReasons = [...new Set([...body.matchAll(/return "([a-z_]+)"/g)].map((m) => m[1]))];
+  assert(lineupReasons.length === 7, "lineupProblem's seven reasons: " + lineupReasons);
+  for (const r of lineupReasons) assert(CARD_REFUSALS.includes(r), `storage-cards.js does not know the lineup reason "${r}"`);
+});
+
+// ---------- battles (v2.25.0) ----------
+// The function holds the rules and draws the luck; the store's functions are tests/mock-cards.mjs's, which
+// tests/test-cards-sql.mjs holds to the SQL. So what is tested here is the function's own part: who is asking,
+// which lineup it will score, that the roll is its own and never the browser's, and what it calls each refusal.
+initDefenses(JSON.parse(readFileSync(new URL("../data/versus-pool.json", import.meta.url), "utf8")), JSON.parse(readFileSync(new URL("../data/card-defense.json", import.meta.url), "utf8")));
+// Six owned cards that make a lineup: the best the account holds at each slot.
+function lineupFrom(s, userId) {
+  const cards = s.cards.owned(userId).map((o) => ({ ...CARDS.get(o.card_id), finish: o.finish })).sort((a, b) => b.rating - a.rating || a.id - b.id);
+  const lineup = {}; const men = new Set();
+  for (const slot of SLOTS) {
+    const c = cards.find((x) => !men.has(x.pid) && (slot.startsWith("FLEX") ? x.pos !== "QB" : x.pos === slot));
+    lineup[slot] = { id: c.id, finish: c.finish }; men.add(c.pid);
+  }
+  return lineup;
+}
+// An account holding the 60 best cards in the game, so a first battle is a win whatever the luck does.
+function stacked(s, userId) {
+  const best = [...CARDS.values()].sort((a, b) => b.rating - a.rating || a.id - b.id);
+  const men = new Set(); const grants = [];
+  for (const c of best) { if (men.has(c.pid)) continue; men.add(c.pid); grants.push({ ref: `g:${c.id}`, card: c.id, finish: "base" }); if (grants.length === 60) break; }
+  for (let i = 0; i < grants.length; i += 20) s.cards.grantCards(userId, "gift", grants.slice(i, i + 20));
+}
+const battleCalls = (s, name) => s.rpcCalls.filter((c) => c.name === name);
+
+await runTest("a run: started once, fought on the server's roll, paid from rewards.mjs", async () => {
+  const s = store();
+  stacked(s, ME);
+  const started = await invoke({ action: "run_start" }, { userId: ME });
+  assert(started.status === 200 && started.body.run.wins === 0 && defenseByKey(started.body.run.defense), "a run with a real defense: " + JSON.stringify(started.body));
+  assert(!JSON.stringify(started.body).includes("seed"), "and the seed is not in the answer");
+  const seed = s.cards.runs[0].seed;
+  assert(/^[0-9a-f]{32}$/.test(seed) && runDefense(seed, 0).key === started.body.run.defense, "the first defense follows from a seed the function made");
+  const twice = await invoke({ action: "run_start" }, { userId: ME });
+  assert(twice.body.run.id === started.body.run.id && s.cards.runs.length === 1, "starting again is the same run");
+
+  const lineup = lineupFrom(s, ME);
+  const run = started.body.run;
+  // A body that brings its own result, roll, coins or user is ignored: none of those is the browser's to say.
+  const res = await invoke({ action: "run_battle", run: run.id, step: 0, lineup, win: false, offense: 1, roll: 0, coins: 9999, user: GUEST, p_user: GUEST }, { userId: ME });
+  assert(res.status === 200 && res.body.ok === true, "fought: " + JSON.stringify(res.body).slice(0, 200));
+  const b = res.body.battle;
+  assert(b.win === true && b.cards.length === 6 && b.defense === run.defense && b.target === battleTarget(defenseByKey(run.defense), 0), "sixty of the best cards win a first battle, against the stated bar");
+  assert(Math.abs(b.cards.reduce((n, c) => n + c.total, 0) - b.offense) < 0.11, "the six totals are the offense");
+  const call = battleCalls(s, "card_run_battle")[0].args;
+  assert(call.p_user === ME && call.p_coins === cardWinCoins(1) && call.p_cap === COIN_RULES.paidCardWinsPerDay && call.p_win === true, "the caller, the first win's pay and the day's cap are the function's own: " + JSON.stringify({ ...call, p_last: 0, p_lineup: 0 }));
+  assert(res.body.run.wins === 1 && res.body.run.status === "live" && res.body.run.defense === runDefense(seed, 1).key, "the next defense follows from the same seed");
+  assert(res.body.coins.credited === cardWinCoins(1) && res.body.coins.balance === s.wallet.balanceOf(ME), "and the win was paid: " + JSON.stringify(res.body.coins));
+  assert(s.cards.runs[0].last.offense === b.offense, "the battle is kept on the run, for a browser that never got this answer");
+
+  // The same request again: the run has moved, so it is stale and nothing is played.
+  const again = await invoke({ action: "run_battle", run: run.id, step: 0, lineup }, { userId: ME });
+  assert(again.status === 409 && again.body.reason === "stale" && s.cards.runs[0].wins === 1 && battleCalls(s, "card_run_battle").length === 1, "a repeat of a played step is stale: " + JSON.stringify(again.body));
+  const wrongRun = await invoke({ action: "run_battle", run: run.id + 7, step: 1, lineup }, { userId: ME });
+  assert(wrongRun.status === 409 && wrongRun.body.reason === "stale", "so is a run id that is not the live one");
+});
+
+await runTest("the luck is the function's, drawn fresh each battle", async () => {
+  const offenses = new Set();
+  for (let i = 0; i < 4; i++) {
+    const s = store(); stacked(s, ME);
+    const run = (await invoke({ action: "run_start" }, { userId: ME })).body.run;
+    // Same six cards every time; the defense differs by run, so compare the rolls themselves.
+    const res = await invoke({ action: "run_battle", run: run.id, step: 0, lineup: lineupFrom(s, ME) }, { userId: ME });
+    offenses.add(res.body.battle.cards.map((c) => c.roll).join());
+    assert(res.body.battle.cards.every((c) => Math.abs(c.roll) <= LUCK_SPREAD), "no roll beyond the spread");
+  }
+  assert(offenses.size === 4, "four battles, four different sets of rolls");
+});
+
+await runTest("a loss ends the run, and walking away ends it too", async () => {
+  const s = store();
+  await claim(ME); // a starter deck: eight cards under 60
+  const lineup = lineupFrom(s, ME);
+  let run = (await invoke({ action: "run_start" }, { userId: ME })).body.run;
+  let lost = null;
+  for (let step = 0; step < 30 && !lost; step++) {
+    const res = await invoke({ action: "run_battle", run: run.id, step, lineup }, { userId: ME });
+    assert(res.status === 200, "each battle is answered: " + JSON.stringify(res.body).slice(0, 160));
+    if (!res.body.battle.win) lost = res.body; else assert(res.body.run.wins === step + 1, "a win moves the step on");
+  }
+  assert(lost && lost.run.status === "over" && lost.coins.credited === 0, "a starter deck loses before thirty battles, and a loss pays nothing");
+  const after = await invoke({ action: "run_battle", run: run.id, step: lost.run.wins, lineup }, { userId: ME });
+  assert(after.status === 409 && after.body.reason === "no_run", "there is no run to play on: " + JSON.stringify(after.body));
+  run = (await invoke({ action: "run_start" }, { userId: ME })).body.run;
+  assert(run.wins === 0 && run.id !== lost.run.id, "the next run is a new one from zero");
+  const end = await invoke({ action: "run_end" }, { userId: ME });
+  assert(end.status === 200 && end.body.ended === true && s.cards.runs.every((r) => r.status === "over"), "walking away ends it");
+  const none = await invoke({ action: "run_end" }, { userId: ME });
+  assert(none.status === 200 && none.body.ended === false, "and walking away from nothing is not an error");
+});
+
+await runTest("the lineups it will not play, and what each is called", async () => {
+  const s = store();
+  await claim(ME);
+  stacked(s, GUEST === ME ? ME : ME);
+  const good = lineupFrom(s, ME);
+  const run = (await invoke({ action: "run_start" }, { userId: ME })).body.run;
+  const fightWith = (lineup, extra = {}) => invoke({ action: "run_battle", run: run.id, step: 0, lineup, ...extra }, { userId: ME });
+  const stranger = [...CARDS.values()].find((c) => c.pos === "QB" && !s.cards.owned(ME).some((o) => o.card_id === c.id));
+  const qb = CARDS.get(good.QB.id);
+  const sameMan = [...CARDS.values()].find((c) => c.pid === CARDS.get(good.FLEX1.id).pid && c.id !== good.FLEX1.id);
+  for (const [reason, status, lineup] of [
+    ["malformed", 400, null],
+    ["malformed", 400, "six of my best"],
+    ["malformed", 400, { ...good, K: good.QB }],
+    ["incomplete", 400, { ...good, TE: undefined }],
+    ["unknown_card", 400, { ...good, QB: { id: 99999999, finish: "base" } }],
+    ["bad_finish", 400, { ...good, QB: { id: good.QB.id, finish: "diamond" } }],
+    ["bad_slot", 400, { ...good, FLEX1: { id: qb.id, finish: good.QB.finish } }],
+    ...(sameMan ? [["same_player", 400, { ...good, FLEX2: { id: sameMan.id, finish: "base" } }]] : []),
+    ["not_owned", 409, { ...good, QB: { id: stranger.id, finish: "base" } }],
+    ["not_owned", 409, { ...good, QB: { id: good.QB.id, finish: "prism" } }],
+  ]) {
+    const res = await fightWith(lineup);
+    assert(res.status === status && res.body.reason === reason, `${reason}: ${JSON.stringify(res.body)} (${res.status})`);
+  }
+  assert(s.cards.runs[0].wins === 0 && s.cards.runs[0].status === "live" && s.cards.runs[0].last === null, "and not one of them touched the run");
+  for (const body of [{ action: "run_battle", lineup: good }, { action: "run_battle", run: "1", step: 0, lineup: good }, { action: "run_battle", run: run.id, step: -1, lineup: good }]) {
+    const res = await invoke(body, { userId: ME });
+    assert(res.status === 400 && res.body.reason === "malformed", "a battle with no run or step: " + JSON.stringify(res.body));
+  }
+  const noRun = await invoke({ action: "run_battle", run: 1, step: 0, lineup: good }, { userId: GUEST });
+  assert(noRun.status === 403 && noRun.body.reason === "guest_not_allowed", "a guest is refused before any of it");
+  s.rpcFails.card_run_battle = true;
+  const broke = await fightWith(good);
+  assert(broke.status === 500 && broke.body.reason === "server", "a database that fails is a server error, not a refusal");
+  s.rpcFails.card_run_battle = false; s.readFails.card_runs = true;
+  assert((await fightWith(good)).body.reason === "server", "and so is a run that cannot be read - never 'no run'");
+});
+
+await runTest("the showdown: the day's defense, one score, once", async () => {
+  const s = store();
+  stacked(s, ME);
+  const lineup = lineupFrom(s, ME);
+  const today = new Date().toISOString().slice(0, 10);
+  const res = await invoke({ action: "showdown", lineup, date: "1999-01-01", score: 9999 }, { userId: ME });
+  assert(res.status === 200 && res.body.date === today, "played for the function's own day, whatever the body says: " + JSON.stringify(res.body).slice(0, 160));
+  const want = showdownScore(today, lineup);
+  assert(res.body.showdown.score === Math.round(want.score * 10) / 10 && res.body.showdown.defense === showdownDefense(today).key, "the score is the seeded one for that day and that lineup");
+  assert(res.body.showdown.lineup.cards.length === 6, "with the six games to show");
+  const again = await invoke({ action: "showdown", lineup }, { userId: ME });
+  assert(again.status === 409 && again.body.reason === "duplicate" && s.cards.showdowns.length === 1, "a second go is refused: " + JSON.stringify(again.body));
+  const stranger = [...CARDS.values()].find((c) => c.pos === "QB" && !s.cards.owned(ME).some((o) => o.card_id === c.id));
+  const s2 = store(); stacked(s2, ME);
+  const cheat = await invoke({ action: "showdown", lineup: { ...lineupFrom(s2, ME), QB: { id: stranger.id, finish: "prism" } } }, { userId: ME });
+  assert(cheat.status === 409 && cheat.body.reason === "not_owned" && s2.cards.showdowns.length === 0, "a card that is not theirs scores nothing");
+  assert(s2.wallet.balanceOf(ME) === 0 && s.wallet.balanceOf(ME) === 0, "and a showdown pays no coins");
+});
+
+await runTest("with the switch off, no battle touches the database", async () => {
+  const s = store({ on: false });
+  for (const body of [{ action: "run_start" }, { action: "run_end" }, { action: "showdown", lineup: {} }, { action: "run_battle", run: 1, step: 0, lineup: {} }]) {
+    const res = await invoke(body, { userId: ME });
+    assert(res.status === 403 && res.body.reason === "cards_off", body.action + " is cards_off: " + JSON.stringify(res.body));
+  }
+  assert(s.rpcCalls.length === 0 && s.cards.runs.length === 0, "not one call was made");
 });
 
 console.log("test-cards-edge.mjs done");

@@ -5,7 +5,7 @@
 // its zero-coin badges, and coinsSummary for a paid season, a capped one, no awards and badge lines.
 // The SQL's own copies of these numbers are checked in test-wallet-sql.mjs.
 import { assert, runTest } from "./helpers.mjs";
-import { COIN_RULES, coinsForRun, seasonReward, startingBalance, badgeRewards, coinsSummary } from "../rewards.mjs";
+import { COIN_RULES, coinsForRun, seasonReward, startingBalance, badgeRewards, coinsSummary, cardWinCoins } from "../rewards.mjs";
 import { BADGES, BADGE_BY_ID, badgeProgress } from "../badges.mjs";
 
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
@@ -18,7 +18,11 @@ await runTest("COIN_RULES are the contract's numbers, and can't be changed at ru
   const want = {
     season: 20, dailySeason: 40, win: 2, playoffs: 10, title: 50, perfect: 150, pointsPer: 10,
     streakPerDay: 5, streakMax: 50, minigame: 15, paidSeasonsPerDay: 20, welcome: 250, startingCap: 10000,
+    cardWin: 3, cardWinStep: 1, cardWinStepMax: 9, paidCardWinsPerDay: 15,
   };
+  // A win in a card run (CARDS.md 11): 3, and one more for every win the run already had, up to 12.
+  assert([1, 2, 3, 10, 11, 40].map(cardWinCoins).join() === "3,4,5,12,12,12", "what each win of a run pays: " + [1, 2, 3, 10, 11, 40].map(cardWinCoins));
+  assert([0, -1, NaN, undefined, "x"].every((n) => cardWinCoins(n) === 0), "and nothing for anything that is not a win");
   assert(same(COIN_RULES, want), `COIN_RULES: ${show(COIN_RULES)}`);
   assert(Object.isFrozen(COIN_RULES), "COIN_RULES is frozen");
   try {

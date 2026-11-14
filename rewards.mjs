@@ -23,10 +23,23 @@ export const COIN_RULES = Object.freeze({
   // now, not the two this line named - claim_minigame's own `p_game not in (...)` check is the real list, and
   // it accepts 'over_under', 'build', 'century' and 'guess' (SQL: supabase/migration-wallet.sql).
   minigame: 15,
+  // Card battles (CARDS.md 11): a win in a run pays cardWin, plus cardWinStep for every win the run already
+  // had, up to cardWinStepMax of them - so the tenth win of a run pays 12 and nothing pays more than that.
+  cardWin: 3,
+  cardWinStep: 1,
+  cardWinStepMax: 9,
+  paidCardWinsPerDay: 15, // wins that pay per UTC day; past it runs still play and still count
   paidSeasonsPerDay: 20, // Unlimited/Genius/GM seasons that pay per UTC day; Dailies don't count toward it
   welcome: 250, // a new account (SQL: create_wallet)
   startingCap: 10000, // the one-time starting balance's cap (SQL: the backfill)
 });
+
+// What the win that takes a run to `wins` wins pays (1 for the first). Nothing for anything that is not a win.
+export function cardWinCoins(wins) {
+  const n = Number(wins);
+  if (!Number.isFinite(n) || n < 1) return 0;
+  return COIN_RULES.cardWin + COIN_RULES.cardWinStep * Math.min(COIN_RULES.cardWinStepMax, Math.floor(n) - 1);
+}
 
 // A count from something that may be missing, fractional or negative.
 const count = (v) => {

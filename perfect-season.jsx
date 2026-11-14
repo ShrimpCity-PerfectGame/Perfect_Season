@@ -13,7 +13,6 @@ import {
   submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY,
 } from "./storage.js";
 import gameData from "./data/players.json";
-import versusPool from "./data/versus-pool.json";
 import seasonPool from "./data/season-2025.json";
 import { cssVars, PALETTE, THEME } from "./theme.mjs";
 import {
@@ -43,7 +42,7 @@ import { BACK_EVENT } from "./app-shell.mjs";
 import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk, NameLink } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
-import { initVersusData } from "./versus-logic.mjs";
+import { loadVersusData } from "./versus-data.mjs";
 import { CENTURY_CSS, CenturyScreen, CENTURY_DONE } from "./century.jsx";
 import { CARDS_CSS, CardsScreen, SeasonCard } from "./cards.jsx";
 import { cardsOn } from "./cards-switch.mjs";
@@ -56,8 +55,8 @@ import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
 import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, DATA_CREDIT, parseSitePath } from "./site-pages.mjs";
 initGameData(gameData.players, gameData.opponents);
-// 1v1's defenses and kickers (VERSUS.md 6). Only versus.jsx reads them; single player never does.
-initVersusData(versusPool);
+// 1v1's defenses and kickers (VERSUS.md 6) are FETCHED, not carried here (versus-data.mjs): only a duel and a
+// card battle read them. The component asks for them once it has mounted and the duel screen waits on that.
 // Century's one-season touchdown pool (v2.9.0). Only century.jsx and the submit-century Edge Function read it,
 // and it is NOT interchangeable with data/players.json - see the header of tools/data/build-season-pool.mjs.
 initCenturyData(seasonPool);
@@ -4841,6 +4840,13 @@ export default function PerfectSeason() {
   // no profile screen, no shop and never the daily, until it keeps its seasons under a name of its own.
   const isGuest = !!stats?.guest;
   const showCards = cardsOn() && !cardsHidden;
+  // Duel's defenses and kickers, fetched once the page is up (versus-data.mjs). "loading" | "ready" | "error".
+  const [versusData, setVersusData] = useState("loading");
+  const fetchVersusData = useCallback(() => {
+    setVersusData("loading");
+    loadVersusData().then(() => setVersusData("ready"), () => setVersusData("error"));
+  }, []);
+  useEffect(() => { fetchVersusData(); }, [fetchVersusData]);
 
   // Back from Google, at the site root, with the 1v1 invite that was put aside before leaving. Taken once -
   // read and cleared together, whatever happens next - and only while it is fresh, so a code left behind by a
@@ -5766,6 +5772,14 @@ export default function PerfectSeason() {
                 <button className="btn" onClick={leaveVersus}>Back</button>
               </div>
             ) : (
+            versusData !== "ready" ? (
+              <div className="panel" role={versusData === "error" ? "alert" : "status"} data-versus-data={versusData}>
+                {versusData === "error"
+                  ? <><p><b>Couldn't load the duel.</b> This is a connection problem - your match, if you have one going, is still there.</p>
+                    <button className="btn" onClick={fetchVersusData}>Try again</button> <button className="btn" onClick={leaveVersus}>Back</button></>
+                  : <p>Loading the duel…</p>}
+              </div>
+            ) :
             <VersusScreen
               key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
               format={format} onBack={leaveVersus} onCode={setVersusCode}

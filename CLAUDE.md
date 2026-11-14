@@ -320,6 +320,13 @@ parts that are unlike every other mode:
   harmless rewrite; the source-text assertion it replaced caught two and fired on the harmless one.
   **Prefer adding to those over asserting on a file's characters.** The stub throws by name on a query shape it
   does not know, so a new call in a function is a loud failure rather than a silent `undefined`.
+- **The pool is fetched, not bundled** (v2.25.0, `versus-data.mjs`). `/data/versus-pool.json` is asked for
+  once the page is up, and the app shows "Loading the duel…" or a Try again panel instead of `VersusScreen`
+  until it is there. It left the bundle because the bundle hit the ceiling in `tests/test-build-seo.mjs`,
+  which had named this file as the next reclaim since v2.14.0. The service worker fetches it network-first
+  (`DATA`), for the guess pool's reason: `match-pick` replays against its own copy. `tests/helpers.mjs`'s
+  `setupDom` answers the fetched data files from disk, so a jsdom test never reaches the real network; a
+  suite that replaces `fetch` has to serve `/data/versus-pool.json` itself if it opens a duel or a battle.
 - **Eight boards, sixteen picks**, and every board offers that team's players, its defense in each year of the
   era and its kicker - a defense can go fifth and a kicker first. A board that cannot serve *both* players is
   skipped before it is dealt (VERSUS.md 8): 31 of the 160 boards hold one quarterback or one tight end, so two
@@ -512,9 +519,10 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.24.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
-five parts. **Three exist: the rules, owning cards, and the pack shop** - a starter deck, a card a day from the
-daily draft, a collection screen, and packs bought with coins. Nothing plays a battle yet. **Production has cards switched off** in two
+**Cards (in progress, v2.25.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck, a card a day
+from the daily draft, a collection screen, packs bought with coins, runs against real defenses and a daily
+showdown. Badges and the profile spot are part 5. **Production has cards switched off** in two
 places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
 `card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
 with the client off banks daily cards nobody can see, which is a launch order and not a state to leave things in. **`CARDS.md` is the reference** and
@@ -575,6 +583,14 @@ The parts unlike everything else:
   called it something else, a drop-by-name would leave the old list in force and every purchase a 500.
 - **Pack prices are measured** by test 11 in `tests/test-economy-security.mjs`. Legends was first written at
   1,500, which made the one pack CERTAIN to hold a 100+ card also the cheapest route to one.
+- **The server plays the battle** (v2.25.0, CARDS.md 11). The browser sends six cards; `card-claim` checks
+  the lineup, draws the luck and calls `card_run_battle`, which checks the run's step under a lock, so a
+  double tap cannot count twice. `card_runs` and `card_showdowns` have RLS on and **no policy and no client
+  grant at all** - the seed says which defenses are coming - and are read through `card_battle_state()` and
+  `card_boards()`. Their boards carry **no name snapshot**: they join `profiles` when read, so `mod_act` and
+  `claim_username` know nothing of them.
+- **A failed play is not "not played".** The battle screen never replays after a lost answer: it reads the
+  state, which carries the run's latest battle, and shows that. Same family as the pack shop's open id.
 - **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not
   used; the number on the card face is always the number in the battle.
 
@@ -821,6 +837,7 @@ node tests/test-card-sprites.mjs       # the fourteen neutral sprites: one per a
 node tests/test-card-face.mjs          # the recolouring maths, a card's spoken label, every text colour at AA, a card with no sprite
 node tests/test-cards-screen.mjs       # the tile and the switch, the starter deck, the collection, hiding it, the pack shop, the daily card on the result
 node tests/test-card-packs.mjs         # what is in a pack: the odds add up, 20,000 rolls match what is stated, the art exists
+# Battles (v2.25.0) ride in test-cards-sql, test-cards-edge, test-cards-screen and test-card-logic.
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -1489,6 +1506,13 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.25.0's (battles, on the test site): re-run **`migration-cards.sql`**, re-run **`migration-profiles.sql`**
+  (`delete_account` learns to erase runs and showdowns), then **deploy the Edge Functions**, then the client.
+  The migration adds two tables and seven functions and replaces `wallet_ledger_kind_check` again (it gains
+  `card_win`); it only adds. `card-claim` now bundles `rewards.mjs`, `data/versus-pool.json` and
+  `data/card-defense.json` as well as `card-logic.mjs`, so **the client and the functions ship together**:
+  a client ahead of the function gets `malformed` on Start a run, and a function ahead of the migration
+  answers `server`. Production takes the same migration and functions and stays off.
   v2.24.0's (the pack shop, on the test site): re-run **`migration-cards.sql`**, then **deploy the Edge
   Functions**, then the client. The migration adds `card_packs` and `buy_pack`, and replaces two constraints by
   name - `card_grants_kind_check` and **`wallet_ledger_kind_check`, which belongs to migration-wallet.sql's

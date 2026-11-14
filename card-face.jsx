@@ -130,7 +130,7 @@ export const CARD_FACE_CSS = `
 .cd-card.cd-f-gold{--cd-edge:linear-gradient(135deg,#f9e7a0,#c9952b 35%,#fff4c4 50%,#bd8c26 70%,#f2d675)}
 .cd-card.cd-f-gold .cd-art{background:linear-gradient(160deg,${P.goldHi},${P.goldLo})}
 .cd-card.cd-f-gold .cd-yr{color:${P.ink}}
-.cd-card.cd-f-silver .cd-in::after,.cd-card.cd-f-gold .cd-in::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 38%,rgba(255,255,255,.45) 50%,transparent 62%);background-size:250% 100%;animation:cd-sheen 3.2s linear infinite;pointer-events:none}
+.cd-card.cd-f-silver .cd-in::after,.cd-card.cd-f-gold .cd-in::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 38%,rgba(255,255,255,.45) 50%,transparent 62%);background-size:250% 100%;background-repeat:no-repeat;animation:cd-sheen 3.2s linear infinite;pointer-events:none}
 .cd-card.cd-f-prism{--cd-edge:linear-gradient(135deg,#ff5fa2,#ffd166,#c6f432,#4cc9f0,#b388ff,#ff5fa2);background-size:300% 300%;animation:cd-prism 6s linear infinite}
 .cd-card.cd-f-prism .cd-in{background:${P.black};color:${P.cream}}
 .cd-card.cd-f-prism .cd-art{background:radial-gradient(circle at 68% 40%,#2b1c4d,${P.black} 75%)}
@@ -141,7 +141,9 @@ export const CARD_FACE_CSS = `
 .cd-card.cd-f-prism .cd-st{border-top-color:${P.lime}}
 .cd-card.cd-f-prism .cd-st div+div{border-left-color:#3a3a40}
 .cd-card.cd-f-prism .cd-fig{filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 7px #4cc9f0)}
-@keyframes cd-sheen{from{background-position:120% 0}to{background-position:-120% 0}}
+/* The gleam starts and ends OFF the card, and the gradient does not repeat. It used to tile, so as one band left
+   on the right its copy was already half-way across - and the loop cut it off there (owner's phone, 2.25.0). */
+@keyframes cd-sheen{from{background-position:150% 0}to{background-position:-150% 0}}
 @keyframes cd-prism{from{background-position:0% 50%}to{background-position:300% 50%}}
 @media (prefers-reduced-motion:reduce){.cd-card.cd-f-prism,.cd-card .cd-in::after{animation:none}}
 `;
