@@ -20,6 +20,16 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.24.5] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: every pose wears the team's pants. The thrower's were drawn white on the sheet and the pointing
+  receiver's faded most of the way to white, so those two stood out from the other twelve. Both are darkened
+  to the helmet's grey when the sprites are built (`tools/cards/poses.json`, "grey"). Reported from the
+  owner's phone.
+
 ## [2.24.4] - 2026-11-13
 
 Test site only.
