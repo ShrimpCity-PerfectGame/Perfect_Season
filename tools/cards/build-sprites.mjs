@@ -35,6 +35,11 @@
 //      And the other way round, under "grey": pants a sheet drew white, or faded most of the way to white, so
 //      that pose alone wore white pants while the other thirteen wore the team's. Those are darkened into the
 //      helmet's grey. It costs that pose the white edging of its pants stripe, which was the same white.
+//      And "mask": eight poses drew the face mask in the helmet's grey and joined to the helmet, so it took the
+//      team's second colour while the other six wore a white one. A mask cannot be found as a region - it IS
+//      the helmet's region - so it is found by being THIN: inside the box listed, any grey that vanishes when
+//      the grey is worn away by MASK_BAR pixels and grown back is a bar, and is whitened. The helmet's shell
+//      is far thicker than that and survives.
 //
 // LOOK AT EVERY IMAGE IT WRITES before committing. A number half-erased, a hole where paper was cleared inside
 // a broken outline, a second player's arm - none of those fail a test. tests/test-card-sprites.mjs holds the
@@ -62,7 +67,7 @@ const sheetFiles = Object.fromEntries(Object.entries(config.sheets).map(([id, s]
 
 const browser = await puppeteer.launch({ executablePath: exe, headless: "new" });
 const page = await browser.newPage();
-const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT, whites, greys) => {
+const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT, whites, greys, masks) => {
   const hsl = (r, g, b) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; let h = 0, s = 0; if (mx !== mn) { const d = mx - mn; s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; } return [h, s, l]; };
   const median = (xs) => { xs.sort((p, q) => p - q); return xs[xs.length >> 1] ?? 0.5; };
 
@@ -169,12 +174,35 @@ const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT, whi
       const lost = wanted.filter((t) => !t.found);
       if (lost.length) throw new Error(`${pose}: no grey patch at ${lost.map((t) => `${t.x},${t.y}`).join(" or ")} - poses.json's "white" and "grey" lists no longer match the drawing`);
     }
+    if (masks[pose]) {
+      const [bx0, by0, bx1, by1] = masks[pose], MASK_BAR = 12;
+      const grey = new Uint8Array(TN);
+      for (let p = 0; p < TN; p++) { if (!fin[p * 4 + 3]) continue; const mx = Math.max(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2]), mn = Math.min(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2]); if ((mx + mn) / 510 > 0.3 && mx - mn < 40) grey[p] = 1; }
+      // steps (8-neighbour) from the nearest pixel of `from`
+      const steps = (from) => {
+        const D = new Int32Array(TN).fill(1e9), q = [];
+        for (let p = 0; p < TN; p++) if (from(p)) { D[p] = 0; q.push(p); }
+        for (let a = 0; a < q.length; a++) { const p = q[a], x = p % tw, y = (p / tw) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= tw || Y >= HEIGHT) continue; const r = Y * tw + X; if (D[r] > D[p] + 1) { D[r] = D[p] + 1; q.push(r); } } }
+        return D;
+      };
+      const out = steps((p) => !grey[p]);
+      const core = steps((p) => grey[p] && out[p] > MASK_BAR);
+      let done = 0;
+      for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
+        const p = y * tw + x;
+        if (!grey[p] || core[p] <= MASK_BAR + 1) continue;
+        // lighter than where the browser stops fading a grey back to white, so none of the helmet colour lands
+        const v = 255 * (0.955 + 0.04 * (Math.max(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2]) + Math.min(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2])) / 510);
+        fin[p * 4] = fin[p * 4 + 1] = fin[p * 4 + 2] = v; done++;
+      }
+      if (done < 3000) throw new Error(`${pose}: only ${done} pixels of face mask in poses.json's "mask" box - it no longer matches the drawing`);
+    }
     const small = document.createElement("canvas"); small.width = tw; small.height = HEIGHT;
     small.getContext("2d").putImageData(new ImageData(fin, tw, HEIGHT), 0, 0);
     out[pose] = { png: small.toDataURL("image/webp", 0.9), w: tw, h: HEIGHT, digits, source: `${sheetId}:${cell}` };
   }
   return out;
-}, sheetFiles, config.poses, HEIGHT, MAX_ASPECT, config.white || {}, config.grey || {});
+}, sheetFiles, config.poses, HEIGHT, MAX_ASPECT, config.white || {}, config.grey || {}, config.mask || {});
 
 const dir = path.join(root, "static/cards");
 fs.mkdirSync(dir, { recursive: true });

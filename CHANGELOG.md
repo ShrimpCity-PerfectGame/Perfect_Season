@@ -20,6 +20,16 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.24.6] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: every pose wears a white face mask. Eight of the fourteen drew it in the helmet's grey, joined to the
+  helmet, so it took the team's second colour while the other six stayed white. The bars are picked out by
+  being thin and whitened when the sprites are built (`tools/cards/poses.json`, "mask"). Asked for by the
+  owner.
+
 ## [2.24.5] - 2026-11-13
 
 Test site only.
