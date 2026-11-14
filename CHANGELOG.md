@@ -20,6 +20,19 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.24.7] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: no colour outside the black outline. Enlarging the drawings left a hairline of light pixels round
+  every player, which the recolouring painted in the helmet colour as a dotted fringe. The rim of each sprite
+  is now pulled down to the outline's black when it is built.
+- Cards: the face masks 2.24.6 left unfinished. It whitened a square of helmet beside the mask on some poses
+  and left a helmet-coloured knot where bars cross on others; the bars are found more tightly now and the
+  knots go with them, and the sideways catch's single bar is whitened too. Both reported from the owner's
+  phone.
+
 ## [2.24.6] - 2026-11-13
 
 Test site only.

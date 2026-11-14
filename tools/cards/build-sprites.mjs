@@ -35,8 +35,8 @@
 //      And the other way round, under "grey": pants a sheet drew white, or faded most of the way to white, so
 //      that pose alone wore white pants while the other thirteen wore the team's. Those are darkened into the
 //      helmet's grey. It costs that pose the white edging of its pants stripe, which was the same white.
-//      And "mask": eight poses drew the face mask in the helmet's grey and joined to the helmet, so it took the
-//      team's second colour while the other six wore a white one. A mask cannot be found as a region - it IS
+//      And "mask": nine poses drew the face mask in the helmet's grey and joined to the helmet, so it took the
+//      team's second colour while the other five wore a white one. A mask cannot be found as a region - it IS
 //      the helmet's region - so it is found by being THIN: inside the box listed, any grey that vanishes when
 //      the grey is worn away by MASK_BAR pixels and grown back is a bar, and is whitened. The helmet's shell
 //      is far thicker than that and survives.
@@ -175,7 +175,8 @@ const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT, whi
       if (lost.length) throw new Error(`${pose}: no grey patch at ${lost.map((t) => `${t.x},${t.y}`).join(" or ")} - poses.json's "white" and "grey" lists no longer match the drawing`);
     }
     if (masks[pose]) {
-      const [bx0, by0, bx1, by1] = masks[pose], MASK_BAR = 12;
+      // 7 pixels is a bar and not the helmet's rim beside it; a pose with fatter bars names its own (goalline).
+      const [bx0, by0, bx1, by1, MASK_BAR = 7] = masks[pose];
       const grey = new Uint8Array(TN);
       for (let p = 0; p < TN; p++) { if (!fin[p * 4 + 3]) continue; const mx = Math.max(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2]), mn = Math.min(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2]); if ((mx + mn) / 510 > 0.3 && mx - mn < 40) grey[p] = 1; }
       // steps (8-neighbour) from the nearest pixel of `from`
@@ -187,15 +188,37 @@ const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT, whi
       };
       const out = steps((p) => !grey[p]);
       const core = steps((p) => grey[p] && out[p] > MASK_BAR);
+      const bar = new Uint8Array(TN);
+      for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) { const p = y * tw + x; if (grey[p] && core[p] > MASK_BAR + 1) bar[p] = 1; }
+      // Where two bars cross the mask is fatter than a bar, and that knot is left behind as a square of helmet
+      // colour. What is left of the grey once the bars are out is the helmet (thousands of pixels) and those
+      // knots (a few hundred, cut off from it by the bars): the small pieces inside the box are mask too.
+      const left = new Uint8Array(TN);
+      for (let p0 = 0; p0 < TN; p0++) {
+        if (!grey[p0] || bar[p0] || left[p0]) continue;
+        const px = [p0]; left[p0] = 1; let sx = 0, sy = 0;
+        for (let a = 0; a < px.length; a++) { const p = px[a], x = p % tw; sx += x; sy += (p / tw) | 0; for (const q of [x > 0 ? p - 1 : -1, x < tw - 1 ? p + 1 : -1, p - tw, p + tw]) if (q >= 0 && q < TN && grey[q] && !bar[q] && !left[q]) { left[q] = 1; px.push(q); } }
+        const cx = sx / px.length, cy = sy / px.length;
+        if (px.length < 700 && cx >= bx0 && cx <= bx1 && cy >= by0 && cy <= by1) for (const p of px) bar[p] = 1;
+      }
       let done = 0;
-      for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
-        const p = y * tw + x;
-        if (!grey[p] || core[p] <= MASK_BAR + 1) continue;
+      for (let p = 0; p < TN; p++) {
+        if (!bar[p]) continue;
         // lighter than where the browser stops fading a grey back to white, so none of the helmet colour lands
         const v = 255 * (0.955 + 0.04 * (Math.max(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2]) + Math.min(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2])) / 510);
         fin[p * 4] = fin[p * 4 + 1] = fin[p * 4 + 2] = v; done++;
       }
-      if (done < 3000) throw new Error(`${pose}: only ${done} pixels of face mask in poses.json's "mask" box - it no longer matches the drawing`);
+      if (done < 1000) throw new Error(`${pose}: only ${done} pixels of face mask in poses.json's "mask" box - it no longer matches the drawing`);
+    }
+    // --- 6. the rim of the drawing is outline, so make it outline ---
+    // Enlarging leaves a hairline of light pixels outside the black line, and a light grey is exactly what the
+    // browser paints in the helmet colour: every player wore a dotted fringe of it. Whatever sits within
+    // RIM pixels of the transparent outside is the black line, so it is pulled down to the line's colour.
+    {
+      const RIM = 3, D = new Int32Array(TN).fill(1e9), q = [];
+      for (let p = 0; p < TN; p++) if (fin[p * 4 + 3] < 24) { D[p] = 0; q.push(p); }
+      for (let a = 0; a < q.length; a++) { const p = q[a]; if (D[p] >= RIM) continue; const x = p % tw, y = (p / tw) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= tw || Y >= HEIGHT) continue; const r = Y * tw + X; if (D[r] > D[p] + 1) { D[r] = D[p] + 1; q.push(r); } } }
+      for (let p = 0; p < TN; p++) if (D[p] > 0 && D[p] <= RIM) for (let c = 0; c < 3; c++) fin[p * 4 + c] = Math.min(fin[p * 4 + c], 14 + 4 * c);
     }
     const small = document.createElement("canvas"); small.width = tw; small.height = HEIGHT;
     small.getContext("2d").putImageData(new ImageData(fin, tw, HEIGHT), 0, 0);
