@@ -7,7 +7,7 @@ import {
   setupDom, makeStorage, makeMockAuth, mount, flush, click, type, clickMode, findButtonByText, assert, runTest, waitForCrypto,
 } from "./helpers.mjs";
 import { CARD_REFUSALS } from "../storage-cards.js";
-import { CARDS, cardBoardKey, buildTeam, dailyFoe, categoryLabel, categoryStat, callerOf, foeCall, bestCategory, GAUNTLET, gauntletName, gauntletFoe } from "../card-logic.mjs";
+import { CARDS, cardBoardKey, buildTeam, autoPick, dailyFoe, categoryLabel, categoryStat, callerOf, foeCall, bestCategory, GAUNTLET, gauntletName, gauntletFoe } from "../card-logic.mjs";
 import { mulberry32 } from "../game-logic.mjs";
 
 setupDom();
@@ -15,6 +15,11 @@ window.storage = makeStorage();
 const auth = makeMockAuth();
 window.__ps_supabase__ = auth;
 window.__ps_cards__ = true;
+// A pack is rolled at random and a card already owned is sold on the spot, so a test that counts cards or reads
+// the balance after a pack it did not pin failed about one run in five (v2.30.0 stopped the wallet assertions
+// failing that way and missed the counts and the balance on the shelf; the full suite caught one in v2.31.0).
+// The tests that are ABOUT copies pin their pack with nextPull, which still wins.
+auth._cards.freshPulls = true;
 // The app fetches the catalog; in a test that is a file read.
 const catalog = JSON.parse(readFileSync(new URL("../data/cards.json", import.meta.url), "utf8"));
 const versusPoolFile = JSON.parse(readFileSync(new URL("../data/versus-pool.json", import.meta.url), "utf8"));
@@ -621,8 +626,11 @@ await runTest("the ladder: your call - a category, then a card, and a result tha
   assert(!q("[data-reveal]") && q("[data-choose]").dataset.choose === "1" && q("[data-choose]").dataset.call === "me", "Next round moves on, and the round you won is yours to call");
 
   // What the round cost: the category is spent, and says who took it.
-  const spent = rackChip("scoring");
-  assert(spent.tagName !== "BUTTON" && spent.dataset.used === "me" && /You won/.test(spent.textContent), "the category is spent, and says in words who took it: " + spent.outerHTML.slice(0, 120));
+  const usedChip = rackChip("scoring");
+  assert(usedChip.tagName !== "BUTTON" && usedChip.dataset.used === "me" && /You won/.test(usedChip.textContent), "the category is spent, and says in words who took it: " + usedChip.outerHTML.slice(0, 120));
+  // Passing a result drops the button that was pressed, so the keyboard's focus is put on the new round's
+  // heading - or a keyboard player is sent back to the top of the page six times a battle.
+  assert(q("[data-choose]").contains(document.activeElement) && document.activeElement.textContent.includes("Your call"), "focus is on the new round's heading, not lost to the page: " + document.activeElement?.tagName + " " + document.activeElement?.className);
   assert(qa("[data-rack] button[data-cat]").length === 5, "five are left to call");
   assert(picks().length && qa("[data-choose] .cb-sc-gone").every((row) => row.dataset.stat === "scoring") && qa("[data-choose] .cb-sc-gone").length === picks().length, "and it is struck through on every card still in the hand");
   const log = () => qa(".cb-round");
@@ -722,6 +730,26 @@ await runTest("two taps are one: Play twice plays one round, and Next twice pass
   assert(area().dataset.phase === "idle", "the run is walked away from");
 });
 
+await runTest("a dead heat: nobody takes the round, and the call stays where it was", async () => {
+  await click(q("[data-start]")); await settle();
+  const run = liveRun(bea);
+  // The same card on both sides, on the same luck, is level to the tenth of a point.
+  const mine = run.hand.map((h) => h.card).find((id) => fits(CARDS.get(id).pos, run.foe[0].spot));
+  run.foe[0] = { card: mine, finish: "base", spot: run.foe[0].spot };
+  await remount(); await openTabOf("run");
+  auth._cards.nextRolls = [0.5, 0.5, 0.5, 0.5];
+  await click(rackChip("workload")); await flush();
+  await click(q('[data-choose] [data-pick="' + mine + '"]')); await flush();
+  await click(q("[data-play]")); await settle(); await settle();
+  assert(run.rounds.length === 1 && run.rounds[0].win === "tie" && run.rounds[0].next.by === "me", "the round was a dead heat, and the call is still yours: " + JSON.stringify(run.rounds[0]?.win));
+  assert(/Dead heat\. The call stays with you\./.test(q("[data-round-verdict]").textContent), "the result says so, and says whose call it still is: " + q("[data-round-verdict]").textContent);
+  assert(q("[data-you]").textContent === "0" && q("[data-cpu]").textContent === "0", "nobody scores");
+  await click(q("[data-continue]")); await flush();
+  assert(rackChip("workload").dataset.used === "tie" && /Tied/.test(rackChip("workload").textContent) && q("[data-choose]").dataset.call === "me", "the category is spent and marked tied in words, and round two is yours to call");
+  assert(/Tied/.test(q(".cb-strip .cb-s").textContent), "on the field too");
+  await click(q("[data-quit]")); await settle(); await settle();
+});
+
 await runTest("a battle survives leaving and coming back mid-way - same hand, same rounds - and can be walked away from", async () => {
   await click(q("[data-start]")); await settle();
   liveRun(bea).foe = foeAt(20);
@@ -790,6 +818,16 @@ await runTest("a play the server refuses is told why, and no round is played", a
   assert(liveRun(bea).rounds.length === 0, "and no round was played");
   assert(picks()[0].getAttribute("aria-pressed") === "true" && rackChip("star").getAttribute("aria-pressed") === "true" && !q("[data-play]").disabled, "the choice is still there to try again");
   row.count = 1;
+  // "Pick for me" picks the CARD. A category you have already pressed is yours: it is the one played, not the
+  // one the card happens to be best at - which would spend a category you did not choose.
+  const live = liveRun(bea);
+  const forMe = autoPick(live.hand.map((h) => ({ id: h.card, finish: h.finish })), live.foe.map((e) => ({ id: e.card, finish: e.finish, spot: e.spot })), []);
+  const notHisBest = ["star", "efficiency", "workload"].find((c) => c !== bestCategory(forMe, []));
+  await click(rackChip(notHisBest)); await flush();
+  auth._cards.nextRolls = rolls(true, 1);
+  await click(q("[data-best]")); await settle(); await settle();
+  assert(liveRun(bea).rounds.length === 1 && liveRun(bea).rounds[0].cat === notHisBest, `Pick for me played the category that was chosen (${notHisBest}), not another: ` + liveRun(bea).rounds[0]?.cat);
+  await click(q("[data-continue]")); await flush();
   await click(q("[data-quit]")); await settle(); await settle();
 });
 
@@ -890,6 +928,31 @@ await runTest("the gauntlet: twelve real teams, one open at a time, their six in
   auth._cards.stateFails = false;
   await click(button("Try again")); await settle(); await settle();
   assert(q("[data-cleared]").textContent === "1", "and trying again finds it");
+});
+
+await runTest("the gauntlet: Try again after a loss is a new attempt, in the same place", async () => {
+  // The result of an attempt and the next attempt at the SAME stage are drawn in the same place. Until v2.31.0
+  // they were the same arena to React - still on its sixth round, handed no rounds - and Try again took the
+  // whole app down. The review found it; nothing pressed the button.
+  await goHome(); await openTabOf("gauntlet");
+  const row = () => auth._cards.gauntlets.get(bea);
+  await click(q('.cb-stage[data-state="next"] [data-play]')); await settle(); await settle();
+  const stage = row().stage;
+  assert(area().dataset.phase === "play" && stage === 1, "an attempt at the stage that is up");
+  auth._cards.nextRolls = rolls(false); // a starter deck, against a real offense, on the worst of the luck
+  await playRounds(6);
+  assert(area().dataset.phase === "result" && arena().dataset.done === "true" && arena().dataset.win === "false" && q("[data-retry]"), "the attempt is lost, and offers another: " + area()?.textContent.slice(0, 80));
+  const lostHand = JSON.stringify(row().hand);
+  await click(q("[data-retry]")); await settle(); await settle();
+  assert(container.querySelector(".cb-arena"), "pressing Try again does not take the screen down");
+  assert(area().dataset.phase === "play" && row().stage === stage && arena().dataset.rounds === "0" && arena().dataset.done === "false", "it is a new attempt at the same stage, with no rounds played");
+  assert(q("[data-choose]")?.dataset.choose === "0" && q("[data-you]").textContent === "0" && q("[data-cpu]").textContent === "0" && !q("[data-reveal]") && !q("[data-verdict]"), "round one, nothing scored, and nothing left over from the attempt before");
+  assert(qa("[data-rack] button[data-cat]").length === 6 && qa(".cb-strip .cb-slot").length === 6, "all six categories to call and six empty spots");
+  assert(JSON.stringify(row().hand) !== undefined && row().hand.length === 12, "with a hand of its own");
+  await playRounds(1);
+  assert(row().rounds.length === 1 && arena().dataset.rounds === "1" && lostHand, "and it plays");
+  await click(q("[data-quit]")); await settle(); await settle();
+  assert(area().dataset.phase === "list" && row().stage === null, "given up, back to the list");
 });
 
 await runTest("the boards list the ladder and the day, by name", async () => {

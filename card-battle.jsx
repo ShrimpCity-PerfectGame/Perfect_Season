@@ -2,14 +2,14 @@
 //
 // OFFENSE AGAINST OFFENSE (v2.27.0, the owner's redesign): a deck of thirty, a hand of twelve dealt from it,
 // against a CPU's six - the same kind of cards you collect. PLAYED A ROUND AT A TIME (v2.28.0): each round is
-// for one spot of the lineup, you play a card from your hand that fits it, and only then is the category
-// revealed.
+// for one spot of the lineup, and you play a card from your hand that fits it. THE CATEGORY IS CALLED BEFORE
+// THE CARD IS PICKED (v2.31.0): by you in round one, then by whoever won the last round.
 //
 // A screen in its own file, like cards.jsx, which mounts it: it styles only its own cb- prefix, reuses the app's
 // .btn / .note / .panel / .lb, and never imports perfect-season.jsx or cards.jsx back.
 //
-// NOTHING HERE DECIDES A BATTLE. The browser sends one card a round; the card-claim Edge Function deals the
-// hand, rolls the luck, holds the order of the categories, says who won and pays. What this file works
+// NOTHING HERE DECIDES A BATTLE. The browser sends one card a round and the category it calls; the card-claim
+// Edge Function deals the hand, checks the call, rolls the luck, says who won and pays. What this file works
 // out for itself is only what a player needs BEFORE playing - what fits, what a lineup's synergies are - and all
 // of it comes from card-logic.mjs, the module the function scores with.
 //
@@ -292,20 +292,31 @@ function Maths({ who, shot, cat }) {
 export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = false, onPlay, onDone }) {
   const total = foe.length;
   // How many rounds' results the player has moved past. Rounds already there at mount are simply shown.
-  const [seen, setSeen] = useState(rounds.length);
+  const [seenTo, setSeen] = useState(rounds.length);
+  // FEWER ROUNDS THAN WERE SEEN is a new battle in the same arena (a second try at a gauntlet stage was one,
+  // until its key said so). Nothing of it has been seen; without this the screen reads a round that is not there.
+  if (seenTo > rounds.length) setSeen(rounds.length);
+  const seen = Math.min(seenTo, rounds.length);
   const [cat, setCat] = useState(null);     // the category chosen, on your call
   const [pick, setPick] = useState(null);   // the card chosen, as a key
   const [why, setWhy] = useState(false);
   const [open, setOpen] = useState(false);  // the rest of the hand
   const sent = useRef(false);
   const go = useRef(null);
+  const callh = useRef(null);
+  const passed = useRef(false); // a result was just passed with the button, which has gone
   const revealing = seen < rounds.length;
   const over = rounds.length >= total && !revealing;
   useEffect(() => { if (over) onDone?.(); }, [over]); // eslint-disable-line react-hooks/exhaustive-deps
   // A new round to choose for: the last choice is spent with the card.
   useEffect(() => { setCat(null); setPick(null); setWhy(false); setOpen(false); }, [rounds.length]);
   // A result on screen: the way on is the button, wherever the keyboard was. Never by scrolling the page.
-  useEffect(() => { if (revealing) go.current?.focus({ preventScroll: true }); }, [revealing, seen]);
+  useEffect(() => {
+    if (revealing) go.current?.focus({ preventScroll: true });
+    // ...and when it is passed, on to the next round's heading - the button that was pressed is gone, and focus
+    // left on the page would send a keyboard back to the top six times a battle.
+    else if (passed.current) { passed.current = false; callh.current?.focus({ preventScroll: true }); }
+  }, [revealing, seen]);
 
   const settled = revealing ? seen + 1 : seen; // rounds whose result is on the board
   const score = settled > 0 ? rounds[settled - 1].score : [0, 0];
@@ -386,7 +397,7 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
 
       {choosing && (
         <div className="cb-panel cb-choose" data-choose={next} data-spot={foe[next].spot} data-call={by}>
-          <p className="cb-callh"><b>{by === "me" ? "Your call" : "Their call"}</b><span>Round {next + 1} of {total} · {spotLabel(foe[next].spot)}</span></p>
+          <p className="cb-callh" tabIndex={-1} ref={callh}><b>{by === "me" ? "Your call" : "Their call"}</b><span>Round {next + 1} of {total} · {spotLabel(foe[next].spot)}</span></p>
           {by === "me" && !inPlay && <p className="cb-hint" data-hint>Pick a category above, then a card.</p>}
           {by === "me" && inPlay && !forced && <p className="cb-hint" data-hint><b>{categoryLabel(inPlay)}</b> it is. Pick who plays it.</p>}
           {forced && <p className="cb-hint" data-hint><b>{categoryLabel(forced)}</b> is the last one left. Pick who plays it.</p>}
@@ -422,7 +433,7 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
               : <>Play {pickedCard.name}</>}
           </button>
           <div className="cb-under">
-            <button type="button" className="linkbtn" data-best disabled={busy || !options.length} onClick={() => { const e = autoPick(hand, foe, rounds); if (e) play(e, by === "me" ? forced || bestCategory(e, rounds) : null); }}>Pick for me</button>
+            <button type="button" className="linkbtn" data-best disabled={busy || !options.length} onClick={() => { const e = autoPick(hand, foe, rounds); if (e) play(e, by === "me" ? forced || cat || bestCategory(e, rounds) : null); }}>Pick for me</button>
             {rest.length > 0 && <button type="button" className="linkbtn" data-whole-hand aria-expanded={String(open)} onClick={() => setOpen(!open)}>{open ? "Hide the rest of your hand" : `See the rest of your hand (${rest.length})`}</button>}
           </div>
           {/* Calling a category spends it for the cards you have NOT reached yet, so they can be looked at. */}
@@ -457,7 +468,7 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
           )}
           <div className="cb-rev-acts">
             <button type="button" className="btn" data-why aria-expanded={String(why)} onClick={() => setWhy(!why)}>{why ? "Hide the maths" : "Why?"}</button>
-            <button type="button" className="btn solid xl" data-continue ref={go} onClick={() => setSeen(seen + 1)}>{seen + 1 >= total ? "See the result" : "Next round"}</button>
+            <button type="button" className="btn solid xl" data-continue ref={go} onClick={() => { passed.current = true; setSeen(seen + 1); }}>{seen + 1 >= total ? "See the result" : "Next round"}</button>
           </div>
         </div>
       )}
@@ -781,6 +792,10 @@ export function BattleArea({ mode, rows, onBalance }) {
     const g = st.gauntlet;
     const total = GAUNTLET.length;
     const headStart = (stage) => { const e = gauntletEdge(stage); return e < 0 ? `Their cards play ${-e} points short each round - a head start.` : ""; };
+    // ONE ARENA AN ATTEMPT. A try's result and the next try at the same stage are drawn in the same place; keyed
+    // by the stage alone they were one arena to React, still on its sixth round and handed none, and "Try
+    // again" took the screen down. The hand is dealt fresh for every attempt, so it names one.
+    const attempt = (stage, hand) => `g:${stage}:${(hand || []).map(keyOf).join(".")}`;
     if (shownG) {
       const seen = seenBattle === shownG.battle;
       const won = shownG.battle.win;
@@ -789,7 +804,7 @@ export function BattleArea({ mode, rows, onBalance }) {
         <div className="cb-area" data-mode="gauntlet" data-phase="result">
           <h2 className="cb-h2 cb-result-h" tabIndex={-1} ref={top}>{!seen ? `Stage ${shownG.stage + 1}: ${gauntletName(shownG.stage)}` : won ? "Stage cleared" : "Beaten"}</h2>
           {alert}
-          <Arena key={`g:${shownG.stage}`} hand={shownG.hand} foe={shownG.battle.foe} rounds={shownG.battle.rounds} edge={shownG.battle.edge} foeName={gauntletName(shownG.stage)}
+          <Arena key={attempt(shownG.stage, shownG.hand)} hand={shownG.hand} foe={shownG.battle.foe} rounds={shownG.battle.rounds} edge={shownG.battle.edge} foeName={gauntletName(shownG.stage)}
             onDone={() => { setSeenBattle(shownG.battle); top.current?.focus({ preventScroll: true }); }} />
           {seen && won && shownG.first === true && <p className="cb-lead" data-paid>You beat {gauntletName(shownG.stage)}.{shownG.coins?.credited > 0 && <> You earned <Coins amount={shownG.coins.credited} size={16} />.</>}</p>}
           {seen && won && shownG.first === false && <p className="cb-lead" data-again>You beat {gauntletName(shownG.stage)} again. A stage pays the first time only.</p>}
@@ -814,7 +829,7 @@ export function BattleArea({ mode, rows, onBalance }) {
           {headStart(g.stage) && <p className="cb-foot" data-head-start>{headStart(g.stage)}</p>}
           {alert}
           {/* A real offense, named on the screen: who you face is the point here, so their six are in view. */}
-          <Arena key={`g:${g.stage}`} hand={g.hand} foe={foe} rounds={g.rounds} edge={gauntletEdge(g.stage)} foeName={gauntletName(g.stage)} busy={busy} onPlay={playG} />
+          <Arena key={attempt(g.stage, g.hand)} hand={g.hand} foe={foe} rounds={g.rounds} edge={gauntletEdge(g.stage)} foeName={gauntletName(g.stage)} busy={busy} onPlay={playG} />
           <div className="cb-acts">
             <button className="linkbtn" data-quit disabled={busy} onClick={giveUp}>Give up this try</button>
           </div>
@@ -1037,6 +1052,7 @@ button.cb-k:focus-visible,button.cb-sc:focus-visible{outline:4px solid var(--acc
 /* The one panel: you choose in it, and the round's result takes its place and stays. */
 .cb-panel{display:grid;gap:10px;border:2px solid var(--ink);border-radius:14px;background:var(--surface);color:var(--ink);padding:12px;box-shadow:4px 4px 0 var(--hard);min-width:0}
 .cb-callh{margin:0;display:grid;gap:3px}
+.cb-callh:focus{outline:none}
 .cb-callh b{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.02em;font-size:clamp(24px,7vw,32px);line-height:1;color:var(--accent-ink)}
 .cb-callh span{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .cb-hint{margin:0;font-size:14px;line-height:1.4;color:var(--ink)}

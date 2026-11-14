@@ -328,6 +328,10 @@ export function makeCards(state, { wallet = null } = {}) {
     readFails: false, // makes a client select on either table answer with an error
     openFails: false, // the next pack purchase goes through and its answer is lost on the way back
     nextPull: null,   // [{ id, finish }] the next opened pack holds, instead of a roll - for a test that needs to know
+    // A rolled pack holds nothing the buyer already owns. The real function rolls freely, and a card already
+    // held is sold on the spot (CARDS.md 12) - so a test that counts cards or coins after a pack it did not pin
+    // fails about one run in five for no reason. test-cards-screen.mjs turns this on; nextPull still wins.
+    freshPulls: false,
     // What anyone's select on card_packs returns: every row, in the order asked for by the caller.
     packRows() {
       if (api.packsReadFail) return { data: null, error: { message: "mock: the read failed", code: "XX000" } };
@@ -400,7 +404,11 @@ export function makeCards(state, { wallet = null } = {}) {
         if (!pack) return cardHttpError("unknown_pack", 400);
         if (!/^[A-Za-z0-9-]{8,36}$/.test(body.open)) return cardHttpError("bad_open", 400);
         // openFails: the purchase HAPPENS and the answer is lost - the case the open id exists for.
-        const pulled = api.nextPull || rollPack(pack, Math.random);
+        let pulled = api.nextPull || rollPack(pack, Math.random);
+        if (!api.nextPull && api.freshPulls) {
+          const held = new Set(api.owned(uid).filter((o) => o.count > 0).map((o) => ownKey(o.card_id, o.finish)));
+          for (let i = 0; i < 500 && pulled.some((c) => held.has(ownKey(c.id, c.finish))); i++) pulled = rollPack(pack, Math.random);
+        }
         api.nextPull = null;
         let bought;
         try { bought = api.buyPack(uid, pack.id, body.open, pulled.map((c) => ({ card: c.id, finish: c.finish, sell: sellFor(c) })), body.price); }
