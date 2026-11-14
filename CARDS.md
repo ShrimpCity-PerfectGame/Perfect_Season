@@ -285,7 +285,8 @@ With the client's off there is no tile and `data/cards.json` is not copied to th
 
 ### 8.5 Drawing a card
 
-`tools/cards/build-sprites.mjs` cuts the owner's sheets into `static/cards/<pose>.png`: paper cleared,
+`tools/cards/build-sprites.mjs` cuts the owner's sheets into `static/cards/<pose>.webp`, 640 pixels tall (an enlargement of the sheets, smoothed
+and re-sharpened so a phone does not show stairs in the outline - v2.24.3): paper cleared,
 painted number erased, still in the sheets' own blue, grey and tan. `tools/cards/poses.json` maps each
 archetype (and `role`) to a sheet cell. **Look at `build/card-sprites-check.png` after running it**; no test
 can see a half-erased number.

@@ -1,5 +1,5 @@
-// The card sprites' SHAPE: one neutral PNG per archetype plus the role player, the size a card expects, and a
-// pose table that agrees with the rules. No browser - a PNG says how big it is in its first 24 bytes.
+// The card sprites' SHAPE: one neutral WebP per archetype plus the role player, the size a card expects, and a
+// pose table that agrees with the rules. No browser - a WebP with alpha says how big it is in its first 30 bytes.
 //
 // What this cannot see is whether a sprite LOOKS right (a number half-erased, stray paper, a neighbour's arm).
 // tools/cards/build-sprites.mjs writes build/card-sprites-check.png for a person to look at, and says so.
@@ -21,19 +21,21 @@ await runTest("a pose for every archetype and the role player, and no others", a
   assert(new Set(Object.values(config.poses).map((p) => p.join(":"))).size === wanted.length, "no two poses share a drawing");
 });
 
-await runTest("every sprite is a PNG of the size a card draws", async () => {
+await runTest("every sprite is a WebP of the size a card draws", async () => {
   const meta = JSON.parse(readFileSync(at("static/cards/sprites.json"), "utf8"));
   assert(JSON.stringify(Object.keys(meta).sort()) === JSON.stringify([...wanted].sort()), "sprites.json lists the same fourteen");
   for (const pose of wanted) {
-    const file = at(`static/cards/${pose}.png`);
-    assert(existsSync(file), `static/cards/${pose}.png exists`);
+    const file = at(`static/cards/${pose}.webp`);
+    assert(existsSync(file), `static/cards/${pose}.webp exists`);
+    assert(!existsSync(at(`static/cards/${pose}.png`)), `the old ${pose}.png is gone - nothing asks for it now`);
     const b = readFileSync(file);
-    assert(b.subarray(1, 4).toString("latin1") === "PNG", `${pose}.png is a PNG`);
-    const w = b.readUInt32BE(16), h = b.readUInt32BE(20);
-    assert(h === 300 && w >= 120 && w <= 340, `${pose}.png is 300 tall and a sensible width (${w}x${h})`);
+    assert(b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP", `${pose}.webp is a WebP`);
+    // The extended header (VP8X) is what a WebP with transparency carries: flags, then width-1 and height-1 in 24 bits each.
+    assert(b.subarray(12, 16).toString("latin1") === "VP8X" && (b[20] & 0x10), `${pose}.webp has an alpha channel - the paper was cleared`);
+    const w = b.readUIntLE(24, 3) + 1, h = b.readUIntLE(27, 3) + 1;
+    assert(h === 640 && w >= 256 && w <= 725, `${pose}.webp is 640 tall and a sensible width (${w}x${h})`);
     assert(meta[pose].w === w && meta[pose].h === h, `sprites.json agrees about ${pose}`);
-    assert(b[25] === 6, `${pose}.png has an alpha channel - the paper was cleared`);
-    assert(statSync(file).size < 200 * 1024, `${pose}.png is under 200 KB (${(statSync(file).size / 1024).toFixed(0)} KB)`);
+    assert(statSync(file).size < 200 * 1024, `${pose}.webp is under 200 KB (${(statSync(file).size / 1024).toFixed(0)} KB)`);
   }
 });
 

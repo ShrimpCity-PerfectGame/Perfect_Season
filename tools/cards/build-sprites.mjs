@@ -1,4 +1,7 @@
-// Cuts the owner's sprite sheets into one neutral sprite per pose: static/cards/<pose>.png and sprites.json.
+// Cuts the owner's sprite sheets into one neutral sprite per pose: static/cards/<pose>.webp and sprites.json.
+// (WebP since v2.24.3: at 640 tall a PNG of this artwork is 400 KB and there are fourteen of them. The browser
+// recolours by REGION, so the small colour error a lossy file brings moves nothing - check that again if the
+// quality below is ever lowered.)
 //
 //   node tools/cards/build-sprites.mjs
 //
@@ -20,6 +23,9 @@
 //      two-man sprite cannot be one player's card.) Told by shape: far wider than one player ever is.
 //   3. Erase the painted number: white pieces whose surroundings are mostly the jersey. A sheet with blank
 //      jerseys simply has none, and that is fine.
+//   4. Enlarge, smoothly. The cut-out's edge is a hard yes-or-no per pixel, so enlarging it enlarges the stairs.
+//      The silhouette is therefore blurred and re-cut at the new size, which turns stairs into a curve, and the
+//      colours are enlarged and then sharpened so the black lines stay crisp instead of going soft.
 //
 // LOOK AT EVERY IMAGE IT WRITES before committing. A number half-erased, a hole where paper was cleared inside
 // a broken outline, a second player's arm - none of those fail a test. tests/test-card-sprites.mjs holds the
@@ -37,7 +43,10 @@ const exe = [process.env.CHROME_PATH, "C:/Program Files/Google/Chrome/Applicatio
   "/usr/bin/google-chrome"].filter(Boolean).find((p) => fs.existsSync(p));
 if (!exe) throw new Error("No Chrome found - set CHROME_PATH");
 
-const HEIGHT = 300; // every sprite is written this tall; a card draws it at about 120 CSS pixels
+// Every sprite is written this tall. A card draws it at up to 250 CSS pixels, which is 750 real ones on a phone,
+// and at 300 tall (the first version) the owner's phone showed every stair in the outline. The sheets only hold
+// a player at about 400 pixels, so this is an ENLARGEMENT, and stage 4 is what keeps it from looking like one.
+const HEIGHT = 640;
 const MAX_ASPECT = 1.25; // wider than this, relative to its height, and a cell is refused as two players
 const config = JSON.parse(fs.readFileSync(path.join(root, "tools/cards/poses.json"), "utf8"));
 const sheetFiles = Object.fromEntries(Object.entries(config.sheets).map(([id, s]) => [id, { ...s, url: "data:image/png;base64," + fs.readFileSync(path.join(root, "tools/cards", s.file)).toString("base64") }]));
@@ -114,9 +123,24 @@ const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT) => 
         for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const qx = x + dx, qy = y + dy; if (qx < 0 || qy < 0 || qx >= w || qy >= h) continue; const q = qy * w + qx; if (on(q) && Ll[q] > 0.22) { s[q * 4] = jr; s[q * 4 + 1] = jg; s[q * 4 + 2] = jb; Ll[q] = jl; } } }
     }
     const big = document.createElement("canvas"); big.width = w; big.height = h; big.getContext("2d").putImageData(new ImageData(s, w, h), 0, 0);
-    const tw = Math.round(w * HEIGHT / h), small = document.createElement("canvas"); small.width = tw; small.height = HEIGHT;
-    const sg = small.getContext("2d"); sg.imageSmoothingQuality = "high"; sg.drawImage(big, 0, 0, tw, HEIGHT);
-    out[pose] = { png: small.toDataURL("image/png"), w: tw, h: HEIGHT, digits, source: `${sheetId}:${cell}` };
+    // --- 4. enlarge, smoothly ---
+    const tw = Math.round(w * HEIGHT / h), scale = HEIGHT / h, TN = tw * HEIGHT;
+    const draw = (blur) => { const cv = document.createElement("canvas"); cv.width = tw; cv.height = HEIGHT; const cg = cv.getContext("2d", { willReadFrequently: true }); cg.imageSmoothingQuality = "high"; if (blur) cg.filter = `blur(${blur}px)`; cg.drawImage(big, 0, 0, tw, HEIGHT); return cg.getImageData(0, 0, tw, HEIGHT).data; };
+    // The colours ride on a copy whose paper is BLACK rather than clear, so the outline's own colour runs out
+    // past the edge and the new silhouette never uncovers a pale fringe.
+    const solid = document.createElement("canvas"); solid.width = w; solid.height = h;
+    { const g2 = solid.getContext("2d"); g2.fillStyle = "#101014"; g2.fillRect(0, 0, w, h); g2.drawImage(big, 0, 0); }
+    const drawSolid = (blur) => { const cv = document.createElement("canvas"); cv.width = tw; cv.height = HEIGHT; const cg = cv.getContext("2d", { willReadFrequently: true }); cg.imageSmoothingQuality = "high"; if (blur) cg.filter = `blur(${blur}px)`; cg.drawImage(solid, 0, 0, tw, HEIGHT); return cg.getImageData(0, 0, tw, HEIGHT).data; };
+    const plain = drawSolid(0), soft = drawSolid(1.1 * scale), edge = draw(0.6 * scale);
+    const fin = new Uint8ClampedArray(TN * 4), SHARPEN = 0.6, STEEP = 2.2;
+    for (let p = 0; p < TN; p++) {
+      const i = p * 4;
+      for (let ch = 0; ch < 3; ch++) fin[i + ch] = plain[i + ch] + SHARPEN * (plain[i + ch] - soft[i + ch]);
+      fin[i + 3] = Math.max(0, Math.min(255, (edge[i + 3] - 127.5) * STEEP + 127.5));
+    }
+    const small = document.createElement("canvas"); small.width = tw; small.height = HEIGHT;
+    small.getContext("2d").putImageData(new ImageData(fin, tw, HEIGHT), 0, 0);
+    out[pose] = { png: small.toDataURL("image/webp", 0.9), w: tw, h: HEIGHT, digits, source: `${sheetId}:${cell}` };
   }
   return out;
 }, sheetFiles, config.poses, HEIGHT, MAX_ASPECT);
@@ -125,7 +149,9 @@ const dir = path.join(root, "static/cards");
 fs.mkdirSync(dir, { recursive: true });
 const meta = {};
 for (const [pose, r] of Object.entries(result)) {
-  fs.writeFileSync(path.join(dir, `${pose}.png`), Buffer.from(r.png.split(",")[1], "base64"));
+  if (!r.png.startsWith("data:image/webp")) throw new Error("this Chrome did not write a WebP");
+  fs.writeFileSync(path.join(dir, `${pose}.webp`), Buffer.from(r.png.split(",")[1], "base64"));
+  fs.rmSync(path.join(dir, `${pose}.png`), { force: true });
   meta[pose] = { w: r.w, h: r.h };
   console.log(`${pose.padEnd(11)} ${String(r.w).padStart(3)}x${r.h}  from ${r.source}  ${r.digits ? `number erased (${r.digits} piece${r.digits === 1 ? "" : "s"})` : "blank jersey"}`);
 }
@@ -133,7 +159,7 @@ fs.writeFileSync(path.join(dir, "sprites.json"), `${JSON.stringify(meta)}\n`);
 
 // A contact sheet to LOOK at, on a dark ground so stray paper shows. Not shipped.
 fs.mkdirSync(path.join(root, "build"), { recursive: true });
-await page.setViewport({ width: 7 * 210, height: 2 * 330, deviceScaleFactor: 1 });
+await page.setViewport({ width: 7 * 210, height: 2 * 330, deviceScaleFactor: 2 });
 await page.setContent(`<body style="margin:0;background:#24304f;display:grid;grid-template-columns:repeat(7,210px)">` + Object.entries(result).map(([pose, r]) => `<div style="height:330px;position:relative;display:flex;align-items:flex-end;justify-content:center"><img style="height:300px" src="${r.png}"><span style="position:absolute;left:6px;top:4px;color:#fff;font:13px sans-serif">${pose}</span></div>`).join("") + `</body>`);
 await page.screenshot({ path: path.join(root, "build/card-sprites-check.png") });
 await browser.close();

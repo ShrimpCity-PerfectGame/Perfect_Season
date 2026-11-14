@@ -94,9 +94,9 @@ await runTest("a card's colours are its team's and its player's", async () => {
   assert(sprites.cardColours(peterson, withTone).skin === skin.tones.t4, "a recorded tone is used");
   assert(sprites.skinFor(peterson.pid, { ...skin, players: { [peterson.pid]: "nope" } }) === skin.default, "a tone key that does not exist falls back to the default");
   assert(sprites.cardColours({ team: "XXX", pid: 1 }).jersey.startsWith("#"), "a team the game does not know still gets a colour");
-  assert(sprites.spriteFor(find("Tom Brady", 2007)) === "/cards/gunslinger.png", "a gunslinger's sprite");
-  assert(sprites.spriteFor(all.find((x) => x.archetype === "role")) === "/cards/role.png", "a role player's");
-  for (const a of logic.ARCHETYPES) assert(readFileSync(new URL(`../static/cards/${a.id}.png`, import.meta.url)).length > 1000, `there is a drawing for ${a.id}`);
+  assert(sprites.spriteFor(find("Tom Brady", 2007)) === "/cards/gunslinger.webp", "a gunslinger's sprite");
+  assert(sprites.spriteFor(all.find((x) => x.archetype === "role")) === "/cards/role.webp", "a role player's");
+  for (const a of logic.ARCHETYPES) assert(readFileSync(new URL(`../static/cards/${a.id}.webp`, import.meta.url)).length > 1000, `there is a drawing for ${a.id}`);
 });
 
 await runTest("a card says who it is, in words", async () => {
@@ -127,7 +127,7 @@ await runTest("the card on screen", async () => {
   assert(el.querySelector(".cd-in").getAttribute("aria-hidden") === "true", "the printed card is hidden from a screen reader, which has the label");
   // No canvas in jsdom, and no image ever loads: the card is on its neutral sprite, and it is a whole card.
   const img = el.querySelector("img.cd-fig");
-  assert(img.getAttribute("src") === "/cards/gunslinger.png" && img.getAttribute("alt") === "", "the neutral sprite, decorative");
+  assert(img.getAttribute("src") === "/cards/gunslinger.webp" && img.getAttribute("alt") === "", "the neutral sprite, decorative");
   img.dispatchEvent(new window.Event("error"));
   await flush();
   assert(img.hidden === true, "a sprite that fails to load is taken away rather than left as a broken image");

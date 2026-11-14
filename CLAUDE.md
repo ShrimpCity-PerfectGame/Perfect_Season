@@ -550,7 +550,9 @@ The parts unlike everything else:
   own try/catch, and answers `card: null` on any failure. Do not move it earlier or let it throw.
 - **A read that failed is not an empty collection** - `fetchMyCards` has three answers and `cards.jsx` has an
   error state of its own. Collapsing them offers a player with fifty cards a starter deck they already opened.
-- **Sprites are recoloured in the browser**, so fourteen neutral PNGs serve every card and there is no file per
+- **Grey and tan are recoloured a REGION at a time** (v2.24.2): a helmet's highlight is the same grey as a white
+  glove's shadow, so judging one pixel scrubbed helmets and bled colour onto gloves. `card-sprites.mjs` says how.
+- **Sprites are recoloured in the browser**, so fourteen neutral WebPs serve every card and there is no file per
   team. `data/card-skin.json`'s player list is a **first pass awaiting the owner's correction** (v2.24.1), and
   that review is a launch gate for production. It is written by `tools/cards/build-card-skin.mjs` from lists
   of NAMES in that file - correct it there and re-run, never in the JSON. Anybody the drafter was not sure of is

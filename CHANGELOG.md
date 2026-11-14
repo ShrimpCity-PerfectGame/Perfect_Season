@@ -20,6 +20,16 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.24.3] - 2026-11-13
+
+Test site only.
+
+### Changed
+- Cards: sharper players. The drawings were 300 pixels tall and a phone draws one at about 750, so every
+  outline showed its stairs. They are 640 tall now, enlarged with the outline smoothed and the lines
+  re-sharpened, and saved as WebP so each is about 45 KB. Recolouring a card was also made about three times
+  faster, since there are four times the pixels to do. Reported from the owner's phone.
+
 ## [2.24.2] - 2026-11-13
 
 Test site only.
