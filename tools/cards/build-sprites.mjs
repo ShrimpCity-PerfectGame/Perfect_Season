@@ -26,6 +26,12 @@
 //   4. Enlarge, smoothly. The cut-out's edge is a hard yes-or-no per pixel, so enlarging it enlarges the stairs.
 //      The silhouette is therefore blurred and re-cut at the new size, which turns stairs into a curve, and the
 //      colours are enlarged and then sharpened so the black lines stay crisp instead of going soft.
+//   5. Whiten the shaded patches of white kit that poses.json lists under "white". A glove's shadow or a
+//      shoe's sole is drawn in the helmet's own grey, and where the outline closes round one the browser has
+//      no way to know it is not helmet: it painted the pointing player's fist in the team's second colour.
+//      Each entry is the middle of one such patch, in the finished sprite's pixels. An entry that no longer
+//      finds its patch stops the build - after a new sheet or a new HEIGHT, look again and re-list them.
+//      (tools: paint the helmet colour bright and look for it on a hand or a foot.)
 //
 // LOOK AT EVERY IMAGE IT WRITES before committing. A number half-erased, a hole where paper was cleared inside
 // a broken outline, a second player's arm - none of those fail a test. tests/test-card-sprites.mjs holds the
@@ -53,7 +59,7 @@ const sheetFiles = Object.fromEntries(Object.entries(config.sheets).map(([id, s]
 
 const browser = await puppeteer.launch({ executablePath: exe, headless: "new" });
 const page = await browser.newPage();
-const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT) => {
+const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT, whites) => {
   const hsl = (r, g, b) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; let h = 0, s = 0; if (mx !== mn) { const d = mx - mn; s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; } return [h, s, l]; };
   const median = (xs) => { xs.sort((p, q) => p - q); return xs[xs.length >> 1] ?? 0.5; };
 
@@ -138,12 +144,32 @@ const result = await page.evaluate(async (sheets, poses, HEIGHT, MAX_ASPECT) => 
       for (let ch = 0; ch < 3; ch++) fin[i + ch] = plain[i + ch] + SHARPEN * (plain[i + ch] - soft[i + ch]);
       fin[i + 3] = Math.max(0, Math.min(255, (edge[i + 3] - 127.5) * STEEP + 127.5));
     }
+    // --- 5. whiten the listed patches of white kit ---
+    // The same test the browser makes for "grey" (card-sprites.mjs), so a patch here is a region there.
+    const wanted = (whites[pose] || []).map(([x, y]) => ({ x, y, found: false }));
+    if (wanted.length) {
+      const grey = new Uint8Array(TN), lt = new Float32Array(TN), seen = new Uint8Array(TN);
+      for (let p = 0; p < TN; p++) { if (!fin[p * 4 + 3]) continue; const mx = Math.max(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2]), mn = Math.min(fin[p * 4], fin[p * 4 + 1], fin[p * 4 + 2]); lt[p] = (mx + mn) / 510; if (lt[p] > 0.3 && mx - mn < 40) grey[p] = 1; }
+      for (let p0 = 0; p0 < TN; p0++) {
+        if (!grey[p0] || seen[p0]) continue;
+        const px = [p0]; seen[p0] = 1; let sx = 0, sy = 0;
+        for (let a = 0; a < px.length; a++) { const p = px[a], x = p % tw; sx += x; sy += (p / tw) | 0; for (const q of [x > 0 ? p - 1 : -1, x < tw - 1 ? p + 1 : -1, p - tw, p + tw]) if (q >= 0 && q < TN && grey[q] && !seen[q]) { seen[q] = 1; px.push(q); } }
+        const cx = sx / px.length, cy = sy / px.length;
+        const hit = px.length < 9000 && wanted.find((t) => !t.found && Math.abs(t.x - cx) <= 12 && Math.abs(t.y - cy) <= 12);
+        if (!hit) continue;
+        hit.found = true;
+        // keep the shading, as a white's: every pixel lands lighter than the browser's line between grey and white
+        for (const p of px) { const v = 255 * (0.89 + 0.09 * lt[p]); fin[p * 4] = fin[p * 4 + 1] = fin[p * 4 + 2] = v; }
+      }
+      const lost = wanted.filter((t) => !t.found);
+      if (lost.length) throw new Error(`${pose}: no grey patch at ${lost.map((t) => `${t.x},${t.y}`).join(" or ")} - poses.json's "white" list no longer matches the drawing`);
+    }
     const small = document.createElement("canvas"); small.width = tw; small.height = HEIGHT;
     small.getContext("2d").putImageData(new ImageData(fin, tw, HEIGHT), 0, 0);
     out[pose] = { png: small.toDataURL("image/webp", 0.9), w: tw, h: HEIGHT, digits, source: `${sheetId}:${cell}` };
   }
   return out;
-}, sheetFiles, config.poses, HEIGHT, MAX_ASPECT);
+}, sheetFiles, config.poses, HEIGHT, MAX_ASPECT, config.white || {});
 
 const dir = path.join(root, "static/cards");
 fs.mkdirSync(dir, { recursive: true });

@@ -20,6 +20,16 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.24.4] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: gloves, wristbands and shoes no longer pick up a patch of the helmet colour. The shaded part of a
+  white glove is drawn in the helmet's own grey, and where the outline closed round it the recolouring could
+  not tell the two apart - most visibly on the pointing player's fist. Fourteen such patches across nine
+  poses are now whitened when the sprites are built (`tools/cards/poses.json`, "white").
+
 ## [2.24.3] - 2026-11-13
 
 Test site only.
