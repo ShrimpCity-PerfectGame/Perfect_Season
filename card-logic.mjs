@@ -663,7 +663,11 @@ export function gauntletFoe(stage) {
 // THE HEAD START. The weakest real offense in the game is still better than a starter deck, so the early
 // stages give points back: every card of theirs plays this many points SHORT, shown on the card as a modifier.
 // It shrinks a stage at a time and is gone by GAUNTLET_EVEN, after which a team is exactly as good as it was.
-export const GAUNTLET_HEAD_START = -32, GAUNTLET_EVEN = 8;
+// -24 since v2.31.0 (it was -32). Calling the category with their six in view, against a second back and a
+// second receiver where a team used to field its two best of anybody, made a stage much easier: at -32 a
+// starter deck cleared stage one 96% of tries when it read the screen and 78% on Pick for me. At -24 that is
+// 81% and 50% - the coin flip on Pick for me it was built to be (54%, measured under the old rules).
+export const GAUNTLET_HEAD_START = -24, GAUNTLET_EVEN = 8;
 export const gauntletEdge = (stage) => (stageOf(stage) && stage < GAUNTLET_EVEN ? Math.round(GAUNTLET_HEAD_START * (1 - stage / GAUNTLET_EVEN)) : 0);
 export const GAUNTLET_EDGE_LABEL = "Head start";
 // One round of a gauntlet battle: playRound with the stage's team and its head start. `cat` is your call.

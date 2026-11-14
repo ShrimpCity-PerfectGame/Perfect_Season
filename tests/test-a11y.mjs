@@ -83,7 +83,12 @@ const SCREENS = [
   ["the ladder before a run", "?screen=cards&tab=run", null],
   ["the ladder: round one, choosing a card", "?screen=cards&tab=run&run=1", null],
   ["the ladder: two rounds in", "?screen=cards&tab=run&run=1&rounds=2", null],
-  ["the ladder: a round being revealed", "?screen=cards&tab=run&run=1&rounds=2&anim=1", null],
+  ["the ladder: a round's result, which stays", "?screen=cards&tab=run&run=1&rounds=2&anim=1", null],
+  // v2.31.0: the category is called. The rack of six, the hand as stat cards side by side (buttons, each one
+  // labelled as a sentence), a category lit on every card, their call named before the pick, and the maths.
+  ["the ladder: a category and a card chosen", "?screen=cards&tab=run&run=1&chosen=1&hand=1", null],
+  ["the ladder: their call", "?screen=cards&tab=run&run=1&rounds=1&theirs=1", null],
+  ["the ladder: a result with the maths open", "?screen=cards&tab=run&run=1&rounds=1&anim=1&why=1", null],
   ["a card battle being played", "?screen=cards&tab=run&battle=win", null],
   ["a card battle that was lost", "?screen=cards&tab=run&battle=loss", null],
   ["the gauntlet, three stages in", "?screen=cards&tab=gauntlet&cleared=3", null],

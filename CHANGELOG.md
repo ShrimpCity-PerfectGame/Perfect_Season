@@ -20,6 +20,52 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.31.0] - 2026-11-14
+
+Card battles, on the test site only: **the category is called before you pick**, the lineup has no Flex, and
+the result of a round stays on screen until you move on.
+
+The owner played 2.30.0 and said picking felt random, that the result flashed past, and that the hand read as
+a list with one big number. The game's own balance test agreed about the first: with the category hidden
+until the card was down, choosing as well as the screen allowed won 48% of even battles and always playing
+the highest rating won 45%.
+
+### Changed
+- **You always know the category before you pick.** You call round one: pick a category, then a card. After
+  that, whoever won the last round calls the next. When they call, they name the category first - their
+  card's best of the ones left - and you choose who answers it. Their card stays face down until yours is
+  played. Each category is used once a battle.
+- **No Flex.** A lineup is a quarterback, two backs, two receivers and a tight end, so a round offers two to
+  four cards. The hand is still twelve.
+- **The hand is cards side by side**, in the order dealt, each with its six stats listed down the card. The
+  category in play is lit on every card, a spent one is struck through, and a row is marked where the card's
+  ability fires. Nothing is sorted by rating and no total is shown in advance.
+- **One panel does everything, and it comes before the field.** You choose in it, and the round's result takes
+  its place: both cards, the real stat, one number a side, who took the round and who calls next. It stays
+  until you press Next round. "Why?" opens the breakdown. Nothing runs on a timer and the page does not move
+  when a card is played. The speed and skip controls are gone with the timer.
+- **"See the rest of your hand"** opens the cards for the other spots, to look at - calling a category spends
+  it for them too.
+- The ladder says how strong their cards are ("their cards rate about 66").
+- **The gauntlet:** its teams field the new lineup. Baltimore 1999-2005 moves from sixth to fourth, because
+  without Flex spots it is weaker than the two teams that were ahead of it - the one time that list is
+  reordered. The head start is 24 points at stage one, not 32: calling the category with their six in view
+  made the early stages much easier than they were built to be.
+
+### What it measures at now
+- At even strength, a player who reads the screen wins 73% of battles, "Pick for me" 62%, and tapping at
+  random 8%. Before: 48%, 45%, 12%.
+- Winning the call does not run away with a battle: 5% of even battles are 6-0 either way, you win 67% of the
+  rounds you call and they win 53% of theirs.
+- No scoring number changed. The ladder's run lengths are inside the bands they were held to before.
+
+### Under it
+- No database change. Who calls follows from the rounds played, and each stored round carries the call for
+  the next one, so a reloaded page knows it without asking.
+- A play carries the category you call. On your call a missing, made-up or spent one is refused
+  (`bad_cat`) and plays nothing; on their call what the browser sends is not looked at.
+- A battle begun before this release finishes under the new call rule with its old spots.
+
 ## [2.30.0] - 2026-11-14
 
 Nothing a player can see changes. The site's main download is about 110 KB smaller.

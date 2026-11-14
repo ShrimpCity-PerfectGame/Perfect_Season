@@ -750,8 +750,10 @@ async function setUpGuess(howMany, finish) {
 // ---------- screen=cards: the card area ----------
 // &tab=packs is the pack shop (&coins=N for the wallet, &inside=1 with a pack's odds open, &soldout=1).
 // &tab=run is the ladder: &run=1 with a run going (the arena on its first round's choice); &rounds=N to play N
-// rounds of it and stop on the next choice; &anim=1 to play one more and leave it PLAYING OUT; &battle=win|loss
-// to play all six and land on the result. &tab=daily is the daily battle (&dealt=1 with the hand dealt,
+// rounds of it and stop on the next choice; &anim=1 to play one more and leave its RESULT on screen (it stays
+// until passed); &battle=win|loss to play all six and land on the ending. &theirs=1 loses those rounds, so the
+// next choice is THEIR call. On a choice: &chosen=1 picks a category and a card, &hand=1 opens the rest of the
+// hand; on a result, &why=1 opens the maths. &tab=daily is the daily battle (&dealt=1 with the hand dealt,
 // &played=1 once it is played), &tab=deck the deck builder, &tab=boards the two boards.
 // ?starter=0 is an account that has not opened its deck (the starter panel); the default is a collection with
 // a starter deck and one showpiece in each finish, so every edge and the count badge are on screen at once.
@@ -797,7 +799,7 @@ async function setUpCards(withDeck) {
   if (withDeck && params.get("tab") !== "gauntlet" && (params.get("run") === "1" || params.get("battle") || params.get("rounds"))) {
     await mock._cards.battle(uid, { action: "run_start" });
     // A loss needs a team that can beat a deck holding 2007 Brady: the top of the ladder, met in battle one.
-    if (params.get("battle") === "loss") mock._cards.runs[0].foe = CL.buildTeam(seededRand(7), 126).map((e) => ({ card: e.id, finish: e.finish, spot: e.spot }));
+    if (params.get("battle") === "loss" || params.get("theirs") === "1") mock._cards.runs[0].foe = CL.buildTeam(seededRand(7), 126).map((e) => ({ card: e.id, finish: e.finish, spot: e.spot }));
   }
   // &tab=gauntlet: &cleared=N stages already beaten; &stage=1 with an attempt going at the stage that is up
   // (then &rounds=N / &battle=win|loss play it, exactly as they do a ladder battle).
@@ -811,7 +813,10 @@ async function setUpCards(withDeck) {
     if (params.get("played") === "1") {
       const hand = dealt.data.daily.hand, foe = CL.dailyFoe(mock._cards.today());
       let log = [];
-      for (let round = 0; round < 6; round++) log = (await mock._cards.battle(uid, { action: "daily_round", round, card: CL.autoPick(hand, foe, log) })).data.daily.log;
+      for (let round = 0; round < 6; round++) {
+        const card = CL.autoPick(hand, foe, log);
+        log = (await mock._cards.battle(uid, { action: "daily_round", round, card, cat: CL.callerOf(log) === "me" ? CL.bestCategory(card, log) : undefined })).data.daily.log;
+      }
     }
   }
   return uid;
@@ -830,22 +835,28 @@ async function setUpCards(withDeck) {
       setTimeout(press, 900); setTimeout(press, 1100);
     }
     // &battle=win|loss plays all six rounds; &rounds=N plays N and stops on the next choice; &anim=1 then plays
-    // one more and leaves it playing out. The luck is pinned (four draws a round: your card's two, then theirs).
+    // one more and leaves its result up. The luck is pinned (four draws a round: your card's two, then theirs).
+    const dress = () => {
+      if (params.get("chosen") === "1") { document.querySelector("[data-rack] button[data-cat]")?.click(); setTimeout(() => document.querySelector("[data-choose] [data-pick]")?.click(), 150); }
+      if (params.get("hand") === "1") document.querySelector("[data-whole-hand]")?.click();
+      if (params.get("why") === "1") document.querySelector("[data-why]")?.click();
+    };
     if (params.get("battle") || params.get("rounds")) {
-      const [you, them] = params.get("battle") === "loss" ? [0.05, 0.95] : [0.95, 0.05];
+      const [you, them] = params.get("battle") === "loss" || params.get("theirs") === "1" ? [0.05, 0.95] : [0.95, 0.05];
       mock._cards.nextRolls = Array(6).fill([you, you, them, them]).flat();
       const want = params.get("battle") ? 6 : Math.max(0, Math.min(5, Number(params.get("rounds")) || 0));
-      let extra = params.get("anim") === "1";
+      const reveal = params.get("anim") === "1" && want < 6;
+      const target = want + (reveal ? 1 : 0);
       const tick = setInterval(() => {
         const arena = document.querySelector(".cb-arena");
         if (!arena) return;
         const played = Number(arena.dataset.rounds);
-        const skip = document.querySelector("[data-skip]"), pick = document.querySelector("[data-best]");
-        if (played >= want && !extra) { if (skip) skip.click(); else clearInterval(tick); return; }
-        if (skip) { skip.click(); return; }
-        if (pick && !pick.disabled) { if (played >= want) { extra = false; clearInterval(tick); } pick.click(); }
-      }, 250);
-    }
+        const go = document.querySelector("[data-continue]"), pick = document.querySelector("[data-best]");
+        if (played >= target) { if (go && !reveal) go.click(); else { clearInterval(tick); setTimeout(dress, 200); } return; }
+        if (go) { go.click(); return; }
+        if (pick && !pick.disabled) pick.click();
+      }, 150);
+    } else if (params.get("run") === "1" || params.get("stage") === "1" || params.get("dealt") === "1") setTimeout(dress, 700);
     // &tab=packs&inside=1 also opens the first pack's contents, so the odds tables are on screen.
     // &tab=packs&qty=5 chooses five of the first pack and presses Open, so the batch's confirm is on screen.
     if (params.get("qty")) setTimeout(() => { document.querySelector(`.cd-pack [data-qty="${params.get("qty")}"]`)?.click(); setTimeout(() => document.querySelector(".cd-pack [data-buy]")?.click(), 200); }, 900);

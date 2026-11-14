@@ -535,7 +535,7 @@ await runTest("the gauntlet: a real team a stage, a round at a time, paid once f
     rounds = n < 5 ? res.body.gauntlet.rounds : rounds; last = res;
     if (n === 0) assert((await post({ action: "gauntlet_round", stage: 0, round: 0, card, cat })).body.reason === "stale", "the same round again is stale");
   }
-  // The sixty best cards in the game against the weakest stage with a 32-point head start: a win.
+  // The sixty best cards in the game against the weakest stage with its head start: a win.
   assert(last.body.done === true && last.body.battle.win === true && last.body.battle.stage === 0 && last.body.first === true, "six rounds and a win: " + JSON.stringify(last.body).slice(0, 160));
   assert(last.body.gauntlet.cleared === 1 && last.body.coins.credited === gauntletCoins(0) && s.wallet.balanceOf(ME) === had + gauntletCoins(0), "stage one cleared and paid what rewards.mjs says: " + JSON.stringify(last.body.coins) + " " + had + " " + s.wallet.balanceOf(ME));
   assert(row().stage === null && row().last.win === true, "the attempt is over, and kept to be shown");

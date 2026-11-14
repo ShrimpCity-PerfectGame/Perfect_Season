@@ -39,6 +39,11 @@ export const CARD_TEXT_PAIRS = [
   [P.ink, P.baseEdge, "the finish label on a Base card"],
   [P.ink, "#8b98a6", "the finish label on a Silver card's darkest stop"],
   [P.ink, "#bd8c26", "the finish label on a Gold card's darkest stop"],
+  // The battle's stat card (card-battle.jsx, v2.31.0) is drawn in these paints too.
+  [P.ink, P.lime, "the category in play on a stat card"],
+  [P.muted, P.paper, "a spent category, and the line under the name, on a stat card"],
+  [P.lime, P.ink, "an ability's bonus on a stat card's row"],
+  [P.ink, P.paper, "the rating chip on a stat card's art"],
 ];
 
 const POS_WORD = { QB: "quarterback", RB: "running back", WR: "wide receiver", TE: "tight end" };
@@ -59,7 +64,9 @@ export function cardLabel(card, finish = "base", count = 1) {
     + `${archetypeLabel(card.archetype)}, ${FINISH_WORD[finish] || finish} finish. ${stats}.${count > 1 ? ` ${count} copies.` : ""}`;
 }
 
-export function CardFace({ card, finish = "base", count = 1 }) {
+// The card's figure, painted in its team's colours: { src, colours }. A hook of its own (v2.31.0) so the battle's
+// stat card (card-battle.jsx) draws the same man without drawing a whole card.
+export function useCardSprite(card) {
   const neutral = spriteFor(card);
   const colours = cardColours(card);
   // A sprite painted before starts painted: no second load, and no flash of the neutral blue when a grid re-draws.
@@ -77,7 +84,11 @@ export function CardFace({ card, finish = "base", count = 1 }) {
     img.src = neutral;
     return () => { live = false; };
   }, [neutral, colours.jersey, colours.metal, colours.skin]);
+  return { src, colours };
+}
 
+export function CardFace({ card, finish = "base", count = 1 }) {
+  const { src, colours } = useCardSprite(card);
   const [first, ...rest] = card.name.split(" ");
   const bonus = FINISH_BONUS[finish] || 0;
   const role = card.archetype === ROLE_PLAYER;

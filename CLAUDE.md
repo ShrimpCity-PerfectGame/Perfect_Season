@@ -519,15 +519,16 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.30.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+**Cards (in progress, v2.31.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
 five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck of thirty, a
 card a day from the daily draft, a collection screen, packs bought with coins, a ladder of CPU teams and a
 daily battle. **The battle was rebuilt in v2.27.0 as offense against offense** (the owner's redesign: "a fast
 collectible strategy game powered by historical NFL seasons"): a deck of thirty, a hand of twelve dealt by the
 server, six rounds each on a category. **Since v2.28.0 a battle is played a round at a time**: each round is
-one lineup spot (QB, RB, WR, TE, Flex, Flex - the first five in a random order, **the last always a Flex**), the
-player sees the spot - **not the card across from it, since v2.28.1** - plays one card from the hand, and only
-then learns the category and who it faced. **The historical gauntlet (v2.29.0)** is twelve real offenses in
+one lineup spot - **QB, RB, RB, WR, WR, TE since v2.31.0, in a random order; there is no Flex** - and the player
+plays one card from the hand without seeing the card across from it (v2.28.1). **Since v2.31.0 the category is
+CALLED before the pick**: you call round one, then whoever won the last round; each category is used once.
+**The historical gauntlet (v2.29.0)** is twelve real offenses in
 order, a stage at a time, with their six in view. The draft arena, badges and the profile spot are not built. **Production has cards switched off** in two
 places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
 `card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
@@ -599,10 +600,21 @@ The parts unlike everything else:
   `claim_username` know nothing of them.
 - **A failed play is not "not played".** The battle screen never replays after a lost answer: it reads the
   state, which carries the rounds played, and shows that. Same family as the pack shop's open id.
-- **The category order is stored and never sent** (`card_runs.cats`; the daily's follows from the date, the
-  accepted gap every seeded daily has). A round's category arrives inside that round's result. Do not add it
-  to `card_battle_state` - knowing it turns every round back into reading off the bigger number, which is
-  the objection that made the battle round-by-round in the first place.
+- **The category is CALLED, and three versions are why** (v2.31.0, CARDS.md 4.1). Everything on show was
+  "read off the bigger number" (v2.27.0); the category hidden until the card was down was a guess - the owner
+  said the picks felt random, and the balance test measured reading the screen at three battles in a hundred
+  over "Pick for me". A choice needs something you know and something you give up: the category is known, a
+  category spent is gone for the rest of the hand, and a round won is the next call. **Do not hide the
+  category again, and do not show a projected total or sort the hand by rating** - each is one of the two
+  failures. `playRound` decides whose category a round is on, so no caller can; `roundProblem` refuses
+  `bad_cat` on your call and ignores what is sent on theirs.
+- **A stored round carries the call for the next one** (`next: { by, cat }`). The ladder hides their cards, so
+  the browser cannot work their call out; this is how it learns it, reload included, and why v2.31.0 had no
+  migration. `card_runs.cats` and `card_gauntlets.cats` are still written (the SQL requires six) and read by
+  nothing.
+- **The battle screen is one panel, before the field, and nothing in it runs on a timer** (CARDS.md 11.5). The
+  owner's words for the version it replaced: "by the time you read them it disappears and goes back to the
+  bottom". A result stays until Next round is pressed; the page never scrolls itself.
 - **Their cards are hidden until played, by the server** (`maskFoe`): a ladder answer and `card_battle_state`
   carry the spots to come and not the cards. A new answer that carries a run's `foe` has to go through it.
 - **The daily card is one of the six players drafted** (`dailyCard(history, rand)`), falling back to the day's
@@ -613,7 +625,9 @@ The parts unlike everything else:
   anything not in that table fails the build**. Never import a card file statically from `perfect-season.jsx`,
   and note their stylesheet is no longer part of `APP_CSS`.
 - **The gauntlet's list is written out and append-only** (`GAUNTLET`, CARDS.md 13): progress is a count of
-  stages cleared, so reordering or recomputing the list silently changes which team stage five is.
+  stages cleared, so reordering or recomputing the list silently changes which team stage five is. It was
+  reordered ONCE, in v2.31.0 (Baltimore sixth to fourth, when the Flex spots went), while only the owner had
+  progress on it. Not again.
 - **A round is written by its number** (`card_run_round`, `card_daily_round`): anything but the next one is
   `stale`, under the row's lock, so a retry can never re-roll a round's luck.
 - **One of a card in a finish; a copy is sold** (v2.26.0, CARDS.md 12). The database has no catalog and cannot
@@ -861,7 +875,7 @@ node tests/test-guess-screen.mjs       # the buttons: the tile, both variants, g
 # Cards (in progress - rules only, 2026-11-13). See CARDS.md. card-logic.mjs is pure, so none of these needs a database or a browser.
 node tests/test-card-catalog.mjs       # data/cards.json: every pool row is a card, and a rebuild of players.json never rewrites one
 node tests/test-card-logic.mjs         # archetypes, category scores, decks/hands/teams, synergies, abilities, a battle, CPU teams, a pinned checksum
-node tests/test-card-balance.mjs       # climbs the ladder a few thousand times and PRINTS the balance the game is held to (about a minute)
+node tests/test-card-balance.mjs       # climbs the ladder a few thousand times with three players and PRINTS the balance the game is held to (about three minutes)
 node tests/test-cards-sql.mjs          # migration-cards.sql in PGlite: nobody writes the tables, a grant happens once, guests refused, SQL == mock
 node tests/test-cards-edge.mjs         # the real card-claim, executed: the order it refuses in, eight cards, and only once
 node tests/test-cards-daily-edge.mjs   # the real submit-run: a daily earns one card a day, and a failed grant never costs the season
@@ -1539,6 +1553,11 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.31.0's (the category is called, no Flex): **deploy the Edge Functions**, then the client. **No migration.**
+  `card-logic.mjs` changed - the 2,000-battle checksum moved - so `card-claim` and the client ship together:
+  an old client against the new function is refused `bad_cat` on every round it calls (it sends no category),
+  and a new client against the old function has its category ignored and a hidden one played instead. A
+  battle in flight finishes under the new call rule with its old spots; the day's daily battle is re-fielded.
   v2.30.0's (card screens on demand): client only. The deploy now serves a second script, `/cards.js`; nothing
   per-environment. Re-run `npm run app:sync` when the Android app is next built.
   v2.29.1's (the battle's field): client only.
