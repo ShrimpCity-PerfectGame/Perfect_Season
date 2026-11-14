@@ -52,6 +52,17 @@ the highest rating won 45%.
   reordered. The head start is 24 points at stage one, not 32: calling the category with their six in view
   made the early stages much easier than they were built to be.
 
+### Fixed
+- **Pressing Try again after losing a gauntlet stage took the whole screen down.** The lost battle and the new
+  try at the same stage were one battle to the screen - still on its sixth round, and handed no rounds. It had
+  been there since 2.29.0: the test checked the button existed and then pressed Back. A fresh review of this
+  release found it; the smaller head start would have made it the common path.
+- "Pick for me" plays the category you have already chosen, instead of picking another and spending that.
+- Passing a result puts the keyboard's focus on the next round's heading rather than losing it to the page.
+- The card screen's tests failed about one run in five by chance - a pack rolled a card already owned, which
+  is sold on the spot, and the tests counted cards. 2.30.0 fixed half of it. A pack those tests do not pin now
+  holds nothing already owned.
+
 ### What it measures at now
 - At even strength, a player who reads the screen wins 73% of battles, "Pick for me" 62%, and tapping at
   random 8%. Before: 48%, 45%, 12%.

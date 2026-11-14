@@ -560,6 +560,12 @@ A ladder win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run alre
   played at the top, on a timer.
 - **Two taps are one.** `Arena` drops a second Play before the page has drawn `busy`; a result is passed by
   setting how many have been seen, so a second Next changes nothing.
+- **One arena a battle - and in the gauntlet, one an ATTEMPT.** An arena remembers how many results have been
+  passed. A lost try and the next try at the same stage are drawn in the same place, and keyed by the stage
+  alone they were one arena, on its sixth round with no rounds: Try again crashed the screen (v2.29.0 to
+  v2.30.0). The gauntlet's arenas are keyed by the hand the attempt was dealt, and an arena handed fewer rounds
+  than it has seen starts again whatever its key. `tests/test-cards-screen.mjs` presses Try again.
+- **"Pick for me" picks the card.** A category already pressed is the player's and is the one played.
 - **A failed play is not "not played".** The screen never replays after a lost answer: it reads
   `card_battle_state`, which carries the rounds played, and shows what is there. A play the page sends from
   behind is refused as `stale` and the page catches up the same way.
