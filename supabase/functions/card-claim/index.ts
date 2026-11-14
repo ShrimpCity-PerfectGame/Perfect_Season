@@ -40,8 +40,9 @@
 //   { action: "run_start" }
 //     409 no_deck           the collection cannot fill a deck of thirty
 //     200 { ok, run: { id, wins, hand, foe, last } }   the live run - the one already going, or a new one
-//   { action: "run_round", run, step, round, card: { id, finish } }     ONE ROUND of the battle the run is on
+//   { action: "run_round", run, step, round, card: { id, finish }, cat }     ONE ROUND of the battle the run is on
 //     400 malformed | unknown_card | bad_finish | bad_slot   the card, by the rules (bad_slot: it does not fit the round's spot)
+//     400 bad_cat           the call is yours and `cat` is missing, made up or already used (v2.31.0)
 //     409 not_in_hand | already_played | same_player
 //     409 no_run            this account has no live run
 //     409 stale             the run is not the one, or not at the step or the ROUND, the browser thinks - read again
@@ -53,14 +54,14 @@
 //   { action: "daily_deal" }
 //     409 no_deck
 //     200 { ok, date, daily: { hand, log, played, rounds, score, shown } }   today's hand, dealt once
-//   { action: "daily_round", round, card }
-//     409 no_hand (nothing dealt today)   409 duplicate (already played today)   409 stale   (the card's reasons)
+//   { action: "daily_round", round, card, cat }
+//     409 no_hand (nothing dealt today)   409 duplicate (already played today)   409 stale   (the card's reasons, and bad_cat)
 //     200 { ok, date, round, done, daily }
 // THE HISTORICAL GAUNTLET (v2.29.0, CARDS.md 13): twelve real offenses in order, card-logic.mjs's GAUNTLET.
 //   { action: "gauntlet_start", stage }
 //     400 malformed (no such stage)   409 no_deck   409 locked (an earlier stage is not cleared)
 //     200 { ok, gauntlet: { cleared, stage, hand, rounds } }   the attempt in progress - the one already going, or a new one
-//   { action: "gauntlet_round", stage, round, card }
+//   { action: "gauntlet_round", stage, round, card, cat }
 //     409 no_battle (no attempt is going)   409 stale   409 not_owned   (the card's reasons)
 //     200 { ok, round, done: false, gauntlet }
 //     200 { ok, round, done: true, battle, gauntlet, first, coins: { credited, balance } }
@@ -69,9 +70,14 @@
 // THE OTHER SIDE'S CARDS ARE HIDDEN UNTIL PLAYED (v2.28.1): every `foe` in a ladder answer is maskFoe'd - the
 // cards of rounds already played, and for the rest the spot alone. (A finished battle's `battle.foe` is whole.)
 // A BATTLE IS PLAYED A ROUND AT A TIME. Each round is for one spot of the lineup, in the order of the other
-// side's six (random, with a Flex last); the browser sends ONE card from the hand and is told how the round
-// went, category and all. The order the categories come up in is drawn when the hand is dealt and kept in
-// card_runs.cats, which no browser can read - a round's category is revealed by playing it.
+// side's six (random); the browser sends ONE card from the hand and, WHEN THE CALL IS ITS OWN, the category to
+// play it on (`cat`), and is told how the round went.
+// THE CATEGORY IS CALLED (v2.31.0, card-logic.mjs "THE CALL"): you call round one, then whoever won the last
+// round. On your call `cat` must be a category not yet used - anything else is 400 bad_cat and plays nothing.
+// On THEIR call `cat` is not looked at: the round is played on their card's best, which the round before it
+// already told the browser (`round.next`). So there is nothing for a browser to gain by sending one.
+// card_runs.cats and card_gauntlets.cats are NOT READ any more. The functions that write a run still require a
+// six-long array, so one is still handed in (CATEGORY_IDS as it stands) - v2.31.0 shipped with no migration.
 // The rules are card-logic.mjs's. THE HAND IS DEALT HERE, with the cryptographic generator, from the deck the
 // account saved (or its best thirty), and stored before it is shown - so it cannot be dealt again by asking
 // again. A ladder battle's luck and the order of its categories are drawn here, fresh; the daily battle's are
@@ -86,7 +92,7 @@
 // The starter deck pays no coins and touches no other table; a pack moves coins only inside buy_pack. Every reason above has to be in storage-cards.js's
 // CARD_REFUSALS - tests/test-cards-edge.mjs reads this file and fails on one that is not.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { CARDS, initCardData, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, shuffleCategories, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey, maskFoe, GAUNTLET, gauntletFoe, gauntletEdge, gauntletRound } from "../../../card-logic.mjs";
+import { CARDS, initCardData, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, CATEGORY_IDS, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey, maskFoe, GAUNTLET, gauntletFoe, gauntletEdge, gauntletRound } from "../../../card-logic.mjs";
 import { COIN_RULES, cardWinCoins, cardSellCoins, gauntletCoins } from "../../../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../../../card-packs.mjs";
 import catalog from "../../../data/cards.json" with { type: "json" };
@@ -281,26 +287,25 @@ async function battle(service: any, userId: string, body: any, json: (body: unkn
   if (body.action === "gauntlet_start") {
     if (!deck) return noDeck();
     const { data, error } = await service.rpc("card_gauntlet_start", {
-      p_user: userId, p_stage: body.stage, p_hand: toSql(dealHand(deck, secureRand)), p_cats: shuffleCategories(secureRand),
+      p_user: userId, p_stage: body.stage, p_hand: toSql(dealHand(deck, secureRand)), p_cats: CATEGORY_IDS,
     });
     if (error || !data) return refused("card_gauntlet_start", error);
     return json({ ok: true, gauntlet: { cleared: data.cleared, stage: data.stage, hand: fromSql(data.hand), rounds: data.rounds ?? [] } });
   }
 
   if (body.action === "gauntlet_round") {
-    // Read for the hand, the rounds and this round's category; checked AGAIN under a lock by the function that writes.
+    // Read for the hand and the rounds; checked AGAIN under a lock by the function that writes.
     const { data: row, error: rowError } = await service
-      .from("card_gauntlets").select("cleared, stage, hand, cats, rounds").eq("user_id", userId).maybeSingle();
+      .from("card_gauntlets").select("cleared, stage, hand, rounds").eq("user_id", userId).maybeSingle();
     if (rowError) return failed("gauntlet read", rowError);
     if (!row || row.stage == null) return json({ error: "no gauntlet battle is going", reason: "no_battle" }, 409);
     const before = Array.isArray(row.rounds) ? row.rounds : [];
     if (row.stage !== body.stage || before.length !== body.round) return json({ error: "the battle has moved on", reason: "stale" }, 409);
     const stage = row.stage, hand = fromSql(row.hand), foe = gauntletFoe(stage);
     if (!foe) return failed("gauntlet stage", "no such stage: " + stage);
-    const problem = roundProblem(hand, foe, before, body.card);
+    const problem = roundProblem(hand, foe, before, body.card, body.cat);
     if (problem) return json({ error: "that card cannot be played", reason: problem }, ROUND_STATUS[problem] || 400);
-    if (!Array.isArray(row.cats) || row.cats.length !== 6) return failed("gauntlet cats", "the attempt has no category order");
-    const round = gauntletRound(stage, before, body.card, row.cats[body.round], secureRand);
+    const round = gauntletRound(stage, before, body.card, body.cat, secureRand);
     const rounds = [...before, round];
     if (rounds.length < 6) {
       const { data, error } = await service.rpc("card_gauntlet_round", { p_user: userId, p_stage: stage, p_round: body.round, p_card: toSql([body.card]), p_rounds: rounds });
@@ -323,7 +328,7 @@ async function battle(service: any, userId: string, body: any, json: (body: unkn
     if (!deck) return noDeck();
     const seed = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
     const { data, error } = await service.rpc("card_run_start", {
-      p_user: userId, p_seed: seed, p_hand: toSql(dealHand(deck, secureRand)), p_foe: foeSql(ladderFoe(seed, 0)), p_cats: shuffleCategories(secureRand),
+      p_user: userId, p_seed: seed, p_hand: toSql(dealHand(deck, secureRand)), p_foe: foeSql(ladderFoe(seed, 0)), p_cats: CATEGORY_IDS,
     });
     if (error || !data) return refused("card_run_start", error);
     const played = Array.isArray(data.rounds) ? data.rounds.length : 0;
@@ -353,9 +358,9 @@ async function battle(service: any, userId: string, body: any, json: (body: unkn
     const log = Array.isArray(row.log) ? row.log : [];
     if (log.length !== body.round) return json({ error: "the battle has moved on", reason: "stale" }, 409);
     const foe = dailyFoe(date);
-    const problem = roundProblem(fromSql(row.hand), foe, log, body.card);
+    const problem = roundProblem(fromSql(row.hand), foe, log, body.card, body.cat);
     if (problem) return json({ error: "that card cannot be played", reason: problem }, ROUND_STATUS[problem] || 400);
-    const round = dailyRound(date, log, body.card);
+    const round = dailyRound(date, log, body.card, body.cat);
     const rounds = [...log, round];
     if (rounds.length < 6) {
       const { data, error } = await service.rpc("card_daily_round", { p_user: userId, p_date: date, p_round: body.round, p_card: toSql([body.card]), p_rounds: rounds });
@@ -372,22 +377,20 @@ async function battle(service: any, userId: string, body: any, json: (body: unkn
     return json({ ok: true, date, round, done: true, daily: { hand: fromSql(row.hand), log: rounds, played: true, rounds: data.rounds, score: Number(data.score), shown: data.shown } });
   }
 
-  // run_round. The run is read here for its hand, its CPU team, its rounds and the category this round is on,
-  // and checked AGAIN under a lock by the function that writes - so two requests that both read "round three"
-  // cannot both play it.
+  // run_round. The run is read here for its hand, its CPU team and its rounds, and checked AGAIN under a lock by
+  // the function that writes - so two requests that both read "round three" cannot both play it.
   const { data: run, error: runError } = await service
-    .from("card_runs").select("id, wins, seed, hand, foe, cats, rounds").eq("user_id", userId).eq("status", "live").maybeSingle();
+    .from("card_runs").select("id, wins, seed, hand, foe, rounds").eq("user_id", userId).eq("status", "live").maybeSingle();
   if (runError) return failed("run read", runError);
   if (!run) return json({ error: "no run is going", reason: "no_run" }, 409);
   const before = Array.isArray(run.rounds) ? run.rounds : [];
   if (run.id !== body.run || run.wins !== body.step || before.length !== body.round) return json({ error: "the run has moved on", reason: "stale" }, 409);
   const hand = fromSql(run.hand), foe = foeFrom(run.foe);
-  const problem = roundProblem(hand, foe, before, body.card);
+  const problem = roundProblem(hand, foe, before, body.card, body.cat);
   if (problem) return json({ error: "that card cannot be played", reason: problem }, ROUND_STATUS[problem] || 400);
-  if (!Array.isArray(run.cats) || run.cats.length !== 6) return failed("run cats", "the run has no category order");
 
   const edge = ladderEdge(run.wins);
-  const round = playRound(foe, before, body.card, run.cats[body.round], secureRand, edge);
+  const round = playRound(foe, before, body.card, body.cat, secureRand, edge);
   const rounds = [...before, round];
   if (rounds.length < 6) {
     const { data, error } = await service.rpc("card_run_round", { p_user: userId, p_run: run.id, p_step: run.wins, p_round: body.round, p_card: toSql([body.card]), p_rounds: rounds });
@@ -395,15 +398,15 @@ async function battle(service: any, userId: string, body: any, json: (body: unkn
     return json({ ok: true, round, done: false, run: { id: run.id, wins: run.wins, status: "live", hand, foe: maskFoe(foe, rounds.length), rounds } });
   }
 
-  // The sixth round ends the battle. The next battle's hand and category order are dealt NOW and stored with the
-  // win, so they exist before the browser knows it won.
+  // The sixth round ends the battle. The next battle's hand is dealt NOW and stored with the win, so it exists
+  // before the browser knows it won.
   const result = battleResult(rounds);
   const last = shownBattle(result, foe, edge);
   const { data, error } = await service.rpc("card_run_battle", {
     p_user: userId, p_run: run.id, p_step: run.wins, p_lineup: toSql(playedOf(rounds)), p_win: result.win,
     p_hand: result.win ? toSql(deck ? dealHand(deck, secureRand) : hand) : null,
     p_foe: result.win ? foeSql(ladderFoe(run.seed, run.wins + 1)) : null,
-    p_cats: result.win ? shuffleCategories(secureRand) : null,
+    p_cats: result.win ? CATEGORY_IDS : null,
     p_last: last, p_coins: result.win ? cardWinCoins(run.wins + 1) : 0, p_cap: COIN_RULES.paidCardWinsPerDay,
   });
   if (error || !data) return refused("card_run_battle", error);

@@ -222,7 +222,7 @@ export function teamProblem(team, hand) {
   for (const e of team) if (!FINISHES.includes(e.finish)) return "bad_finish";
   const count = { QB: 0, RB: 0, WR: 0, TE: 0 };
   for (const e of team) count[CARDS.get(e.id).pos]++;
-  if (count.QB !== 1 || count.RB < 1 || count.WR < 1 || count.TE < 1) return "bad_slot";
+  if (POSITIONS.some((p) => count[p] !== LINEUP_SHAPE[p])) return "bad_slot";
   const men = new Set();
   for (const e of team) { const pid = CARDS.get(e.id).pid; if (men.has(pid)) return "same_player"; men.add(pid); }
   if (hand) {
@@ -244,8 +244,7 @@ export function bestTeam(entries) {
     men.add(CARDS.get(e.id).pid); team.push({ id: e.id, finish: e.finish });
     return true;
   };
-  for (const pos of POSITIONS) if (!take((c) => c.pos === pos)) return null;
-  for (let i = 0; i < 2; i++) if (!take((c) => c.pos !== "QB")) return null;
+  for (const spot of SPOTS) if (!take((c) => spotFits(c.pos, spot))) return null;
   return team.sort(byPower);
 }
 
@@ -325,9 +324,10 @@ export const abilityOf = (card) => ABILITIES[card.archetype] || null;
 // THE NUMBERS ARE TUNED, NOT CHOSEN - tests/test-card-balance.mjs plays thousands of battles and prints what
 // they do. The KEYS are the design: which archetype does what, and who plays better beside whom.
 //
-// THE DRAWS ARE COUNTED. Five to order the categories, then four a round (two a card, yours first): twenty-nine
-// a battle, always, whatever the cards are and whatever fires. The browser and the Edge Function run different
-// JavaScript engines and have to walk the generator in step (game-logic.mjs's smallTimSort has the history).
+// THE DRAWS ARE COUNTED. Four a round (two a card, yours first): twenty-four a battle, always, whatever the
+// cards are and whatever fires - and none to order the categories, which are CALLED now (v2.31.0, below). The
+// browser and the Edge Function run different JavaScript engines and have to walk the generator in step
+// (game-logic.mjs's smallTimSort has the history).
 export const CAT_SCALE = 1.3;     // a category score (0-99) put on the rating's scale (about 20-130)
 export const RATING_SHARE = 0.4;  // how much of a round is the card's overall rating; the rest is the category
 export const LUCK_SPREAD = 14;    // a card's luck is a triangular roll within this, either way
@@ -352,21 +352,70 @@ const FINISH_LABEL = { silver: "Silver finish", gold: "Gold finish", prism: "Pri
 
 // ONE ROUND AT A TIME, ONE SPOT A ROUND (v2.28.0). The owner's question about the first version was the right
 // one: if you set all six and their order before anything is known, where is the choice? So a battle is PLAYED
-// a round at a time. Each round is for one spot of the lineup - QB, RB, WR, TE and two Flex - in an order that
-// is random for the battle except that THE LAST IS ALWAYS A FLEX (the owner's rule). You see the spot, the card
-// you are facing and which categories are still to come; you commit a card from your HAND that fits; only then
-// is the category revealed. Everything a round needs about the battle so far - the score, whether your last
-// card won, whether your quarterback has played, who is already down - follows from the rounds played.
-export const SPOTS = ["QB", "RB", "WR", "TE", "FLEX", "FLEX"];
+// a round at a time. Each round is for one spot of the lineup, in an order that is random for the battle.
+// Everything a round needs about the battle so far - the score, whether your last card won, whether your
+// quarterback has played, who is already down, WHO CALLS - follows from the rounds played.
+//
+// NO FLEX (v2.31.0, the owner's call after playing it): a Flex round offered every back, receiver and tight end
+// left in the hand, "a ton of players". A lineup is a quarterback, two backs, two receivers and a tight end, so
+// a round offers two to four cards and never more. spotFits still answers for "FLEX": a battle begun before
+// this shipped has two, and has to be able to finish.
+export const SPOTS = ["QB", "RB", "RB", "WR", "WR", "TE"];
+const SPOT_NAMES = new Set([...SPOTS, "FLEX"]); // every spot a stored team may carry, old or new
+const LINEUP_SHAPE = SPOTS.reduce((n, s) => ({ ...n, [s]: (n[s] || 0) + 1 }), { QB: 0, RB: 0, WR: 0, TE: 0 });
 export const spotFits = (pos, spot) => (spot === "FLEX" ? pos !== "QB" : pos === spot);
 const SPOT_LABEL = { QB: "Quarterback", RB: "Running back", WR: "Receiver", TE: "Tight end", FLEX: "Flex" };
 export const spotLabel = (spot) => SPOT_LABEL[spot] || spot;
 
-// null when `entry` may be played next, otherwise why not. NEVER THROWS - it is the door a modified browser
-// knocks on. The card has to be in the hand, fit the round's spot, and be a man not already played.
+// THE CALL (v2.31.0). The owner played three versions and each failed the same test from a different side:
+// with everything on show a round was "read off the bigger number", and with the category hidden until the
+// card was down it was a guess - measured, choosing as well as the screen allowed beat always playing the
+// highest rating by three battles in a hundred. A choice needs something you know and something you give up.
+// So a round's category is CALLED before the card is picked:
+//
+//   - you call round one; after that WHOEVER WON THE LAST ROUND calls; a dead heat leaves the call where it was
+//   - on your call you name a category not yet used, and then a card
+//   - on theirs they name their card's best category of the ones left, and you choose who answers it
+//   - each category is used once a battle, so the sixth round's is whichever is left
+//
+// Their card is still hidden until yours is down. Who calls follows from the rounds played and nothing else.
+export const leftCategories = (rounds) => CATEGORY_IDS.filter((c) => !rounds.some((r) => r && r.cat === c));
+export function callerOf(rounds) {
+  let by = "me";
+  for (const r of rounds) if (r && (r.win === "me" || r.win === "foe")) by = r.win;
+  return by;
+}
+// What a card is worth in a category before luck and before the battle: its base, plus an ability that fires on
+// the CATEGORY and on nothing else. An ability that waits on the battle so far (Momentum, Clutch, Go route) is
+// not counted - nobody can call it into being. This is what the CPU calls on and what "Pick for me" calls on.
+const CALM = { wins: 0, losses: 0, prevWon: null, qbPlayed: false, foeRating: 0, rating: 0 };
+export function categoryWorth(entry, cat) {
+  const ability = abilityOf(CARDS.get(entry.id));
+  return round1(roundBase(entry, cat) + (ability && ability.pts && ability.when({ ...CALM, cat }) === true ? ability.pts : 0));
+}
+const bestOf = (entry, left) => { let best = null, top = -Infinity; for (const c of left) { const w = categoryWorth(entry, c); if (w > top) { top = w; best = c; } } return best; };
+// The category of the ones left that a card is worth most in. Ties go to the catalog's order. NO DRAWS.
+export const bestCategory = (entry, rounds) => bestOf(entry, leftCategories(rounds));
+// THEIR call for the round to come: their card's best. null when that card cannot be read (the ladder hides
+// it from the browser - see `next` on a round) or the battle is full.
+export function foeCall(foe, rounds) {
+  const e = Array.isArray(foe) && rounds.length < TEAM_SIZE ? foe[rounds.length] : null;
+  return isEntry(e) && CARDS.has(e.id) ? bestOf(e, leftCategories(rounds)) : null;
+}
+// The call for the round to come: { by, cat }. `cat` is set when it is already decided - on their call, or
+// when one category is left - and null when it is yours to choose. null once six rounds are played.
+export function nextCall(foe, rounds) {
+  if (rounds.length >= TEAM_SIZE) return null;
+  const by = callerOf(rounds), left = leftCategories(rounds);
+  return { by, cat: by === "foe" ? foeCall(foe, rounds) : left.length === 1 ? left[0] : null };
+}
+
+// null when `entry` may be played next, otherwise why not. NEVER THROWS. The card has to be in the hand, fit the
+// round's spot, and be a man not already played. This is the CARD's half of the door - what the screen and the
+// bots ask to know what a hand may play; roundProblem below is the whole door, and the one the server uses.
 // `foe` is the other side's six, each carrying the `spot` it plays; round n is for foe[n].spot.
-export function roundProblem(hand, foe, rounds, entry) {
-  if (!Array.isArray(hand) || !Array.isArray(foe) || !Array.isArray(rounds) || rounds.length >= TEAM_SIZE || !isEntry(foe[rounds.length]) || !SPOTS.includes(foe[rounds.length].spot)) return "malformed";
+export function cardProblem(hand, foe, rounds, entry) {
+  if (!Array.isArray(hand) || !Array.isArray(foe) || !Array.isArray(rounds) || rounds.length >= TEAM_SIZE || !isEntry(foe[rounds.length]) || !SPOT_NAMES.has(foe[rounds.length].spot)) return "malformed";
   if (!isEntry(entry)) return "malformed";
   if (!CARDS.has(entry.id)) return "unknown_card";
   if (!FINISHES.includes(entry.finish)) return "bad_finish";
@@ -376,10 +425,19 @@ export function roundProblem(hand, foe, rounds, entry) {
   if (rounds.some((r) => CARDS.get(r.mine.id)?.pid === CARDS.get(entry.id).pid)) return "same_player";
   return null;
 }
+// THE DOOR a modified browser knocks on: the card, and then the category. On YOUR call `cat` has to be one not
+// yet used ("bad_cat" - missing, made up or spent). On THEIR call it is not looked at: the round is played on
+// foeCall whatever was sent, so there is nothing a client can gain by sending one. NEVER THROWS.
+export function roundProblem(hand, foe, rounds, entry, cat) {
+  const card = cardProblem(hand, foe, rounds, entry);
+  if (card) return card;
+  if (callerOf(rounds) === "me" && !leftCategories(rounds).includes(cat)) return "bad_cat";
+  return null;
+}
 
 // The cards in a hand that may be played next, best first.
 export function playable(hand, foe, rounds) {
-  return hand.filter((e) => roundProblem(hand, foe, rounds, e) === null).sort(byPower);
+  return hand.filter((e) => cardProblem(hand, foe, rounds, e) === null).sort(byPower);
 }
 
 // The highest-rated card that may be played next WITHOUT leaving a later spot nobody can fill - a Flex round
@@ -404,12 +462,19 @@ export function leavesAWay(hand, foe, rounds, entry) {
   return POSITIONS.every((p) => have[p] >= need[p]) && spare >= flex;
 }
 
-// Play the next round: `entry` against the card the other side has in this spot, on `cat`. EXACTLY FOUR DRAWS,
-// yours first. Trusts its input - roundProblem is the door.
+// Play the next round: `entry` against the card the other side has in this spot. EXACTLY FOUR DRAWS, yours
+// first. Trusts its input - roundProblem is the door.
+// `cat` is the category YOU called. On their call it is ignored and the round is played on foeCall - decided
+// here rather than by each caller, so the function, the mock and the bots cannot disagree about it.
 // `foeEdge` is points added to their card - the ladder's, once its teams cannot be made of better cards than
 // the game holds (see ladderEdge).
+// The result says who called (`call`) and carries the call for the round to come (`next`, null after the
+// sixth): the ladder hides their cards from the browser, which therefore cannot work their call out, and a
+// round is stored as it is written - so this is also how a reloaded page learns it.
 export function playRound(foe, rounds, entry, cat, rand, foeEdge = 0, edgeLabel = null) {
   const i = rounds.length;
+  const call = callerOf(rounds);
+  if (call === "foe") cat = foeCall(foe, rounds) || cat;
   const last = rounds[i - 1] || null;
   const side = (mine) => {
     const e = mine ? entry : foe[i], who = mine ? "mine" : "foe", won = mine ? "me" : "foe";
@@ -440,7 +505,9 @@ export function playRound(foe, rounds, entry, cat, rand, foeEdge = 0, edgeLabel 
     };
   });
   const win = shown[0].total > shown[1].total ? "me" : shown[0].total < shown[1].total ? "foe" : "tie";
-  return { cat, spot: foe[i].spot, mine: shown[0], foe: shown[1], win, score: [sides[0].wins + (win === "me" ? 1 : 0), sides[1].wins + (win === "foe" ? 1 : 0)] };
+  const round = { cat, spot: foe[i].spot, call, mine: shown[0], foe: shown[1], win, score: [sides[0].wins + (win === "me" ? 1 : 0), sides[1].wins + (win === "foe" ? 1 : 0)] };
+  round.next = nextCall(foe, [...rounds, round]);
+  return round;
 }
 
 // Where a battle stands after the rounds played: more rounds wins; level on rounds, the higher total; dead
@@ -451,21 +518,17 @@ export function battleResult(rounds) {
   return { rounds, wins, losses, total, foeTotal, win: wins !== losses ? wins > losses : total >= foeTotal };
 }
 
-// The six categories in a random order. FIVE DRAWS.
-export function shuffleCategories(rand) {
-  const order = CATEGORY_IDS.slice();
-  for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
-  return order;
-}
+// The category a card is played on when it is yours to call: the one handed in with it (`entry.cat`) if that
+// is still left, otherwise the card's best. For the bots, the tests and "Pick for me" - a player's own call
+// goes through roundProblem.
+const calledCat = (entry, rounds) => (leftCategories(rounds).includes(entry.cat) ? entry.cat : bestCategory(entry, rounds));
 
-// A whole battle in one go: `mine` is your six in the order of the other side's spots (mine[n] plays round n).
-// What the bots and the pinned checksum use. Twenty-nine draws - five for the categories (made and thrown away
-// when `cats` hands the order in, so the count never depends on who called), then four a round.
-export function scoreBattle(mine, foe, rand, cats = null, foeEdge = 0) {
-  const order = shuffleCategories(rand);
-  const play = Array.isArray(cats) && cats.length === TEAM_SIZE ? cats : order;
+// A whole battle in one go: `mine` is your six in the order of the other side's spots (mine[n] plays round n),
+// each optionally carrying the `cat` to call if the call is yours. What the bots and the pinned checksum use.
+// TWENTY-FOUR DRAWS: four a round.
+export function scoreBattle(mine, foe, rand, foeEdge = 0) {
   const rounds = [];
-  for (let i = 0; i < TEAM_SIZE; i++) rounds.push(playRound(foe, rounds, mine[i], play[i], rand, foeEdge));
+  for (let i = 0; i < TEAM_SIZE; i++) rounds.push(playRound(foe, rounds, mine[i], calledCat(mine[i], rounds), rand, foeEdge));
   return battleResult(rounds);
 }
 // Six cards out of a hand for the six rounds against `foe`, by autoPick each round: the dull lineup.
@@ -486,9 +549,9 @@ export const maskFoe = (foe, played) => foe.map((e, i) => (i < played ? e : { sp
 
 // ---------- The other side ----------
 // The CPU plays the same kind of cards you collect. A CPU team is built round a target rating: one card of each
-// position and two more, each the nearest to the target the catalog holds (within CPU_BAND, widening only if a
-// position has nobody there), six different men. Each card carries the SPOT it plays, and the order they play
-// in is the order of a battle's rounds: random, except that the last is always a Flex. TEN DRAWS, always.
+// spot, each the nearest to the target the catalog holds (within CPU_BAND, widening only if a position has
+// nobody there), six different men. Each card carries the SPOT it plays, and the order they play in is the
+// order of a battle's rounds: all six shuffled. ELEVEN DRAWS, always - six cards and five to order them.
 export const CPU_BAND = 9;
 export function buildTeam(rand, target) {
   const all = [...CARDS.values()].sort((a, b) => a.id - b.id);
@@ -502,8 +565,8 @@ export function buildTeam(rand, target) {
     const card = pool[Math.floor(x * pool.length)];
     men.add(card.pid); team.push({ id: card.id, finish: "base", spot });
   }
-  // The first five in a random order; the sixth - the second Flex - stays last.
-  for (let i = team.length - 2; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [team[i], team[j]] = [team[j], team[i]]; }
+  // All six in a random order (until v2.31.0 the last was always a Flex; there is none now).
+  for (let i = team.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [team[i], team[j]] = [team[j], team[i]]; }
   return team;
 }
 
@@ -525,9 +588,9 @@ export const ladderFoe = (seed, step) => buildTeam(mulberry32(hashStr(`ladder-${
 const TIERS = ["Practice squad", "Rookies", "Backups", "Starters", "Veterans", "Pro Bowlers", "All-Pros", "Legends", "Hall of Famers", "The GOATs"];
 export const ladderName = (step) => TIERS[Math.min(TIERS.length - 1, Math.max(0, Math.floor((Number.isFinite(step) ? step : 0) / 2)))];
 
-// THE DAILY BATTLE. One CPU team a day, the same for everyone, the six categories in the same order for
-// everyone, and ONE ROLL PER CARD PER DAY: a card has the same luck today in every lineup that fields it, in any
-// spot. So the board rewards the six you pick and the order you put them in, not the roll. (The first design
+// THE DAILY BATTLE. One CPU team a day, the same for everyone, calling the same way for everyone, and ONE ROLL
+// PER CARD PER DAY: a card has the same luck today in every lineup that fields it, in any spot. So the board
+// rewards the six you pick, where you play them and what you call, not the roll. (The first design
 // seeded luck from the whole lineup, and review found swapping two cards re-rolled all six.) Your hand is dealt
 // by the server, once, and stored - a hand that followed from the deck could be re-dealt by editing the deck.
 //
@@ -536,10 +599,9 @@ export const ladderName = (step) => TIERS[Math.min(TIERS.length - 1, Math.max(0,
 export const DAILY_TARGET = 86;
 export const dailySeed = (date) => `card-daily-${date}`;
 export const dailyFoe = (date) => buildTeam(mulberry32(hashStr(`${dailySeed(date)}|foe`)), DAILY_TARGET);
-export const dailyCategories = (date) => shuffleCategories(mulberry32(hashStr(`${dailySeed(date)}|cats`)));
-// One round of the day's battle: `entry` against the day's team, on the day's category for that round, with
-// your card's own two draws for the day and then the CPU card's own two.
-export function dailyRound(date, rounds, entry) {
+// One round of the day's battle: `entry` against the day's team, on the category called (`cat` is yours; on
+// their call playRound uses theirs), with your card's own two draws for the day and then the CPU card's own two.
+export function dailyRound(date, rounds, entry, cat) {
   const foe = dailyFoe(date);
   const draws = [];
   for (const [tag, e] of [["you", entry], ["cpu", foe[rounds.length]]]) {
@@ -547,12 +609,12 @@ export function dailyRound(date, rounds, entry) {
     draws.push(own(), own());
   }
   let i = 0;
-  return playRound(foe, rounds, entry, dailyCategories(date)[rounds.length], () => draws[i++]);
+  return playRound(foe, rounds, entry, cat, () => draws[i++]);
 }
-// The whole of it, your six in the order of the day's spots.
+// The whole of it, your six in the order of the day's spots, each optionally carrying the `cat` to call.
 export function dailyBattle(date, mine) {
   const rounds = [];
-  for (const entry of mine) rounds.push(dailyRound(date, rounds, entry));
+  for (const entry of mine) rounds.push(dailyRound(date, rounds, entry, calledCat(entry, rounds)));
   return battleResult(rounds);
 }
 // What a daily battle is ranked by: rounds won first, then your six-round total.
@@ -568,14 +630,19 @@ export const dailyScore = (result) => ({ rounds: result.wins, score: result.tota
 // added, and stage five would quietly become another team. It was chosen by ranking all 160 team-eras by the
 // average rating of their best six and taking twelve spread evenly from the bottom to the top, no franchise
 // twice. tests/test-card-logic.mjs holds every one to fielding a full six and the strengths to rising.
+//
+// REORDERED ONCE, in v2.31.0, and never again: with no Flex a team fields two backs and two receivers instead
+// of its best two of anybody, and Baltimore 1999-2005 fell from 87.4 to 78.7 - below the two stages before it.
+// It moved from sixth to fourth so the stages still rise. Cards were on the test site only and the one account
+// with progress was the owner's; nothing is paid twice, because progress is a count. The rule stands from here.
 export const GAUNTLET = [
-  ["NYJ", 3], ["JAX", 3], ["TEN", 2], ["SEA", 2], ["HOU", 3], ["BAL", 0],
+  ["NYJ", 3], ["JAX", 3], ["TEN", 2], ["BAL", 0], ["SEA", 2], ["HOU", 3],
   ["ATL", 1], ["NYG", 0], ["LV", 4], ["GB", 3], ["DEN", 2], ["KC", 0],
 ];
 const stageOf = (stage) => (Number.isInteger(stage) && stage >= 0 && stage < GAUNTLET.length ? GAUNTLET[stage] : null);
 export const gauntletName = (stage) => { const g = stageOf(stage); return g ? `${g[0]} ${WINDOWS[g[1]][0]}\u2013${WINDOWS[g[1]][1]}` : ""; };
 // The six a stage fields: the best card that franchise has in that era for each spot (rating, then id), six
-// different men, Base finish. The first five spots in an order that follows from the stage alone; the Flex last.
+// different men, Base finish. The six spots in an order that follows from the stage alone.
 const gauntletTeams = new Map();
 export function gauntletFoe(stage) {
   const g = stageOf(stage);
@@ -589,7 +656,7 @@ export function gauntletFoe(stage) {
     men.add(card.pid); team.push({ id: card.id, finish: "base", spot });
   }
   const rand = mulberry32(hashStr(`gauntlet|${g[0]}|${g[1]}`));
-  for (let i = team.length - 2; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [team[i], team[j]] = [team[j], team[i]]; }
+  for (let i = team.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [team[i], team[j]] = [team[j], team[i]]; }
   gauntletTeams.set(stage, team);
   return team.map((e) => ({ ...e }));
 }
@@ -599,7 +666,7 @@ export function gauntletFoe(stage) {
 export const GAUNTLET_HEAD_START = -32, GAUNTLET_EVEN = 8;
 export const gauntletEdge = (stage) => (stageOf(stage) && stage < GAUNTLET_EVEN ? Math.round(GAUNTLET_HEAD_START * (1 - stage / GAUNTLET_EVEN)) : 0);
 export const GAUNTLET_EDGE_LABEL = "Head start";
-// One round of a gauntlet battle: playRound with the stage's team and its head start.
+// One round of a gauntlet battle: playRound with the stage's team and its head start. `cat` is your call.
 export const gauntletRound = (stage, rounds, entry, cat, rand) => playRound(gauntletFoe(stage), rounds, entry, cat, rand, gauntletEdge(stage), GAUNTLET_EDGE_LABEL);
 
 // ---------- Getting cards ----------

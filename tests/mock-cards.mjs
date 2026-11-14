@@ -6,7 +6,7 @@
 // No Node-only import here: tests/mock-supabase.mjs is bundled into a browser page by tools/ui-harness. The
 // card catalog is therefore whatever card-logic.mjs has been initialised with - tests/helpers.mjs does it for
 // the jsdom suites, and in the harness the app's own loadCardData does.
-import { CARDS, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, shuffleCategories, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey, maskFoe, GAUNTLET, gauntletFoe, gauntletEdge, gauntletRound } from "../card-logic.mjs";
+import { CARDS, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, CATEGORY_IDS, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey, maskFoe, GAUNTLET, gauntletFoe, gauntletEdge, gauntletRound } from "../card-logic.mjs";
 import { COIN_RULES, cardWinCoins, cardSellCoins, gauntletCoins } from "../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../card-packs.mjs";
 
@@ -474,7 +474,7 @@ export function makeCards(state, { wallet = null } = {}) {
     if (body.action === "gauntlet_start") {
       if (!deck) return said("no_deck", 409);
       try {
-        const g = api.gauntletStart(uid, body.stage, toSql(deal(deck)), shuffleCategories(Math.random));
+        const g = api.gauntletStart(uid, body.stage, toSql(deal(deck)), CATEGORY_IDS.slice());
         return { data: { ok: true, gauntlet: { cleared: g.cleared, stage: g.stage, hand: fromSql(g.hand), rounds: g.rounds } }, error: null };
       } catch (e) { return refuse(e); }
     }
@@ -483,9 +483,9 @@ export function makeCards(state, { wallet = null } = {}) {
       if (!row || row.stage === null) return said("no_battle", 409);
       if (row.stage !== body.stage || row.rounds.length !== body.round) return said("stale", 409);
       const stage = row.stage, hand = fromSql(row.hand), foe = gauntletFoe(stage);
-      const problem = roundProblem(hand, foe, row.rounds, body.card);
+      const problem = roundProblem(hand, foe, row.rounds, body.card, body.cat);
       if (problem) return said(problem, REASON_STATUS[problem] || 400);
-      const round = gauntletRound(stage, row.rounds, body.card, row.cats[body.round], api.nextRolls && api.nextRolls.length ? () => api.nextRolls.shift() : Math.random);
+      const round = gauntletRound(stage, row.rounds, body.card, body.cat, api.nextRolls && api.nextRolls.length ? () => api.nextRolls.shift() : Math.random);
       const rounds = [...row.rounds, round];
       if (rounds.length < 6) {
         try { api.gauntletRound(uid, stage, body.round, toSql([body.card]), rounds); } catch (e) { return refuse(e); }
@@ -503,7 +503,7 @@ export function makeCards(state, { wallet = null } = {}) {
       if (!deck) return said("no_deck", 409);
       const seed = Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
       try {
-        const run = api.runStart(uid, seed, toSql(deal(deck)), foeSql(ladderFoe(seed, 0)), shuffleCategories(Math.random));
+        const run = api.runStart(uid, seed, toSql(deal(deck)), foeSql(ladderFoe(seed, 0)), CATEGORY_IDS.slice());
         return { data: { ok: true, run: { id: run.id, wins: run.wins, hand: fromSql(run.hand), foe: maskFoe(foeFrom(run.foe), run.rounds.length), rounds: run.rounds, last: run.last } }, error: null };
       } catch (e) { return refuse(e); }
     }
@@ -522,9 +522,9 @@ export function makeCards(state, { wallet = null } = {}) {
       if (row.played_at !== null) return said("duplicate", 409);
       if (row.log.length !== body.round) return said("stale", 409);
       const foe = dailyFoe(date);
-      const problem = roundProblem(fromSql(row.hand), foe, row.log, body.card);
+      const problem = roundProblem(fromSql(row.hand), foe, row.log, body.card, body.cat);
       if (problem) return said(problem, REASON_STATUS[problem] || 400);
-      const round = dailyRound(date, row.log, body.card);
+      const round = dailyRound(date, row.log, body.card, body.cat);
       const rounds = [...row.log, round];
       try {
         if (rounds.length < 6) api.dailyRound(uid, date, body.round, toSql([body.card]), rounds);
@@ -543,10 +543,10 @@ export function makeCards(state, { wallet = null } = {}) {
     if (!run) return said("no_run", 409);
     if (run.id !== body.run || run.wins !== body.step || run.rounds.length !== body.round) return said("stale", 409);
     const hand = fromSql(run.hand), foe = foeFrom(run.foe);
-    const problem = roundProblem(hand, foe, run.rounds, body.card);
+    const problem = roundProblem(hand, foe, run.rounds, body.card, body.cat);
     if (problem) return said(problem, REASON_STATUS[problem] || 400);
     const edge = ladderEdge(run.wins);
-    const round = playRound(foe, run.rounds, body.card, run.cats[body.round], api.nextRolls && api.nextRolls.length ? () => api.nextRolls.shift() : Math.random, edge);
+    const round = playRound(foe, run.rounds, body.card, body.cat, api.nextRolls && api.nextRolls.length ? () => api.nextRolls.shift() : Math.random, edge);
     const rounds = [...run.rounds, round];
     if (rounds.length < 6) {
       try { api.runRound(uid, run.id, body.step, body.round, toSql([body.card]), rounds); } catch (e) { return refuse(e); }
@@ -558,7 +558,7 @@ export function makeCards(state, { wallet = null } = {}) {
     let rec;
     try {
       rec = api.runBattle(uid, run.id, body.step, toSql(played(rounds)), result.win,
-        result.win ? toSql(deal(deck || hand)) : null, result.win ? foeSql(ladderFoe(run.seed, run.wins + 1)) : null, result.win ? shuffleCategories(Math.random) : null,
+        result.win ? toSql(deal(deck || hand)) : null, result.win ? foeSql(ladderFoe(run.seed, run.wins + 1)) : null, result.win ? CATEGORY_IDS.slice() : null,
         last, result.win ? cardWinCoins(run.wins + 1) : 0, COIN_RULES.paidCardWinsPerDay);
     } catch (e) { return refuse(e); }
     if (api.battleFails) { api.battleFails = false; return lost(); }

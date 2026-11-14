@@ -14,6 +14,8 @@ export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "
   // battles (v2.27.0): a deck's and a team's own reasons out of card-logic.mjs, a run's, and the daily battle's
   "incomplete", "unknown_card", "bad_finish", "bad_slot", "same_player", "not_owned", "no_run", "stale",
   "bad_deck", "no_deck", "not_in_hand", "no_hand", "already_played",
+  // the call (v2.31.0): on your call, a category that is missing, made up or already used
+  "bad_cat",
   // the gauntlet (v2.29.0)
   "locked", "no_battle"];
 
@@ -140,12 +142,14 @@ export async function fetchCardBoards(limit = 25) {
 const battleCall = async (body) => { const res = await callClaim(body); return res.ok ? { ...res.data, ok: true } : res; };
 export const saveDeck = (cards) => battleCall({ action: "deck_save", cards });
 export const startRun = () => battleCall({ action: "run_start" });
-export const playRound = (run, step, round, card) => battleCall({ action: "run_round", run, step, round, card });
+// `cat` is the category you call. It counts only when the call is yours; send it anyway - the function ignores
+// it on theirs, and a missing one on yours is refused (bad_cat).
+export const playRound = (run, step, round, card, cat) => battleCall({ action: "run_round", run, step, round, card, cat });
 export const endRun = () => battleCall({ action: "run_end" });
 export const dealDaily = () => battleCall({ action: "daily_deal" });
-export const playDailyRound = (round, card) => battleCall({ action: "daily_round", round, card });
+export const playDailyRound = (round, card, cat) => battleCall({ action: "daily_round", round, card, cat });
 export const startGauntlet = (stage) => battleCall({ action: "gauntlet_start", stage });
-export const playGauntletRound = (stage, round, card) => battleCall({ action: "gauntlet_round", stage, round, card });
+export const playGauntletRound = (stage, round, card, cat) => battleCall({ action: "gauntlet_round", stage, round, card, cat });
 export const quitGauntlet = () => battleCall({ action: "gauntlet_quit" });
 
 // Sell every copy past the first: { ok: true, copies, coins, balance } or { ok: false, reason }. Safe to ask

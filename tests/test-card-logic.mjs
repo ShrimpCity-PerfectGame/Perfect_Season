@@ -20,7 +20,7 @@ const need = (name) => { if (typeof C[name] === "undefined") { fails++; console.
 
 // ---------- 1. Cards and archetypes ----------
 const catalog = read("data/cards.json");
-const CHECKSUM = 9088863; // the 2,000-battle pin in section 5: a change to a number, a category or a draw moves it
+const CHECKSUM = 9740567; // the 2,000-battle pin in section 5: a change to a number, a category or a draw moves it
 const info = C.initCardData(catalog);
 eq(info.cards, 3124, "every card loads");
 eq(info.players, 1639, "1,639 players");
@@ -87,6 +87,7 @@ const A = [...C.CARDS.values()].sort((a, b) => a.id - b.id);
 const F = (name, season) => A.find((c) => c.name === name && c.season === season);
 const E = (c, finish = "base") => ({ id: c.id, finish });
 const byPos = (pos) => A.filter((c) => c.pos === pos);
+const POSITIONS_OF = (team) => C.POSITIONS.map((p) => team.filter((e) => C.CARDS.get(e.id).pos === p).length).join();
 // thirty different men in the deck's shape, the first of each position by id
 function someDeck(skip = 0) {
   const men = new Set(), deck = [];
@@ -158,6 +159,12 @@ if (need("deckProblem")) {
   ]) eq(C.teamProblem(list, h === undefined ? null : h), reason, `teamProblem: ${reason}`);
   eq(C.teamProblem([...team].reverse(), hand), null, "any order of a legal six is legal - the order is the player's");
   eq(C.bestTeam(hand.filter((e) => C.CARDS.get(e.id).pos !== "TE")), null, "no tight end, no team");
+  // v2.31.0: no Flex. A six is exactly the lineup - a quarterback, two backs, two receivers, a tight end.
+  eq(POSITIONS_OF(team), "1,2,2,1", "the best six is one quarterback, two backs, two receivers and a tight end");
+  {
+    const rb3 = hand.find((e) => C.CARDS.get(e.id).pos === "RB" && !team.some((t) => t.id === e.id));
+    eq(C.teamProblem(swap(team.findIndex((e) => C.CARDS.get(e.id).pos === "WR"), rb3), hand), "bad_slot", "three backs and one receiver is not a lineup");
+  }
 
   eq(C.bestDeck(deck).length, 30, "thirty cards in the shape make a deck of themselves");
   eq(C.bestDeck(deck.slice(1)), null, "one short of a position is no deck");
@@ -210,27 +217,79 @@ if (need("playRound")) {
   const deck = someDeck();
   const hand = C.dealHand(deck, mulberry32(11));
   const foe = C.buildTeam(mulberry32(12), 55);
-  // The other side: six spots, each card fitting its own, in an order with a Flex last.
+  // The other side: six spots, each card fitting its own. NO FLEX (v2.31.0, the owner's call: a Flex round
+  // offered every back, receiver and tight end left, and that was too many to choose from).
+  eq(C.SPOTS.join(), "QB,RB,RB,WR,WR,TE", "a lineup is a quarterback, two backs, two receivers and a tight end");
   eq(foe.map((e) => e.spot).slice().sort().join(), [...C.SPOTS].sort().join(), "the other side's six carry the six spots");
-  eq(foe[5].spot, "FLEX", "and the last is a Flex");
   ok(foe.every((e) => C.spotFits(C.CARDS.get(e.id).pos, e.spot)), "each of their cards fits its spot");
-  ok(C.spotFits("TE", "FLEX") && C.spotFits("RB", "FLEX") && !C.spotFits("QB", "FLEX") && C.spotFits("QB", "QB") && !C.spotFits("RB", "WR"), "a Flex is anybody but a quarterback");
-  const firsts = new Set(Array.from({ length: 300 }, (_, i) => C.buildTeam(mulberry32(i + 1), 60)[0].spot));
-  eq(firsts.size, 5, "the first round can be any of the five spots that are not the last Flex - it is not the quarterback every time");
-  ok(Array.from({ length: 300 }, (_, i) => C.buildTeam(mulberry32(i + 1), 60)).every((t) => t[5].spot === "FLEX"), "and the last round is a Flex in every one of 300 teams");
+  ok(C.spotFits("TE", "FLEX") && C.spotFits("RB", "FLEX") && !C.spotFits("QB", "FLEX") && C.spotFits("QB", "QB") && !C.spotFits("RB", "WR"), "spotFits still answers for a Flex - a battle begun before v2.31.0 has two");
+  const teams300 = Array.from({ length: 300 }, (_, i) => C.buildTeam(mulberry32(i + 1), 60));
+  eq(new Set(teams300.map((t) => t[0].spot)).size, 4, "the first round can be any spot - it is not the quarterback every time");
+  eq(new Set(teams300.map((t) => t[5].spot)).size, 4, "and so can the last: no spot is pinned to a round any more");
 
   // What may be played: in the hand, fits the spot, not already down.
   const spot = foe[0].spot;
   const fit = hand.find((e) => C.spotFits(C.CARDS.get(e.id).pos, spot));
   const misfit = hand.find((e) => !C.spotFits(C.CARDS.get(e.id).pos, spot));
   const outsider = A.find((c) => C.spotFits(c.pos, spot) && !deck.some((d) => C.CARDS.get(d.id).pid === c.pid));
-  eq(C.roundProblem(hand, foe, [], fit), null, "a card from the hand that fits the spot may be played");
+  eq(C.roundProblem(hand, foe, [], fit, "star"), null, "a card from the hand that fits the spot may be played, on a category you call");
+  eq(need("cardProblem") && C.cardProblem(hand, foe, [], fit), null, "cardProblem is the card's half of that");
   for (const [reason, entry, rounds] of [
     ["malformed", null], ["malformed", "my best card"], ["unknown_card", { id: 99999999, finish: "base" }], ["bad_finish", { id: fit.id, finish: "diamond" }],
     ["not_in_hand", E(outsider)], ["not_in_hand", { id: fit.id, finish: "prism" }], ["bad_slot", misfit],
-  ]) eq(C.roundProblem(hand, foe, rounds || [], entry), reason, `roundProblem: ${reason}`);
-  eq(C.roundProblem(hand, foe, new Array(6).fill({ mine: fit }), fit), "malformed", "a seventh round is not a round");
-  eq(C.roundProblem(null, foe, [], fit), "malformed", "nor is one with no hand");
+  ]) {
+    eq(C.roundProblem(hand, foe, rounds || [], entry, "star"), reason, `roundProblem: ${reason}`);
+    eq(C.roundProblem(hand, foe, rounds || [], entry, "nope"), reason, `...and the card is judged before the category: ${reason}`);
+  }
+  eq(C.roundProblem(hand, foe, new Array(6).fill({ mine: fit }), fit, "star"), "malformed", "a seventh round is not a round");
+  eq(C.roundProblem(null, foe, [], fit, "star"), "malformed", "nor is one with no hand");
+
+  // WHO CALLS (v2.31.0). You call round one; after that whoever won the last round; a dead heat leaves the call
+  // where it was. It follows from the rounds played and from nothing else.
+  if (need("callerOf") && need("leftCategories") && need("foeCall") && need("nextCall") && need("bestCategory") && need("categoryWorth")) {
+    const W = { win: "me" }, L = { win: "foe" }, T = { win: "tie" };
+    for (const [rounds, by] of [[[], "me"], [[W], "me"], [[L], "foe"], [[T], "me"], [[L, T], "foe"], [[L, T, T], "foe"], [[L, T, W], "me"], [[W, T], "me"], [[W, L, W, L], "foe"]]) {
+      eq(C.callerOf(rounds), by, `after ${rounds.map((r) => r.win).join(",") || "nothing"} the call is ${by === "me" ? "yours" : "theirs"}`);
+    }
+    eq(C.leftCategories([]).join(), C.CATEGORY_IDS.join(), "every category is left at the start");
+    eq(C.leftCategories([{ cat: "star" }, { cat: "scoring" }]).join(), C.CATEGORY_IDS.filter((c) => c !== "star" && c !== "scoring").join(), "a category is used once: what is left is the rest, in the catalog's order");
+    // What a card is worth in a category: its base, plus an ability that fires ON the category and nothing else.
+    const goalBack = byPos("RB").find((c) => c.archetype === "goalline"), deepOne = byPos("WR").find((c) => c.archetype === "deep");
+    eq(C.categoryWorth(E(goalBack), "scoring"), Math.round(10 * (C.roundBase(E(goalBack), "scoring") + 6)) / 10, "a Goal-line back is worth his six more in a Touchdown round");
+    eq(C.categoryWorth(E(goalBack), "bigplay"), C.roundBase(E(goalBack), "bigplay"), "and only his base anywhere else");
+    ok(C.CATEGORY_IDS.every((c) => C.categoryWorth(E(deepOne), c) === C.roundBase(E(deepOne), c)), "an ability that depends on the battle so far is not counted - nobody can call it");
+    // THEIR CALL: their card's best category of the ones left. No draws, ties to the catalog's order.
+    const best = (e, left) => left.reduce((b, c) => (C.categoryWorth(e, c) > C.categoryWorth(e, b) ? c : b), left[0]);
+    eq(C.foeCall(foe, []), best(foe[0], C.CATEGORY_IDS), "they call the category their card is worth most in");
+    const gone = [{ cat: C.foeCall(foe, []), win: "foe" }];
+    eq(C.foeCall(foe, gone), best(foe[1], C.leftCategories(gone)), "for the round's own card, out of what is left");
+    let never = true;
+    for (let i = 0; i < 200; i++) {
+      const f = C.buildTeam(mulberry32(i + 3000), 45 + (i % 60)), used = [];
+      for (let k = 0; k < 6; k++) { const c = C.foeCall(f, used); if (!c || used.some((r) => r.cat === c)) never = false; used.push({ cat: c, win: "foe" }); }
+    }
+    ok(never, "200 teams calling all six rounds never call a used category and never run out");
+    eq(C.foeCall(C.maskFoe(foe, 0), []), null, "a card that is hidden cannot be read for its call");
+    eq(C.foeCall(foe, new Array(6).fill({ cat: "x", win: "foe" })), null, "and there is no seventh call");
+    eq(C.bestCategory(fit, []), best(fit, C.CATEGORY_IDS), "bestCategory is the same question asked of your card");
+    eq(JSON.stringify(C.nextCall(foe, [])), JSON.stringify({ by: "me", cat: null }), "round one is yours, and the category is yours to choose");
+    eq(JSON.stringify(C.nextCall(foe, gone)), JSON.stringify({ by: "foe", cat: C.foeCall(foe, gone) }), "after a round they won, the call is theirs and says what it is");
+    eq(JSON.stringify(C.nextCall(C.maskFoe(foe, 1), gone)), JSON.stringify({ by: "foe", cat: null }), "...which a browser that cannot see their card cannot work out for itself");
+    const five = C.CATEGORY_IDS.slice(0, 5).map((cat) => ({ cat, win: "me" }));
+    eq(JSON.stringify(C.nextCall(foe, five)), JSON.stringify({ by: "me", cat: C.CATEGORY_IDS[5] }), "the sixth round's category is whichever is left, even on your call");
+    eq(C.nextCall(foe, new Array(6).fill({ cat: "x", win: "me" })), null, "and after six there is no call");
+
+    // THE CATEGORY AT THE DOOR: on your call it must be one not yet used; on theirs what you send is ignored.
+    eq(C.roundProblem(hand, foe, [], fit), "bad_cat", "your call with no category at all");
+    eq(C.roundProblem(hand, foe, [], fit, "nope"), "bad_cat", "a category the game does not have");
+    eq(C.roundProblem(hand, foe, [], fit, "constructor"), "bad_cat", "nor a name off the prototype");
+    const second = hand.find((e) => C.spotFits(C.CARDS.get(e.id).pos, foe[1].spot) && C.CARDS.get(e.id).pid !== C.CARDS.get(fit.id).pid);
+    const won = [{ cat: "star", win: "me", mine: fit, foe: foe[0] }], lost = [{ cat: "star", win: "foe", mine: fit, foe: foe[0] }];
+    eq(C.roundProblem(hand, foe, won, second, "star"), "bad_cat", "a category already used cannot be called again");
+    eq(C.roundProblem(hand, foe, won, second, "scoring"), null, "another one can");
+    eq(C.roundProblem(hand, foe, lost, second, "nope"), null, "on THEIR call what you send is not looked at");
+    eq(C.roundProblem(hand, foe, lost, second), null, "nor is sending nothing");
+  }
   ok(C.playable(hand, foe, []).every((e) => C.spotFits(C.CARDS.get(e.id).pos, spot)) && C.playable(hand, foe, []).length >= 2, "playable lists the cards that fit, and there is always a choice");
   ok(C.playable(hand, foe, []).every((e, i, list) => i === 0 || C.CARDS.get(list[i - 1].id).rating >= C.CARDS.get(e.id).rating), "best first");
 
@@ -239,10 +298,31 @@ if (need("playRound")) {
   const r0 = C.playRound(foe, [], fit, "star", () => (draws++, 0.5));
   eq(draws, 4, "a round is four draws");
   ok(r0.cat === "star" && r0.spot === spot && r0.mine.id === fit.id && r0.foe.id === foe[0].id && r0.mine.roll === 0, "it is your card against theirs in that spot, on that category");
+  eq(r0.call, "me", "a round says who called it");
+  eq(JSON.stringify(r0.next), JSON.stringify(C.nextCall(foe, [r0])), "and carries the call for the round to come - the browser cannot see their card to work it out");
+  {
+    const flat = () => 0.5;
+    const second = hand.find((e) => C.spotFits(C.CARDS.get(e.id).pos, foe[1].spot) && C.CARDS.get(e.id).pid !== C.CARDS.get(fit.id).pid);
+    const lost = [{ ...r0, win: "foe" }], theirs = C.foeCall(foe, lost), other = C.leftCategories(lost).find((c) => c !== theirs);
+    const r1 = C.playRound(foe, lost, second, other, flat);
+    ok(r1.cat === theirs && r1.call === "foe", `on their call the round is played on THEIR category (${theirs}), whatever was passed (${other})`);
+    eq(r1.mine.base, C.roundBase(second, theirs), "and your card is scored on it too");
+    const tied = [{ ...r0, win: "foe" }, { ...r1, win: "tie" }];
+    eq(C.callerOf(tied), "foe", "a dead heat leaves the call with whoever had it");
+    // A battle begun before v2.31.0: its rounds carry no call and no next, and it had Flex spots. It still plays.
+    const old = [{ cat: "star", spot: foe[0].spot, mine: r0.mine, foe: r0.foe, win: "me", score: [1, 0] }];
+    const again = C.playRound(foe, old, second, "scoring", flat);
+    ok(again.cat === "scoring" && again.call === "me" && again.next, "rounds stored without a call or a next still take the next round");
+    const at = (s, n = 0) => foe.filter((e) => e.spot === s)[n];
+    const flexed = [at("QB"), at("RB"), at("WR"), at("TE"), { ...at("RB", 1), spot: "FLEX" }, { ...at("WR", 1), spot: "FLEX" }];
+    eq(C.cardProblem(hand, [{ ...foe[0], spot: "constructor" }], [], fit), "malformed", "a spot the game never had is still refused");
+    const lineup = C.autoLineup(hand, flexed);
+    ok(lineup && C.scoreBattle(lineup, flexed, mulberry32(4)).rounds.length === 6, "and a team with two Flex spots can still be played to the end");
+  }
   ok(Math.abs(r0.mine.total - (r0.mine.base + r0.mine.roll + r0.mine.mods.reduce((n, m) => n + m.pts, 0))) < 0.06 && r0.mine.base === C.roundBase(fit, "star"), "a card's total is its base, its luck and its bonuses");
   eq(r0.win, r0.mine.total > r0.foe.total ? "me" : r0.mine.total < r0.foe.total ? "foe" : "tie", "the higher total takes the round");
   eq(r0.score.join(), r0.win === "me" ? "1,0" : r0.win === "foe" ? "0,1" : "0,0", "and the score moves");
-  eq(C.roundProblem(hand, foe, [r0], fit), foe[1].spot === spot || (foe[1].spot === "FLEX" && C.CARDS.get(fit.id).pos !== "QB") ? "already_played" : "bad_slot", "the same card cannot be played again");
+  eq(C.roundProblem(hand, foe, [r0], fit, "scoring"), foe[1].spot === spot ? "already_played" : "bad_slot", "the same card cannot be played again");
 
   // "Pick for me" never strands a later spot, and a whole battle can always be played from any hand.
   let stuck = 0, wrong = 0;
@@ -253,8 +333,9 @@ if (need("playRound")) {
     if (picks.some((e, k) => !C.spotFits(C.CARDS.get(e.id).pos, f[k].spot)) || new Set(picks.map((e) => C.CARDS.get(e.id).pid)).size !== 6) wrong++;
   }
   eq(stuck + wrong, 0, "500 hands against 500 teams: Pick for me fills all six spots, legally, every time");
-  // ...and the trap it avoids: a Flex round that eats the only card a later spot can use.
-  const flexFirst = [{ ...foe.find((e) => e.spot === "FLEX"), spot: "FLEX" }, ...["TE", "QB", "RB", "WR"].map((s) => ({ ...foe.find((e) => e.spot === s) })), { ...foe.filter((e) => e.spot === "FLEX")[1] }];
+  // ...and the trap it avoids, which only a battle begun before v2.31.0 still has: a Flex round that eats the
+  // only card a later spot can use.
+  const flexFirst = ["FLEX", "TE", "QB", "RB", "WR", "FLEX"].map((s, i) => ({ ...foe[i], spot: s }));
   const tes = hand.filter((e) => C.CARDS.get(e.id).pos === "TE");
   const oneTe = hand.filter((e) => C.CARDS.get(e.id).pos !== "TE" || e.id === tes[0].id);
   ok(C.leavesAWay(oneTe, flexFirst, [], oneTe.find((e) => C.CARDS.get(e.id).pos === "RB")) && !C.leavesAWay(oneTe, flexFirst, [], tes[0]), "with one tight end left and his round to come, he is not spent on a Flex");
@@ -264,15 +345,21 @@ if (need("playRound")) {
   const mine = C.autoLineup(hand, foe);
   draws = 0;
   const b = C.scoreBattle(mine, foe, () => (draws++, 0.5));
-  eq(draws, 29, "twenty-nine draws: five to order the categories, four a round");
+  eq(draws, 24, "twenty-four draws: four a round, and none to order the categories - they are called now");
   eq(b.rounds.map((x) => x.cat).sort().join(), [...C.CATEGORY_IDS].sort().join(), "each category exactly once");
   eq(b.rounds.map((x) => x.spot).join(), foe.map((e) => e.spot).join(), "the rounds are the other side's spots, in order");
   eq(JSON.stringify(C.battleResult(b.rounds)), JSON.stringify(b), "battleResult is the rounds added up");
   eq(b.win, b.wins !== b.losses ? b.wins > b.losses : b.total >= b.foeTotal, "more rounds wins; level on rounds, the higher total; dead level, you");
   eq(JSON.stringify(C.scoreBattle(mine, foe, mulberry32(77))), JSON.stringify(C.scoreBattle(mine, foe, mulberry32(77))), "the same generator plays the same battle");
-  const orders = new Set(Array.from({ length: 60 }, (_, i) => C.scoreBattle(mine, foe, mulberry32(i + 1)).rounds.map((x) => x.cat).join()));
-  ok(orders.size > 40, "the category order really is shuffled: " + orders.size + " orders in 60 battles");
-  eq(C.shuffleCategories(mulberry32(3)).slice().sort().join(), [...C.CATEGORY_IDS].sort().join(), "shuffleCategories is the six, each once");
+  ok(b.rounds.every((x, i) => x.call === C.callerOf(b.rounds.slice(0, i))), "each round is called by whoever the rounds before it say");
+  ok(b.rounds.every((x, i) => x.cat === (x.call === "foe" ? C.foeCall(foe, b.rounds.slice(0, i)) : C.bestCategory(mine[i], b.rounds.slice(0, i)))), "theirs on their card's best, yours - when none is handed in - on your card's best");
+  ok(b.rounds[5].next === null && b.rounds[4].next.cat === b.rounds[5].cat, "the fifth round names the one category left, and the sixth has no next");
+  ok(typeof C.shuffleCategories === "undefined" && typeof C.dailyCategories === "undefined", "nothing shuffles the categories any more");
+  {
+    // A category handed in is played on your call - here the one this card is WORST at.
+    const worst = C.CATEGORY_IDS.reduce((w, c) => (C.categoryWorth(mine[0], c) < C.categoryWorth(mine[0], w) ? c : w), C.CATEGORY_IDS[0]);
+    eq(C.scoreBattle([{ ...mine[0], cat: worst }, ...mine.slice(1)], foe, () => 0.5).rounds[0].cat, worst, "a category handed in with a card is the one called");
+  }
   // Luck is bounded, and wider only for a Gunslinger.
   let worst = 0, wide = 0;
   for (let i = 0; i < 200; i++) for (const x of C.scoreBattle(mine, foe, mulberry32(i + 500)).rounds) for (const side of [x.mine, x.foe]) {
@@ -280,8 +367,7 @@ if (need("playRound")) {
   }
   ok(worst <= C.LUCK_SPREAD && worst > C.LUCK_SPREAD * 0.7, "luck stays inside its spread: " + worst);
   ok(wide <= C.LUCK_SPREAD * C.LUCK_WIDE, "a Gunslinger's inside the wider one: " + wide);
-  const fixed = C.scoreBattle(mine, foe, () => 0.5, ["star", "scoring", "bigplay", "workload", "efficiency", "production"], 5);
-  eq(fixed.rounds.map((x) => x.cat).join(), "star,scoring,bigplay,workload,efficiency,production", "the categories can be handed in");
+  const fixed = C.scoreBattle(mine, foe, () => 0.5, 5);
   ok(fixed.rounds.every((x) => x.foe.mods.some((m) => m.key === "edge" && m.pts === 5) && !x.mine.mods.some((m) => m.key === "edge")), "an edge goes on every card of theirs and none of yours");
   const one = E(F("Adrian Peterson", 2012));
   ok(new Set(C.CATEGORY_IDS.map((k) => C.roundBase(one, k))).size >= 4, "one card is worth different amounts in different categories");
@@ -329,7 +415,7 @@ if (need("playRound")) {
 if (need("buildTeam")) {
   let draws = 0;
   const t = C.buildTeam(() => (draws++, 0.4), 70);
-  eq(draws, 10, "a CPU team is ten draws");
+  eq(draws, 11, "a CPU team is eleven draws: six cards, and five to put all six in order");
   eq(C.teamProblem(t, null), null, "and a legal six");
   ok(t.every((e) => e.finish === "base" && Math.abs(C.CARDS.get(e.id).rating - 70) <= C.CPU_BAND), "of Base cards near its target");
   for (const target of [20, 38, 70, 100, 124, 140]) eq(C.teamProblem(C.buildTeam(mulberry32(target), target), null), null, `a team can be built at ${target}`);
@@ -348,14 +434,13 @@ if (need("buildTeam")) {
   const dfoe = C.dailyFoe(day);
   eq(JSON.stringify(dfoe), JSON.stringify(C.dailyFoe(day)), "the day's team is the day's");
   ok(JSON.stringify(dfoe) !== JSON.stringify(C.dailyFoe("2026-11-15")), "and tomorrow's is another");
-  eq(C.dailyCategories(day).slice().sort().join(), [...C.CATEGORY_IDS].sort().join(), "the day's categories are the six");
   const hand = C.dealHand(someDeck(30), mulberry32(5)), team = C.autoLineup(hand, dfoe);
   const a = C.dailyBattle(day, team);
   eq(JSON.stringify(a), JSON.stringify(C.dailyBattle(day, team)), "the same cards in the same spots score the same for everyone");
-  eq(a.rounds.map((x) => x.cat).join(), C.dailyCategories(day).join(), "on the day's categories, in the day's order");
-  eq(JSON.stringify(C.dailyRound(day, [], team[0])), JSON.stringify(a.rounds[0]), "a round played on its own is the round of the whole battle");
+  eq(a.rounds.map((x) => x.cat).slice().sort().join(), [...C.CATEGORY_IDS].sort().join(), "on the six categories, each once, as they were called");
+  eq(JSON.stringify(C.dailyRound(day, [], team[0], a.rounds[0].cat)), JSON.stringify(a.rounds[0]), "a round played on its own is the round of the whole battle");
   // ONE ROLL PER CARD PER DAY: the same card has the same luck whichever round it plays in, and whatever its finish.
-  const flexA = dfoe.findIndex((e) => e.spot === "FLEX"), flexB = 5;
+  const [flexA, flexB] = dfoe.map((e, i) => (e.spot === "RB" ? i : -1)).filter((i) => i >= 0); // the two backs' rounds
   const swapped = team.slice(); [swapped[flexA], swapped[flexB]] = [swapped[flexB], swapped[flexA]];
   const moved = C.dailyBattle(day, swapped);
   eq(moved.rounds[flexB].mine.roll, a.rounds[flexA].mine.roll, "a card keeps its luck for the day whichever round it plays in");
@@ -429,8 +514,12 @@ if (need("starterFill")) {
   const teams = C.GAUNTLET.map((_, s) => C.gauntletFoe(s));
   ok(teams.every((t) => t && t.length === 6 && new Set(t.map((e) => C.CARDS.get(e.id).pid)).size === 6), "every stage fields six different men");
   ok(teams.every((t, s) => t.every((e) => C.CARDS.get(e.id).team === C.GAUNTLET[s][0] && e.finish === "base")), "all of them that franchise's own cards, Base");
-  ok(teams.every((t) => t[5].spot === "FLEX" && t.map((e) => e.spot).sort().join() === "FLEX,FLEX,QB,RB,TE,WR" && t.every((e) => C.spotFits(C.CARDS.get(e.id).pos, e.spot))), "one card a spot, each fitting it, a Flex last");
-  ok(new Set(teams.map((t) => t.slice(0, 5).map((e) => e.spot).join())).size > 3, "and not the same order of spots every stage");
+  ok(teams.every((t) => t.map((e) => e.spot).sort().join() === "QB,RB,RB,TE,WR,WR" && t.every((e) => C.spotFits(C.CARDS.get(e.id).pos, e.spot))), "one card a spot, each fitting it: a quarterback, two backs, two receivers, a tight end");
+  ok(new Set(teams.map((t) => t.map((e) => e.spot).join())).size > 3, "and not the same order of spots every stage");
+  // The order as written. It was changed ONCE, in v2.31.0: without Flex spots Baltimore fields a second back
+  // and a second receiver where it had two stars, and fell below the two stages before it. From here the list
+  // is append-only - progress is a count of stages cleared.
+  eq(C.GAUNTLET.map((g) => g[0]).join(), "NYJ,JAX,TEN,BAL,SEA,HOU,ATL,NYG,LV,GB,DEN,KC", "the twelve, in the order written");
   const avg = teams.map((t) => t.reduce((n, e) => n + C.CARDS.get(e.id).rating, 0) / 6);
   ok(avg.every((a, i) => i === 0 || a > avg[i - 1]), "each stage is stronger than the one before: " + avg.map((a) => a.toFixed(0)).join(" "));
   eq(JSON.stringify(C.gauntletFoe(3)), JSON.stringify(C.gauntletFoe(3)), "a stage is the same team every time it is asked for");
