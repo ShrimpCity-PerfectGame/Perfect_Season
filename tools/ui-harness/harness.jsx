@@ -57,7 +57,6 @@ import guessPool from "../../data/guess-pool.json";
 import { CardsScreen } from "../../cards.jsx";
 import * as CL from "../../card-logic.mjs";
 import cardCatalog from "../../data/cards.json";
-import cardDefense from "../../data/card-defense.json";
 import harnessVersusPool from "../../data/versus-pool.json";
 import { primeVersusData } from "../../versus-data.mjs";
 // Cards (CARDS.md). The app FETCHES the catalog and loads its sprites from /cards; the harness has neither a
@@ -65,7 +64,6 @@ import { primeVersusData } from "../../versus-data.mjs";
 // static/ folder. The recolouring needs a canvas it can read back, which a file:// page will not give - open
 // the harness over http (the "harness" entry in .claude/launch.json) to see cards in their team colours.
 CL.initCardData(cardCatalog);
-CL.initDefenses(harnessVersusPool, cardDefense);
 // Duel's pool is fetched by the app (versus-data.mjs); here it is handed over before anything mounts.
 primeVersusData(harnessVersusPool);
 window.__ps_cards__ = true;
@@ -73,9 +71,7 @@ window.__ps_card_base__ = "../../static/cards";
 const realFetch = window.fetch ? window.fetch.bind(window) : null;
 window.fetch = (url, opts) => (String(url).endsWith("/data/cards.json")
   ? Promise.resolve({ ok: true, status: 200, json: async () => cardCatalog })
-  : String(url).endsWith("/data/card-defense.json")
-    ? Promise.resolve({ ok: true, status: 200, json: async () => cardDefense })
-    : realFetch(url, opts));
+  : realFetch(url, opts));
 // The app FETCHES this file in the browser (guess-pool.mjs); the harness is opened over file:// and has no
 // server to fetch it from, so it is imported and initialised here before anything mounts. Everything downstream
 // - the menu, the grid, tests/test-a11y.mjs's three entries - then sees a pool that is already there, which is
@@ -753,8 +749,9 @@ async function setUpGuess(howMany, finish) {
 
 // ---------- screen=cards: the card area ----------
 // &tab=packs is the pack shop (&coins=N for the wallet, &inside=1 with a pack's odds open, &soldout=1).
-// &tab=run is a run (&run=1 with one already going, &battle=win|loss to play its first battle and land on the
-// result), &tab=showdown the daily showdown (&played=1 once it is played), &tab=boards the two boards.
+// &tab=run is the ladder (&run=1 with a run going, so the team picker; &battle=win|loss to play its first
+// battle - the arena, then the result), &tab=daily the daily battle (&dealt=1 with the hand dealt, &played=1
+// once it is played), &tab=deck the deck builder, &tab=boards the two boards.
 // ?starter=0 is an account that has not opened its deck (the starter panel); the default is a collection with
 // a starter deck and one showpiece in each finish, so every edge and the count badge are on screen at once.
 function CardsPreview({ userId }) {
@@ -773,6 +770,7 @@ function CardsPreview({ userId }) {
     </div>
   );
 }
+const seededRand = (seed) => { let a = seed; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 async function setUpCards(withDeck) {
   const { data } = await mock.auth.signUp({ email: "cards@harness.test", password: "harness-only", options: { data: { username: "shrimpcity" } } });
   const uid = data.user.id;
@@ -782,7 +780,10 @@ async function setUpCards(withDeck) {
   if (params.get("soldout") === "1") mock._cards.packs.get("pack-legends").stock_left = 0;
   if (withDeck) {
     const seeded = (() => { let a = 20261113; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();
-    mock._cards.grantCards(uid, "starter", CL.starterDeck(seeded).map((c, i) => ({ ref: `starter:${i}`, card: c.id, finish: c.finish })));
+    // The starter cards fill a deck of thirty; they go in as two grants because one is at most forty entries and
+    // it reads better than a magic number.
+    const fill = CL.starterFill([], seeded).map((c) => ({ ref: c.ref, card: c.id, finish: c.finish }));
+    mock._cards.grantCards(uid, "starter", fill);
     const all = [...CL.CARDS.values()];
     const pick = (name, season) => all.find((c) => c.name === name && c.season === season);
     const show = [[pick("Tom Brady", 2007), "prism"], [pick("Adrian Peterson", 2012), "gold"], [pick("Antonio Gates", 2005), "silver"],
@@ -792,15 +793,14 @@ async function setUpCards(withDeck) {
     const stacked = params.get("stacked") === "1";
     show.forEach(([card, finish], i) => card && mock._cards.grantCards(uid, "daily", [{ ref: `2026-10-${String(i + 1).padStart(2, "0")}`, card: card.id, finish, ...(stacked ? {} : { sell: mock._cards.sellFor({ id: card.id, finish }) }) }]));
   }
-  if (withDeck && (params.get("run") === "1" || params.get("battle"))) mock._cards.runStart(uid, "harness-seed-0001", "2000|BAL");
-  if (withDeck && params.get("played") === "1") {
-    const rows = mock._cards.owned(uid).map((o) => ({ id: o.card_id, finish: o.finish, card: CL.CARDS.get(o.card_id) }));
-    const lineup = {}; const men = new Set();
-    for (const slot of ["QB", "RB", "WR", "TE", "FLEX1", "FLEX2"]) {
-      const row = rows.filter((r) => !men.has(r.card.pid) && (slot.startsWith("FLEX") ? r.card.pos !== "QB" : r.card.pos === slot)).sort((a, b) => b.card.rating - a.card.rating)[0];
-      lineup[slot] = { id: row.id, finish: row.finish }; men.add(row.card.pid);
-    }
-    await mock._cards.battle(uid, { action: "showdown", lineup });
+  if (withDeck && (params.get("run") === "1" || params.get("battle"))) {
+    await mock._cards.battle(uid, { action: "run_start" });
+    // A loss needs a team that can beat a deck holding 2007 Brady: the top of the ladder, met in battle one.
+    if (params.get("battle") === "loss") mock._cards.runs[0].foe = CL.buildTeam(seededRand(7), 126).map((e) => ({ card: e.id, finish: e.finish }));
+  }
+  if (withDeck && (params.get("dealt") === "1" || params.get("played") === "1")) {
+    const dealt = await mock._cards.battle(uid, { action: "daily_deal" });
+    if (params.get("played") === "1") await mock._cards.battle(uid, { action: "daily_play", team: CL.bestTeam(dealt.data.daily.hand) });
   }
   return uid;
 }
@@ -819,7 +819,9 @@ async function setUpCards(withDeck) {
     }
     // &battle=win|loss: fill the lineup and play, with the luck pinned so the result is the one asked for.
     if (params.get("battle")) {
-      mock._cards.nextRolls = Array(12).fill(params.get("battle") === "loss" ? 0.02 : 0.98);
+      // Twenty-nine draws: five to order the categories, then your card's two and theirs, six times over.
+      const [you, them] = params.get("battle") === "loss" ? [0.05, 0.95] : [0.95, 0.05];
+      mock._cards.nextRolls = [0.1, 0.7, 0.3, 0.9, 0.5, ...Array(6).fill([you, you, them, them]).flat()];
       setTimeout(() => document.querySelector("[data-best]")?.click(), 900);
       setTimeout(() => document.querySelector("[data-play]")?.click(), 1100);
     }

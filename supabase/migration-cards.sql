@@ -97,7 +97,7 @@ revoke all on sequence public.card_grants_id_seq from anon, authenticated;
 
 -- grant_cards(user, kind, grants): hand a player cards, each exactly once.
 --
--- p_grants is a JSON list of { "ref": text, "card": integer, "finish": text }, at most twenty. For each entry
+-- p_grants is a JSON list of { "ref": text, "card": integer, "finish": text }, at most forty (a starter fill is up to thirty). For each entry
 -- the ledger row is inserted "on conflict do nothing"; only when that insert really happened is the card added
 -- to card_owned. So the return says what was NEW:
 --
@@ -149,7 +149,7 @@ begin
   if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
 
   if p_kind is null or p_kind not in ('starter', 'daily', 'gift', 'pack')
-     or p_grants is null or jsonb_typeof(p_grants) <> 'array' or jsonb_array_length(p_grants) > 20 then
+     or p_grants is null or jsonb_typeof(p_grants) <> 'array' or jsonb_array_length(p_grants) > 40 then
     raise exception 'bad_grant' using errcode = 'P0001';
   end if;
   for v_entry in select * from jsonb_array_elements(p_grants) loop
@@ -370,27 +370,55 @@ revoke all on function public.buy_pack(uuid, text, text, jsonb, integer) from pu
 grant execute on function public.buy_pack(uuid, text, text, jsonb, integer) to service_role;
 
 -- ============================================================================================================
--- Battles (v2.25.0). See CARDS.md 11.
+-- Battles (v2.27.0: offense against offense). See CARDS.md 11.
 --
--- A RUN is defenses one after another until a loss; the DAILY SHOWDOWN is one defense a day, once, for a score.
--- The card-claim Edge Function plays both: it holds the rules (card-logic.mjs), draws the luck, and calls the
--- functions below to write down what happened. Nothing here is the browser's to read or write directly - RLS
--- is on with NO policy of any kind, and the client roles hold no grant - because card_runs.seed says which
--- defenses are still to come, and a row of somebody else's lineup is a list of what they own.
+-- A player keeps a DECK of thirty cards. On THE LADDER a run is CPU teams one after another until a loss; in
+-- THE DAILY BATTLE everyone meets the same CPU team once. Either way the server deals a HAND of twelve from
+-- the deck, the player fields six of them in an order, and the card-claim Edge Function plays the battle: it
+-- holds the rules (card-logic.mjs), draws the luck, and calls the functions below to write down what happened.
+--
+-- Nothing here is the browser's to read or write directly - RLS is on with NO policy of any kind and the client
+-- roles hold no grant - because card_runs.seed says which teams are still to come, and a deck or a hand is a
+-- list of what somebody owns.
 --   - a player reads their own state through card_battle_state()
 --   - everybody signed in reads the boards through card_boards()
 --
--- NO NAME SNAPSHOT, on purpose and unlike every older board. sou_runs, builds, century_runs and guess_runs each
--- carry a username and a guest flag stamped by a trigger and rewritten by mod_act's rename and by
--- claim_username. These two join profiles when a board is read instead: a guest can never own a card, so there
--- is no guest row to mark, and a name read live cannot be left behind by a rename.
+-- NO NAME SNAPSHOT, on purpose and unlike every older board: the two boards join profiles when they are read. A
+-- guest can never own a card, so there is no guest row to mark, and a name read live cannot be left behind by a
+-- rename.
+--
+-- THE FIRST VERSION OF THIS (v2.25.0, the test site only) was offense against a defense: card_runs carried a
+-- `defense` and there was a card_showdowns table. Neither ever reached production. A database that has them is
+-- cleared of them here, once - the `defense` column is how the old shape is recognised - so this file can be
+-- re-run on any shape and never drops a run of the new kind.
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'card_runs' and column_name = 'defense') then
+    drop table public.card_runs;
+  end if;
+  drop table if exists public.card_showdowns;
+  drop function if exists public.card_run_start(uuid, text, text);
+  drop function if exists public.card_run_battle(uuid, bigint, integer, jsonb, boolean, text, jsonb, integer, integer);
+  drop function if exists public.card_showdown_record(uuid, date, text, jsonb, numeric, jsonb);
+end $$;
+
+-- The deck a player saved: thirty { card, finish }. An account with no row here plays its best thirty, worked
+-- out by the Edge Function from what it owns - so nobody has to build a deck before a first battle.
+create table if not exists public.card_decks (
+  user_id    uuid primary key references public.profiles(id) on delete cascade,
+  cards      jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.card_runs (
   id         bigint generated always as identity primary key,
   user_id    uuid not null references public.profiles(id) on delete cascade,
   seed       text not null check (char_length(seed) between 8 and 64),
   wins       integer not null default 0 check (wins >= 0),
-  -- While the run is live: the defense to beat next. Once it is over: the one that ended it.
-  defense    text not null check (char_length(defense) between 3 and 20),
+  -- The twelve cards dealt for the battle the run is on, and the six it is against. Stored, not derived: a hand
+  -- that could be asked for again could be re-dealt by asking again.
+  hand       jsonb not null,
+  foe        jsonb not null,
   status     text not null default 'live' check (status in ('live', 'over')),
   -- The latest battle as the function reported it, so a browser whose answer was lost can still be shown it.
   last       jsonb,
@@ -401,24 +429,29 @@ create table if not exists public.card_runs (
 create unique index if not exists card_runs_one_live on public.card_runs (user_id) where status = 'live';
 create index if not exists card_runs_user_idx on public.card_runs (user_id, wins desc);
 
-create table if not exists public.card_showdowns (
+-- One row a day an account, made when the day's hand is DEALT and finished when the battle is played.
+create table if not exists public.card_dailies (
   date       date not null,
   user_id    uuid not null references public.profiles(id) on delete cascade,
-  defense    text not null check (char_length(defense) between 3 and 20),
-  lineup     jsonb not null,
-  score      numeric(7,1) not null,
-  created_at timestamptz not null default now(),
+  hand       jsonb not null,
+  rounds     integer check (rounds between 0 and 6),   -- null until played
+  score      numeric(7,1),
+  shown      jsonb,                                     -- the battle as it was shown
+  dealt_at   timestamptz not null default now(),
+  played_at  timestamptz,
   primary key (date, user_id)
 );
-create index if not exists card_showdowns_day_idx on public.card_showdowns (date, score desc);
+create index if not exists card_dailies_day_idx on public.card_dailies (date, rounds desc, score desc);
 
+alter table public.card_decks enable row level security;
 alter table public.card_runs enable row level security;
-alter table public.card_showdowns enable row level security;
+alter table public.card_dailies enable row level security;
+revoke all on public.card_decks from anon, authenticated;
 revoke all on public.card_runs from anon, authenticated;
-revoke all on public.card_showdowns from anon, authenticated;
+revoke all on public.card_dailies from anon, authenticated;
 revoke all on sequence public.card_runs_id_seq from anon, authenticated;
 
--- The wallet's ledger learns 'card_win', a win in a run. Same replacement as 'pack' above, and for its reason.
+-- The wallet's ledger learns 'card_win', a win on the ladder. Same replacement as 'pack' above, and for its reason.
 do $$
 declare
   c record;
@@ -434,12 +467,40 @@ end $$;
 alter table public.wallet_ledger add constraint wallet_ledger_kind_check
   check (kind in ('starting', 'welcome', 'season', 'daily', 'badge', 'minigame', 'purchase', 'pack', 'card_win', 'card_sell'));
 
--- Does this account hold every card of a lineup? p_lineup is a JSON list of exactly six { card, finish }.
--- Raises bad_lineup for anything that is not that, and answers false when one of the six is not owned.
--- The Edge Function has already checked the SHAPE of the lineup against the rules (card-logic.mjs's
--- lineupProblem); what it cannot know without asking is who owns what, and asking here - inside the same
--- transaction that records the battle - leaves no gap between the question and the write.
-create or replace function public.card_lineup_owned(p_user uuid, p_lineup jsonb)
+-- A list of { card, finish } of exactly p_size entries: is it well formed? Raises `p_reason` when it is not.
+create or replace function public.card_list_check(p_list jsonb, p_size integer, p_reason text)
+returns void
+language plpgsql
+immutable
+set search_path = public, pg_temp
+as $$
+declare
+  v_entry jsonb;
+begin
+  if p_list is null or jsonb_typeof(p_list) <> 'array' or jsonb_array_length(p_list) <> p_size then
+    raise exception '%', p_reason using errcode = 'P0001';
+  end if;
+  for v_entry in select * from jsonb_array_elements(p_list) loop
+    if jsonb_typeof(v_entry) <> 'object'
+       or jsonb_typeof(v_entry -> 'card') is distinct from 'number'
+       or (v_entry ->> 'card') !~ '^[1-9][0-9]{0,8}$'
+       or jsonb_typeof(v_entry -> 'finish') is distinct from 'string'
+       or (v_entry ->> 'finish') not in ('base', 'silver', 'gold', 'prism') then
+      raise exception '%', p_reason using errcode = 'P0001';
+    end if;
+  end loop;
+end;
+$$;
+revoke all on function public.card_list_check(jsonb, integer, text) from public, anon, authenticated;
+grant execute on function public.card_list_check(jsonb, integer, text) to service_role;
+
+-- Does this account hold every card of a list? p_size entries of { card, finish }; raises bad_lineup for
+-- anything that is not that, and answers false when one of them is not owned.
+-- The Edge Function has already checked the list against the RULES (card-logic.mjs: the shape of a deck, of a
+-- team, that a team came out of the hand); what it cannot know without asking is who owns what, and asking
+-- here - inside the same transaction that writes - leaves no gap between the question and the write.
+drop function if exists public.card_lineup_owned(uuid, jsonb);
+create or replace function public.card_lineup_owned(p_user uuid, p_lineup jsonb, p_size integer default 6)
 returns boolean
 language plpgsql
 stable
@@ -449,18 +510,7 @@ as $$
 declare
   v_entry jsonb;
 begin
-  if p_lineup is null or jsonb_typeof(p_lineup) <> 'array' or jsonb_array_length(p_lineup) <> 6 then
-    raise exception 'bad_lineup' using errcode = 'P0001';
-  end if;
-  for v_entry in select * from jsonb_array_elements(p_lineup) loop
-    if jsonb_typeof(v_entry) <> 'object'
-       or jsonb_typeof(v_entry -> 'card') is distinct from 'number'
-       or (v_entry ->> 'card') !~ '^[1-9][0-9]{0,8}$'
-       or jsonb_typeof(v_entry -> 'finish') is distinct from 'string'
-       or (v_entry ->> 'finish') not in ('base', 'silver', 'gold', 'prism') then
-      raise exception 'bad_lineup' using errcode = 'P0001';
-    end if;
-  end loop;
+  perform public.card_list_check(p_lineup, p_size, 'bad_lineup');
   for v_entry in select * from jsonb_array_elements(p_lineup) loop
     if not exists (select 1 from public.card_owned
                     where user_id = p_user and card_id = (v_entry ->> 'card')::integer
@@ -471,14 +521,56 @@ begin
   return true;
 end;
 $$;
-revoke all on function public.card_lineup_owned(uuid, jsonb) from public, anon, authenticated;
-grant execute on function public.card_lineup_owned(uuid, jsonb) to service_role;
+revoke all on function public.card_lineup_owned(uuid, jsonb, integer) from public, anon, authenticated;
+grant execute on function public.card_lineup_owned(uuid, jsonb, integer) to service_role;
 
--- card_run_start(user, seed, first defense): the account's live run - the one it already has, or a new one.
--- The seed and the first defense are the Edge Function's (a cryptographic seed, and runDefense(seed, 0)); they
--- are simply ignored when a run is already live, so asking twice, or from two tabs, is one run.
--- Returns { id, wins, defense, last, fresh }. Raises no_profile, guest_not_allowed, bad_run.
-create or replace function public.card_run_start(p_user uuid, p_seed text, p_defense text)
+-- Everything an account owns, as [{ card, finish }], and the deck it saved (or null). What the Edge Function
+-- deals a hand from. Service role only.
+create or replace function public.card_deck_read(p_user uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select jsonb_build_object(
+    'owned', coalesce((select jsonb_agg(jsonb_build_object('card', o.card_id, 'finish', o.finish) order by o.card_id, o.finish)
+                         from public.card_owned o where o.user_id = p_user and o.count >= 1), '[]'::jsonb),
+    'deck', (select d.cards from public.card_decks d where d.user_id = p_user));
+$$;
+revoke all on function public.card_deck_read(uuid) from public, anon, authenticated;
+grant execute on function public.card_deck_read(uuid) to service_role;
+
+-- card_deck_save(user, thirty cards): keep this deck. The Edge Function has checked its shape (5, 10, 10 and 5,
+-- thirty different men); this checks that every card is theirs. Returns { saved: true }.
+-- Raises no_profile, guest_not_allowed, bad_lineup, not_owned.
+create or replace function public.card_deck_save(p_user uuid, p_cards jsonb)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_guest boolean;
+begin
+  select guest into v_guest from public.profiles where id = p_user;
+  if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
+  if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
+  if not public.card_lineup_owned(p_user, p_cards, 30) then raise exception 'not_owned' using errcode = 'P0001'; end if;
+  insert into public.card_decks (user_id, cards) values (p_user, p_cards)
+  on conflict (user_id) do update set cards = excluded.cards, updated_at = now();
+  return jsonb_build_object('saved', true);
+end;
+$$;
+revoke all on function public.card_deck_save(uuid, jsonb) from public, anon, authenticated;
+grant execute on function public.card_deck_save(uuid, jsonb) to service_role;
+
+-- card_run_start(user, seed, hand, foe): the account's live run - the one it already has, or a new one.
+-- The seed, the first hand and the first CPU team are the Edge Function's; they are simply ignored when a run is
+-- already live, so asking twice, or from two tabs, is one run with one hand.
+-- Returns { id, wins, hand, foe, last, fresh }. Raises no_profile, guest_not_allowed, bad_run.
+create or replace function public.card_run_start(p_user uuid, p_seed text, p_hand jsonb, p_foe jsonb)
 returns jsonb
 language plpgsql
 volatile
@@ -493,44 +585,45 @@ begin
   select guest into v_guest from public.profiles where id = p_user;
   if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
   if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
-  if p_seed is null or char_length(p_seed) not between 8 and 64
-     or p_defense is null or char_length(p_defense) not between 3 and 20 then
+  if p_seed is null or char_length(p_seed) not between 8 and 64 then
     raise exception 'bad_run' using errcode = 'P0001';
   end if;
+  perform public.card_list_check(p_hand, 12, 'bad_run');
+  perform public.card_list_check(p_foe, 6, 'bad_run');
 
   select * into v_run from public.card_runs where user_id = p_user and status = 'live';
   if not found then
     begin
-      insert into public.card_runs (user_id, seed, defense) values (p_user, p_seed, p_defense) returning * into v_run;
+      insert into public.card_runs (user_id, seed, hand, foe) values (p_user, p_seed, p_hand, p_foe) returning * into v_run;
       v_fresh := true;
     exception when unique_violation then
       -- the other tab's insert landed between the select and this one: its run is the run
       select * into v_run from public.card_runs where user_id = p_user and status = 'live';
     end;
   end if;
-  return jsonb_build_object('id', v_run.id, 'wins', v_run.wins, 'defense', v_run.defense, 'last', v_run.last, 'fresh', v_fresh);
+  return jsonb_build_object('id', v_run.id, 'wins', v_run.wins, 'hand', v_run.hand, 'foe', v_run.foe, 'last', v_run.last, 'fresh', v_fresh);
 end;
 $$;
-revoke all on function public.card_run_start(uuid, text, text) from public, anon, authenticated;
-grant execute on function public.card_run_start(uuid, text, text) to service_role;
+revoke all on function public.card_run_start(uuid, text, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.card_run_start(uuid, text, jsonb, jsonb) to service_role;
 
 -- card_run_battle: write down one battle of a run, and pay it. ONE transaction.
 --
 --   p_run, p_step   the run and the number of wins the Edge Function read before it rolled. The row is locked
 --                   and both are checked again here, so two requests that overlap - a double tap, two tabs -
 --                   cannot both count: the second finds the run moved and raises `stale`, having changed nothing.
---   p_lineup        the six cards, [{ card, finish }]. Ownership is checked HERE (see card_lineup_owned).
+--   p_lineup        the six cards played, [{ card, finish }]. Ownership is checked HERE; that they came out of
+--                   the hand was the function's to check, against the hand it read from this row.
 --   p_win           what the function's roll came to
---   p_next          the defense after this one (a win), ignored on a loss
+--   p_hand, p_foe   the hand and the CPU team for the NEXT battle (a win); ignored on a loss
 --   p_last          the battle as the browser will be shown it, kept on the row
 --   p_coins, p_cap  what this win pays and how many wins pay per UTC day - rewards.mjs's
 --
 -- wallet_lock comes first, before anything is decided, as in every function that moves coins.
--- Returns { wins, status, defense, credited, capped, balance }.
--- Raises no_profile, guest_not_allowed, bad_battle, no_run (no live run by that id for this account), stale,
--- bad_lineup, not_owned - in that order.
+-- Returns { wins, status, hand, foe, credited, capped, balance }.
+-- Raises no_profile, guest_not_allowed, bad_battle, no_run, stale, bad_lineup, not_owned - in that order.
 create or replace function public.card_run_battle(p_user uuid, p_run bigint, p_step integer, p_lineup jsonb,
-  p_win boolean, p_next text, p_last jsonb, p_coins integer, p_cap integer)
+  p_win boolean, p_hand jsonb, p_foe jsonb, p_last jsonb, p_coins integer, p_cap integer)
 returns jsonb
 language plpgsql
 volatile
@@ -547,19 +640,22 @@ begin
   if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
   if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
   if p_win is null or p_step is null or p_last is null or jsonb_typeof(p_last) <> 'object'
-     or p_coins is null or p_coins < 0 or p_coins > 100 or p_cap is null or p_cap < 0
-     or (p_win and (p_next is null or char_length(p_next) not between 3 and 20)) then
+     or p_coins is null or p_coins < 0 or p_coins > 100 or p_cap is null or p_cap < 0 then
     raise exception 'bad_battle' using errcode = 'P0001';
+  end if;
+  if p_win then
+    perform public.card_list_check(p_hand, 12, 'bad_battle');
+    perform public.card_list_check(p_foe, 6, 'bad_battle');
   end if;
 
   perform public.wallet_lock(p_user);
   select * into v_run from public.card_runs where id = p_run and user_id = p_user and status = 'live' for update;
   if not found then raise exception 'no_run' using errcode = 'P0001'; end if;
   if v_run.wins <> p_step then raise exception 'stale' using errcode = 'P0001'; end if;
-  if not public.card_lineup_owned(p_user, p_lineup) then raise exception 'not_owned' using errcode = 'P0001'; end if;
+  if not public.card_lineup_owned(p_user, p_lineup, 6) then raise exception 'not_owned' using errcode = 'P0001'; end if;
 
   if p_win then
-    update public.card_runs set wins = wins + 1, defense = p_next, last = p_last where id = p_run returning * into v_run;
+    update public.card_runs set wins = wins + 1, hand = p_hand, foe = p_foe, last = p_last where id = p_run returning * into v_run;
     if p_coins > 0 then
       -- UTC midnight worked out explicitly, as credit_coins does: a bare date follows the session's time zone.
       if (select count(*) from public.wallet_ledger
@@ -574,16 +670,16 @@ begin
     update public.card_runs set status = 'over', ended_at = now(), last = p_last where id = p_run returning * into v_run;
   end if;
 
-  return jsonb_build_object('wins', v_run.wins, 'status', v_run.status, 'defense', v_run.defense,
+  return jsonb_build_object('wins', v_run.wins, 'status', v_run.status, 'hand', v_run.hand, 'foe', v_run.foe,
     'credited', v_credited, 'capped', v_capped,
     'balance', (select balance from public.wallets where user_id = p_user));
 end;
 $$;
-revoke all on function public.card_run_battle(uuid, bigint, integer, jsonb, boolean, text, jsonb, integer, integer) from public, anon, authenticated;
-grant execute on function public.card_run_battle(uuid, bigint, integer, jsonb, boolean, text, jsonb, integer, integer) to service_role;
+revoke all on function public.card_run_battle(uuid, bigint, integer, jsonb, boolean, jsonb, jsonb, jsonb, integer, integer) from public, anon, authenticated;
+grant execute on function public.card_run_battle(uuid, bigint, integer, jsonb, boolean, jsonb, jsonb, jsonb, integer, integer) to service_role;
 
--- card_run_end(user): walk away from the live run. It ends at the wins it has; the defense it was facing stays
--- on the row. Returns { ended, wins } - ended false when there was no live run, which is not an error.
+-- card_run_end(user): walk away from the live run. It ends at the wins it has.
+-- Returns { ended, wins } - ended false when there was no live run, which is not an error.
 create or replace function public.card_run_end(p_user uuid)
 returns jsonb
 language plpgsql
@@ -603,14 +699,11 @@ $$;
 revoke all on function public.card_run_end(uuid) from public, anon, authenticated;
 grant execute on function public.card_run_end(uuid) to service_role;
 
--- card_showdown_record: one showdown a day an account. The date is the Edge Function's clock (UTC), the defense
--- and the score are its arithmetic; this checks who is asking and that they own the six, and writes the row.
--- p_lineup is the six as [{ card, finish }] for the ownership check; p_shown is the battle as the browser will be
--- shown it again tomorrow morning, and is what the row keeps.
--- A second one for the same day changes nothing and answers with the FIRST one, duplicate: true.
--- Returns { duplicate, date, defense, lineup, score }. Raises no_profile, guest_not_allowed, bad_showdown,
--- bad_lineup, not_owned - in that order.
-create or replace function public.card_showdown_record(p_user uuid, p_date date, p_defense text, p_lineup jsonb, p_score numeric, p_shown jsonb)
+-- card_daily_deal(user, date, hand): the day's hand - the one already dealt, or this one. Dealt ONCE: the
+-- second ask for a day answers with the first hand whatever it is handed, so changing a deck and asking again
+-- cannot re-deal. Returns { hand, played, rounds, score, shown }.
+-- Raises no_profile, guest_not_allowed, bad_daily.
+create or replace function public.card_daily_deal(p_user uuid, p_date date, p_hand jsonb)
 returns jsonb
 language plpgsql
 volatile
@@ -619,46 +712,68 @@ set search_path = public, pg_temp
 as $$
 declare
   v_guest boolean;
-  v_row public.card_showdowns;
-  v_dup boolean := true;
+  v_row public.card_dailies;
 begin
   select guest into v_guest from public.profiles where id = p_user;
   if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
   if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
-  if p_date is null or p_defense is null or char_length(p_defense) not between 3 and 20
-     or p_score is null or p_score < -9999 or p_score > 9999
-     or p_shown is null or jsonb_typeof(p_shown) <> 'object' then
-    raise exception 'bad_showdown' using errcode = 'P0001';
-  end if;
-
-  select * into v_row from public.card_showdowns where date = p_date and user_id = p_user;
-  if not found then
-    if not public.card_lineup_owned(p_user, p_lineup) then raise exception 'not_owned' using errcode = 'P0001'; end if;
-    insert into public.card_showdowns (date, user_id, defense, lineup, score)
-    values (p_date, p_user, p_defense, p_shown, round(p_score, 1))
-    on conflict (date, user_id) do nothing
-    returning * into v_row;
-    if found then
-      v_dup := false;
-    else
-      -- the other tab's insert landed first: its showdown is the day's
-      select * into v_row from public.card_showdowns where date = p_date and user_id = p_user;
-    end if;
-  end if;
-  return jsonb_build_object('duplicate', v_dup, 'date', v_row.date, 'defense', v_row.defense, 'lineup', v_row.lineup, 'score', v_row.score);
+  if p_date is null then raise exception 'bad_daily' using errcode = 'P0001'; end if;
+  perform public.card_list_check(p_hand, 12, 'bad_daily');
+  insert into public.card_dailies (date, user_id, hand) values (p_date, p_user, p_hand)
+  on conflict (date, user_id) do nothing;
+  select * into v_row from public.card_dailies where date = p_date and user_id = p_user;
+  return jsonb_build_object('hand', v_row.hand, 'played', v_row.played_at is not null,
+    'rounds', v_row.rounds, 'score', v_row.score, 'shown', v_row.shown);
 end;
 $$;
-revoke all on function public.card_showdown_record(uuid, date, text, jsonb, numeric, jsonb) from public, anon, authenticated;
-grant execute on function public.card_showdown_record(uuid, date, text, jsonb, numeric, jsonb) to service_role;
+revoke all on function public.card_daily_deal(uuid, date, jsonb) from public, anon, authenticated;
+grant execute on function public.card_daily_deal(uuid, date, jsonb) to service_role;
+
+-- card_daily_record: the day's battle, once. The row must have been dealt and not yet played; the lineup's
+-- ownership is checked here. A second one changes nothing and answers with the FIRST, duplicate: true.
+-- Returns { duplicate, rounds, score, shown }.
+-- Raises no_profile, guest_not_allowed, bad_daily, no_hand (nothing dealt for that day), bad_lineup, not_owned.
+create or replace function public.card_daily_record(p_user uuid, p_date date, p_lineup jsonb, p_rounds integer, p_score numeric, p_shown jsonb)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_guest boolean;
+  v_row public.card_dailies;
+begin
+  select guest into v_guest from public.profiles where id = p_user;
+  if not found then raise exception 'no_profile' using errcode = 'P0001'; end if;
+  if v_guest then raise exception 'guest_not_allowed' using errcode = 'P0001'; end if;
+  if p_date is null or p_rounds is null or p_rounds < 0 or p_rounds > 6
+     or p_score is null or p_score < -9999 or p_score > 9999
+     or p_shown is null or jsonb_typeof(p_shown) <> 'object' then
+    raise exception 'bad_daily' using errcode = 'P0001';
+  end if;
+  select * into v_row from public.card_dailies where date = p_date and user_id = p_user for update;
+  if not found then raise exception 'no_hand' using errcode = 'P0001'; end if;
+  if v_row.played_at is not null then
+    return jsonb_build_object('duplicate', true, 'rounds', v_row.rounds, 'score', v_row.score, 'shown', v_row.shown);
+  end if;
+  if not public.card_lineup_owned(p_user, p_lineup, 6) then raise exception 'not_owned' using errcode = 'P0001'; end if;
+  update public.card_dailies set rounds = p_rounds, score = round(p_score, 1), shown = p_shown, played_at = now()
+   where date = p_date and user_id = p_user returning * into v_row;
+  return jsonb_build_object('duplicate', false, 'rounds', v_row.rounds, 'score', v_row.score, 'shown', v_row.shown);
+end;
+$$;
+revoke all on function public.card_daily_record(uuid, date, jsonb, integer, numeric, jsonb) from public, anon, authenticated;
+grant execute on function public.card_daily_record(uuid, date, jsonb, integer, numeric, jsonb) to service_role;
 
 -- card_battle_state(): what the signed-in caller's battle screens open on. Read-only, so the browser calls it
 -- as a GET and supabase-js retries it. Nobody signed in, or an account with nothing, gets the same shape empty.
---   { today, run: { id, wins, status, defense, last } | null, best, paid_today,
---     showdown: { defense, lineup, score } | null }
--- `run` is the account's LATEST run, live or over - not only a live one. A browser whose answer to a battle
--- was lost on the way back has to be able to learn that the run ended, and be shown the battle that ended it.
--- `today` is the server's UTC date - the day the showdown is FOR - so the browser never has to guess it from a
--- clock in another time zone. The seed is not in here and must never be.
+--   { today, deck, run: { id, wins, status, hand, foe, last } | null, best, paid_today,
+--     daily: { hand, played, rounds, score, shown } | null }
+-- `run` is the account's LATEST run, live or over - a browser whose answer to a battle was lost on the way back
+-- has to be able to learn that the run ended, and be shown the battle that ended it. `daily` is today's row if
+-- a hand has been dealt. `today` is the server's UTC date, so the browser never has to guess the day.
+-- The seed is not in here and must never be.
 create or replace function public.card_battle_state()
 returns jsonb
 language sql
@@ -668,24 +783,26 @@ set search_path = public, pg_temp
 as $$
   select jsonb_build_object(
     'today', (now() at time zone 'utc')::date,
-    'run', (select jsonb_build_object('id', r.id, 'wins', r.wins, 'status', r.status, 'defense', r.defense, 'last', r.last)
+    'deck', (select d.cards from public.card_decks d where d.user_id = auth.uid()),
+    'run', (select jsonb_build_object('id', r.id, 'wins', r.wins, 'status', r.status, 'hand', r.hand, 'foe', r.foe, 'last', r.last)
               from public.card_runs r where r.user_id = auth.uid() order by r.id desc limit 1),
     'best', coalesce((select max(r.wins) from public.card_runs r where r.user_id = auth.uid()), 0),
     'paid_today', (select count(*) from public.wallet_ledger l
                     where l.user_id = auth.uid() and l.kind = 'card_win'
                       and l.created_at >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc')),
-    'showdown', (select jsonb_build_object('defense', s.defense, 'lineup', s.lineup, 'score', s.score)
-                   from public.card_showdowns s
-                  where s.user_id = auth.uid() and s.date = (now() at time zone 'utc')::date)
+    'daily', (select jsonb_build_object('hand', s.hand, 'played', s.played_at is not null, 'rounds', s.rounds, 'score', s.score, 'shown', s.shown)
+                from public.card_dailies s
+               where s.user_id = auth.uid() and s.date = (now() at time zone 'utc')::date)
   );
 $$;
 revoke all on function public.card_battle_state() from public, anon;
 grant execute on function public.card_battle_state() to authenticated;
 
--- card_boards(limit): the two boards of the card area. Longest runs, one row an account (its best run, live
--- ones included - a run still going has already won what it has won); and today's showdown, best score first.
--- Names are read from profiles NOW (see the note at the top of this section). Every order is fully tiebroken.
---   { today, runs: [{ username, wins }], showdown: [{ username, score }] }
+-- card_boards(limit): the two boards of the card area. The ladder - one row an account, its best run, live ones
+-- included (a run still going has already won what it has won) - and today's daily battle: rounds won first,
+-- then the six-round total, then who got there first. Names are read from profiles NOW (see the note at the top
+-- of this section). Every order is fully tiebroken.
+--   { today, runs: [{ username, wins }], daily: [{ username, rounds, score }] }
 create or replace function public.card_boards(p_limit integer default 25)
 returns jsonb
 language sql
@@ -704,12 +821,12 @@ as $$
               having max(r.wins) > 0
                order by max(r.wins) desc, p.username collate "C"
                limit greatest(1, least(coalesce(p_limit, 25), 100))) t), '[]'::jsonb),
-    'showdown', coalesce((
-      select jsonb_agg(jsonb_build_object('username', t.username, 'score', t.score) order by t.score desc, t.created_at, t.username collate "C")
-        from (select p.username, s.score, s.created_at
-                from public.card_showdowns s join public.profiles p on p.id = s.user_id
-               where s.date = (now() at time zone 'utc')::date and not p.guest
-               order by s.score desc, s.created_at, p.username collate "C"
+    'daily', coalesce((
+      select jsonb_agg(jsonb_build_object('username', t.username, 'rounds', t.rounds, 'score', t.score) order by t.rounds desc, t.score desc, t.played_at, t.username collate "C")
+        from (select p.username, s.rounds, s.score, s.played_at
+                from public.card_dailies s join public.profiles p on p.id = s.user_id
+               where s.date = (now() at time zone 'utc')::date and s.played_at is not null and not p.guest
+               order by s.rounds desc, s.score desc, s.played_at, p.username collate "C"
                limit greatest(1, least(coalesce(p_limit, 25), 100))) t), '[]'::jsonb)
   );
 $$;

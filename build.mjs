@@ -108,8 +108,9 @@ cpSync("data/versus-pool.json", "public/data/versus-pool.json");
 // The card catalog, fetched like the guess pool (card-data.mjs) - but ONLY where cards are switched on. With
 // them off the file is not shipped at all: nothing would read it, and a catalog sitting on production ahead of
 // the feature is a thing somebody finds.
-if (cardsOn) { cpSync("data/cards.json", "public/data/cards.json"); cpSync("data/card-defense.json", "public/data/card-defense.json"); }
-else { rmSync("public/data/cards.json", { force: true }); rmSync("public/data/card-defense.json", { force: true }); }
+if (cardsOn) cpSync("data/cards.json", "public/data/cards.json");
+else rmSync("public/data/cards.json", { force: true });
+rmSync("public/data/card-defense.json", { force: true }); // served for v2.25.0's battles against a defense; nothing asks for it now
 
 // The service worker, which is what makes the site installable and what lets a draft carry on with no signal
 // (service-worker.js, sw-rules.mjs; entry.jsx registers it). Its store is named after this exact build - the

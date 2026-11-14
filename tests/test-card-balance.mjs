@@ -1,158 +1,163 @@
-// The card battle's balance, MEASURED. card-logic.mjs's numbers (the luck spread, the defense's bar, every
-// counter and pair) are tuned, not chosen, and this is what they are tuned to. It builds three collections,
-// lets two bots pick lineups from them against random defenses, plays the battles, PRINTS what happened and
-// holds each number to the band the design asks for (docs/superpowers/specs/2026-11-13-card-collection-design.md,
-// section 2's anti-goals):
+// Plays thousands of card battles and PRINTS what the rules do, then holds the game to a few promises.
+// Offense against offense (CARDS.md 5): a deck of thirty, a hand of twelve, six cards in an order you choose,
+// six rounds each on a category. This file is the only thing that knows whether the numbers in card-logic.mjs
+// make a GAME: that a new player wins sometimes, that a great collection can still lose, and - the one that
+// matters most - that what you do with the hand beats just fielding your six best.
 //
-//   - a new player with a starter deck wins a battle or two a run, and not none
-//   - a bigger collection goes further, and the best one in the game still meets a bar it cannot clear
-//   - the six highest ratings are NOT the answer: a bot that reads the defense picks differently, and goes further
-//   - luck decides "a bit" of it
+//   node tests/test-card-balance.mjs [runs] [seed]
 //
-// WHAT THIS DOES NOT DO: hold any single counter or pair to anything. Review deleted six of the seven pairs and
-// zeroed every positive counter, and only one band moved, by less than seed noise. These are bands on the game
-// as a whole - run length, and whether reading the defense pays - so a number in COUNTERS or PAIRS can be wrong
-// on its own and this file will not say so. The starter bands measure the bar and nothing else: with eight
-// cards there is almost never a second lineup to choose.
-//
-// A band failing after a change to card-logic.mjs is the change's cost, stated. If the bands cannot all hold
-// together that is a design question for the owner - never loosen one to make a run green.
-//
-//   node tests/test-card-balance.mjs
+// THREE COLLECTIONS: a starter deck (thirty Base cards rated under 60), sixty random cards, and the sixty best.
+// TWO PLAYERS: one fields the six highest ratings in rating order; one picks the six and the order that the
+// numbers on screen say are best (it cannot see the category order or the luck - nobody can).
 import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { SLOTS, mulberry32 } from "../game-logic.mjs";
 import * as C from "../card-logic.mjs";
+import { mulberry32 } from "../game-logic.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const read = (f) => JSON.parse(readFileSync(path.join(root, f), "utf8"));
+const read = (f) => JSON.parse(readFileSync(new URL(`../${f}`, import.meta.url), "utf8"));
 C.initCardData(read("data/cards.json"));
-C.initDefenses(read("data/versus-pool.json"), read("data/card-defense.json"));
+const RUNS = Number(process.argv[2]) || 400;
+const SEED = Number(process.argv[3]) || 20261114;
 const all = [...C.CARDS.values()].sort((a, b) => a.id - b.id);
-const mid = () => 0.5;
-
 let fails = 0;
-const band = (value, lo, hi, what) => {
-  const good = value >= lo && value <= hi;
-  if (!good) fails++;
-  console.log(`${good ? "  ok " : "FAIL "} ${what.padEnd(64)} ${value.toFixed(3)}   (wants ${lo} to ${hi})`);
-};
+const hold = (ok, what) => { console.log(`${ok ? "  ok  " : "  FAIL"} ${what}`); if (!ok) fails++; };
 
-const fitsSlot = (card, slot) => (slot.startsWith("FLEX") ? card.pos !== "QB" : card.pos === slot);
-const entry = (card) => ({ id: card.id, finish: "base" });
-
-// The highest-rated legal lineup, archetypes ignored: what "just play your best cards" means.
-function byRating(collection) {
-  const sorted = [...collection].sort((a, b) => b.rating - a.rating || a.id - b.id);
-  const lineup = {}; const men = new Set();
-  for (const slot of SLOTS) {
-    const c = sorted.find((x) => !men.has(x.pid) && fitsSlot(x, slot));
-    if (!c) return null;
-    lineup[slot] = entry(c); men.add(c.pid);
+// ---- collections ----
+const entries = (cards) => cards.map((c) => ({ id: c.id, finish: "base" }));
+function starter(rand) { return C.starterFill([], rand).map((g) => ({ id: g.id, finish: g.finish })); }
+function randomSixty(rand) {
+  // sixty different men, drawn until a deck can be made of them
+  for (;;) {
+    const men = new Set(), out = [];
+    while (out.length < 60) { const c = all[Math.floor(rand() * all.length)]; if (!men.has(c.pid)) { men.add(c.pid); out.push(c); } }
+    if (C.bestDeck(entries(out))) return entries(out);
   }
-  return lineup;
+}
+function bestSixty() {
+  const men = new Set(), out = [];
+  for (const c of [...all].sort((a, b) => b.rating - a.rating || a.id - b.id)) {
+    const need = { QB: 10, RB: 20, WR: 20, TE: 10 }[c.pos];
+    if (men.has(c.pid) || out.filter((x) => x.pos === c.pos).length >= need) continue;
+    men.add(c.pid); out.push(c);
+    if (out.length === 60) break;
+  }
+  return entries(out);
 }
 
-// The lineup with the best no-luck score against THIS defense, searched over the strongest few candidates for
-// each slot. A candidate's worth is its rating, what the defense does to it, and the most a pair could add - so
-// a 58 that completes a pair is in the running beside an 80 that does not.
-const maxPair = Object.fromEntries(C.ARCHETYPES.map((a) => [a.id, Math.max(0, ...C.PAIRS.filter((p) => p[0] === a.id || p[1] === a.id).map((p) => p[2]))]));
-function byFit(collection, defense, flat, per = 4, flexPer = 5) {
-  const worth = (c) => c.rating + defense.traits.reduce((s, t) => s + (C.COUNTERS[t]?.[c.archetype] || 0), 0) + (maxPair[c.archetype] || 0);
-  const ranked = [...collection].sort((a, b) => worth(b) - worth(a) || a.id - b.id);
-  const pick = (test, n) => ranked.filter(test).slice(0, n);
-  const [qbs, rbs, wrs, tes] = ["QB", "RB", "WR", "TE"].map((p) => pick((c) => c.pos === p, per));
-  const flexes = pick((c) => c.pos !== "QB", flexPer + 3);
-  let best = flat, bestScore = flat ? C.scoreBattle(flat, defense, mid).offense : -Infinity;
-  for (const q of qbs) for (const r of rbs) for (const w of wrs) for (const t of tes) {
-    const men = new Set([q.pid, r.pid, w.pid, t.pid]);
-    if (men.size < 4) continue;
-    const pool = flexes.filter((f) => !men.has(f.pid)).slice(0, flexPer);
-    for (let i = 0; i < pool.length; i++) for (let j = i + 1; j < pool.length; j++) {
-      if (pool[i].pid === pool[j].pid) continue;
-      const lineup = { QB: entry(q), RB: entry(r), WR: entry(w), TE: entry(t), FLEX1: entry(pool[i]), FLEX2: entry(pool[j]) };
-      const score = C.scoreBattle(lineup, defense, mid).offense;
-      if (score > bestScore) { bestScore = score; best = lineup; }
+// ---- players ----
+const dull = (hand) => C.bestTeam(hand);
+// What a card is worth in an average round, before luck: its base averaged over the six categories.
+const avgBase = (e) => C.CATEGORY_IDS.reduce((s, cat) => s + C.roundBase(e, cat), 0) / 6;
+const chance = (diff) => 1 / (1 + Math.exp(-diff / 9)); // roughly how often a lead of `diff` holds up
+// Every legal six out of the hand, scored by average base plus synergy; then the best of the 720 orders against
+// the CPU's six, each of whose cards is known and whose order is known.
+function sharp(hand, foe) {
+  const by = (pos) => hand.filter((e) => C.CARDS.get(e.id).pos === pos);
+  const [qbs, rbs, wrs, tes] = ["QB", "RB", "WR", "TE"].map(by);
+  let bestSix = null, bestWorth = -Infinity;
+  const others = [...rbs, ...wrs, ...tes];
+  for (const qb of qbs) for (let a = 0; a < others.length; a++) for (let b = a + 1; b < others.length; b++) for (let c = b + 1; c < others.length; c++) for (let d = c + 1; d < others.length; d++) for (let e = d + 1; e < others.length; e++) {
+    const team = [qb, others[a], others[b], others[c], others[d], others[e]];
+    if (C.teamProblem(team, null)) continue;
+    const syn = C.teamSynergies(team);
+    const worth = team.reduce((s, x, i) => s + avgBase(x) + syn[i].reduce((n, m) => n + m.pts, 0), 0);
+    if (worth > bestWorth) { bestWorth = worth; bestSix = team; }
+  }
+  if (!bestSix) return dull(hand);
+  const syn = C.teamSynergies(bestSix);
+  const mine = bestSix.map((e, i) => avgBase(e) + syn[i].reduce((n, m) => n + m.pts, 0));
+  const fsyn = C.teamSynergies(foe);
+  const theirs = foe.map((e, i) => avgBase(e) + fsyn[i].reduce((n, m) => n + m.pts, 0));
+  let bestOrder = null, bestWins = -Infinity;
+  const idx = [0, 1, 2, 3, 4, 5];
+  const walk = (k) => {
+    if (k === 6) {
+      const wins = idx.reduce((s, card, spot) => s + chance(mine[card] - theirs[spot]), 0);
+      if (wins > bestWins) { bestWins = wins; bestOrder = idx.slice(); }
+      return;
     }
-  }
-  return best;
+    for (let i = k; i < 6; i++) { [idx[k], idx[i]] = [idx[i], idx[k]]; walk(k + 1); [idx[k], idx[i]] = [idx[i], idx[k]]; }
+  };
+  walk(0);
+  return bestOrder.map((i) => bestSix[i]);
 }
 
-// ---------- The three collections ----------
-const draw = (rand, from, n) => { const pool = [...from]; const out = []; while (out.length < n && pool.length) out.push(pool.splice(Math.floor(rand() * pool.length), 1)[0]); return out; };
-// the real starter deck, dealt by the rule the server deals it with
-const starter = (seed) => C.starterDeck(mulberry32(seed)).map((e) => C.CARDS.get(e.id));
-const middling = (seed) => draw(mulberry32(seed), all, 60);
-const stacked = () => [...all].sort((a, b) => b.rating - a.rating || a.id - b.id).slice(0, 60);
-
-// ---------- Play ----------
-// A run: random defenses one after another, a fresh lineup for each, until a loss. The bar rises with every win
-// (card-logic.mjs, BAR_STEP), so a run's LENGTH is the measure of a collection.
-const MIDDLING = 50; // how many different sixty-card collections stand for "a middling collection"
-const MAX_RUN = 40; // nothing should get near it; reaching it is itself a failure of the bar
-function play(name, make, collections, runsEach, seedA = 1000, seedB = 77) {
-  const t = { runs: 0, battles: 0, fitWins: 0, ratingWins: 0, differs: 0, luckMoved: 0, luckShift: 0, lowCard: 0, zero: 0, capped: 0, longest: 0 };
-  for (let k = 0; k < collections; k++) {
-    const collection = make(seedA + k);
-    const flat = byRating(collection);
-    const rand = mulberry32(seedB * (k + 1));
-    for (let r = 0; r < runsEach; r++) {
-      t.runs++;
-      // the same defenses and the same luck for both bots, so the only difference is the lineup
-      const draws = Array.from({ length: MAX_RUN }, () => ({ defense: C.DEFENSES[Math.floor(rand() * C.DEFENSES.length)], seed: Math.floor(rand() * 2 ** 31) }));
-      const fits = []; // the fit bot's pick for each battle of this run, worked out once and shared with the no-luck replay
-      const fitAt = (i) => fits[i] || (fits[i] = byFit(collection, draws[i].defense, flat));
-      let step = 0;
-      for (; step < MAX_RUN; step++) {
-        const { defense, seed } = draws[step];
-        const fit = fitAt(step);
-        const rolled = C.scoreBattle(fit, defense, mulberry32(seed), step);
-        t.battles++;
-        if (SLOTS.map((x) => fit[x].id).sort().join() !== SLOTS.map((x) => flat[x].id).sort().join()) t.differs++;
-        if (SLOTS.some((x) => C.CARDS.get(fit[x].id).rating < 70)) t.lowCard++;
-        if (!rolled.win) break;
-      }
-      t.fitWins += step; if (step === 0) t.zero++; if (step === MAX_RUN) t.capped++; if (step > t.longest) t.longest = step;
-// The same run with no luck at all: how far the collection goes on its merits. Luck is "a bit" when it
-      // moves a run by a win, not when it decides where the run ends up.
-      let calm = 0;
-      while (calm < MAX_RUN && C.scoreBattle(fitAt(calm), draws[calm].defense, mid, calm).win) calm++;
-      if (calm !== step) t.luckMoved++;
-      t.luckShift += Math.abs(calm - step);
-      let flatStep = 0;
-      while (flatStep < MAX_RUN && C.scoreBattle(flat, draws[flatStep].defense, mulberry32(draws[flatStep].seed), flatStep).win) flatStep++;
-      t.ratingWins += flatStep;
+// ---- a run up the ladder ----
+function climb(deck, pick, rand, seed) {
+  let wins = 0, sixes = 0, changed = 0, upsets = 0, battles = 0;
+  for (; wins < 60; ) {
+    const foe = C.ladderFoe(seed, wins);
+    const hand = C.dealHand(deck, rand);
+    const team = pick(hand, foe);
+    const plain = dull(hand);
+    battles++;
+    if (team.map((e) => e.id).sort().join() !== plain.map((e) => e.id).sort().join()) changed++;
+    const result = C.scoreBattle(team, foe, rand, null, C.ladderEdge(wins));
+    // a round a lower-rated card took off a higher-rated one
+    upsets += result.rounds.filter((r) => r.win === "me" && r.mine.rating < r.foe.rating).length;
+    sixes += result.wins;
+    if (!result.win) break;
+    wins++;
+  }
+  return { wins, changed, battles, upsets, rounds: sixes };
+}
+function measure(name, makeDeck) {
+  const out = {};
+  for (const [who, pick] of [["dull", (hand) => dull(hand)], ["sharp", sharp]]) {
+    const rand = mulberry32(SEED);
+    let total = 0, zero = 0, long = 0, changed = 0, battles = 0, upsets = 0;
+    const lengths = [];
+    for (let i = 0; i < RUNS; i++) {
+      const collection = makeDeck(mulberry32(SEED + 1000 + (i % 50)));
+      const deck = C.bestDeck(collection);
+      const r = climb(deck, pick, rand, `bal-${SEED}-${i}`);
+      total += r.wins; lengths.push(r.wins); if (r.wins === 0) zero++; if (r.wins >= 40) long++;
+      changed += r.changed; battles += r.battles; upsets += r.upsets;
     }
+    out[who] = { avg: total / RUNS, zero: zero / RUNS, long, changed: changed / battles, upsets: upsets / battles, max: Math.max(...lengths) };
   }
-  console.log(`\n${name}: ${t.runs} runs, ${t.battles} battles, longest run ${t.longest}`);
-  return { wins: t.fitWins / t.runs, flatWins: t.ratingWins / t.runs, winless: t.zero / t.runs, capped: t.capped / t.runs,
-    differs: t.differs / t.battles, luckMoved: t.luckMoved / t.runs, luckShift: t.luckShift / t.runs, lowCard: t.lowCard / t.battles };
+  console.log(`\n${name}`);
+  for (const who of ["dull", "sharp"]) {
+    const m = out[who];
+    console.log(`  ${who.padEnd(5)} wins a run ${m.avg.toFixed(2)}   no win at all ${(100 * m.zero).toFixed(0)}%   longest ${m.max}   upset rounds a battle ${m.upsets.toFixed(2)}${who === "sharp" ? `   picks a different six ${(100 * m.changed).toFixed(0)}%` : ""}`);
+  }
+  return out;
 }
 
-console.log(`constants: LUCK_SPREAD ${C.LUCK_SPREAD}; bar ${C.BAR_START} + ${C.BAR_STEP} a win + ${C.BAR_DEFENSE} x (defense rating - ${C.BAR_PIVOT})`);
-// node tests/test-card-balance.mjs [seedA] [seedB] plays a different set of collections and defenses. The bands
-// have to hold for the CONSTANTS, not for one lucky draw of sixty cards: review re-ran the first version of this
-// file on three other seed sets and two of them failed a band, because twenty collections is too few to say
-// what a "middling collection" does. Try another pair before believing a number that sits near its edge.
-const SEED_A = Number(process.argv[2]) || 1000, SEED_B = Number(process.argv[3]) || 77;
-const s = play("starter deck (8 cards rated under 60)", starter, 40, 25, SEED_A, SEED_B);
-band(s.wins, 0.8, 2.5, "starter deck: wins in an average run");
-band(s.winless, 0.02, 0.30, "starter deck: runs that end without a single win");
-const m = play("middling collection (60 random cards)", middling, MIDDLING, 6, SEED_A, SEED_B);
-band(m.wins, 5, 10, "middling collection: wins in an average run");
-// The three bands below are FLOORS set under what was measured, not targets the numbers were tuned to hit. On
-// three seed sets at 80 collections the gain was 0.338 every time, luck moved 29-31% of runs, and a sub-70 card
-// was fielded in 16-24% of battles. Whether +0.34 wins a run is ENOUGH reward for reading the defense is a
-// question for somebody playing it, and CARDS.md says so.
-band(m.wins - m.flatWins, 0.25, 40, "...more than the six highest ratings manage, by this many wins");
-band(m.differs, 0.40, 1, "...reading the defense picks a different six this often");
-band(m.luckMoved, 0.20, 0.75, "...luck changes how long a run lasts this often");
-band(m.luckShift, 0.2, 1.0, "...and by this many wins on average");
-band(m.lowCard, 0.10, 1, "...a card rated under 70 is in the chosen lineup this often");
-const k = play("stacked collection (the 60 highest ratings)", stacked, 1, 60, SEED_A, SEED_B);
-band(k.wins, 9, 16, "stacked collection: wins in an average run");
-band(k.capped + m.capped + s.capped, 0, 0, "no run ever reaches " + MAX_RUN + " wins - the bar always catches up");
+console.log(`card balance: ${RUNS} runs a collection, seed ${SEED}`);
+const s = measure("A starter deck (thirty Base cards rated under 60)", starter);
+const r = measure("Sixty random cards", randomSixty);
+const b = measure("The sixty best cards in the game", () => bestSixty());
 
-console.log(fails ? `\n${fails} band(s) FAILED` : "\ncard balance: every band holds");
+// ---- how much is luck ----
+// The same two teams, played a thousand times: how often does the side that is better on paper lose?
+{
+  const rand = mulberry32(SEED + 7);
+  let flips = 0, games = 0;
+  for (let i = 0; i < 300; i++) {
+    const deck = C.bestDeck(randomSixty(mulberry32(SEED + 2000 + i)));
+    const hand = C.dealHand(deck, rand);
+    // an even match: a CPU team built at the rating this hand's best six average
+    const even = dull(hand).reduce((sum, e) => sum + C.CARDS.get(e.id).rating, 0) / 6;
+    const foe = C.buildTeam(rand, even);
+    const team = sharp(hand, foe);
+    let w = 0;
+    for (let k = 0; k < 20; k++) if (C.scoreBattle(team, foe, rand).win) w++;
+    games += 20; flips += Math.min(w, 20 - w);
+  }
+  var luck = flips / games;
+  console.log(`\nAn even match played twenty times: the less likely result comes up ${(100 * luck).toFixed(0)}% of the time.`);
+}
+
+console.log("\nWhat the game is held to:");
+hold(s.dull.avg >= 0.8 && s.dull.avg <= 3, `a starter deck wins ${s.dull.avg.toFixed(2)} battles a run (0.8 to 3)`);
+hold(s.dull.zero <= 0.4, `...and loses its very first battle ${(100 * s.dull.zero).toFixed(0)}% of the time (at most 40%)`);
+hold(r.sharp.avg >= 4 && r.sharp.avg <= 9, `sixty random cards win ${r.sharp.avg.toFixed(2)} a run (4 to 9)`);
+hold(b.sharp.avg >= 8 && b.sharp.avg <= 16, `the sixty best win ${b.sharp.avg.toFixed(2)} a run (8 to 16)`);
+hold(b.sharp.long === 0 && b.dull.long === 0, "no run reaches forty wins");
+hold(r.sharp.avg - r.dull.avg >= 0.3, `choosing and ordering the six is worth ${(r.sharp.avg - r.dull.avg).toFixed(2)} wins a run over the six best in rating order (at least 0.3)`);
+hold(r.sharp.changed >= 0.25, `the sharp player fields a different six ${(100 * r.sharp.changed).toFixed(0)}% of the time (at least 25%)`);
+hold(r.sharp.upsets >= 0.3, `a lower-rated card takes ${r.sharp.upsets.toFixed(2)} rounds a battle off a higher-rated one (at least 0.3)`);
+hold(luck >= 0.08 && luck <= 0.35, `luck turns ${(100 * luck).toFixed(0)}% of rematches (8% to 35%)`);
+
+console.log(fails ? `\n${fails} FAILED` : "\ncard balance: every promise held");
 process.exit(fails ? 1 : 0);

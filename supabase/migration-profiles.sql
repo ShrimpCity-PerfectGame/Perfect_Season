@@ -745,7 +745,13 @@ begin
   -- that reads names live would otherwise show the tombstone holding a streak.
   if to_regclass('public.card_runs') is not null then
     execute 'delete from public.card_runs where user_id = $1' using v_uid;
-    execute 'delete from public.card_showdowns where user_id = $1' using v_uid;
+  end if;
+  -- ...and the deck and the daily battles of v2.27.0. Each its own guard: these tables arrived in different releases.
+  if to_regclass('public.card_decks') is not null then
+    execute 'delete from public.card_decks where user_id = $1' using v_uid;
+  end if;
+  if to_regclass('public.card_dailies') is not null then
+    execute 'delete from public.card_dailies where user_id = $1' using v_uid;
   end if;
   -- Reports they filed and reports about them: both name a person, and a closed account cannot answer one.
   delete from public.reports where reporter_id = v_uid or target_id = v_uid;

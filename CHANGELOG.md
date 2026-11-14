@@ -20,6 +20,39 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-11-14
+
+Test site only. **The battle is rebuilt: offense against offense.** The owner's redesign - "a fast collectible
+strategy game powered by historical NFL seasons" - and stage one of four modes.
+
+### Changed
+- Cards: **you play a CPU team made of the same cards you collect**, not a defense. Defenses, their traits and
+  the bar are gone.
+- Cards: **a deck of thirty** - 5 quarterbacks, 10 backs, 10 receivers, 5 tight ends. Each battle deals you
+  twelve of them (2, 4, 4, 2) and you field six, **in an order you choose**. An unsaved deck is your best thirty.
+- Cards: **six rounds, each on a category** - Production, Touchdown threat, Big play, Workload, Efficiency,
+  Star power. Every card has a 0-99 score in each, from how its real season ranked at its position in its era.
+  Each category comes up once, in an order nobody knows. Win more rounds than the other side.
+- Cards: **every archetype has an ability** (a Workhorse gains after a win, a Deep threat once your quarterback
+  has played, a Safety valve cancels the card across from him...) and a lineup earns **synergies** for
+  teammates, a shared season, and the archetype pairs.
+- Cards: **the arena.** Your active card on the left, theirs on the right, a big VS, the stat comparison, the
+  round's winner called; your six below with the active one lit and the bench named; the score, the round, a
+  speed control and a battle log.
+- Cards: **the starter deck is thirty cards**, a full deck. An account that opened the old eight-card starter
+  is offered a top-up to thirty.
+- Cards: the ladder (runs against stronger and stronger CPU teams) and the daily battle (one team a day, the
+  same for everyone) replace runs against defenses and the daily showdown. A **Deck** tab joins Ladder, Daily
+  and Boards under Battle.
+
+### Removed
+- `card_showdowns`, `card_runs.defense` and the functions around them, which only ever reached the test site.
+  `migration-cards.sql` clears them from a database that has them, once. `data/card-defense.json` is no longer
+  served or bundled.
+
+### Not built yet
+- The historical gauntlet and the draft arena - stages two and three.
+
 ## [2.26.0] - 2026-11-14
 
 Test site only. All three asked for by the owner, from their phone.

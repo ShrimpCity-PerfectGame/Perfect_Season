@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import * as GL from "../game-logic.mjs";
 import * as V from "../versus-logic.mjs";
-import { initCardData, initDefenses } from "../card-logic.mjs";
+import { initCardData } from "../card-logic.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const root = path.resolve(__dirname, "..");
@@ -29,13 +29,10 @@ V.initVersusData(versusPool);
 // it is bundled into a browser page by tools/ui-harness). This is the Node copy of card-logic.mjs the mock
 // imports - the app under test has its own copy inside its bundle and loads the catalog by fetch.
 initCardData(JSON.parse(readFileSync(path.join(root, "data", "cards.json"), "utf8")));
-// ...and the defenses a card battle is played against, for the mock's run and showdown.
-initDefenses(versusPool, JSON.parse(readFileSync(path.join(root, "data", "card-defense.json"), "utf8")));
 
 const NODE_FETCH = globalThis.fetch;
 const FETCHED_DATA = {
   "/data/versus-pool.json": versusPool,
-  "/data/card-defense.json": JSON.parse(readFileSync(path.join(root, "data", "card-defense.json"), "utf8")),
 };
 
 export { makeMockAuth } from "./mock-supabase.mjs";

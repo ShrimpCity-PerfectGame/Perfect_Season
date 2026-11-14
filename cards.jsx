@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId, fetchWallet, sellCopies } from "./storage.js";
 import { loadCardData } from "./card-data.mjs";
-import { CARDS, FINISHES } from "./card-logic.mjs";
+import { CARDS, FINISHES, bestDeck, DECK_SIZE } from "./card-logic.mjs";
 import { TEAMS } from "./game-logic.mjs";
 import { PACKS, packCards, packOdds } from "./card-packs.mjs";
 import { Coins } from "./cosmetics.jsx";
@@ -301,6 +301,11 @@ const FINISH_ORDER = { prism: 0, gold: 1, silver: 2, base: 3 };
 // Owned rows as cards to draw: best first. A row whose card is not in the catalog this browser loaded is
 // skipped rather than drawn as a blank - it means the catalog is older than the collection, and the rest of the
 // collection is still worth showing.
+// THE STARTER CARDS FILL A DECK (v2.27.0). A battle needs a deck of thirty, so the offer is made to any
+// collection that cannot fill one - a new account, or one that opened the old eight-card starter - and not by
+// whether a starter was ever claimed.
+const canDeck = (rows) => bestDeck(rows.map((r) => ({ id: r.id, finish: r.finish }))) !== null;
+
 function toCards(rows) {
   return rows.map((r) => ({ ...r, card: CARDS.get(r.id) })).filter((r) => r.card)
     .sort((a, b) => b.card.rating - a.card.rating || FINISH_ORDER[a.finish] - FINISH_ORDER[b.finish] || a.id - b.id);
@@ -308,9 +313,9 @@ function toCards(rows) {
 
 // Two levels (v2.26.0): three things to do with cards across the top - look at them, get more, play them - and
 // the three ways to play under Battle. Five chips in one group wrapped onto two ragged rows on a phone.
-const TABS = [["collection", "Collection"], ["packs", "Packs"], ["run", "Run"], ["showdown", "Showdown"], ["boards", "Boards"]];
+const TABS = [["collection", "Collection"], ["packs", "Packs"], ["run", "Ladder"], ["daily", "Daily"], ["deck", "Deck"], ["boards", "Boards"]];
 const TOP_TABS = [["collection", "Collection"], ["packs", "Packs"], ["battle", "Battle"]];
-const BATTLE_TABS = [["run", "Run"], ["showdown", "Showdown"], ["boards", "Boards"]];
+const BATTLE_TABS = [["run", "Ladder"], ["daily", "Daily"], ["deck", "Deck"], ["boards", "Boards"]];
 const isBattle = (tab) => BATTLE_TABS.some(([id]) => id === tab);
 // initialTab is the UI harness's, so the pack shop and the battle screens can be looked at and audited without a click.
 export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, balance = null, onBalance, initialTab = "collection" }) {
@@ -346,7 +351,7 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
         if (!current() || got.status !== "ok") return;
         const cards = toCards(got.cards);
         setOwned(cards); setStale(cards.length < got.cards.length);
-        setPhase(got.starter ? "collection" : "starter");
+        setPhase(canDeck(cards) ? "collection" : "starter");
       } catch { /* what is on screen stays */ }
       return;
     }
@@ -359,7 +364,7 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
       const cards = toCards(got.cards);
       setOwned(cards);
       setStale(cards.length < got.cards.length);
-      setPhase(got.starter ? "collection" : "starter");
+      setPhase(canDeck(cards) ? "collection" : "starter");
     } catch {
       if (current()) setPhase("error");
     }
@@ -474,8 +479,9 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
       {phase === "starter" && tab === "collection" && (
         <div className="panel cd-starter">
           <h2 className="cd-h">Your starter deck</h2>
-          <p>Eight cards to get you going: a quarterback, a back, a receiver, a tight end and four more. After that, finishing
-            the daily draft earns you one card a day.</p>
+          <p>{owned.length === 0
+            ? `${DECK_SIZE} cards to get you going - a full deck of 5 quarterbacks, 10 backs, 10 receivers and 5 tight ends, enough to battle straight away. After that, finishing the daily draft earns you one card a day.`
+            : `Battles need a full deck of ${DECK_SIZE}: 5 quarterbacks, 10 backs, 10 receivers and 5 tight ends. Open this and your collection is topped up to one.`}</p>
           <button className="btn solid xl" onClick={openStarter} disabled={busy}>{busy ? "Opening…" : "Open your starter deck"}</button>
           {notice && <p className="note" role="alert">{notice}</p>}
         </div>

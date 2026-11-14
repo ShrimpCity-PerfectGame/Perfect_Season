@@ -7,7 +7,8 @@ import {
   setupDom, makeStorage, makeMockAuth, mount, flush, click, type, clickMode, findButtonByText, assert, runTest, waitForCrypto,
 } from "./helpers.mjs";
 import { CARD_REFUSALS } from "../storage-cards.js";
-import { CARDS, cardBoardKey } from "../card-logic.mjs";
+import { CARDS, cardBoardKey, buildTeam, dailyFoe } from "../card-logic.mjs";
+import { mulberry32 } from "../game-logic.mjs";
 
 setupDom();
 window.storage = makeStorage();
@@ -17,11 +18,9 @@ window.__ps_cards__ = true;
 // The app fetches the catalog; in a test that is a file read.
 const catalog = JSON.parse(readFileSync(new URL("../data/cards.json", import.meta.url), "utf8"));
 const versusPoolFile = JSON.parse(readFileSync(new URL("../data/versus-pool.json", import.meta.url), "utf8"));
-const cardDefense = JSON.parse(readFileSync(new URL("../data/card-defense.json", import.meta.url), "utf8"));
 let fetchFails = false;
 globalThis.fetch = window.fetch = async (url) => {
   if (String(url).endsWith("/data/cards.json")) { if (fetchFails) throw new Error("offline"); return { ok: true, status: 200, json: async () => catalog }; }
-  if (String(url).endsWith("/data/card-defense.json")) return { ok: true, status: 200, json: async () => cardDefense };
   if (String(url).endsWith("/data/versus-pool.json")) return { ok: true, status: 200, json: async () => versusPoolFile };
   return { ok: false, status: 404, json: async () => ({}) };
 };
@@ -77,12 +76,12 @@ await runTest("a new account opens a starter deck, once", async () => {
   const open = button("Open your starter deck");
   assert(open, "the starter button is there: " + container.querySelector(".cd-area")?.textContent.slice(0, 120));
   await click(open); await settle(); await settle();
-  assert(container.querySelector("#cd-fresh-h")?.textContent === "Your starter deck", "the eight just dealt are shown under their own heading");
-  assert(container.querySelectorAll(".cd-fresh [data-card]").length === 8, "all eight of them");
-  assert(container.querySelector("#cd-coll-h")?.textContent === "8 cards", "and the collection says 8 cards: " + container.querySelector("#cd-coll-h")?.textContent);
-  assert(auth._cards.owned(ann).reduce((n, o) => n + o.count, 0) === 8, "the account owns eight");
+  assert(container.querySelector("#cd-fresh-h")?.textContent === "Your starter deck", "the thirty just dealt are shown under their own heading");
+  assert(container.querySelectorAll(".cd-fresh [data-card]").length === 30, "all thirty of them");
+  assert(container.querySelector("#cd-coll-h")?.textContent === "30 cards", "and the collection says 30 cards: " + container.querySelector("#cd-coll-h")?.textContent);
+  assert(auth._cards.owned(ann).reduce((n, o) => n + o.count, 0) === 30, "the account owns thirty");
   await remount(); await openCards();
-  assert(!button("Open your starter deck") && container.querySelector("#cd-coll-h")?.textContent === "8 cards", "coming back shows the collection, not the button");
+  assert(!button("Open your starter deck") && container.querySelector("#cd-coll-h")?.textContent === "30 cards", "coming back shows the collection, not the button");
   assert(!container.querySelector(".cd-fresh"), "and the just-dealt section was for the moment it was dealt");
   const ratings = [...container.querySelectorAll("section[aria-labelledby='cd-coll-h'] [data-card]")].map((el) => CARDS.get(Number(el.dataset.card)).rating);
   assert(ratings.every((r, i) => i === 0 || ratings[i - 1] >= r), "best card first");
@@ -96,7 +95,7 @@ await runTest("the position filter", async () => {
   assert(shown.length >= 1 && shown.every((el) => CARDS.get(Number(el.dataset.card)).pos === "QB"), "QB shows only quarterbacks");
   assert(shown.every((el) => el.getAttribute("aria-label").includes("quarterback")), "and each one says so aloud");
   assert(chip("QB").getAttribute("aria-pressed") === "true" && chip("All").getAttribute("aria-pressed") === "false", "the pressed state moved");
-  assert(container.querySelector("#cd-coll-h").textContent === "8 cards", "the count is the collection's, not the filter's");
+  assert(container.querySelector("#cd-coll-h").textContent === "30 cards", "the count is the collection's, not the filter's");
   await click(chip("All")); await flush();
 });
 
@@ -106,9 +105,9 @@ await runTest("the finish and team filters narrow the same grid", async () => {
   auth._cards.grantCards(ann, "gift", [{ ref: "filter-gold", card: gold.id, finish: "gold" }]);
   await openCards();
   const finishChip = (f) => container.querySelector(`[data-finish-filter="${f}"]`);
-  assert(finishChip("All").getAttribute("aria-pressed") === "true" && cardsOnScreen().length === 9, "nine cards, any finish");
+  assert(finishChip("All").getAttribute("aria-pressed") === "true" && cardsOnScreen().length === 31, "thirty-one cards, any finish");
   await click(finishChip("gold")); await flush();
-  assert(cardsOnScreen().length === 1 && cardsOnScreen()[0].dataset.finish === "gold" && /Showing 1 of 9\./.test(container.querySelector("[data-shown]").textContent), "Gold shows the one Gold card, and says how many of how many");
+  assert(cardsOnScreen().length === 1 && cardsOnScreen()[0].dataset.finish === "gold" && /Showing 1 of 31\./.test(container.querySelector("[data-shown]").textContent), "Gold shows the one Gold card, and says how many of how many");
   await click(finishChip("prism")); await flush();
   assert(cardsOnScreen().length === 0 && /No cards match those filters/.test(container.textContent), "a finish nobody holds says so, not 'no cards yet'");
   await click(finishChip("All")); await flush();
@@ -118,7 +117,7 @@ await runTest("the finish and team filters narrow the same grid", async () => {
   setter.call(select, gold.team); select.dispatchEvent(new window.Event("change", { bubbles: true })); await flush();
   assert(cardsOnScreen().length >= 1 && cardsOnScreen().every((el) => CARDS.get(Number(el.dataset.card)).team === gold.team), "a team shows only that team's cards");
   setter.call(select, "All"); select.dispatchEvent(new window.Event("change", { bubbles: true })); await flush();
-  assert(cardsOnScreen().length === 9, "and Every team brings them all back");
+  assert(cardsOnScreen().length === 31, "and Every team brings them all back");
   auth._cards.tables.card_owned.splice(auth._cards.tables.card_owned.findIndex((o) => o.user_id === ann && o.card_id === gold.id && o.finish === "gold"), 1);
   await openCards();
 });
@@ -132,7 +131,7 @@ await runTest("a read that failed is not an empty collection", async () => {
   assert(!container.querySelector("#cd-coll-h") && cardsOnScreen().length === 0, "and does not claim a count");
   auth._cards.readFails = false;
   await click(button("Try again")); await settle();
-  assert(container.querySelector("#cd-coll-h")?.textContent === "8 cards", "Try again loads the collection");
+  assert(container.querySelector("#cd-coll-h")?.textContent === "30 cards", "Try again loads the collection");
 });
 
 await runTest("a catalog that will not load is the same honest failure", async () => {
@@ -149,8 +148,8 @@ await runTest("a catalog that will not load is the same honest failure", async (
 await runTest("a card the catalog does not know is skipped, and the rest still show", async () => {
   auth._cards.tables.card_owned.push({ user_id: ann, card_id: 999999, finish: "gold", count: 1 });
   await remount(); await openCards();
-  assert(cardsOnScreen().length === 8, "eight real cards are drawn");
-  assert(container.querySelector("#cd-coll-h").textContent === "8 cards", "and counted - the unknown one is not");
+  assert(cardsOnScreen().length === 30, "thirty real cards are drawn");
+  assert(container.querySelector("#cd-coll-h").textContent === "30 cards", "and counted - the unknown one is not");
   assert(/out of date/i.test(container.querySelector(".cd-area").textContent), "and the screen says the page is out of date, rather than leaving a card silently missing");
   auth._cards.tables.card_owned.pop();
 });
@@ -169,7 +168,7 @@ await runTest("a stack of copies from before is sold the first time the collecti
   const said = container.querySelector("[data-swept]")?.textContent || "";
   assert(/2 extra copies were sold for/.test(said) && said.includes((2 * each).toLocaleString("en-US")), "the screen says what was sold and for how much: " + said);
   const el = container.querySelector(`[data-card="${first.card_id}"]`);
-  assert(!el.querySelector(".cd-count") && container.querySelector("#cd-coll-h").textContent === "8 cards", "and the collection shows one of it, eight cards in all");
+  assert(!el.querySelector(".cd-count") && container.querySelector("#cd-coll-h").textContent === "30 cards", "and the collection shows one of it, thirty cards in all");
   // Opening it again sells nothing more and says nothing more.
   await remount(); await openCards(); await settle();
   assert(auth._wallet.balanceOf(ann) === before + 2 * each && !container.querySelector("[data-swept]"), "a second visit sells nothing");
@@ -186,7 +185,7 @@ await runTest("a server that has cards switched off says so, in a sentence", asy
   assert(button("Open your starter deck") && !button("Open your starter deck").disabled, "the button is live again");
   auth._cards.enabled = true;
   await click(button("Open your starter deck")); await settle(); await settle();
-  assert(container.querySelector("#cd-coll-h")?.textContent === "8 cards", "and once it is on, the same button works");
+  assert(container.querySelector("#cd-coll-h")?.textContent === "30 cards", "and once it is on, the same button works");
 });
 
 await runTest("every refusal has a sentence", async () => {
@@ -290,7 +289,7 @@ await runTest("finishing the daily shows the card it earned, under the coins", a
   assert(button("Open your starter deck"), "the starter deck is still on offer");
   assert(container.querySelector("#cd-coll-h")?.textContent === "1 card" && container.querySelector(`[data-card="${shown}"]`), "and the card it was just shown is there: " + container.querySelector("#cd-coll-h")?.textContent);
   await click(button("Open your starter deck")); await settle(); await settle();
-  assert(container.querySelector("#cd-coll-h")?.textContent === "9 cards", "opening the deck adds eight to it");
+  assert(container.querySelector("#cd-coll-h")?.textContent === "30 cards", "opening the deck fills it to thirty - the daily card already holds one of the spots");
 });
 
 await runTest("with cards hidden the daily shows no card, and the card is still banked", async () => {
@@ -503,12 +502,14 @@ await runTest("a guest and a signed-out visitor get no pack shop", async () => {
   assert(!shopTab() && !container.querySelector("[data-pack]"), "signed out: no Packs tab");
 });
 
-// ---------- battles (v2.25.0): a run, the daily showdown, the boards ----------
-// Run, Showdown and Boards sit under Battle, so reaching one is Battle first when it is not already open.
+// ---------- battles (v2.27.0: offense against offense): the ladder, the daily battle, the deck, the boards ----------
+// Ladder, Daily, Deck and Boards sit under Battle, so reaching one is Battle first when it is not already open.
 const tabBtn = (id) => container.querySelector(`.cd-area [data-tab="${id}"]`);
 const area = () => container.querySelector(".cb-area");
 const q = (sel) => container.querySelector(sel);
-const HIGH = () => Array(12).fill(0.98), LOW = () => Array(12).fill(0.02);
+const qa = (sel) => [...container.querySelectorAll(sel)];
+// Twenty-nine draws: five to order the categories, then your card's two and theirs, six times over.
+const rolls = (win) => [0.1, 0.7, 0.3, 0.9, 0.5, ...Array(6).fill(win ? [0.97, 0.97, 0.03, 0.03] : [0.03, 0.03, 0.97, 0.97]).flat()];
 async function openTabOf(id) {
   await openCards();
   assert(tabBtn("battle"), "an account sees a Battle tab");
@@ -516,72 +517,96 @@ async function openTabOf(id) {
   assert(tabBtn(id), `and a ${id} tab under it`);
   await click(tabBtn(id)); await settle(); await settle();
 }
+const liveRun = (uid) => auth._cards.runs.filter((r) => r.user_id === uid).at(-1);
+// A CPU team this account's starter cards cannot beat, or cannot lose to: the test decides, not the ladder.
+const foeAt = (rating) => buildTeam(mulberry32(rating), rating).map((e) => ({ card: e.id, finish: e.finish }));
 let bea;
 
-await runTest("a run: see the defense, pick six, play, and go again", async () => {
+await runTest("the ladder: see their six, pick and order yours, play, and go again", async () => {
   bea = await signUp("bea@cards.test", "bea");
   await openCards();
   await click(button("Open your starter deck")); await settle(); await settle();
   await openTabOf("run");
-  assert(area()?.dataset.phase === "idle" && q("[data-start]") && q("[data-best]") === null, "it opens on the offer to start, not on a battle: " + container.querySelector(".cd-area")?.textContent.slice(0, 160));
+  assert(area()?.dataset.phase === "idle" && q("[data-start]") && !q("[data-play]"), "it opens on the offer to start, not on a battle: " + container.querySelector(".cd-area")?.textContent.slice(0, 160));
   assert(q("[data-paid-left]").textContent === "15" && q("[data-best-run]").textContent === "0", "with the day's paid wins and the best so far");
-  assert(container.querySelectorAll(".cd-tabs [data-tab]").length === 3 && tabBtn("battle").getAttribute("aria-pressed") === "true" && tabBtn("run").getAttribute("aria-pressed") === "true", "three tabs across the top, Battle pressed, and Run pressed under it");
+  assert(qa(".cd-tabs [data-tab]").length === 3 && tabBtn("battle").getAttribute("aria-pressed") === "true" && tabBtn("run").getAttribute("aria-pressed") === "true" && tabBtn("deck") && tabBtn("daily") && tabBtn("boards"), "three tabs across the top, Battle pressed, and four ways in under it");
   await click(q("[data-start]")); await settle();
-  assert(area().dataset.phase === "pick" && q("[data-defense]") && /defense/i.test(q(".cb-def-h").textContent), "starting shows the defense first: " + area().textContent.slice(0, 120));
-  const run = auth._cards.runs.find((r) => r.user_id === bea);
-  assert(run && q("[data-defense]").dataset.defense === run.defense && !container.innerHTML.includes(run.seed), "it is the server's defense, and the seed is nowhere on the page");
-  assert(q("[data-play]").disabled && !q("[data-proj]"), "nothing to play until six are picked");
+  const run = liveRun(bea);
+  assert(area().dataset.phase === "pick" && run && !container.innerHTML.includes(run.seed), "starting opens the picker, and the seed is nowhere on the page");
+  assert(qa("[data-foe] [data-card]").map((el) => Number(el.dataset.card)).join() === run.foe.map((e) => e.card).join(), "their six are shown, in the order the server holds them");
+  assert(qa(".cb-hand [data-hand]").map((b) => Number(b.dataset.hand)).sort().join() === run.hand.map((e) => e.card).sort().join(), "and the hand is the twelve the server dealt");
+  assert(qa(".cb-hand .cb-cats").length === 12 && /Yds|TD|Big/.test(q(".cb-hand .cb-cats").textContent), "every card in the hand shows its category scores");
+  assert(q("[data-play]").disabled && /Pick 6 more/.test(q("[data-hint]").textContent), "nothing to play until six are picked, and it says how many: " + q("[data-hint]")?.textContent);
 
-  // By hand for one slot, then the rest: a slot opens a list of the cards that fit it.
-  await click(q('[data-slot="QB"] .cb-slot')); await flush();
-  const options = [...container.querySelectorAll('[data-slot="QB"] .cb-opt')];
-  assert(options.length >= 1 && options.every((o) => CARDS.get(Number(o.dataset.card)).pos === "QB"), "the quarterback slot lists quarterbacks, and only those");
-  await click(options[0]); await flush();
-  assert(q('[data-slot="QB"] .cb-who b') && q("[data-play]").disabled, "one picked, five to go");
+  // By hand: a quarterback, then the second quarterback is not on offer.
+  const qbs = qa(".cb-hand [data-hand]").filter((b) => CARDS.get(Number(b.dataset.hand)).pos === "QB");
+  await click(qbs[0]); await flush();
+  assert(qbs[0].getAttribute("aria-pressed") === "true" && qbs[1].disabled && /Pick 5 more/.test(q("[data-hint]").textContent), "one quarterback in, the other no longer offered");
+  await click(q("[data-out]")); await flush();
+  assert(!q("[data-team]") && !qbs[1].disabled, "taking him out puts both back");
   await click(q("[data-best]")); await flush();
-  assert(!q("[data-play]").disabled && /Before luck: [\d.,]+ against a bar of \d+/.test(q("[data-proj]").textContent), "six picked: the score before luck, against the bar: " + q("[data-proj]")?.textContent);
-  assert(q("[data-bar]").textContent === q("[data-proj]").textContent.match(/bar of (\d+)/)[1], "the bar on the defense is the bar in the sum");
+  const order = () => qa("[data-team] [data-card]").map((el) => Number(el.dataset.card));
+  assert(order().length === 6 && !q("[data-play]").disabled && !q("[data-hint]"), "Pick for me fields six, and the battle can be played");
+  assert(qa("[data-team] .cb-vs").map((el) => el.textContent).join("|") === run.foe.map((e) => `vs ${CARDS.get(e.card).name}`).join("|"), "each spot says who it is up against");
+  // The order is the player's: move the second card up and it is the one sent first.
+  const before = order();
+  await click(qa("[data-team] [data-up]")[1]); await flush();
+  assert(order()[0] === before[1] && order()[1] === before[0], "moving a card earlier swaps it with the one above");
 
-  auth._cards.nextRolls = HIGH();
+  run.foe = foeAt(20); // beatable whatever the hand
+  auth._cards.nextRolls = rolls(true);
+  const sent = order();
   await click(q("[data-play]")); await settle(); await settle();
-  assert(area().dataset.phase === "result" && q("[data-win]").dataset.win === "true", "a win: " + area().textContent.slice(0, 80));
-  assert(/Win 1/.test(q(".cb-result-h").textContent) && /You won, [\d.,]+ to a bar of \d+\./.test(q("[data-verdict]").textContent), "said in words, not only in colour: " + q("[data-verdict]").textContent);
-  assert(container.querySelectorAll(".cb-play").length === 6 && container.querySelectorAll(".cb-play [data-card]").length === 6, "six cards, each with its game");
-  assert(/yards, \d+ TD/.test(q(".cb-line").textContent) && /luck/.test(q(".cb-math").textContent), "a football line and the luck that went with it");
-  assert(q("[data-paid]") && auth._wallet.balanceOf(bea) === 253, "and the win paid its three coins: " + auth._wallet.balanceOf(bea));
+  assert(area().dataset.phase === "result" && q("[data-win]").dataset.win === "true" && q("[data-done]").dataset.done === "true", "a win, shown finished: " + area().textContent.slice(0, 80));
+  assert(/Win 1/.test(q(".cb-result-h").textContent) && /You won, \d rounds to \d\./.test(q("[data-verdict]").textContent), "said in words, not only in colour: " + q("[data-verdict]").textContent);
+  assert(q("[data-you]").textContent === String(liveRun(bea).last.wins) && q("[data-cpu]").textContent === String(liveRun(bea).last.losses), "the scoreboard is the rounds each side took");
+  assert(liveRun(bea).last.team.map((e) => e.id).join() === sent.join(), "the six were played in the order on the screen");
+  const log = qa(".cb-round");
+  assert(log.length === 6 && log.every((li) => /beat|lost to|tied/.test(li.textContent) && /Category \d+ to \d+, luck/.test(li.textContent)), "the log has all six rounds, each with who beat whom and why");
+  assert(new Set(qa(".cb-round-cat").map((el) => el.textContent)).size === 6, "one category a round, all six of them");
+  assert(qa(".cb-strip .cb-s").length === 6 && qa(".cb-strip .cb-s").every((li) => /Won|Lost|Tied/.test(li.textContent)), "your six are in the strip, each marked won or lost in words");
+  assert(/Bench:/.test(q(".cb-bench")?.textContent || ""), "and the six you left out are named as the bench");
+  assert(q("[data-paid]") && auth._wallet.balanceOf(bea) === 253, "the win paid its three coins: " + auth._wallet.balanceOf(bea));
 
   await click(q("[data-next]")); await settle();
-  assert(area().dataset.phase === "pick" && /1 win so far/.test(q(".cb-kick").textContent) && !q("[data-play]").disabled, "the next defense, with the lineup still picked");
-  assert(Number(q("[data-bar]").textContent) > 190, "and a higher bar");
-  auth._cards.nextRolls = LOW();
+  assert(area().dataset.phase === "pick" && /1 win so far/.test(q(".cb-kick").textContent) && q("[data-play]").disabled, "the next team, a NEW hand, and nothing picked yet");
+  const second = liveRun(bea);
+  second.foe = foeAt(126); // unbeatable
+  auth._cards.nextRolls = rolls(false);
+  await click(q("[data-best]")); await flush();
   await click(q("[data-play]")); await settle(); await settle();
-  assert(q("[data-win]").dataset.win === "false" && /Stopped/.test(q(".cb-result-h").textContent) && /The run ends at 1 win\./.test(q("[data-over]").textContent), "a loss ends the run at one: " + area().textContent.slice(0, 80));
+  assert(q("[data-win]").dataset.win === "false" && /Beaten/.test(q(".cb-result-h").textContent) && /The run ends at 1 win\./.test(q("[data-over]").textContent), "a loss ends the run at one: " + area().textContent.slice(0, 80));
   assert(!q("[data-paid]") && auth._wallet.balanceOf(bea) === 253, "and pays nothing");
   await click(q("[data-start]")); await settle();
   assert(area().dataset.phase === "pick" && /0 wins so far/.test(q(".cb-kick").textContent) && auth._cards.runs.filter((r) => r.user_id === bea).length === 2, "a new run starts from zero");
 });
 
-await runTest("a run survives leaving and coming back, and can be walked away from", async () => {
+await runTest("a run survives leaving and coming back - with the same hand - and can be walked away from", async () => {
+  const hand = liveRun(bea).hand.map((e) => e.card).sort().join();
   await goHome(); await openTabOf("run");
   assert(area().dataset.phase === "pick" && /0 wins so far/.test(q(".cb-kick").textContent), "the same run is there on return, not a new one");
+  assert(qa(".cb-hand [data-hand]").map((b) => Number(b.dataset.hand)).sort().join() === hand, "and the same hand - leaving does not re-deal it");
   assert(auth._cards.runs.filter((r) => r.user_id === bea && r.status === "live").length === 1, "still one live run");
   await click(q("[data-quit]")); await settle(); await settle();
-  assert(area().dataset.phase === "idle" && q("[data-best-run]").textContent === "1" && q("[data-paid-left]").textContent === "14", "walking away ends it; the best and the day's paid wins are remembered: " + area().textContent.slice(-120));
+  assert(area().dataset.phase === "idle" && q("[data-best-run]").textContent === "1" && q("[data-paid-left]").textContent === "14", "walking away ends it; the best and the day's paid wins are remembered");
 });
 
 await runTest("a battle whose answer is lost is shown as it was played, never played again", async () => {
   await click(q("[data-start]")); await settle();
+  liveRun(bea).foe = foeAt(20);
   await click(q("[data-best]")); await flush();
-  auth._cards.nextRolls = HIGH(); auth._cards.battleFails = true;
+  auth._cards.nextRolls = rolls(true); auth._cards.battleFails = true;
   await click(q("[data-play]")); await settle(); await settle(); await settle();
-  const run = auth._cards.runs.filter((r) => r.user_id === bea).at(-1);
+  const run = liveRun(bea);
   assert(run.wins === 1, "the battle was played once on the server");
   assert(area().dataset.phase === "result" && q("[data-win]").dataset.win === "true" && /was played/.test(q("[data-notice]").textContent), "and the page shows that battle, saying why: " + q("[data-notice]")?.textContent);
   await click(q("[data-next]")); await settle();
   assert(/1 win so far/.test(q(".cb-kick").textContent) && run.wins === 1, "the run carries on from one win, not two");
 
   // The state cannot be read either: say so, and promise only what is true.
-  auth._cards.nextRolls = HIGH(); auth._cards.battleFails = true; auth._cards.stateFails = true;
+  run.foe = foeAt(20);
+  await click(q("[data-best]")); await flush();
+  auth._cards.nextRolls = rolls(true); auth._cards.battleFails = true; auth._cards.stateFails = true;
   await click(q("[data-play]")); await settle(); await settle(); await settle();
   assert(/couldn't confirm/i.test(q("[data-notice]").textContent) && /never played twice/.test(q("[data-notice]").textContent) && !/not played/.test(q("[data-notice]").textContent), "unknown is called unknown: " + q("[data-notice]").textContent);
   auth._cards.stateFails = false;
@@ -597,45 +622,76 @@ await runTest("a read that failed is not 'no run going'", async () => {
   auth._cards.stateFails = false;
   await click(button("Try again")); await settle(); await settle();
   assert(area()?.dataset.phase === "pick" && /2 wins so far/.test(q(".cb-kick").textContent), "and trying again finds the run");
-  await click(q("[data-quit]")); await settle(); await settle();
 });
 
-await runTest("a lineup the server refuses is told why, and nothing is played", async () => {
-  await click(q("[data-start]")); await settle();
+await runTest("a six the server refuses is told why, and nothing is played", async () => {
   await click(q("[data-best]")); await flush();
-  // The card leaves the collection between the pick and the play (another tab, in a later version a trade).
-  const qbId = Number(q('[data-slot="QB"] .cb-slot').dataset.card); // the quarterback actually in the lineup - a deck can hold two
-  const row = auth._cards.tables.card_owned.find((o) => o.user_id === bea && o.card_id === qbId);
+  // The card leaves the collection between the deal and the play.
+  const first = Number(q("[data-team] [data-card]").dataset.card);
+  const row = auth._cards.tables.card_owned.find((o) => o.user_id === bea && o.card_id === first);
   row.count = 0;
   await click(q("[data-play]")); await settle(); await settle();
   assert(/isn't in your collection/.test(q("[data-notice]")?.textContent || "") && area().dataset.phase === "pick", "not owned, in a sentence: " + q("[data-notice]")?.textContent);
-  assert(auth._cards.runs.filter((r) => r.user_id === bea).at(-1).wins === 0, "and the run did not move");
+  assert(liveRun(bea).wins === 2, "and the run did not move");
   row.count = 1;
   await click(q("[data-quit]")); await settle(); await settle();
 });
 
-await runTest("the showdown: one defense, a second tap, one score", async () => {
-  await click(tabBtn("showdown")); await settle(); await settle();
-  assert(area().dataset.mode === "showdown" && /Today's showdown/.test(q(".cb-kick").textContent) && q("[data-play]").disabled, "today's defense, and nothing to play yet");
-  assert(!q("[data-bar]"), "a showdown has no bar: it is a score");
-  await click(q("[data-best]")); await flush();
-  assert(/Before luck: [\d.,]+\./.test(q("[data-proj]").textContent) && !/bar/.test(q("[data-proj]").textContent), "the score before luck, with no bar in it");
-  await click(q("[data-play]")); await flush();
-  assert(/one go/i.test(q("[data-play]").textContent) && auth._cards.showdowns.length === 0, "the first tap only asks");
-  await click(q("[data-play]")); await settle(); await settle();
-  const mine = auth._cards.showdowns.find((s) => s.user_id === bea);
-  assert(mine && /Your score today: [\d.,]+\./.test(q("[data-played]").textContent) && q("[data-played]").textContent.includes(mine.score.toLocaleString("en-US", { maximumFractionDigits: 1 })), "played once, and the score on the page is the recorded one: " + q("[data-played]")?.textContent);
-  assert(!q("[data-play]") && container.querySelectorAll(".cb-play").length === 6 && /You scored/.test(q("[data-verdict]").textContent), "the six games are shown and there is no second go");
-  await goHome(); await openTabOf("showdown");
-  assert(q("[data-played]") && !q("[data-play]"), "and it is still played after leaving and coming back");
-  assert(auth._wallet.balanceOf(bea) === 260, "a showdown pays no coins: still the 250 welcome and the three paid wins (3, 3 and 4)");
+await runTest("the deck: thirty cards by position, a swap, and a save", async () => {
+  // Two more backs than the deck holds, so there is something to swap in.
+  const spare = [...CARDS.values()].filter((c) => c.pos === "RB" && c.rating < 30 && !auth._cards.owned(bea).some((o) => CARDS.get(o.card_id).pid === c.pid)).slice(0, 2);
+  auth._cards.grantCards(bea, "gift", spare.map((c, i) => ({ ref: `spare:${i}`, card: c.id, finish: "base" })));
+  await goHome(); await openTabOf("deck");
+  assert(area().dataset.mode === "deck" && qa("[data-pos]").map((s) => `${s.dataset.pos}:${s.querySelectorAll(":scope > ul > li").length}`).join() === "QB:5,RB:10,WR:10,TE:5", "the deck, five, ten, ten and five: " + qa("[data-pos]").map((s) => s.querySelectorAll(":scope > ul > li").length));
+  assert(q("[data-save]").disabled && !auth._cards.decks.has(bea), "nothing to save until something changes - an unsaved deck is the best thirty");
+  const rbs = q('[data-pos="RB"]');
+  await click([...rbs.querySelectorAll("button")].find((b) => b.textContent === "Swap")); await flush();
+  const ins = qa("[data-swap-in]");
+  assert(ins.length === 2, "the two spare backs are offered, and nobody already in the deck: " + ins.length);
+  await click(ins[0]); await flush();
+  assert(!q("[data-save]").disabled && qa("[data-swap-in]").length === 0, "one swapped in, and the deck can be saved");
+  await click(q("[data-save]")); await settle(); await settle();
+  const saved = auth._cards.decks.get(bea);
+  assert(saved && saved.length === 30 && saved.some((c) => spare.some((s) => s.id === c.card)) && /Deck saved/.test(q("[data-notice]").textContent), "saved, with the spare back in it");
+  assert(q("[data-save]").disabled, "and there is nothing left to save");
+  // The hand comes out of the SAVED deck.
+  await click(tabBtn("run")); await settle(); await settle();
+  await click(q("[data-start]")); await settle();
+  const deckIds = new Set(saved.map((c) => c.card));
+  assert(liveRun(bea).hand.every((e) => deckIds.has(e.card)), "a run's hand is dealt from the deck that was saved");
+  await click(q("[data-quit]")); await settle(); await settle();
+  await click(tabBtn("deck")); await settle(); await settle();
+  await click(q("[data-best-deck]")); await flush();
+  assert(!q("[data-save]").disabled, "Use my best thirty puts the stronger back in again, ready to save");
 });
 
-await runTest("the boards list the run and the showdown, by name", async () => {
+await runTest("the daily battle: deal once, a second tap, one result", async () => {
+  await click(tabBtn("daily")); await settle(); await settle();
+  assert(area().dataset.phase === "deal" && q("[data-deal]") && auth._cards.dailies.length === 0, "it opens on the deal - nothing is dealt by looking");
+  await click(q("[data-deal]")); await settle(); await settle();
+  const row = auth._cards.dailies.find((d) => d.user_id === bea);
+  assert(area().dataset.phase === "pick" && row && qa(".cb-hand [data-hand]").length === 12, "dealt: twelve cards and today's team");
+  assert(qa("[data-foe] [data-card]").map((el) => Number(el.dataset.card)).join() === dailyFoe(auth._cards.today()).map((e) => e.id).join(), "against the day's CPU team");
+  const hand = row.hand.map((e) => e.card).join();
+  await goHome(); await openTabOf("daily");
+  assert(area().dataset.phase === "pick" && auth._cards.dailies.find((d) => d.user_id === bea).hand.map((e) => e.card).join() === hand, "leaving and coming back is the same hand");
+  await click(q("[data-best]")); await flush();
+  await click(q("[data-play]")); await flush();
+  assert(/one go/i.test(q("[data-play]").textContent) && row.played_at === null, "the first tap only asks");
+  await click(q("[data-play]")); await settle(); await settle();
+  assert(row.played_at !== null && area().dataset.phase === "played", "played, once");
+  assert(new RegExp(`You took ${row.rounds} of 6 rounds for`).test(q("[data-played]").textContent) && q("[data-played]").textContent.includes(row.score.toLocaleString("en-US", { maximumFractionDigits: 1 })), "the rounds and points on the page are the recorded ones: " + q("[data-played]").textContent);
+  assert(!q("[data-play]") && qa(".cb-round").length === 6, "the six rounds are shown and there is no second go");
+  await goHome(); await openTabOf("daily");
+  assert(q("[data-played]") && !q("[data-play]") && !q("[data-deal]"), "and it is still played after leaving and coming back");
+});
+
+await runTest("the boards list the ladder and the day, by name", async () => {
   await click(tabBtn("boards")); await settle(); await settle();
-  const tables = [...container.querySelectorAll(".cb-board")];
-  assert(tables.length === 2 && /Longest runs/.test(tables[0].caption.textContent) && /Today's showdown/.test(tables[1].caption.textContent), "two boards");
+  const tables = qa(".cb-board");
+  assert(tables.length === 2 && /ladder/i.test(tables[0].caption.textContent) && /Today's battle/.test(tables[1].caption.textContent), "two boards");
   assert(/bea/.test(tables[0].textContent) && tables[0].querySelector("td.r").textContent === "2" && /bea/.test(tables[1].textContent), "with this account on both: " + tables[0].textContent);
+  assert(/\d–6|\d–\d · /.test(tables[1].querySelector("td.r").textContent), "the day's row is rounds won and lost, then points: " + tables[1].querySelector("td.r").textContent);
   assert(tables[0].querySelector(".namelink, .bname"), "names are drawn the way every board draws them");
   auth._cards.stateFails = true;
   await click(tabBtn("run")); await settle(); await click(tabBtn("boards")); await settle(); await settle();
@@ -643,10 +699,19 @@ await runTest("the boards list the run and the showdown, by name", async () => {
   auth._cards.stateFails = false;
 });
 
-await runTest("no cards, no battle: the screen says what is needed", async () => {
-  await signUp("cyrus@cards.test", "cyrus");
-  await openTabOf("run");
-  assert(/You need six to play/.test(container.textContent) && !q("[data-start]"), "an account with no deck is sent to open one");
+await runTest("an old eight-card collection is offered its top-up, and cannot battle until it takes it", async () => {
+  const cy = await signUp("cyrus@cards.test", "cyrus");
+  const old = ["QB", "RB", "WR", "TE", "RB", "WR", "WR", "QB"].map((pos, i) => [...CARDS.values()].filter((c) => c.pos === pos && c.rating < 60)[i * 7 + 3]);
+  auth._cards.grantCards(cy, "starter", old.map((c, i) => ({ ref: `starter:${i}`, card: c.id, finish: "base" })));
+  await openCards();
+  assert(button("Open your starter deck") && /topped up/.test(container.querySelector(".cd-starter").textContent) && cardsOnScreen().length === 8, "eight cards and the offer to top them up: " + container.querySelector(".cd-starter")?.textContent.slice(0, 120));
+  await click(tabBtn("battle")); await settle(); await settle();
+  assert(q("[data-no-deck]") && !q("[data-start]"), "no deck, no battle - and it says what is needed");
+  await click(tabBtn("collection")); await settle();
+  await click(button("Open your starter deck")); await settle(); await settle();
+  assert(container.querySelector("#cd-coll-h").textContent === "30 cards" && !button("Open your starter deck") && qa(".cd-fresh [data-card]").length === 22, "topped up to thirty: twenty-two new ones shown, and the offer is gone");
+  await click(tabBtn("battle")); await settle(); await settle();
+  assert(q("[data-start]") && !q("[data-no-deck]"), "and now there is a ladder to climb");
 });
 
 await runTest("every battle refusal has a sentence, and none claims to know what it cannot", async () => {
@@ -655,7 +720,7 @@ await runTest("every battle refusal has a sentence, and none claims to know what
     assert(typeof BATTLE_SENTENCES[key] === "string" && BATTLE_SENTENCES[key].length > 15, `"${key}" has a battle sentence`);
   }
   for (const key of ["offline", "network", "server"]) assert(!/not played|wasn't played|was played/i.test(BATTLE_SENTENCES[key]), `"${key}" does not say whether the battle happened`);
-  for (const key of ["not_owned", "same_player", "bad_slot", "guest_not_allowed", "cards_off", "no_run"]) assert(!/connection/i.test(BATTLE_SENTENCES[key]), `"${key}" is a rule, not a fault in your connection`);
+  for (const key of ["not_owned", "not_in_hand", "same_player", "bad_slot", "bad_deck", "no_deck", "guest_not_allowed", "cards_off", "no_run", "no_hand"]) assert(!/connection/i.test(BATTLE_SENTENCES[key]), `"${key}" is a rule, not a fault in your connection`);
 });
 
 await runTest("a copy pulled from a pack is sold as it arrives, and the screen shows it going", async () => {
@@ -676,7 +741,7 @@ await runTest("a copy pulled from a pack is sold as it arrives, and the screen s
   assert(/You have this one\. Sold for/.test(sold[0].textContent) && sold[0].textContent.includes(String(each)), "in words, not only as an animation: " + sold[0].textContent);
   assert(container.querySelectorAll(".cd-fresh [data-card]").length === 3, "all three cards that came out are shown");
   assert(auth._wallet.balanceOf(dee) === before - 150 + each, "the wallet is the pack's price down and the copy's coins up");
-  assert(auth._cards.owned(dee).every((o) => o.count === 1) && auth._cards.owned(dee).length === 10, "and the collection holds one of everything: eight, and the two new ones");
+  assert(auth._cards.owned(dee).every((o) => o.count === 1) && auth._cards.owned(dee).length === 32, "and the collection holds one of everything: thirty, and the two new ones");
   assert(!container.querySelector("[data-swept]"), "nothing was stacked, so there was nothing to sweep");
 });
 

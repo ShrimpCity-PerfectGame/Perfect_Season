@@ -66,153 +66,109 @@ A card that qualifies for several shows the first in this order. Counts are card
 Everything else is `role`, "Role player": about 1,900 of the 3,124. A card with no games, attempts, carries or
 catches qualifies for nothing rather than comparing `NaN`.
 
-## 3. Defenses and traits
+## 3. Categories
 
-The opponent is always a real team defense from `data/versus-pool.json`, the file Duel ships (859 team-seasons,
-1999-2025).
+**A battle is offense against offense** (v2.27.0, the owner's redesign of 2026-11-14): your six cards against
+a CPU's six, the same kind of cards you collect. The owner's line for it is "a fast collectible strategy game
+powered by historical NFL seasons" - not fantasy scoring, not a football simulation, not a card flip. There
+are no defenses any more; `data/card-defense.json` and its builder are left in the repo and read by nothing.
 
-| id | Label | Stat |
-|---|---|---|
-| stingy | Stingy | fewest points allowed |
-| runstop | Run stopper | fewest rushing yards allowed a game (`data/card-defense.json`) |
-| ballhawks | Ball hawks | most interceptions |
-| passrush | Pass rush | most sacks |
-| strip | Strip artists | most fumbles (the pool's `fum` column) |
-| scoring | Scoring defense | most defensive touchdowns |
+A round is never "the better card wins". Each of a battle's six rounds is fought on a **category**, and a
+card's score in a category is how its real season ranked **at its own position, in its own era**, 0 to 99.
 
-**A defense has a trait when it is in the best five of its own season** for that stat, ties broken by team code.
-Within a season, not across the pool: scoring and sack rates moved so far between 1999 and 2025 that a raw cut
-would give every Stingy to the early 2000s. So every season has exactly five of each. 411 defenses have no
-trait, 219 have one, 229 have two or more.
-
-**Run stopper has a data file of its own.** Duel's `versus-pool.json` has no yards allowed, and the season file
-it is built from has no such column. `tools/data/build-card-defense.mjs` writes `data/card-defense.json`
-(season, team, games, rushing and passing yards allowed a game) from nflverse's weekly team file, where each
-row is what one offence gained against a named opponent - so a defense's yards allowed is the sum of what its
-opponents gained. Regular season only.
-
-- **It is a separate file on purpose.** `versus-pool.json` is carried by both the browser and the `match-pick`
-  Edge Function, which must agree on every number in it, and rebuilding it re-fetches its sources. Adding two
-  columns there would risk moving a defense's rating under a live duel for a trait Duel never reads.
-- `initDefenses(versusPool, yardsAllowed)` takes it as an optional second argument. Without it a defense has
-  no `rush` and no Run stopper - absent, never guessed.
-- **22 defenses from 1999 to 2002 are averaged over fifteen games**, because the source is missing one of
-  theirs (mostly opponents of the two broken Jaguars seasons the pool already leaves out). The builder prints
-  them and refuses any defense missing more than one game. 2022's Bills and Bengals have sixteen for real.
-- Pinned by hand: the 2000 Ravens at 60.6 rushing yards a game (970 in sixteen), the fewest in the pool.
-- Passing yards allowed is in the file and nothing reads it yet.
-- Rebuild it when a season is added to `versus-pool.json`: `node tools/data/build-card-defense.mjs`. It
-  refuses to write a file that does not cover that pool exactly.
-
-## 4. Lineups
-
-The draft's six slots: QB, RB, WR, TE, FLEX1, FLEX2 (Flex is anyone but a quarterback). A lineup is
-`{ [slot]: { id, finish } }` - the card and the finish of the copy being played.
-
-`lineupProblem(lineup, owned)` answers `null` or the first of these, in this order. It never throws.
-
-| Reason | Meaning |
+| Category | What it measures |
 |---|---|
-| `malformed` | not an object, a key that is not a slot, or an entry that is not an object |
-| `incomplete` | a slot is missing |
-| `unknown_card` | an id that is not in the catalog |
-| `bad_finish` | not one of `base`, `silver`, `gold`, `prism` |
-| `bad_slot` | the card's position does not fit the slot |
-| `same_player` | two entries are the same man (by `pid`), even in different seasons |
-| `not_owned` | `owned` (a Map of `"id:finish"` to count) has fewer than one |
+| Production | total yards |
+| Touchdown threat | touchdowns a game |
+| Big play | yards per completion (QB), per carry (RB), per catch (WR, TE) |
+| Workload | attempts and touches a game |
+| Efficiency | yards and scores per attempt or touch, less turnovers |
+| Star power | the overall rating itself |
 
-Every one of these will need a sentence in whichever client module receives it.
+- Ranked **within position and era** (`WINDOWS`), so a quarterback and a back can meet in a round and
+  compare fairly, and a 2003 season is judged against 2003 football.
+- Per-touch categories are **shrunk** toward an ordinary season (phantom touches at a league-ordinary rate),
+  or a man with eight catches for 203 yards is the best big-play threat in the game. He was, in the first cut.
+- **Every category is something the catalog really holds.** There is no Clutch and no Deep ball because
+  there is no such column, and a score that is not the player's own numbers is a number made up about a real
+  man.
+- Computed in `initCardData` and kept on the card as `cats`. They follow from `data/cards.json`, which is
+  frozen, so they do not move unless the formulas in `rawCategories` do.
+
+## 4. Decks, hands and teams
+
+- A **deck** is thirty cards you own: 5 QB, 10 RB, 10 WR, 5 TE, thirty different men. `deckProblem`.
+  An account that never saved one plays `bestDeck` of what it owns.
+- A **hand** is twelve of the thirty - 2, 4, 4, 2 - dealt by the server for each battle (`dealHand`, twelve
+  draws). So a deck is never a guaranteed lineup.
+- A **team** is six of the hand: exactly one quarterback, at least one back, one receiver and one tight end,
+  six different men. **The order of the six is the order they play in, and it is the player's.**
+  `teamProblem` answers `null` or one of `malformed`, `incomplete`, `unknown_card`, `bad_finish`, `bad_slot`,
+  `same_player`, `not_in_hand`. It never throws.
+- `bestTeam` is the six highest ratings that make a team, best first. It is the DULL choice on purpose - the
+  screen's "Pick for me", the CPU's lineup, and the bot every balance number is measured against.
 
 ## 5. How a battle scores
 
-`scoreBattle(lineup, defense, rand, step = 0)`. For each card, in slot order:
+`scoreBattle(mine, foe, rand, cats = null, foeEdge = 0)`. Six rounds, your first card against their first.
+The six categories come up **exactly once each, in an order nobody knows** until it is played. A card's round:
 
-- **base** = printed rating + finish bonus (Base 0, Silver 1, Gold 2, Prism 3). The printed rating plays in
-  every slot; `flexRating` is not used.
-- **roll** = `(rand() + rand() - 1) * LUCK_SPREAD`. Two draws a card, twelve a battle, always.
-- **mods**: a counter when the defense has a trait that touches the card's archetype; a pair when the lineup
-  also holds the partner archetype (once per card, however many partners).
-- **total** = base + roll + mods. The six totals are the offense; `win` is offense >= the bar.
+    RATING_SHARE x (rating + finish)  +  the rest from its category score  +  synergies  +  ability  +  luck
 
-**The bar rises with every win in a run** (owner's decision, 2026-11-13):
-`bar = BAR_START + BAR_STEP * step + BAR_DEFENSE * (defense rating - BAR_PIVOT)`, `step` being the run's wins so
-far. It replaced a bar fixed per defense, which could not work: a starter deck's best six add up to about 246,
-sixty random cards to 641 and the sixty best to 780, so one bar was a 0.4% win rate for a new player or a
-walkover for everyone else.
+The higher total takes the round. Win more rounds; a 3-3 split goes to the higher six-round total, and a dead
+heat to you. So the overall rating is part of every round and never the whole of one.
 
-Constants as tuned: `LUCK_SPREAD 26`, `BAR_START 190`, `BAR_STEP 55`, `BAR_DEFENSE 1.5`, `BAR_PIVOT 65`.
+- **Draws are counted:** five to order the categories, then four a round (two a card, yours first) -
+  twenty-nine a battle, always. The browser and the Edge Function must walk the generator in step.
+- **Synergies** (`teamSynergies`, worked out once for the lineup): +2 per lineup-mate from the same team (to
+  6), +1 per mate from the same season (to 3), +2 once for a real teammate (both), and the archetype pairs.
+- **Abilities**, one an archetype (`ABILITIES`). Some fire on the category (Gunslinger and Home-run hitter in
+  Big play, Goal-line back and Red-zone target in Touchdown threat), some on the battle so far (Workhorse
+  after a win, Seam stretcher when behind, Deep threat and Receiving back once the quarterback has played),
+  the Scrambler against a higher-rated card. A Game manager lifts the NEXT card his side plays. A Safety
+  valve cancels the ability across from him. A card whose ability did not fire is still shown it, as "not
+  this round" - that is how a player learns to order the six.
+- **Luck** is a triangular roll within `LUCK_SPREAD` (14), half as wide again for a Gunslinger.
+- Constants as tuned: `RATING_SHARE 0.4`, `CAT_SCALE 1.3`, `LUCK_SPREAD 14`, `CPU_START 38`, `CPU_STEP 7`,
+  `CPU_MAX 124`, `CPU_EDGE 0.6`, `DAILY_TARGET 86`.
 
-Counters (trait, then archetype and points):
+**These numbers are tuned, not chosen.** Change one and run `node tests/test-card-balance.mjs`. A change
+also moves the 2,000-battle checksum in `tests/test-card-logic.mjs`, and then the client and the functions
+must ship together.
 
-| Trait | Hurts | Helps |
-|---|---|---|
-| Stingy | Goal-line back -20, Red-zone target -20 | |
-| Run stopper | Workhorse -20, Goal-line back -15, Home-run hitter -15 | Receiving back +10 |
-| Ball hawks | Gunslinger -25, Volume passer -20 | Game manager +15 |
-| Pass rush | Volume passer -20, Gunslinger -15 | Scrambler +20, Safety valve +13, Receiving back +13 |
-| Strip artists | Workhorse -20, Home-run hitter -15 | Possession +10 |
-| Scoring defense | Volume passer -15 | Game manager +15, Workhorse +10 |
+## 6. Balance, as measured on 2026-11-14
 
-Pairs (points to each card): Gunslinger + Deep threat 16; Gunslinger + Seam stretcher 12; Game manager +
-Possession 12; Game manager + Safety valve 10; Scrambler + Home-run hitter 12; Volume passer + Receiving back
-12; Volume passer + Possession 10.
-
-**These numbers are tuned, not chosen.** Change one and run `node tests/test-card-balance.mjs`.
-
-## 6. Balance, as measured on 2026-11-13
-
-Two bots pick lineups for each defense in a run: one takes the six highest ratings, one reads the defense and
-searches for the best no-luck score.
+Three collections climb the ladder. One player fields the six highest ratings in rating order; one picks the
+six and the order the numbers on screen say are best (it cannot see the category order or the luck).
 
 | | Measured | Band |
 |---|---|---|
-| Starter deck (8 cards under 60): wins in an average run | 1.60 | 0.8 to 2.5 |
-| Starter deck: runs with no win at all | 7% | 2% to 30% |
-| 60 random cards: wins in an average run | 8.70 | 5 to 10 |
-| ...more than the six highest ratings manage | +0.34 to +0.37 wins | at least 0.25 |
-| ...reading the defense picks a different six | 68% to 80% of battles | at least 40% |
-| ...luck changes how long a run lasts | 29% to 31% of runs | 20% to 75% |
-| ...by this many wins on average | 0.34 to 0.38 | 0.2 to 1.0 |
-| ...a card rated under 70 is in the chosen lineup | 16% to 24% of battles | at least 10% |
-| The 60 best cards: wins in an average run | 11.5 | 9 to 16 |
-| Runs that reach 40 wins | none | none |
+| Starter deck (thirty Base cards under 60): wins a run | 1.45 | 0.8 to 3 |
+| ...loses its very first battle | 17% | at most 40% |
+| Sixty random cards: wins a run | 7.7 | 4 to 9 |
+| The sixty best cards: wins a run | 13.6 | 8 to 16 |
+| Runs that reach forty wins | none | none |
+| Choosing and ordering beats the six best in rating order by | 0.49 wins a run | at least 0.3 |
+| The sharp player fields a different six | 62% of battles | at least 25% |
+| A lower-rated card takes a round off a higher-rated one | 0.37 a battle | at least 0.3 |
+| An even match replayed: the less likely result | 29% | 8% to 35% |
 
-Run stopper was added after these were first measured and moved them very little (the default seeds went from
-+0.35 to +0.37 wins for reading the defense). Ranges are across three different sets of collections and defenses (`node tests/test-card-balance.mjs 9000 13`
-plays another). The first version used twenty collections and two of three other seed sets failed a band; it
-uses fifty now.
+**What these do not hold:** any single ability, pair or bonus; and whether it is fun. The bands are the
+builder's reading of the design. Luck at 29% of even rematches is at the high end of "a bit" - `LUCK_SPREAD`
+is the knob. The sharp bot is a search, not a person.
 
-**What these bands do not hold.** Any single counter or pair: review deleted six of the seven pairs and zeroed
-every positive counter and one band moved, by less than seed noise. And the open question the numbers cannot
-answer: reading the defense is the better pick in most battles but is worth only about a third of a win per
-run, because one win is 55 points of bar and a good matchup is 10 to 25. Whether that is enough is for
-somebody playing it to say. The starter bands measure the bar alone - eight cards rarely offer a second lineup.
+## 7. The other side
 
-What it does not tell you: whether this is fun. The bands are the builder's reading of the design, not the
-owner's numbers, and nobody has played a battle. A player is also not the search bot - a real person will find
-fewer of the good lineups than it does.
-
-**The numbers the next plans need:** a new player wins about 1.6 battles a run; a player with sixty cards
-about 9. Coin rewards per win and the daily cap on paid wins should be set from those.
-
-## 7. The daily showdown
-
-`showdownDefense(date)` picks one defense for the day from the seed `showdown-<date>`.
-`showdownScore(date, lineup)` gives **each card one roll for the day**, seeded from the day and the card's id and
-nothing else. 2007 Brady has the same game today in every lineup, slot and finish. So the same six cards score
-the same for everyone, a better finish adds exactly its bonus, and the board rewards the lineup rather than
-the roll. The score is the offense; there is no step and no win or loss.
-
-It was first seeded from the whole lineup, and review found what that did: swapping the two Flex cards or
-fielding a different copy re-rolled all six, so the same cards scored anywhere from 693 to 891. Seed nothing in
-the showdown from the slot, the finish or the other five cards.
-
-`showdownDefense` picks by position in `DEFENSES`, so adding a season to the pool re-deals every date.
-Whatever records a showdown must store the defense's key.
-
-**Accepted gap, and it cannot be closed here:** the bundle and the seed are public, so anybody willing to run
-`card-logic.mjs` can find the day's best lineup for their collection offline. It is the gap every seeded daily
-in this game has.
+- `buildTeam(rand, target)`: one card of each position and two more, each within `CPU_BAND` of the target
+  rating (widening only if a position has nobody there), six different men, in a random order. Eleven draws.
+- **The ladder:** `ladderFoe(seed, step)` at `ladderTarget(step)` - 38, then 7 more a win, to 124. Past the
+  best cards the game holds it cannot field a stronger team, so `ladderEdge(step)` adds points to every card
+  of theirs instead; without it the best collections never met anything that could stop them.
+- **The daily battle:** `dailyFoe(date)`, `dailyCategories(date)` and `dailyRand` - one team, one category
+  order, and **one roll per card per day**, so the board rewards the six and their order and not the roll.
+  Ranked by rounds won, then the six-round total (`dailyScore`).
+- **Accepted gap**, the one every seeded daily here has: the bundle and the seed are public, so the day's
+  best lineup for a hand can be worked out offline.
 
 ## 8. Owning cards (v2.23.0)
 
@@ -442,96 +398,95 @@ thing loot-box rules are written about, and that question goes to the owner's la
   kind = 'pack';` then `select ref, card_id, finish from card_grants where user_id = '<uuid>' and kind =
   'pack' and ref like '<open id>:%';`
 
-## 11. Battles (v2.25.0, on the test site)
+## 11. Battles: who runs them, and what is written down (v2.27.0, on the test site)
 
-Two ways to play six cards against a defense, and two boards. The rules are sections 3 to 7; this is who runs
-them and what is written down.
+The rules are sections 3 to 7. Stage one of the owner's four modes is here - the **ladder** and the **daily
+battle**; the historical gauntlet and the draft arena are not built.
 
 ### 11.1 Who decides what
 
 | | Decided by |
 |---|---|
-| Which six cards | the player, in the browser |
-| Whether that lineup is legal | `lineupProblem` in `card-claim` (shape) and `card_lineup_owned` in SQL (ownership) |
-| A run's defenses | `runDefense(seed, step)`; the seed is made by `card-claim` when the run starts and kept in `card_runs` |
-| A run battle's luck | `card-claim`, fresh, with the cryptographic generator |
-| The showdown's defense and luck | the UTC date (section 7) |
-| Whether it counts, and what it pays | `card_run_battle` / `card_showdown_record`, one transaction each |
+| The deck | the player (`deck_save`); `bestDeck` if none is saved |
+| The hand of twelve | `card-claim`, with the cryptographic generator, **stored before it is shown** |
+| Which six, and their order | the player, in the browser |
+| Whether that six is legal, and came out of the hand | `teamProblem` in `card-claim` |
+| Whether the cards are theirs | `card_lineup_owned` in SQL, in the transaction that writes |
+| A ladder team | `ladderFoe(seed, step)`; the seed is `card-claim`'s and kept in `card_runs` |
+| A ladder battle's luck and category order | `card-claim`, fresh |
+| The daily's team, categories and luck | the UTC date |
+| Whether it counts, and what it pays | `card_run_battle` / `card_daily_record`, one transaction each |
 
-The browser computes only what a player needs before playing: which cards fit a slot, what a trait does to
-each, and `lineupProjection` - the score with the luck at zero. Nothing it sends about a result is read.
+Nothing the browser sends about a result is read.
 
 ### 11.2 The database
 
-`card_runs (id, user_id, seed, wins, defense, status, last, started_at, ended_at)` and
-`card_showdowns (date, user_id, defense, lineup, score)`. **RLS on, no policy of any kind, no grant to a
-client role**: the seed says which defenses are still to come, and a lineup is a list of what somebody owns.
+`card_decks (user_id, cards)`, `card_runs (id, user_id, seed, wins, hand, foe, status, last, ...)`,
+`card_dailies (date, user_id, hand, rounds, score, shown, dealt_at, played_at)`. **RLS on, no policy of any
+kind, no grant to a client role.**
 
-- One live run an account (a partial unique index). `defense` is the one to beat next while the run is
-  live, and the one that ended it afterwards. `last` is the latest battle as the browser was shown it.
-- **No name snapshot**, unlike every older board: `card_boards` joins `profiles` when it is read. A guest
-  can never own a card, so there is no guest row to mark, and a rename cannot leave a name behind. So
-  `mod_act`, `claim_username` and the `use_account_username` trigger know nothing of these tables.
-- `delete_account` erases both tables' rows: they are the person's, like the cards.
+- **A hand is stored, never derived.** A hand that followed from the deck could be re-dealt by editing the
+  deck. `card_run_start` keeps the first hand it is handed for a live run, `card_run_battle` stores the next
+  one with the win, and `card_daily_deal` keeps the first hand of the day whatever it is handed after.
+- One live run an account (a partial unique index). `last` is the latest battle as it was shown.
+- **No name snapshot**: `card_boards` joins `profiles` when read, so `mod_act`, `claim_username` and the
+  `use_account_username` trigger know nothing of these tables. A guest can never own a card.
+- `delete_account` erases all three.
+- **The first version's tables are cleared once.** v2.25.0 (test site only) had `card_runs.defense` and a
+  `card_showdowns` table; the migration recognises that shape by the `defense` column and drops it. It can
+  be re-run on any shape and never drops a run of the new kind (a test holds both).
 
-Service role only: `card_run_start`, `card_run_battle`, `card_run_end`, `card_showdown_record`,
-`card_lineup_owned`. Signed-in players, as GETs: `card_battle_state()` and `card_boards(limit)`.
+Service role only: `card_deck_read`, `card_deck_save`, `card_run_start`, `card_run_battle`, `card_run_end`,
+`card_daily_deal`, `card_daily_record`, `card_lineup_owned`, `card_list_check`. Signed-in players, as GETs:
+`card_battle_state()` and `card_boards(limit)`.
 
-- **`card_run_battle` checks the step under a lock.** The function reads the run, rolls, and hands back the
-  run id and the wins it read; the row is locked and both are checked again. Two requests that overlap - a
-  double tap, two tabs - cannot both count: the second raises `stale` having changed nothing.
-- `card_battle_state` returns the account's **latest** run, live or over, with `last`. That is what lets a
-  browser whose answer was lost learn that it lost, and be shown the battle.
-- `today` in both readers is the server's UTC date. The browser never works out the showdown's day itself.
+- **`card_run_battle` checks the step under a lock**, so a double tap or two tabs cannot both count: the
+  second raises `stale` having changed nothing.
+- `card_battle_state` returns the account's **latest** run, live or over, with `last` - what lets a browser
+  whose answer was lost learn that it lost and be shown the battle.
 
 ### 11.3 The function
 
-`card-claim` gained four actions: `run_start`, `run_battle { run, step, lineup }`, `run_end`,
-`showdown { lineup }`. New reasons: the seven from `lineupProblem`, `no_run`, `stale`. It bundles
-`data/versus-pool.json` and `data/card-defense.json` now, with `card-logic.mjs` and `rewards.mjs` -
-so **a change to any of those ships the function and the client together**.
+`card-claim` actions: `deck_save { cards }`, `run_start`, `run_battle { run, step, team }`, `run_end`,
+`daily_deal`, `daily_play { team }`. It bundles `card-logic.mjs`, `rewards.mjs` and `data/cards.json`, so **a
+change to any of those ships the function and the client together**.
 
 ### 11.4 Coins
 
-`rewards.mjs`: a win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run already had, up to
-`cardWinStepMax` (9) of them - 3, 4, 5 ... 12. `paidCardWinsPerDay` (15) wins pay per UTC day; past it a
-win still moves the run. Ledger kind `card_win`, ref `<run id>:<wins>`. A showdown pays nothing.
-
-From the balance table: a starter deck wins about 1.6 battles a run, so about 7 coins a run; sixty cards about
-9, so about 63. Fifteen paid wins is roughly 50 to 110 coins a day - under a Daily's 40-plus-wins, and a
-Standard pack (150) every day or two for somebody who plays both. **These are the builder's numbers.**
+A ladder win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run already had, to 12;
+`paidCardWinsPerDay` (15) wins pay per UTC day. Ledger kind `card_win`. The daily battle pays nothing.
 
 ### 11.5 The screens
 
-`card-battle.jsx`, mounted by `cards.jsx` under three more tabs: Run, Showdown, Boards.
+`card-battle.jsx`, mounted by `cards.jsx` under Battle: Ladder, Daily, Deck, Boards.
 
-- A defense is shown, with what each trait does, **before** the lineup is picked.
-- **The battle plays out** (v2.26.0): a scoreboard pinned at the top counts up against the bar while the cards
-  take their turns, then the result is stamped. The outcome is already known when it draws - the playback
-  only decides when it is shown - so the parent hides the heading, the coins and the next button until
-  `onDone`. It plays where `matchMedia` says motion is fine and is simply finished everywhere else
-  (reduced motion; jsdom, so every test sees the finished battle; a showdown opened again later). Nothing
-  fades - a waiting card is greyed with a filter - because half-opacity text is below AA while the fade lasts.
-- The tabs are two levels (v2.26.0): Collection, Packs, Battle; then Run, Showdown, Boards under Battle.
-- **A failed play is not "not played".** `offline`, `network` and `server` may follow a battle that was
-  played. The screen never replays to find out: it reads `card_battle_state` and shows what is there. Only
-  when that confirms the run did not move does it say the battle was not played; when the state cannot be
-  read either it says so, and promises only that a battle is never played twice.
-- `/data/card-defense.json` is fetched like the catalog (build.mjs copies it where cards are on).
+- `CardRow` is a card as a row: its six category scores are always on show, because they are the game. A
+  strong one is a lime FILL with its own ink, never lime text.
+- `TeamPicker`: their six in order, your six in order with up/down, your hand of twelve.
+- `Arena` is the owner's layout: your active card left, theirs right, a big VS, the stat comparison, the
+  round's winner called; your six as a strip with the active one lit; the score, the round, a speed control
+  and a battle log. Four beats a round. **It plays where `matchMedia` says motion is fine and is simply
+  finished everywhere else** (reduced motion; jsdom, so every test sees the finished battle; a daily opened
+  again later). The parent hides the heading, the coins and the next button until `onDone`. Nothing fades.
+- **A failed play is not "not played".** The screen never replays after a lost answer: it reads
+  `card_battle_state` and shows what is there.
 
 ### 11.6 Runbook
 
 - **End somebody's stuck run:** `select card_run_end('<user uuid>');`
-- **See a run:** `select id, wins, status, defense, last from card_runs where user_id = '<uuid>' order by id desc;`
-- **Take a showdown back:** `delete from card_showdowns where date = '<date>' and user_id = '<uuid>';`
+- **See a run:** `select id, wins, status, hand, foe, last from card_runs where user_id = '<uuid>' order by id desc;`
+- **Give a day's battle back:** `delete from card_dailies where date = '<date>' and user_id = '<uuid>';`
 
 ### 11.7 Not built, and known gaps
 
-- No badge, nothing on the profile (part 5). No history of battles: a run keeps only its latest.
-- Two accounts are two collections, so nothing stops one person running two. It moves only these two boards.
-- The showdown's gap is section 7's: the day's best lineup can be worked out offline.
-- A run's seed never leaves the server, but each defense is known once it is shown - walking away from a bad
-  draw costs the streak, which is the price the design set on it.
+- The **historical gauntlet** and the **draft arena** (the owner chose all four modes; these are stages two
+  and three). No badge, nothing on the profile.
+- **Open design question from the owner (2026-11-14):** whether choosing between two cards feels like a
+  choice. Today the six and their order are set before any category is known. The sharper version is to play
+  a round at a time - commit a card, then see the category - which needs the server to hold a battle in
+  progress.
+- The team picker is long on a phone: twenty-four card rows.
+- Two accounts are two collections; nothing stops one person climbing twice.
 
 ## 12. Copies (v2.26.0, on the test site)
 

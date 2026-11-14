@@ -80,9 +80,9 @@ await runTest("a collection bigger than one page of rows comes back whole", asyn
 
 await runTest("claiming a starter deck, and every way it is refused", async () => {
   const won = await claimStarter();
-  assert(won.ok === true && won.cards.length === 8, "eight cards: " + JSON.stringify(won).slice(0, 120));
+  assert(won.ok === true && won.cards.length >= 29 && won.cards.length <= 30, "the starter cards fill a deck (thirty, or twenty-nine when the daily card already fills a spot): " + JSON.stringify(won).slice(0, 120));
   const after = await fetchMyCards();
-  assert(after.starter === true && after.cards.reduce((n, c) => n + c.count, 0) === 9, "the collection has them, beside the daily card");
+  assert(after.starter === true && after.cards.reduce((n, c) => n + c.count, 0) >= 30, "the collection has them, beside the daily card");
   const again = await claimStarter();
   assert(again.ok === false && again.reason === "duplicate", "a second claim: " + JSON.stringify(again));
 

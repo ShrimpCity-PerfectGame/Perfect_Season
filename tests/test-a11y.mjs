@@ -76,13 +76,16 @@ const SCREENS = [
   // The pack shop, with a pack's contents open: three tables of odds, and a pack nobody can afford.
   ["the pack shop", "?screen=cards&tab=packs&inside=1&coins=300", null],
   ["the pack shop with a pack sold out", "?screen=cards&tab=packs&soldout=1&coins=9000", null],
-  // Battles (CARDS.md 11): the dark defense panel and the lineup's slots, a played battle - six card images
-  // each with its game, chips whose sign is in the text as well as the colour - the showdown and the boards.
-  ["a card run before it starts", "?screen=cards&tab=run", null],
-  ["a card run: the defense and the lineup", "?screen=cards&tab=run&run=1", null],
-  ["a card battle that was won", "?screen=cards&tab=run&battle=win", null],
+  // Battles (CARDS.md 11): the dark panel of the other side's six and the rows of category scores (a strong one
+  // is a lime FILL with its own ink, never lime text), the arena mid-battle - two card images, a scoreboard,
+  // chips whose sign is in the text as well as the colour - a finished battle with its log, the deck, the boards.
+  ["the ladder before a run", "?screen=cards&tab=run", null],
+  ["the ladder: their six, your hand", "?screen=cards&tab=run&run=1", null],
+  ["a card battle being played", "?screen=cards&tab=run&battle=win", null],
   ["a card battle that was lost", "?screen=cards&tab=run&battle=loss", null],
-  ["the daily showdown, played", "?screen=cards&tab=showdown&played=1", null],
+  ["the deck builder", "?screen=cards&tab=deck", null],
+  ["the daily battle, dealt", "?screen=cards&tab=daily&dealt=1", null],
+  ["the daily battle, played", "?screen=cards&tab=daily&played=1", null],
   ["the card boards", "?screen=cards&tab=boards&played=1", null],
   // Copies (CARDS.md 12): a pulled copy drawn as sold with its coin badge, and the notice after old stacks are sold.
   ["a pack with a copy that was sold", "?screen=cards&tab=packs&copy=1", null],
