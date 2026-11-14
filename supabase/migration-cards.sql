@@ -74,8 +74,13 @@ begin
     execute format('alter table public.wallet_ledger drop constraint %I', c.conname);
   end loop;
 end $$;
+-- THE WHOLE LIST, HERE TOO (v2.28.1). This file replaces the check again further down, as battles added kinds,
+-- and this first replacement used to list only the kinds that existed when packs shipped. Re-running the file
+-- on a database that already HELD a 'card_win' row then failed right here - the intermediate check is validated
+-- against every row - and took the whole migration with it. It happened on staging the first time somebody had
+-- won a battle. Both lists are now the same list; add a kind to both.
 alter table public.wallet_ledger add constraint wallet_ledger_kind_check
-  check (kind in ('starting', 'welcome', 'season', 'daily', 'badge', 'minigame', 'purchase', 'pack'));
+  check (kind in ('starting', 'welcome', 'season', 'daily', 'badge', 'minigame', 'purchase', 'pack', 'card_win', 'card_sell', 'card_gauntlet'));
 
 alter table public.card_owned enable row level security;
 alter table public.card_grants enable row level security;

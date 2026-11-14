@@ -1532,6 +1532,10 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.28.2's (several packs at once): client only - but **re-run `migration-cards.sql`** if 2.28.1's did not
+  finish. **The file replaces `wallet_ledger_kind_check` in two places and BOTH must hold the whole list**:
+  each replacement is validated against every row, so a first list missing 'card_win' fails the whole file on
+  any database where a battle has been won. A new ledger kind goes in both.
   v2.28.1's (their card hidden, the reveal, the daily card): re-run **`migration-cards.sql`** (it replaces
   `card_battle_state` and adds the gauntlet's table and functions, which nothing calls yet) and
   **`migration-profiles.sql`** (`delete_account` learns the gauntlet), then **deploy the Edge Functions**

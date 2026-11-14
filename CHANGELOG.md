@@ -20,6 +20,21 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.28.2] - 2026-11-14
+
+Test site only.
+
+### Added
+- Cards: **open one, five or ten packs at once.** One confirm for the whole price; every card is shown
+  together. Each pack is still its own purchase, so a batch that stops part-way keeps what it opened and only
+  the one unanswered pack is asked about again.
+
+### Fixed
+- The cards migration could not be re-run once anybody had won a battle: it replaces the wallet ledger's list
+  of kinds twice, and the first replacement still held the list from when packs shipped, which a 'card_win'
+  row fails. That stopped 2.28.1's migration on the test site for a few minutes. Both lists are the same now,
+  and a test re-runs the file over a ledger holding every card kind.
+
 ## [2.28.1] - 2026-11-14
 
 Test site only. Three things the owner found playing 2.28.0.

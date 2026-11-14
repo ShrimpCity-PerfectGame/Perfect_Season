@@ -75,6 +75,7 @@ const SCREENS = [
   ["the card area before a starter deck", "?screen=cards&starter=0", null],
   // The pack shop, with a pack's contents open: three tables of odds, and a pack nobody can afford.
   ["the pack shop", "?screen=cards&tab=packs&inside=1&coins=300", null],
+  ["the pack shop with five chosen", "?screen=cards&tab=packs&coins=3000&qty=5", null],
   ["the pack shop with a pack sold out", "?screen=cards&tab=packs&soldout=1&coins=9000", null],
   // Battles (CARDS.md 11): the dark panel of the other side's six and the rows of category scores (a strong one
   // is a lime FILL with its own ink, never lime text), the arena mid-battle - two card images, a scoreboard,

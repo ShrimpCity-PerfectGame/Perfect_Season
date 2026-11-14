@@ -643,6 +643,12 @@ await runTest("a database with the first version's tables is cleared of them, on
   await old.query("select card_run_start($1, 'seed-keep', $2::jsonb, $3::jsonb, $4::jsonb)", [U, J(HAND), J(FOE), J(CATS)]);
   await old.exec(sql("migration-cards.sql"));
   assert((await old.query("select count(*)::int as n from card_runs where status = 'live'")).rows[0].n === 1, "re-running the migration does not drop, or end, a run of the new kind");
+  // A wallet that has already been paid for a win, a sale and a gauntlet stage: the file replaces the ledger's
+  // kind check more than once, and EVERY replacement is validated against these rows. The first one listed only
+  // the pack-era kinds until v2.28.1, so this re-run failed on staging the day somebody won a battle.
+  for (const kind of ["card_win", "card_sell", "card_gauntlet", "pack"]) await old.query("select wallet_apply($1, 5::bigint, $2, 'rerun-' || $2)", [U, kind]);
+  await old.exec(sql("migration-cards.sql"));
+  assert((await old.query("select count(*)::int as n from wallet_ledger where user_id = $1 and ref like 'rerun-%'", [U])).rows[0].n === 4, "re-running the migration over a ledger holding every card kind works, and keeps the rows");
   // A run dealt before v2.28.0 has no category order and cannot be played on: the migration ends it.
   await old.query("update card_runs set cats = null");
   await old.exec(sql("migration-cards.sql"));

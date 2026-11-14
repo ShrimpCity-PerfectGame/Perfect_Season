@@ -840,6 +840,8 @@ async function setUpCards(withDeck) {
       }, 250);
     }
     // &tab=packs&inside=1 also opens the first pack's contents, so the odds tables are on screen.
+    // &tab=packs&qty=5 chooses five of the first pack and presses Open, so the batch's confirm is on screen.
+    if (params.get("qty")) setTimeout(() => { document.querySelector(`.cd-pack [data-qty="${params.get("qty")}"]`)?.click(); setTimeout(() => document.querySelector(".cd-pack [data-buy]")?.click(), 200); }, 900);
     if (params.get("inside") === "1") setTimeout(() => [...document.querySelectorAll(".cd-pack .linkbtn")][0]?.click(), 900);
     return;
   }

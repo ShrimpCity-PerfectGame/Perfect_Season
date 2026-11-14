@@ -95,6 +95,7 @@ function packContents(pack) {
   return { bands, cards, finishes: FINISHES.filter((f) => pack.finish[f] > 0).map((f) => ({ name: FINISH_NAME[f], chance: pack.finish[f] })) };
 }
 const SHOWN_FIRST = 12;
+const PACK_COUNTS = [1, 5, 10];
 
 // The pack shop. `balance` is the wallet the app already holds (null while unknown); `onBalance` hands back a
 // balance just learned; `onOpened` tells the card area its collection may have grown. `pendingRef` is the card
@@ -109,7 +110,13 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
   const [asking, setAsking] = useState(null); // the pack waiting on Confirm
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null); // { pack, text }
-  const [pulled, setPulled] = useState(null); // { pack, cards, again }
+  const [pulled, setPulled] = useState(null); // { pack, cards, again, opened, wanted }
+  // How many of each pack to open at once (v2.28.1): pack id -> 1, 5 or 10. Each pack of a batch is still its
+  // OWN purchase with its own open id, bought one after another - so everything a single purchase guarantees
+  // (charged once, a lost answer can be asked about again) holds for each, and a batch that stops part-way has
+  // simply bought the ones before it.
+  const [qty, setQty] = useState({});
+  const [progress, setProgress] = useState(null); // { pack, opened, wanted } while a batch is opening
   const own = useRef(new Map());
   const pending = (pendingRef || own).current;
   const pulledRef = useRef(null);
@@ -135,22 +142,36 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
   async function buy(pack, row) {
     if (busy) return;
     const retry = pending.has(pack.id);
-    if (!retry) pending.set(pack.id, { id: newOpenId(), price: row.price });
-    const mine = pending.get(pack.id);
+    // A retry is about ONE purchase - the one whose answer was lost - never the rest of a batch.
+    const wanted = retry ? 1 : qty[pack.id] || 1;
     setBusy(true); setNotice(null); setAsking(pack.id);
-    const res = await openPack(pack.id, mine.id, mine.price);
-    // What the purchase changed is the card area's and the app's to know WHETHER OR NOT this shop is still on
-    // screen - a player who taps Collection while a pack is opening has still bought it.
-    if (res.ok) {
+    const got = [];
+    let res = null, again = false, missing = false, opened = 0;
+    for (let n = 0; n < wanted; n++) {
+      if (!pending.has(pack.id)) pending.set(pack.id, { id: newOpenId(), price: row.price });
+      const mine = pending.get(pack.id);
+      res = await openPack(pack.id, mine.id, mine.price);
+      if (!res.ok) break;
+      // What the purchase changed is the card area's and the app's to know WHETHER OR NOT this shop is still on
+      // screen - a player who taps Collection while a pack is opening has still bought it.
       pending.delete(pack.id);
       onBalance?.(res.balance);
       onOpened?.();
+      opened++;
+      const cards = toCards(res.cards.map((c) => ({ ...c, count: 1 })));
+      got.push(...cards);
+      again = again || res.duplicate; missing = missing || cards.length < res.cards.length;
+      if (live.current) {
+        setProgress({ pack: pack.id, opened, wanted });
+        setShelf((s) => (Array.isArray(s) ? s.map((r) => (r.id === pack.id ? { ...r, stockLeft: res.stockLeft } : r)) : s));
+      }
+    }
+    if (live.current) setProgress(null);
+    if (opened > 0 && live.current) setPulled({ pack, cards: got, again, missing, opened, wanted });
+    if (res.ok) {
       if (!live.current) return;
       setBusy(false);
       setAsking(null);
-      const cards = toCards(res.cards.map((c) => ({ ...c, count: 1 })));
-      setPulled({ pack, cards, again: res.duplicate, missing: cards.length < res.cards.length });
-      setShelf((s) => (Array.isArray(s) ? s.map((r) => (r.id === pack.id ? { ...r, stockLeft: res.stockLeft } : r)) : s));
       return;
     }
     const unknown = OUTCOME_UNKNOWN.includes(res.reason) || !PACK_SENTENCES[res.reason];
@@ -191,10 +212,11 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
       {pulled && (
         <section className="cd-fresh" aria-labelledby="cd-pulled-h">
           <h2 className="cd-h" id="cd-pulled-h" tabIndex={-1} ref={pulledRef}>You pulled</h2>
+          {pulled.wanted > 1 && <p className="note" data-batch>{pulled.opened === pulled.wanted ? `${pulled.opened} packs opened.` : `${pulled.opened} of ${pulled.wanted} packs opened. The rest were not bought.`}</p>}
           {pulled.again && <p className="note">This pack was already bought — here are its cards again. You weren't charged twice.</p>}
           {pulled.missing && <p className="note">Some of these cards can't be shown because this page is out of date. They are yours — reload to see them.</p>}
           <div className="cd-grid">
-            {pulled.cards.map((r) => <PulledCard key={`p${r.id}:${r.finish}`} row={r} />)}
+            {pulled.cards.map((r, i) => <PulledCard key={`p${i}:${r.id}:${r.finish}`} row={r} />)}
           </div>
         </section>
       )}
@@ -203,8 +225,12 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
         {onSale.map((pack) => {
           const row = rows.get(pack.id);
           const soldOut = row.stockLeft != null && row.stockLeft <= 0;
-          const short = balance != null && balance < row.price ? row.price - balance : 0;
           const waiting = pending.has(pack.id); // sent, and not answered for certain
+          const many = waiting ? 1 : qty[pack.id] || 1;
+          const cost = row.price * many;
+          const short = balance != null && balance < cost ? cost - balance : 0;
+          const tooMany = row.stockLeft != null && row.stockLeft > 0 && many > row.stockLeft;
+          const going = progress?.pack === pack.id ? progress : null;
           const isAsking = asking === pack.id || waiting;
           const open = inside === pack.id;
           const contents = open ? packContents(pack) : null;
@@ -219,15 +245,23 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
                 {row.stockLeft != null && (
                   <p className="cd-pack-stock">{soldOut ? "Sold out" : `${row.stockLeft.toLocaleString("en-US")} of ${row.stockTotal.toLocaleString("en-US")} left`}</p>
                 )}
+                {!soldOut && (
+                  <div className="cd-qty" role="group" aria-label={`How many ${pack.name} packs to open`}>
+                    {PACK_COUNTS.map((n) => (
+                      <button key={n} className="cd-qty-b" data-qty={n} aria-pressed={many === n} disabled={busy || waiting}
+                        onClick={() => { setQty((q) => ({ ...q, [pack.id]: n })); setNotice(null); }}>×{n}</button>
+                    ))}
+                  </div>
+                )}
                 <div className="cd-pack-acts">
                   {/* ONE button through Open, Confirm and Try again, so the keyboard's focus stays on it as its
                       label changes. Two buttons swapped in and out dropped focus to the page at every step. */}
-                  <button className="btn solid" data-buy disabled={busy || (!isAsking && (soldOut || short > 0))}
+                  <button className="btn solid" data-buy disabled={busy || (!isAsking && (soldOut || short > 0 || tooMany))}
                     onClick={() => { if (isAsking) buy(pack, row); else { setAsking(pack.id); setNotice(null); } }}>
-                    {!isAsking ? (soldOut ? "Sold out" : "Open")
-                      : busy && asking === pack.id ? "Opening…"
+                    {!isAsking ? (soldOut ? "Sold out" : many > 1 ? `Open ${many}` : "Open")
+                      : busy && asking === pack.id ? (going && going.wanted > 1 ? `Opening ${Math.min(going.wanted, going.opened + 1)} of ${going.wanted}…` : "Opening…")
                       : waiting ? "Try again"
-                      : `Confirm: ${row.price.toLocaleString("en-US")} coins`}
+                      : many > 1 ? `Confirm: ${cost.toLocaleString("en-US")} coins for ${many}` : `Confirm: ${row.price.toLocaleString("en-US")} coins`}
                   </button>
                   {/* No Cancel on a purchase that may already have happened: it cannot be cancelled, only asked about. */}
                   {isAsking && !waiting && (
@@ -239,7 +273,8 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
                   <button className="linkbtn" aria-expanded={open} aria-controls={open ? `cd-in-${pack.id}` : undefined}
                     onClick={() => { setInside(open ? null : pack.id); setAll(false); }}>Who is inside</button>
                 </div>
-                {short > 0 && !soldOut && <p className="note">You need {short.toLocaleString("en-US")} more coins.</p>}
+                {short > 0 && !soldOut && <p className="note">You need {short.toLocaleString("en-US")} more coins{many > 1 ? ` for ${many}` : ""}.</p>}
+                {tooMany && <p className="note">Only {row.stockLeft.toLocaleString("en-US")} left.</p>}
                 {/* A purchase still waiting says so even when the notice that first said it is gone - the shop
                     was left and come back to - or "Try again" would be a button with no reason beside it. */}
                 {(notice?.pack === pack.id || waiting) && <p className="note" role="alert">{notice?.pack === pack.id ? notice.text : UNKNOWN_OUTCOME}</p>}
@@ -594,6 +629,11 @@ export const CARDS_CSS = CARD_FACE_CSS + CARD_BATTLE_CSS + `
 @keyframes cd-sell{from{transform:none;filter:none}to{transform:rotate(-5deg) scale(.9);filter:grayscale(.85) brightness(.92)}}
 @keyframes cd-coin{from{visibility:hidden;transform:translate(-50%,-160%) rotate(-6deg) scale(.4)}to{visibility:visible;transform:translate(-50%,-50%) rotate(-6deg) scale(1)}}
 @media (prefers-reduced-motion:reduce){.cd-sold-card{animation:none;transform:rotate(-5deg) scale(.9);filter:grayscale(.85) brightness(.92)}.cd-sold-coin,.cd-swept-coin{animation:none}}
+.cd-qty{display:flex;gap:6px;margin:2px 0 4px}
+.cd-qty-b{font-weight:800;font-size:14px;padding:6px 12px;border-radius:999px;border:2px solid var(--btn-line);background:var(--surface);color:var(--ink);font-variant-numeric:tabular-nums}
+.cd-qty-b[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.cd-qty-b:disabled{opacity:1;color:var(--muted);border-color:var(--line2)}
+.cd-qty-b[aria-pressed="true"]:disabled{color:var(--bg);background:var(--muted);border-color:var(--muted)}
 /* "You pulled" takes focus so a screen reader lands on what just happened; it is not a control, so no ring. */
 .cd-h[tabindex="-1"]:focus,.cd-inside:focus{outline:none}
 .cd-shop{display:grid;gap:18px}
@@ -629,5 +669,6 @@ export const CARDS_CSS = CARD_FACE_CSS + CARD_BATTLE_CSS + `
 }
 @media (pointer:coarse){
   .cd-chip{min-height:44px;padding:8px 16px;z-index:1}
+  .cd-qty-b{min-height:44px;min-width:52px;position:relative;z-index:1}
 }
 `;

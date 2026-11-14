@@ -739,6 +739,43 @@ await runTest("every battle refusal has a sentence, and none claims to know what
   for (const key of ["not_owned", "not_in_hand", "already_played", "same_player", "bad_slot", "bad_deck", "no_deck", "guest_not_allowed", "cards_off", "no_run", "no_hand"]) assert(!/connection/i.test(BATTLE_SENTENCES[key]), `"${key}" is a rule, not a fault in your connection`);
 });
 
+await runTest("several packs at once: one confirm, each its own purchase, and a batch that stops keeps what it opened", async () => {
+  const mo = await signUp("mona@cards.test", "mona");
+  auth._wallet.apply(mo, 1750, "season", "multi"); // 2,000 with the welcome coins
+  await openShop();
+  const qty = (n) => packEl("pack-standard").querySelector(`[data-qty="${n}"]`);
+  assert(qty(1).getAttribute("aria-pressed") === "true" && qty(5) && qty(10), "one, five or ten - one to begin with");
+  await click(qty(5)); await flush();
+  assert(qty(5).getAttribute("aria-pressed") === "true" && packBtn("pack-standard", "Open 5"), "five chosen, and the button says so");
+  await click(packBtn("pack-standard", "Open 5")); await flush();
+  assert(packBtn("pack-standard", "Confirm: 750 coins for 5") && auth._wallet.balanceOf(mo) === 2000, "it asks once, for the whole price, and has bought nothing yet");
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle(); await settle();
+  assert(auth._wallet.balanceOf(mo) === 1250, "five packs left the wallet: " + auth._wallet.balanceOf(mo));
+  assert(container.querySelectorAll(".cd-fresh [data-card]").length === 15 && /5 packs opened\./.test(container.querySelector("[data-batch]").textContent), "all fifteen cards are shown together: " + container.querySelectorAll(".cd-fresh [data-card]").length);
+  const opens = new Set(auth._cards.grants(mo).filter((g) => g.kind === "pack").map((g) => g.ref.split(":")[0]));
+  assert(opens.size === 5, "five purchases, each with an open id of its own: " + opens.size);
+
+  // Ten, with coins for eight: the button will not start what the wallet cannot finish.
+  await click(qty(10)); await flush();
+  assert(packBtn("pack-standard", "Open 10").disabled && /You need 250 more coins for 10\./.test(packEl("pack-standard").textContent), "ten costs more than there is, and it says by how much");
+
+  // A batch whose third answer is lost: two are opened and shown, the third is the one Try again asks about.
+  await click(qty(5)); await flush();
+  await click(packBtn("pack-standard", "Open 5")); await flush();
+  const real = auth._cards.claimStarter.bind(auth._cards);
+  let calls = 0;
+  auth._cards.claimStarter = async (body) => { if (body?.action === "open_pack" && ++calls === 3) auth._cards.openFails = true; return real(body); };
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle(); await settle();
+  auth._cards.claimStarter = real;
+  assert(calls === 3, "it stopped at the one that did not answer: " + calls);
+  assert(auth._wallet.balanceOf(mo) === 1250 - 450, "three were bought - the third's answer was lost, not its purchase");
+  assert(/2 of 5 packs opened/.test(container.querySelector("[data-batch]").textContent) && container.querySelectorAll(".cd-fresh [data-card]").length === 6, "the two that answered are shown");
+  assert(packBtn("pack-standard", "Try again") && qty(5).disabled, "and the third is asked about, not bought again - with the count locked meanwhile");
+  await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
+  assert(auth._wallet.balanceOf(mo) === 800 && container.querySelectorAll(".cd-fresh [data-card]").length === 3 && /already bought/.test(container.querySelector(".cd-fresh").textContent), "Try again shows that one pack's cards and charges nothing more");
+  assert(packBtn("pack-standard", "Open 5") && !qty(5).disabled, "and the shop is back to normal");
+});
+
 await runTest("a copy pulled from a pack is sold as it arrives, and the screen shows it going", async () => {
   const dee = await signUp("dee@cards.test", "deedee");
   auth._wallet.apply(dee, 1000, "season", "test-coins");
