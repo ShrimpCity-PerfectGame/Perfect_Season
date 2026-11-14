@@ -7,7 +7,7 @@ import {
   setupDom, makeStorage, makeMockAuth, mount, flush, click, type, clickMode, findButtonByText, assert, runTest, waitForCrypto,
 } from "./helpers.mjs";
 import { CARD_REFUSALS } from "../storage-cards.js";
-import { CARDS, cardBoardKey, buildTeam, dailyFoe, dailyCategories, categoryLabel } from "../card-logic.mjs";
+import { CARDS, cardBoardKey, buildTeam, dailyFoe, dailyCategories, categoryLabel, GAUNTLET, gauntletName, gauntletFoe } from "../card-logic.mjs";
 import { mulberry32 } from "../game-logic.mjs";
 
 setupDom();
@@ -544,7 +544,7 @@ await runTest("the ladder: a round at a time - see the spot and who you face, pl
   await openTabOf("run");
   assert(area()?.dataset.phase === "idle" && q("[data-start]") && !arena(), "it opens on the offer to start, not on a battle: " + container.querySelector(".cd-area")?.textContent.slice(0, 160));
   assert(q("[data-paid-left]").textContent === "15" && q("[data-best-run]").textContent === "0", "with the day's paid wins and the best so far");
-  assert(qa(".cd-tabs [data-tab]").length === 3 && tabBtn("battle").getAttribute("aria-pressed") === "true" && tabBtn("run").getAttribute("aria-pressed") === "true" && tabBtn("deck") && tabBtn("daily") && tabBtn("boards"), "three tabs across the top, Battle pressed, and four ways in under it");
+  assert(qa(".cd-tabs [data-tab]").length === 3 && tabBtn("battle").getAttribute("aria-pressed") === "true" && tabBtn("run").getAttribute("aria-pressed") === "true" && tabBtn("deck") && tabBtn("daily") && tabBtn("boards") && tabBtn("gauntlet"), "three tabs across the top, Battle pressed, and five ways in under it");
   await click(q("[data-start]")); await settle();
   const run = liveRun(bea);
   assert(area().dataset.phase === "play" && arena() && run && !container.innerHTML.includes(run.seed), "starting opens the arena, and the seed is nowhere on the page");
@@ -702,10 +702,63 @@ await runTest("the daily battle: deal once, a round at a time, one result", asyn
   assert(q("[data-played]") && !q("[data-choose]") && !q("[data-deal]") && qa(".cb-round").length === 6, "and it is still played after leaving and coming back");
 });
 
+await runTest("the gauntlet: twelve real teams, one open at a time, their six in view, paid once", async () => {
+  await click(tabBtn("gauntlet")); await settle(); await settle();
+  assert(area().dataset.mode === "gauntlet" && area().dataset.phase === "list" && q("[data-cleared]").textContent === "0", "it opens on the list, nothing cleared");
+  const stages = () => qa(".cb-stage");
+  assert(stages().length === GAUNTLET.length && stages().map((li) => li.dataset.state).join() === ["next", ...Array(GAUNTLET.length - 1).fill("locked")].join(), "twelve stages: the first up next, the rest locked");
+  assert(stages()[0].textContent.includes(gauntletName(0)) && /pays 20 coins/.test(stages()[0].textContent) && /32-point head start/.test(stages()[0].textContent), "the first says who it is, what it pays and its head start: " + stages()[0].textContent);
+  assert(stages()[0].querySelector("[data-play]") && !stages()[1].querySelector("button") && !stages()[1].textContent.includes(CARDS.get(gauntletFoe(1)[0].id).name), "only the open stage can be played, and a locked one does not say who is in it");
+  const before = auth._wallet.balanceOf(bea);
+  await click(q("[data-play]")); await settle(); await settle();
+  const row = () => auth._cards.gauntlets.get(bea);
+  assert(area().dataset.phase === "play" && row().stage === 0 && arena() && /points short each round/.test(q("[data-head-start]").textContent), "an attempt at stage one, with its head start said in words");
+  const foe = gauntletFoe(0);
+  assert(Number(q("[data-facing] [data-card]").dataset.card) === foe[0].id && !q("[data-facing-hidden]"), "here their card IS shown - a real team is the point");
+  assert(!container.textContent.includes(row().cats.join()), "but the category order is not");
+  // Leave and come back mid-way: the same attempt, the same hand.
+  auth._cards.nextRolls = rolls(true);
+  await playRounds(2);
+  const hand = row().hand.map((e) => e.card).join();
+  await goHome(); await openTabOf("gauntlet");
+  assert(area().dataset.phase === "play" && arena().dataset.rounds === "2" && row().hand.map((e) => e.card).join() === hand, "leaving and coming back is the same attempt, two rounds in");
+  await playRounds(4);
+  assert(area().dataset.phase === "result" && arena().dataset.done === "true", "six rounds and it is over");
+  const won = arena().dataset.win === "true";
+  if (won) {
+    assert(/Stage cleared/.test(q(".cb-result-h").textContent) && q("[data-paid]") && auth._wallet.balanceOf(bea) === before + 20 && row().cleared === 1, "a win clears the stage and pays its twenty");
+    assert(q("[data-next]").textContent.includes(gauntletName(1)), "and offers the next team by name");
+  } else {
+    assert(/Beaten/.test(q(".cb-result-h").textContent) && q("[data-retry]") && auth._wallet.balanceOf(bea) === before && row().cleared === 0, "a loss costs nothing and offers another try");
+    // Make it a win so the rest of the test has a cleared stage: a stage is as often as it takes.
+    auth._cards.gauntlets.set(bea, { ...row(), cleared: 1, cleared_at: new Date().toISOString() });
+  }
+  await click(q("[data-back]")); await settle();
+  await goHome(); await openTabOf("gauntlet");
+  assert(q("[data-cleared]").textContent === "1" && stages().slice(0, 3).map((li) => li.dataset.state).join() === "cleared,next,locked", "stage one cleared, stage two open: " + stages().slice(0, 3).map((li) => li.dataset.state));
+  assert(stages()[0].querySelector("[data-replay]") && !/pays/.test(stages()[0].textContent), "a cleared stage can be played again and promises no coins");
+  // A lost answer on a round: shown as played, never played twice.
+  await click(q("[data-play]")); await settle(); await settle();
+  auth._cards.battleFails = true;
+  await click(q("[data-best]")); await settle(); await settle(); await settle();
+  assert(row().rounds.length === 1 && arena().dataset.rounds === "1" && /was played/.test(q("[data-notice]").textContent), "a round whose answer was lost is shown as it was played");
+  // Giving up keeps the progress.
+  await click(q("[data-quit]")); await settle(); await settle();
+  assert(area().dataset.phase === "list" && row().stage === null && q("[data-cleared]").textContent === "1", "giving up a try ends the attempt and nothing else");
+  // A read that failed is not "nothing cleared".
+  auth._cards.stateFails = true;
+  await goHome(); await openTabOf("gauntlet");
+  assert(/Couldn't load your battles/.test(container.textContent) && !q(".cb-stage"), "a failed read shows no gauntlet at all, not an empty one");
+  auth._cards.stateFails = false;
+  await click(button("Try again")); await settle(); await settle();
+  assert(q("[data-cleared]").textContent === "1", "and trying again finds it");
+});
+
 await runTest("the boards list the ladder and the day, by name", async () => {
   await click(tabBtn("boards")); await settle(); await settle();
   const tables = qa(".cb-board");
-  assert(tables.length === 2 && /ladder/i.test(tables[0].caption.textContent) && /Today's battle/.test(tables[1].caption.textContent), "two boards");
+  assert(tables.length === 3 && /ladder/i.test(tables[0].caption.textContent) && /Today's battle/.test(tables[1].caption.textContent) && /gauntlet/i.test(tables[2].caption.textContent), "three boards");
+  assert(/bea/.test(tables[2].textContent) && tables[2].querySelector("td.r").textContent === "1", "with this account's cleared stage on the gauntlet's");
   assert(/bea/.test(tables[0].textContent) && tables[0].querySelector("td.r").textContent === "1" && /bea/.test(tables[1].textContent), "with this account on both: " + tables[0].textContent);
   assert(/\d–\d · /.test(tables[1].querySelector("td.r").textContent), "the day's row is rounds won and lost, then points: " + tables[1].querySelector("td.r").textContent);
   assert(tables[0].querySelector(".namelink, .bname"), "names are drawn the way every board draws them");

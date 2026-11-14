@@ -10,6 +10,8 @@ import { loadEdgeFunction } from "./edge-harness.mjs";
 import { makeCards } from "./mock-cards.mjs";
 import { makeWallet } from "./mock-wallet.mjs";
 import { PACK_BY_ID, packCards } from "../card-packs.mjs";
+import { GAUNTLET, gauntletFoe, gauntletEdge } from "../card-logic.mjs";
+import { gauntletCoins } from "../rewards.mjs";
 import { initCardData, CARDS, CATEGORY_IDS, STARTER_MAX_RATING, deckProblem, bestDeck, autoPick, spotFits, ladderFoe, dailyFoe, dailyBattle, dailyCategories, LUCK_SPREAD, LUCK_WIDE } from "../card-logic.mjs";
 import { COIN_RULES, cardWinCoins, cardSellCoins } from "../rewards.mjs";
 import { CARD_REFUSALS } from "../storage-cards.js";
@@ -34,7 +36,7 @@ function store({ on = true } = {}) {
     users: { has: (id) => id === ME || id === GUEST || id === NAMELESS },
     readFails: {}, writeFails: {}, rpcFails: {}, throwOn: {}, beforeWrite: null, rpcCalls: [],
     profiles, cards, wallet,
-    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : table === "card_runs" ? cards.runs : table === "card_dailies" ? cards.dailies : []),
+    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : table === "card_runs" ? cards.runs : table === "card_dailies" ? cards.dailies : table === "card_gauntlets" ? [...cards.gauntlets].map(([user_id, g]) => ({ user_id, ...g })) : []),
     insert: (_table, row) => ({ row }),
     remove() {},
     rpcs: {
@@ -45,6 +47,10 @@ function store({ on = true } = {}) {
         card_run_start: (a) => cards.runStart(a.p_user, a.p_seed, a.p_hand, a.p_foe, a.p_cats),
         card_run_round: (a) => cards.runRound(a.p_user, a.p_run, a.p_step, a.p_round, a.p_card, a.p_rounds),
         card_daily_round: (a) => cards.dailyRound(a.p_user, a.p_date, a.p_round, a.p_card, a.p_rounds),
+        card_gauntlet_start: (a) => cards.gauntletStart(a.p_user, a.p_stage, a.p_hand, a.p_cats),
+        card_gauntlet_round: (a) => cards.gauntletRound(a.p_user, a.p_stage, a.p_round, a.p_card, a.p_rounds),
+        card_gauntlet_finish: (a) => cards.gauntletFinish(a.p_user, a.p_stage, a.p_lineup, a.p_win, a.p_last, a.p_coins),
+        card_gauntlet_quit: (a) => cards.gauntletQuit(a.p_user),
         card_deck_read: (a) => cards.deckRead(a.p_user),
         card_deck_save: (a) => cards.deckSave(a.p_user, a.p_cards),
         card_daily_deal: (a) => cards.dailyDeal(a.p_user, a.p_date, a.p_hand),
@@ -471,6 +477,43 @@ await runTest("the daily battle: a hand dealt once, the day's team, a round at a
   const cheat = await post({ action: "daily_round", round: 0, card: outsider });
   assert(cheat.status === 409 && cheat.body.reason === "not_in_hand" && s2.cards.dailies[0].log.length === 0, "a card that was not dealt plays nothing");
   assert(s.wallet.balanceOf(ME) === 0, "and a daily battle pays no coins");
+});
+
+await runTest("the gauntlet: a real team a stage, a round at a time, paid once from rewards.mjs", async () => {
+  const s = store();
+  stacked(s, ME);
+  for (const bad of [-1, GAUNTLET.length, 1.5, "0", undefined]) assert((await post({ action: "gauntlet_start", stage: bad })).body.reason === "malformed", `stage ${bad} is not a stage`);
+  assert((await post({ action: "gauntlet_start", stage: 1 })).body.reason === "locked", "stage two is locked");
+  assert((await post({ action: "gauntlet_round", stage: 0, round: 0, card: { id: 1, finish: "base" } })).body.reason === "no_battle", "no attempt, no round");
+  assert((await post({ action: "gauntlet_start", stage: 0 }, GUEST)).body.reason === "guest_not_allowed", "a guest has no gauntlet");
+  const started = await post({ action: "gauntlet_start", stage: 0 });
+  const g = started.body.gauntlet;
+  assert(started.status === 200 && g.stage === 0 && g.cleared === 0 && g.hand.length === 12 && g.rounds.length === 0 && !JSON.stringify(started.body).includes("cats"), "an attempt, a hand of twelve, and no category order in the answer");
+  const again = await post({ action: "gauntlet_start", stage: 0 });
+  assert(JSON.stringify(again.body.gauntlet.hand) === JSON.stringify(g.hand), "asking again is the same attempt and the same hand");
+  const row = () => s.cards.gauntlets.get(ME);
+  const had = s.wallet.balanceOf(ME);
+  const foe = gauntletFoe(0), cats = row().cats.slice();
+  let rounds = [], last = null;
+  for (let n = 0; n < 6; n++) {
+    const res = await post({ action: "gauntlet_round", stage: 0, round: n, card: autoPick(g.hand, foe, rounds), win: "me", cat: "star", coins: 9999 });
+    assert(res.status === 200 && res.body.round.cat === cats[n] && res.body.round.foe.id === foe[n].id, `round ${n + 1} is on the attempt's own category against the stage's card: ` + JSON.stringify(res.body).slice(0, 120));
+    assert(res.body.round.foe.mods.some((m) => m.key === "edge" && m.pts === gauntletEdge(0)), "with the stage's head start on their card");
+    rounds = n < 5 ? res.body.gauntlet.rounds : rounds; last = res;
+    if (n === 0) assert((await post({ action: "gauntlet_round", stage: 0, round: 0, card: autoPick(g.hand, foe, []) })).body.reason === "stale", "the same round again is stale");
+  }
+  // The sixty best cards in the game against the weakest stage with a 32-point head start: a win.
+  assert(last.body.done === true && last.body.battle.win === true && last.body.battle.stage === 0 && last.body.first === true, "six rounds and a win: " + JSON.stringify(last.body).slice(0, 160));
+  assert(last.body.gauntlet.cleared === 1 && last.body.coins.credited === gauntletCoins(0) && s.wallet.balanceOf(ME) === had + gauntletCoins(0), "stage one cleared and paid what rewards.mjs says: " + JSON.stringify(last.body.coins) + " " + had + " " + s.wallet.balanceOf(ME));
+  assert(row().stage === null && row().last.win === true, "the attempt is over, and kept to be shown");
+  // Again: it plays, and pays nothing. Then give up one, which is not an error either way.
+  await post({ action: "gauntlet_start", stage: 0 });
+  rounds = [];
+  for (let n = 0; n < 6; n++) { const res = await post({ action: "gauntlet_round", stage: 0, round: n, card: autoPick(row().hand.map((e) => ({ id: e.card, finish: e.finish })), foe, rounds) }); last = res; if (n < 5) rounds = res.body.gauntlet.rounds; }
+  assert(last.body.done === true && last.body.first === false && last.body.coins.credited === 0 && s.wallet.balanceOf(ME) === had + gauntletCoins(0), "a cleared stage beaten again pays nothing");
+  await post({ action: "gauntlet_start", stage: 1 });
+  const quit = await post({ action: "gauntlet_quit" });
+  assert(quit.status === 200 && quit.body.ended === true && row().stage === null && row().cleared === 1 && (await post({ action: "gauntlet_quit" })).body.ended === false, "giving up ends the attempt and keeps the progress");
 });
 
 await runTest("with the switch off, no battle touches the database", async () => {

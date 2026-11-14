@@ -603,6 +603,64 @@ await runTest("the daily battle: a hand dealt once, a battle played once", async
   assert(mine.daily.played === true && mine.daily.rounds === 4 && mine.daily.score === 512.3, "each player's state holds their own day");
 });
 
+await runTest("the gauntlet: a stage at a time, an attempt stored, each stage paid once", async () => {
+  const gStart = (u, stage, hand = HAND, cats = CATS) => both("card_gauntlet_start", [u, stage, J(hand), J(cats)], ["::uuid", "::integer", "::jsonb", "::jsonb"], () => battleMock.cards.gauntletStart(u, stage, hand, cats));
+  const gRound = (u, stage, n, { card = [SIX[n]], rounds = roundsTo(n + 1) } = {}) => both("card_gauntlet_round", [u, stage, n, J(card), J(rounds)], ["::uuid", "::integer", "::integer", "::jsonb", "::jsonb"], () => battleMock.cards.gauntletRound(u, stage, n, card, rounds));
+  const gFinish = (u, stage, win, { lineup = SIX, last = { win }, coins = 20 } = {}) => both("card_gauntlet_finish", [u, stage, J(lineup), win, J(last), coins], ["::uuid", "::integer", "::jsonb", "::boolean", "::jsonb", "::integer"], () => battleMock.cards.gauntletFinish(u, stage, lineup, win, last, coins));
+  const gQuit = (u) => both("card_gauntlet_quit", [u], ["::uuid"], () => battleMock.cards.gauntletQuit(u));
+  const bal = async (u) => Number((await owner("select balance from wallets where user_id = $1", [u]))[0].balance);
+
+  assert((await stateOf(RUNNER)).gauntlet === null, "nothing before a first attempt");
+  assert((await gStart(RGUEST, 0)).error === "guest_not_allowed" && (await gStart(uuid(404), 0)).error === "no_profile", "a guest and a stranger are refused");
+  assert((await gStart(RUNNER, 0, HAND.slice(1))).error === "bad_gauntlet" && (await gStart(RUNNER, 0, HAND, CATS.slice(1))).error === "bad_gauntlet" && (await gStart(RUNNER, -1)).error === "bad_gauntlet", "a hand, a category order or a stage that is not one is this function's fault");
+  assert((await gStart(RUNNER, 1)).error === "locked", "stage two is locked until stage one is beaten");
+  assert((await stateOf(RUNNER)).gauntlet === null, "and a refused start leaves nothing behind");
+  assert((await gRound(RUNNER, 0, 0)).error === "no_battle" && (await gFinish(RUNNER, 0, true)).error === "no_battle", "no attempt, no round and no result");
+
+  const first = await gStart(RUNNER, 0);
+  assert(first.data.fresh === true && first.data.stage === 0 && first.data.cleared === 0 && J(first.data.hand) === J(HAND) && first.data.rounds.length === 0, "an attempt at stage one: " + J(first.data).slice(0, 120));
+  const again = await gStart(RUNNER, 0, cardsFrom(13, 12));
+  assert(again.data.fresh === false && J(again.data.hand) === J(HAND), "starting again is the same attempt with the SAME hand");
+  const st = await stateOf(RUNNER);
+  assert(st.gauntlet.stage === 0 && !("cats" in st.gauntlet) && !J(st).includes(CATS[0] + '","' + CATS[1]), "the state carries the attempt and not its category order");
+
+  assert((await gRound(RUNNER, 0, 1)).error === "stale" && (await gRound(RUNNER, 1, 0)).error === "stale", "a round out of turn, or for another stage, is stale");
+  assert((await gRound(RUNNER, 0, 0, { card: [{ card: 999, finish: "base" }] })).error === "not_owned", "a card that is not theirs is refused");
+  assert((await gFinish(RUNNER, 0, true)).error === "stale", "a result with rounds still to play is stale");
+  for (let n = 0; n < 5; n++) assert(!(await gRound(RUNNER, 0, n)).error, `round ${n} is written`);
+  assert((await gRound(RUNNER, 0, 4)).error === "bad_gauntlet" || (await stateOf(RUNNER)).gauntlet.rounds.length === 5, "five rounds down, and no sixth by this door");
+  assert((await gFinish(RUNNER, 0, true, { lineup: SIX.slice(1) })).error === "bad_lineup" && (await gFinish(RUNNER, 0, true, { coins: 5000 })).error === "bad_gauntlet", "a lineup or a prize that is not one is this function's fault");
+  const before = await bal(RUNNER);
+  const won = await gFinish(RUNNER, 0, true, { last: { win: true, n: 1 } });
+  assert(won.data.cleared === 1 && won.data.first === true && won.data.credited === 20 && (await bal(RUNNER)) === before + 20, "the stage is cleared and paid: " + J(won.data));
+  assert((await gFinish(RUNNER, 0, true)).error === "no_battle", "the same result again finds no attempt, and pays nothing");
+  const after = await stateOf(RUNNER);
+  assert(after.gauntlet.cleared === 1 && after.gauntlet.stage === null && after.gauntlet.last.n === 1 && after.gauntlet.last_stage === 0 && after.gauntlet.hand === null, "the attempt is over and kept as the last one");
+
+  // A cleared stage again: it plays, and pays nothing.
+  await gStart(RUNNER, 0);
+  for (let n = 0; n < 5; n++) await gRound(RUNNER, 0, n);
+  const twice = await gFinish(RUNNER, 0, true);
+  assert(twice.data.first === false && twice.data.credited === 0 && twice.data.cleared === 1 && (await bal(RUNNER)) === before + 20, "beating a cleared stage again pays nothing and clears nothing");
+  // A loss: nothing moves.
+  await gStart(RUNNER, 1);
+  for (let n = 0; n < 5; n++) await gRound(RUNNER, 1, n);
+  const lost = await gFinish(RUNNER, 1, false, { coins: 0 });
+  assert(lost.data.cleared === 1 && lost.data.first === false && lost.data.credited === 0, "a loss clears nothing");
+  // Giving up: the attempt goes, the progress stays, and a new attempt gets a new hand.
+  await gStart(RUNNER, 1);
+  assert((await gQuit(RUNNER)).data.ended === true && (await gQuit(RUNNER)).data.ended === false, "giving up ends the attempt, once");
+  const fresh = await gStart(RUNNER, 1, cardsFrom(13, 12));
+  assert(fresh.data.fresh === true && J(fresh.data.hand) === J(cardsFrom(13, 12)) && fresh.data.cleared === 1, "and the next attempt is dealt afresh");
+  await gQuit(RUNNER);
+  for (const fn of ["card_gauntlet_start(uuid, integer, jsonb, jsonb)", "card_gauntlet_round(uuid, integer, integer, jsonb, jsonb)", "card_gauntlet_finish(uuid, integer, jsonb, boolean, jsonb, integer)", "card_gauntlet_quit(uuid)"]) {
+    const can = (await owner(`select has_function_privilege('authenticated', 'public.${fn}', 'execute') as a, has_function_privilege('anon', 'public.${fn}', 'execute') as b`))[0];
+    assert(can.a === false && can.b === false, `no browser may call ${fn}`);
+  }
+  const tbl = (await owner("select has_table_privilege('authenticated', 'public.card_gauntlets', 'select') as a, has_table_privilege('anon', 'public.card_gauntlets', 'select') as b"))[0];
+  assert(tbl.a === false && tbl.b === false, "and nobody reads card_gauntlets from a browser");
+});
+
 await runTest("the two boards, in SQL and in the mock", async () => {
   await start(QUITTER, "seed-0004");
   await fill(QUITTER, 3, 0); await fight(QUITTER, 3, 0, true); await fill(QUITTER, 3, 1); await fight(QUITTER, 3, 1, true); // level with runner's best, and still live
@@ -613,6 +671,7 @@ await runTest("the two boards, in SQL and in the mock", async () => {
     for (const row of a.daily) row.score = Number(row.score);
     delete a.today; delete b.today;
     assert(!differs(a, b), `card_boards(${limit}): the SQL and the mock disagree - ${differs(a, b)}`);
+    if (limit === 25) assert(!differs(a.gauntlet, [{ username: "runner", cleared: 1 }]), "the gauntlet board: stages cleared, by name: " + J(a.gauntlet));
     if (limit === 25) {
       assert(!differs(a.runs, [{ username: "quitter", wins: 2 }, { username: "runner", wins: 2 }]), "the ladder: longest runs, ties by name, a live run counted, nobody on it with none: " + J(a.runs));
       assert(!differs(a.daily, [{ username: "quitter", rounds: 5, score: 100 }, { username: "runner", rounds: 4, score: 512.3 }, { username: "rival", rounds: 4, score: 512.3 }]),

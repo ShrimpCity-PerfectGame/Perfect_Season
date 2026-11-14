@@ -20,6 +20,20 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.29.0] - 2026-11-14
+
+Test site only. **The historical gauntlet** - the third of the owner's four card modes.
+
+### Added
+- Cards: **the gauntlet.** Twelve real offenses in order, weakest first, from the 2016-20 Jets to the 1999-2005
+  Chiefs. Each is one franchise's best card at every spot from one of the game's five-year eras. Beat one to
+  open the next. Here you CAN see who you are facing - a real team is the point.
+- A stage can be tried as often as it takes, with a new hand each time, and losing costs nothing. Each stage
+  pays once, the first time it is beaten: 20 coins for the first and 10 more for each after it, 900 in all.
+- The early stages give a head start - their cards play points short, 32 at stage one, shrinking to nothing by
+  stage nine - because the weakest real offense is still better than a starter deck. It is shown on their card.
+- A third board: stages cleared.
+
 ## [2.28.2] - 2026-11-14
 
 Test site only.

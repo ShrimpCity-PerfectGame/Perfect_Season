@@ -519,10 +519,51 @@ A ladder win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run alre
 
 ### 11.7 Not built, and known gaps
 
-- The **historical gauntlet** and the **draft arena** (the owner chose all four modes; these are stages two
-  and three). No badge, nothing on the profile.
+- The **draft arena** (the fourth of the owner's four modes). The gauntlet is section 13. No badge, nothing on the profile.
 - A battle is now six requests rather than one. Each is small, and a lost one is recovered from the state.
 - Two accounts are two collections; nothing stops one person climbing twice.
+
+## 13. The gauntlet (v2.29.0, on the test site)
+
+Twelve real offenses, weakest first. `GAUNTLET` in card-logic.mjs is the list: `[team, era index]`.
+
+- **A stage's team** is `gauntletFoe(stage)`: that franchise's best card (rating, then id) for each of the six
+  spots in that era, six different men, Base. The first five spots are shuffled on the stage's own seed and the
+  Flex is last. It is the same team every time.
+- **The list is written out, not computed, and may only be added to at the end.** Progress is a count of stages
+  cleared, so a list worked out from the catalog would reorder itself the day a season is added and stage five
+  would become another team. It was chosen by ranking all 160 team-eras by the average rating of their best
+  six and taking twelve spread from bottom (65) to top (110), no franchise twice.
+- **The head start** (`gauntletEdge`): the weakest real offense is far better than a starter deck, so the
+  early stages' cards play points short - `GAUNTLET_HEAD_START` (-32) at stage one, shrinking evenly to nothing
+  at `GAUNTLET_EVEN` (stage nine). It rides playRound's `foeEdge` with the label "Head start" and shows on
+  their card as a modifier. Measured at one try with the dull bot (2026-11-14):
+
+  | Stage | Starter deck | Sixty random | Sixty best |
+  |---|---|---|---|
+  | 1 NYJ 2016-20 (65) | 54% | 100% | 100% |
+  | 2 JAX 2016-20 (73) | 21% | 100% | 100% |
+  | 3 TEN 2011-15 (77) | 4% | 100% | 100% |
+  | 5 HOU 2016-20 (85) | 0% | 85% | 100% |
+  | 8 NYG 1999-2005 (93) | 0% | 23% | 100% |
+  | 10 GB 2016-20 (102) | 0% | 7% | 99% |
+  | 12 KC 1999-2005 (110) | 0% | 0% | 47% |
+
+- **Their six are in view.** Everywhere else the card across from you is hidden until yours is down; here the
+  team is named on the screen and the stage list, so hiding it would be theatre. The category order is still
+  secret (`card_gauntlets.cats`, returned by no read).
+- **The database:** `card_gauntlets`, one row an account - `cleared`, and the attempt in progress (`stage`,
+  `hand`, `cats`, `rounds`), plus `last` / `last_stage` for a browser whose final answer was lost. RLS on,
+  no policy, no client grant. Service role only: `card_gauntlet_start` (raises `locked` past the next stage;
+  an attempt already going is returned whatever stage was asked for), `card_gauntlet_round`,
+  `card_gauntlet_finish`, `card_gauntlet_quit`. A round is written by its number, exactly as on the ladder.
+- **Coins:** `gauntletCoins(stage)` = 20 + 10 a stage, 900 for all twelve, ever. Ledger kind `card_gauntlet`,
+  ref the stage number - so a stage pays once whatever else happens. A cleared stage can be replayed for nothing.
+- **Accepted:** giving up an attempt and starting again deals a new hand, so a hand can be fished for. Losing
+  is free and retries are unlimited, so that buys nothing a patient player did not already have.
+- **Runbook:** see somebody's progress - `select cleared, stage, last_stage from card_gauntlets where user_id = '<uuid>';`.
+  Put a stage back - `update card_gauntlets set cleared = <n> where user_id = '<uuid>';` (the coins already paid stay paid).
+- **Not built:** the draft arena (the fourth mode). No badge for running the gauntlet.
 
 ## 12. Copies (v2.26.0, on the test site)
 

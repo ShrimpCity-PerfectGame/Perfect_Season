@@ -348,9 +348,9 @@ function toCards(rows) {
 
 // Two levels (v2.26.0): three things to do with cards across the top - look at them, get more, play them - and
 // the three ways to play under Battle. Five chips in one group wrapped onto two ragged rows on a phone.
-const TABS = [["collection", "Collection"], ["packs", "Packs"], ["run", "Ladder"], ["daily", "Daily"], ["deck", "Deck"], ["boards", "Boards"]];
+const TABS = [["collection", "Collection"], ["packs", "Packs"], ["run", "Ladder"], ["gauntlet", "Gauntlet"], ["daily", "Daily"], ["deck", "Deck"], ["boards", "Boards"]];
 const TOP_TABS = [["collection", "Collection"], ["packs", "Packs"], ["battle", "Battle"]];
-const BATTLE_TABS = [["run", "Ladder"], ["daily", "Daily"], ["deck", "Deck"], ["boards", "Boards"]];
+const BATTLE_TABS = [["run", "Ladder"], ["gauntlet", "Gauntlet"], ["daily", "Daily"], ["deck", "Deck"], ["boards", "Boards"]];
 const isBattle = (tab) => BATTLE_TABS.some(([id]) => id === tab);
 // initialTab is the UI harness's, so the pack shop and the battle screens can be looked at and audited without a click.
 export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, balance = null, onBalance, initialTab = "collection" }) {

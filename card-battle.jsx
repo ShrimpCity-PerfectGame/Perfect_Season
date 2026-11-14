@@ -17,13 +17,13 @@
 // whose answer was lost. So the screen never replays to find out: it reads card_battle_state, which says where
 // things really stand and carries the latest battle, and shows that. A battle cannot be played twice either way.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchBattleState, fetchCardBoards, startRun, playRound, endRun, saveDeck, dealDaily, playDailyRound } from "./storage.js";
+import { fetchBattleState, fetchCardBoards, startRun, playRound, endRun, saveDeck, dealDaily, playDailyRound, startGauntlet, playGauntletRound, quitGauntlet } from "./storage.js";
 import {
   CARDS, CATEGORIES, FINISH_BONUS, DECK_SHAPE, HAND_SHAPE, POSITIONS, archetypeLabel, categoryLabel, spotLabel, abilityOf,
   deckProblem, bestDeck, playable, autoPick, playedSynergies, battleResult, ladderName, dailyFoe, maskFoe, categoryStat,
-  RATING_SHARE,
+  RATING_SHARE, GAUNTLET, GAUNTLET_EVEN, gauntletName, gauntletFoe, gauntletEdge,
 } from "./card-logic.mjs";
-import { COIN_RULES, cardWinCoins } from "./rewards.mjs";
+import { COIN_RULES, cardWinCoins, gauntletCoins } from "./rewards.mjs";
 import { Coins, NameLink } from "./cosmetics.jsx";
 import { CardFace } from "./card-face.jsx";
 
@@ -336,7 +336,7 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
         <div className="cb-finale">
           <p className="cb-stamp" aria-hidden="true">{result.win ? "\u{1F3C8} Win" : "\u{1F480} Beaten"}</p>
           <p className="cb-verdict" role="status" data-verdict>{result.win ? `You won, ${result.wins} rounds to ${result.losses}.` : `You lost, ${result.wins} rounds to ${result.losses}.`}</p>
-          <p className="cb-margin">{result.wins === result.losses ? `Level on rounds, so it went to total points: ${fmt(result.total)} to ${fmt(result.foeTotal)}.` : `Total points ${fmt(result.total)} to ${fmt(result.foeTotal)}.`}{edge > 0 ? ` Their cards played ${fmt(edge)} points up - the top of the ladder.` : ""}</p>
+          <p className="cb-margin">{result.wins === result.losses ? `Level on rounds, so it went to total points: ${fmt(result.total)} to ${fmt(result.foeTotal)}.` : `Total points ${fmt(result.total)} to ${fmt(result.foeTotal)}.`}{edge > 0 ? ` Their cards played ${fmt(edge)} points up - the top of the ladder.` : edge < 0 ? ` Their cards played ${fmt(-edge)} points short - your head start.` : ""}</p>
         </div>
       )}
 
@@ -415,11 +415,12 @@ function Boards() {
       <h2 className="cb-h2">Boards</h2>
       {got.runs.length === 0 ? <p className="note">Nobody has won a battle on the ladder yet.</p> : table("The ladder: longest runs", got.runs, "Wins", (x) => x.wins)}
       {got.daily.length === 0 ? <p className="note">Nobody has played today's battle yet.</p> : table("Today's battle", got.daily, "Rounds · points", (x) => `${x.rounds}–${6 - x.rounds} · ${fmt(x.score)}`)}
+      {got.gauntlet.length === 0 ? <p className="note">Nobody has cleared a stage of the gauntlet yet.</p> : table("The gauntlet: stages cleared", got.gauntlet, `Of ${GAUNTLET.length}`, (x) => x.cleared)}
     </div>
   );
 }
 
-// mode: "run" (the ladder) | "daily" | "deck" | "boards". rows: the collection, [{ id, finish, count, card }].
+// mode: "run" (the ladder) | "gauntlet" | "daily" | "deck" | "boards". rows: the collection, [{ id, finish, count, card }].
 export function BattleArea({ mode, rows, onBalance }) {
   const [st, setSt] = useState(null); // null: loading. "error" | "signed_out". Or the battle state.
   // The ladder battle that just ENDED: { id, step, hand, battle, coins, wins, over }. Kept so the arena stays on
@@ -428,6 +429,8 @@ export function BattleArea({ mode, rows, onBalance }) {
   // WHICH battle has finished playing out - the battle itself, not a flag. A flag reset in an effect on `shown`
   // is reset AFTER the child's own effect has reported it done (children's effects run first), and stuck at false.
   const [seenBattle, setSeenBattle] = useState(null);
+  // The gauntlet attempt that just ENDED: { stage, hand, battle, coins, first, cleared }.
+  const [shownG, setShownG] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const live = useRef(true);
@@ -445,7 +448,7 @@ export function BattleArea({ mode, rows, onBalance }) {
     }
   }, []);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setNotice(""); }, [mode]);
+  useEffect(() => { setNotice(""); setShownG(null); }, [mode]);
 
   if (mode === "boards") return <Boards />;
   if (st === null) return <p className="note" role="status">Loading…</p>;
@@ -564,8 +567,156 @@ export function BattleArea({ mode, rows, onBalance }) {
     setBusy(false);
   }
 
+  // ---- the gauntlet's three moves ----
+  async function beginG(stage) {
+    if (busy) return;
+    setBusy(true); setNotice("");
+    const res = await startGauntlet(stage);
+    if (!live.current) return;
+    setBusy(false);
+    if (res.ok) { setShownG(null); setSt((s) => ({ ...s, gauntlet: { ...s.gauntlet, ...res.gauntlet } })); return; }
+    if (!UNKNOWN.includes(res.reason)) { setNotice(say(res.reason)); if (res.reason === "locked") load(); return; }
+    // It may have started and its answer been lost: the state says, and an attempt in progress simply opens.
+    const fresh = await fetchBattleState();
+    if (!live.current) return;
+    if (fresh.status !== "ok") { setNotice(UNCONFIRMED); return; }
+    setSt(fresh);
+    if (fresh.gauntlet.stage == null) setNotice(say(res.reason));
+  }
+  async function playG(entry) {
+    const g = st.gauntlet;
+    if (busy || g.stage == null) return;
+    const stage = g.stage, round = g.rounds.length;
+    setBusy(true); setNotice("");
+    const res = await playGauntletRound(stage, round, entry);
+    if (!live.current) return;
+    if (res.ok) {
+      setBusy(false);
+      if (!res.done) { setSt((s) => ({ ...s, gauntlet: { ...s.gauntlet, rounds: res.gauntlet.rounds } })); return; }
+      if (typeof res.coins?.balance === "number") onBalance?.(res.coins.balance);
+      setShownG({ stage, hand: g.hand, battle: res.battle, coins: res.coins, first: res.first, cleared: res.gauntlet.cleared });
+      setSt((s) => ({ ...s, gauntlet: { cleared: res.gauntlet.cleared, stage: null, hand: [], rounds: [], last: res.battle, lastStage: stage } }));
+      return;
+    }
+    if (UNKNOWN.includes(res.reason) || res.reason === "stale" || res.reason === "no_battle") {
+      // Either it went through and the answer was lost, or it was played somewhere else: the state says.
+      const fresh = await fetchBattleState();
+      if (!live.current) return;
+      if (fresh.status !== "ok") setNotice(UNCONFIRMED);
+      else {
+        setSt(fresh);
+        const now = fresh.gauntlet;
+        if (now.stage === stage) {
+          setNotice(now.rounds.length > round ? "That round was played - its answer just didn't reach this page. Here is how it went."
+            : UNKNOWN.includes(res.reason) ? `${say(res.reason)} That round was not played.` : say(res.reason));
+        } else if (now.stage == null && now.last && now.lastStage === stage && round === 5) {
+          setShownG({ stage, hand: g.hand, battle: now.last, coins: null, first: null, cleared: now.cleared });
+          setNotice("That battle was finished - its answer just didn't reach this page. Here is how it went.");
+        } else setNotice(say(res.reason));
+      }
+    } else setNotice(say(res.reason));
+    setBusy(false);
+  }
+  async function giveUp() {
+    if (busy) return;
+    setBusy(true); setNotice("");
+    await quitGauntlet();
+    if (!live.current) return;
+    setBusy(false); setShownG(null);
+    await load();
+  }
+
   const paidLeft = Math.max(0, COIN_RULES.paidCardWinsPerDay - st.paidToday);
   const alert = notice && <p className="note" role="alert" data-notice>{notice}</p>;
+
+  if (mode === "gauntlet") {
+    const g = st.gauntlet;
+    const total = GAUNTLET.length;
+    const headStart = (stage) => { const e = gauntletEdge(stage); return e < 0 ? `Their cards play ${-e} points short each round - a head start.` : ""; };
+    if (shownG) {
+      const seen = seenBattle === shownG.battle;
+      const won = shownG.battle.win;
+      const next = shownG.cleared < total ? shownG.cleared : null; // the stage now up, if there is one
+      return (
+        <div className="cb-area" data-mode="gauntlet" data-phase="result">
+          <h2 className="cb-h2 cb-result-h" tabIndex={-1} ref={top}>{!seen ? `Stage ${shownG.stage + 1}: ${gauntletName(shownG.stage)}` : won ? "Stage cleared" : "Beaten"}</h2>
+          {alert}
+          <Arena key={`g:${shownG.stage}`} hand={shownG.hand} foe={shownG.battle.foe} rounds={shownG.battle.rounds} edge={shownG.battle.edge} foeName={gauntletName(shownG.stage)}
+            onDone={() => { setSeenBattle(shownG.battle); top.current?.focus(); }} />
+          {seen && won && shownG.first === true && <p className="cb-lead" data-paid>You beat {gauntletName(shownG.stage)}.{shownG.coins?.credited > 0 && <> You earned <Coins amount={shownG.coins.credited} size={16} />.</>}</p>}
+          {seen && won && shownG.first === false && <p className="cb-lead" data-again>You beat {gauntletName(shownG.stage)} again. A stage pays the first time only.</p>}
+          {seen && won && shownG.cleared >= total && <p className="cb-lead" data-all>That's all {total}. You've run the gauntlet.</p>}
+          {seen && !won && <p className="cb-lead" data-over>{gauntletName(shownG.stage)} held. Try it again whenever you like - you get a new hand each time.</p>}
+          {seen && (
+            <div className="cb-acts">
+              {won && next !== null && next > shownG.stage && <button className="btn solid xl" data-next disabled={busy} onClick={() => beginG(next)}>{busy ? "Dealing…" : `Next: ${gauntletName(next)}`}</button>}
+              {!won && <button className="btn solid xl" data-retry disabled={busy} onClick={() => beginG(shownG.stage)}>{busy ? "Dealing…" : "Try again"}</button>}
+              <button className="linkbtn" data-back onClick={() => { setShownG(null); setNotice(""); }}>Back to the gauntlet</button>
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (g.stage != null) {
+      const foe = gauntletFoe(g.stage);
+      if (!foe) return <div className="panel" role="alert"><p><b>This page is out of date.</b> Reload it to carry on with the gauntlet.</p></div>;
+      return (
+        <div className="cb-area" data-mode="gauntlet" data-phase="play" data-stage={g.stage}>
+          <h2 className="cb-h2 cb-result-h">Stage {g.stage + 1} <span className="cb-count">{gauntletName(g.stage)}</span></h2>
+          {headStart(g.stage) && <p className="cb-foot" data-head-start>{headStart(g.stage)}</p>}
+          {alert}
+          {/* A real offense, named on the screen: who you face is the point here, so their six are in view. */}
+          <Arena key={`g:${g.stage}`} hand={g.hand} foe={foe} rounds={g.rounds} edge={gauntletEdge(g.stage)} foeName={gauntletName(g.stage)} busy={busy} onPlay={playG} />
+          <div className="cb-acts">
+            <button className="linkbtn" data-quit disabled={busy} onClick={giveUp}>Give up this try</button>
+          </div>
+          <p className="cb-foot">{g.stage === g.cleared ? `Beating them pays ${gauntletCoins(g.stage)} coins, once.` : "You've cleared this stage already, so it pays nothing."} Losing costs nothing.</p>
+        </div>
+      );
+    }
+    return (
+      <div className="cb-area" data-mode="gauntlet" data-phase="list">
+        <h2 className="cb-h2">The gauntlet</h2>
+        <p className="cb-lead">{total} real offenses, weakest first. Each is one team's best player at every spot from a five-year stretch. Beat one to open the next.</p>
+        <dl className="cb-stats">
+          <div><dt>Cleared</dt><dd data-cleared>{g.cleared}</dd></div>
+          <div><dt>Stages</dt><dd>{total}</dd></div>
+        </dl>
+        {alert}
+        <ol className="cb-stages">
+          {GAUNTLET.map((_, stage) => {
+            const foe = gauntletFoe(stage) || [];
+            const stars = foe.map((e) => CARDS.get(e.id)).filter(Boolean).sort((a, b) => b.rating - a.rating || a.id - b.id);
+            const state = stage < g.cleared ? "cleared" : stage === g.cleared ? "next" : "locked";
+            return (
+              <li key={stage} className={`cb-stage cb-stage-${state}`} data-stage={stage} data-state={state}>
+                <span className="cb-stage-n" aria-hidden="true">{stage + 1}</span>
+                <div className="cb-stage-body">
+                  <h3 className="cb-stage-h"><span className="vh">Stage {stage + 1}: </span>{gauntletName(stage)}</h3>
+                  <p className="cb-stage-who">{state === "locked" ? "Beat the stage before it to see who's here." : stars.slice(0, 3).map((c) => c.name).join(", ")}</p>
+                  <p className="cb-stage-meta">
+                    <b>{state === "cleared" ? "Cleared" : state === "next" ? "Up next" : "Locked"}</b>
+                    {state !== "cleared" && <> · pays {gauntletCoins(stage)} coins</>}
+                    {state === "next" && headStart(stage) && <> · {-gauntletEdge(stage)}-point head start</>}
+                  </p>
+                </div>
+                {state === "next" && <button className="btn solid cb-stage-act" data-play disabled={busy} onClick={() => beginG(stage)}>{busy ? "…" : "Play"}</button>}
+                {state === "cleared" && <button className="btn sm cb-stage-act" data-replay disabled={busy} onClick={() => beginG(stage)}>Again</button>}
+              </li>
+            );
+          })}
+        </ol>
+        {g.cleared >= total && <p className="cb-lead" data-all>You've run the gauntlet. Every stage can be played again.</p>}
+        <h3 className="cb-h3">How it works</h3>
+        <ul className="cb-how">
+          <li>A battle is the same six rounds as the ladder - but here you can see who you're facing.</li>
+          <li>The early stages give you a head start: their cards play a few points short. It shrinks as you go and is gone by stage {GAUNTLET_EVEN + 1}.</li>
+          <li>Lose and nothing happens. Try again with a new hand as often as you like.</li>
+          <li>Each stage pays once, the first time you beat it.</li>
+        </ul>
+      </div>
+    );
+  }
 
   if (mode === "daily") {
     const day = st.daily;
@@ -796,6 +947,17 @@ export const CARD_BATTLE_CSS = `
 .cb-round-cat::before{content:"Round " counter(cbr) " · "}
 .cb-round-line{font-size:14.5px;color:var(--ink);font-variant-numeric:tabular-nums}
 .cb-round-why{font-size:12.5px;line-height:1.4;color:var(--muted)}
+.cb-stages{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.cb-stage{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px 12px;border:2px solid var(--btn-line);background:var(--surface);color:var(--ink);border-radius:12px;padding:10px 12px}
+.cb-stage-locked{background:var(--surface2);border-color:var(--line2)}
+.cb-stage-next{box-shadow:4px 4px 0 var(--ink)}
+.cb-stage-n{font-family:var(--display);font-size:28px;line-height:1;color:var(--muted);min-width:28px;text-align:center}
+.cb-stage-cleared .cb-stage-n{color:var(--ink)}
+.cb-stage-body{display:grid;gap:2px;min-width:0}
+.cb-stage-h{margin:0;font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.02em;font-size:20px;line-height:1.1;color:var(--ink)}
+.cb-stage-who,.cb-stage-meta{margin:0;font-size:13px;line-height:1.35;color:var(--muted)}
+.cb-stage-who{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cb-stage-meta b{color:var(--ink)}
 .cb-boards{display:grid;gap:14px}
 .cb-board caption{text-align:left;font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:18px;padding-bottom:6px;color:var(--ink)}
 @keyframes cb-pop{from{transform:translateY(-8px) scale(.8)}to{transform:none}}

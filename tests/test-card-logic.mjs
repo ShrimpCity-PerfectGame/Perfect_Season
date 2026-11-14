@@ -421,5 +421,39 @@ if (need("starterFill")) {
   ok(seen.size > 15 && [...seen].every((id) => ["NE|1", "KC|0"].includes(C.cardBoardKey(C.CARDS.get(id)))), "any card on those boards can come up, and no other");
 }
 
+// ---------- the gauntlet (v2.29.0) ----------
+{
+  const N = C.GAUNTLET.length;
+  eq(N, 12, "twelve stages");
+  eq(new Set(C.GAUNTLET.map((g) => g[0])).size, N, "no franchise twice");
+  const teams = C.GAUNTLET.map((_, s) => C.gauntletFoe(s));
+  ok(teams.every((t) => t && t.length === 6 && new Set(t.map((e) => C.CARDS.get(e.id).pid)).size === 6), "every stage fields six different men");
+  ok(teams.every((t, s) => t.every((e) => C.CARDS.get(e.id).team === C.GAUNTLET[s][0] && e.finish === "base")), "all of them that franchise's own cards, Base");
+  ok(teams.every((t) => t[5].spot === "FLEX" && t.map((e) => e.spot).sort().join() === "FLEX,FLEX,QB,RB,TE,WR" && t.every((e) => C.spotFits(C.CARDS.get(e.id).pos, e.spot))), "one card a spot, each fitting it, a Flex last");
+  ok(new Set(teams.map((t) => t.slice(0, 5).map((e) => e.spot).join())).size > 3, "and not the same order of spots every stage");
+  const avg = teams.map((t) => t.reduce((n, e) => n + C.CARDS.get(e.id).rating, 0) / 6);
+  ok(avg.every((a, i) => i === 0 || a > avg[i - 1]), "each stage is stronger than the one before: " + avg.map((a) => a.toFixed(0)).join(" "));
+  eq(JSON.stringify(C.gauntletFoe(3)), JSON.stringify(C.gauntletFoe(3)), "a stage is the same team every time it is asked for");
+  const kc = teams[N - 1].map((e) => C.CARDS.get(e.id).name);
+  ok(C.gauntletName(N - 1) === "KC 1999\u20132005" && kc.includes("Priest Holmes") && kc.includes("Tony Gonzalez"), "the last is the 1999-2005 Chiefs: " + kc.join(", "));
+  for (const bad of [-1, N, 1.5, "0", null, undefined]) { eq(C.gauntletFoe(bad), null, `no stage ${bad}`); eq(C.gauntletName(bad), "", `and no name for it`); eq(C.gauntletEdge(bad), 0, "nor a head start"); }
+  const edges = C.GAUNTLET.map((_, s) => C.gauntletEdge(s));
+  ok(edges[0] === C.GAUNTLET_HEAD_START && edges.every((e, i) => e <= 0 && (i === 0 || e >= edges[i - 1])) && edges.slice(C.GAUNTLET_EVEN).every((e) => e === 0), "the head start is biggest first, shrinks, and is gone by GAUNTLET_EVEN: " + edges.join(" "));
+  // A round: the stage's card for the spot, playing its head start short and saying so.
+  const hand = C.dealHand(C.bestDeck([...C.CARDS.values()].map((c) => ({ id: c.id, finish: "base" }))), mulberry32(9));
+  const r = C.gauntletRound(0, [], C.autoPick(hand, teams[0], []), "star", () => 0.5);
+  ok(r.foe.id === teams[0][0].id && r.foe.mods.some((m) => m.key === "edge" && m.pts === edges[0] && m.label === C.GAUNTLET_EDGE_LABEL) && !r.mine.mods.some((m) => m.key === "edge"), "a round is against the stage's card, with the head start on theirs alone");
+  eq(Math.round(10 * (r.foe.total - r.foe.base)) / 10, edges[0], "and it really comes off their total");
+  ok(C.gauntletRound(N - 1, [], C.autoPick(hand, teams[N - 1], []), "star", () => 0.5).foe.mods.every((m) => m.key !== "edge"), "the last stage has none");
+  // maskFoe: the cards met, and the spots of the rest.
+  eq(JSON.stringify(C.maskFoe(teams[0], 2)), JSON.stringify(teams[0].map((e, i) => (i < 2 ? e : { spot: e.spot }))), "maskFoe shows the cards played and only the spots of the rest");
+  ok(C.playable(hand, C.maskFoe(teams[0], 0), []).length >= 1 && C.autoPick(hand, C.maskFoe(teams[0], 0), []), "a hand can be played against a team it cannot see");
+  // categoryStat: the number behind each category, in words.
+  const ap = F("Adrian Peterson", 2012);
+  eq(C.categoryStat(ap, "scoring"), `${ap.rtd + ap.rctd} TD in ${ap.g} games`, "Touchdown threat is touchdowns");
+  ok(/total yards$/.test(C.categoryStat(ap, "production")) && /yards a carry$/.test(C.categoryStat(ap, "bigplay")) && /touches a game$/.test(C.categoryStat(ap, "workload")) && /yards a touch/.test(C.categoryStat(ap, "efficiency")) && /^Rated \d+ overall$/.test(C.categoryStat(ap, "star")), "and each of the others says its own thing");
+  ok(C.CATEGORY_IDS.every((k) => C.categoryStat(ap, k).length > 5) && C.categoryStat(null, "star") === "" && C.categoryStat(ap, "nope") === "", "every category has one; nothing else does");
+}
+
 console.log(fails ? `\n${fails} FAILED` : "card logic: all checks passed");
 process.exit(fails ? 1 : 0);

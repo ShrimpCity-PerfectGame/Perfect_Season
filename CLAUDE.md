@@ -519,7 +519,7 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.28.1 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+**Cards (in progress, v2.29.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
 five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck of thirty, a
 card a day from the daily draft, a collection screen, packs bought with coins, a ladder of CPU teams and a
 daily battle. **The battle was rebuilt in v2.27.0 as offense against offense** (the owner's redesign: "a fast
@@ -527,8 +527,8 @@ collectible strategy game powered by historical NFL seasons"): a deck of thirty,
 server, six rounds each on a category. **Since v2.28.0 a battle is played a round at a time**: each round is
 one lineup spot (QB, RB, WR, TE, Flex, Flex - the first five in a random order, **the last always a Flex**), the
 player sees the spot - **not the card across from it, since v2.28.1** - plays one card from the hand, and only
-then learns the category and who it faced. The historical gauntlet,
-the draft arena, badges and the profile spot are not built. **Production has cards switched off** in two
+then learns the category and who it faced. **The historical gauntlet (v2.29.0)** is twelve real offenses in
+order, a stage at a time, with their six in view. The draft arena, badges and the profile spot are not built. **Production has cards switched off** in two
 places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
 `card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
 with the client off banks daily cards nobody can see, which is a launch order and not a state to leave things in. **`CARDS.md` is the reference** and
@@ -607,6 +607,8 @@ The parts unlike everything else:
   carry the spots to come and not the cards. A new answer that carries a run's `foe` has to go through it.
 - **The daily card is one of the six players drafted** (`dailyCard(history, rand)`), falling back to the day's
   boards only when none of the six has a card.
+- **The gauntlet's list is written out and append-only** (`GAUNTLET`, CARDS.md 13): progress is a count of
+  stages cleared, so reordering or recomputing the list silently changes which team stage five is.
 - **A round is written by its number** (`card_run_round`, `card_daily_round`): anything but the next one is
   `stale`, under the row's lock, so a retry can never re-roll a round's luck.
 - **One of a card in a finish; a copy is sold** (v2.26.0, CARDS.md 12). The database has no catalog and cannot
@@ -1532,6 +1534,8 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.29.0's (the gauntlet's screen): client only on a database that took 2.28.1's migration and functions -
+  the table, the four functions and `card-claim`'s three actions shipped then, dormant.
   v2.28.2's (several packs at once): client only - but **re-run `migration-cards.sql`** if 2.28.1's did not
   finish. **The file replaces `wallet_ledger_kind_check` in two places and BOTH must hold the whole list**:
   each replacement is validated against every row, so a first list missing 'card_win' fails the whole file on

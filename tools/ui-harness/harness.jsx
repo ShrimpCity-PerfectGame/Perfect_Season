@@ -794,10 +794,17 @@ async function setUpCards(withDeck) {
     const stacked = params.get("stacked") === "1";
     show.forEach(([card, finish], i) => card && mock._cards.grantCards(uid, "daily", [{ ref: `2026-10-${String(i + 1).padStart(2, "0")}`, card: card.id, finish, ...(stacked ? {} : { sell: mock._cards.sellFor({ id: card.id, finish }) }) }]));
   }
-  if (withDeck && (params.get("run") === "1" || params.get("battle") || params.get("rounds"))) {
+  if (withDeck && params.get("tab") !== "gauntlet" && (params.get("run") === "1" || params.get("battle") || params.get("rounds"))) {
     await mock._cards.battle(uid, { action: "run_start" });
     // A loss needs a team that can beat a deck holding 2007 Brady: the top of the ladder, met in battle one.
     if (params.get("battle") === "loss") mock._cards.runs[0].foe = CL.buildTeam(seededRand(7), 126).map((e) => ({ card: e.id, finish: e.finish, spot: e.spot }));
+  }
+  // &tab=gauntlet: &cleared=N stages already beaten; &stage=1 with an attempt going at the stage that is up
+  // (then &rounds=N / &battle=win|loss play it, exactly as they do a ladder battle).
+  if (withDeck && params.get("tab") === "gauntlet") {
+    const cleared = Math.max(0, Math.min(CL.GAUNTLET.length, Number(params.get("cleared")) || 0));
+    if (cleared) mock._cards.gauntlets.set(uid, { cleared, stage: null, hand: null, cats: null, rounds: [], last: null, last_stage: null, cleared_at: new Date().toISOString() });
+    if (params.get("stage") === "1") await mock._cards.battle(uid, { action: "gauntlet_start", stage: Math.min(cleared, CL.GAUNTLET.length - 1) });
   }
   if (withDeck && (params.get("dealt") === "1" || params.get("played") === "1")) {
     const dealt = await mock._cards.battle(uid, { action: "daily_deal" });
