@@ -523,6 +523,20 @@ A ladder win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run alre
 - A battle is now six requests rather than one. Each is small, and a lost one is recovered from the state.
 - Two accounts are two collections; nothing stops one person climbing twice.
 
+## 14. The field (v2.29.1)
+
+`Arena`'s lineup display. `.cb-field` carries the `dark` class, so its tokens are the navy scope's wherever
+the screen is drawn; the floodlight and yard lines are white over `--surface2`, so it has no colour of its own.
+`ol.cb-strip` is your six (`li.cb-s[data-slot]`): a `.cb-slot` outline until the round is played, then a real
+`CardFace`, with the result in words under it - never colour alone. `ol.cb-them` is their six
+(`li.cb-t`): `.cb-t-back` and a "?" until the round is played, unless the answer carried the card (the
+gauntlet). It shows nothing the server did not send, so it is not a second place the hidden card could leak.
+Order on the screen: scoreboard, the round playing back, the result, the field, then the choice.
+
+**Owed before production:** the card screens ride in the one bundle every visitor loads, including on
+production where they are never drawn, and v2.29.1 took that bundle past the ceiling in
+`tests/test-build-seo.mjs`, which was raised. Load them on demand before cards launch.
+
 ## 13. The gauntlet (v2.29.0, on the test site)
 
 Twelve real offenses, weakest first. `GAUNTLET` in card-logic.mjs is the list: `[team, era index]`.

@@ -300,6 +300,51 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
         </div>
       )}
 
+      {result && (
+        <div className="cb-finale">
+          <p className="cb-stamp" aria-hidden="true">{result.win ? "\u{1F3C8} Win" : "\u{1F480} Beaten"}</p>
+          <p className="cb-verdict" role="status" data-verdict>{result.win ? `You won, ${result.wins} rounds to ${result.losses}.` : `You lost, ${result.wins} rounds to ${result.losses}.`}</p>
+          <p className="cb-margin">{result.wins === result.losses ? `Level on rounds, so it went to total points: ${fmt(result.total)} to ${fmt(result.foeTotal)}.` : `Total points ${fmt(result.total)} to ${fmt(result.foeTotal)}.`}{edge > 0 ? ` Their cards played ${fmt(edge)} points up - the top of the ladder.` : edge < 0 ? ` Their cards played ${fmt(-edge)} points short - your head start.` : ""}</p>
+        </div>
+      )}
+
+      {/* The field: their six along the far sideline, yours as six big cards, three across. A spot is an empty
+          outline until its round is played; then the card you played stands in it, marked won or lost in words. */}
+      <div className="cb-field dark" data-field>
+        <p className="cb-field-h">{foeName}'s six</p>
+        <ol className="cb-them" aria-label={`${foeName}'s six`}>
+          {foe.map((f, i) => {
+            const shown = rounds[i] ? rounds[i].foe : f.id != null ? f : null;
+            const c = shown ? CARDS.get(shown.id) : null;
+            const res = i < settled ? rounds[i].win : null;
+            return (
+              <li key={i} className={`cb-t${c ? "" : " cb-t-back"}${res === "me" ? " cb-t-beat" : res === "foe" ? " cb-t-won" : ""}`} data-them={i}>
+                <span className="cb-t-pos">{f.spot === "FLEX" ? "Flex" : f.spot}</span>
+                <span className="cb-t-nm">{c ? c.name.split(" ").slice(-1)[0] : "?"}</span>
+              </li>
+            );
+          })}
+        </ol>
+        <p className="cb-field-h">Your six</p>
+        <ol className="cb-strip" aria-label="Your six">
+          {foe.map((f, i) => {
+            const played = rounds[i];
+            const c = played ? CARDS.get(played.mine.id) : null;
+            const res = i < settled ? rounds[i].win : null;
+            const now = !over && i === (animating ? seen : next);
+            const state = res === "me" ? "cb-s-won" : res === "foe" ? "cb-s-lost" : res === "tie" ? "cb-s-tie" : now ? "cb-s-now" : "cb-s-wait";
+            return (
+              <li key={i} className={`cb-s ${state}`} data-slot={i}>
+                {c ? <CardFace card={c} finish={played.mine.finish} /> : (
+                  <span className="cb-slot"><b>{f.spot === "FLEX" ? "Flex" : f.spot}</b><i>{played ? "—" : `Round ${i + 1}`}</i></span>
+                )}
+                <span className="cb-s-res">{c && <span className="cb-s-pos">{f.spot === "FLEX" ? "Flex" : f.spot} · </span>}{res === "me" ? "Won" : res === "foe" ? "Lost" : res === "tie" ? "Tied" : now ? "Up now" : played ? "Played" : "To come"}</span>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+
       {!animating && next < total && (
         <div className="cb-choose" data-choose={next} data-spot={foe[next].spot}>
           <p className="cb-cat"><span>Round {next + 1} of {total}</span><b>{spotLabel(foe[next].spot)}</b></p>
@@ -332,30 +377,6 @@ export function Arena({ hand, foe, rounds, edge = 0, foeName = "CPU", busy = fal
         </div>
       )}
 
-      {result && (
-        <div className="cb-finale">
-          <p className="cb-stamp" aria-hidden="true">{result.win ? "\u{1F3C8} Win" : "\u{1F480} Beaten"}</p>
-          <p className="cb-verdict" role="status" data-verdict>{result.win ? `You won, ${result.wins} rounds to ${result.losses}.` : `You lost, ${result.wins} rounds to ${result.losses}.`}</p>
-          <p className="cb-margin">{result.wins === result.losses ? `Level on rounds, so it went to total points: ${fmt(result.total)} to ${fmt(result.foeTotal)}.` : `Total points ${fmt(result.total)} to ${fmt(result.foeTotal)}.`}{edge > 0 ? ` Their cards played ${fmt(edge)} points up - the top of the ladder.` : edge < 0 ? ` Their cards played ${fmt(-edge)} points short - your head start.` : ""}</p>
-        </div>
-      )}
-
-      <ol className="cb-strip" aria-label="The six rounds">
-        {foe.map((f, i) => {
-          const played = rounds[i];
-          const c = played ? CARDS.get(played.mine.id) : null;
-          const res = i < settled ? rounds[i].win : null;
-          const now = !over && i === (animating ? seen : next);
-          const state = res === "me" ? "cb-s-won" : res === "foe" ? "cb-s-lost" : res === "tie" ? "cb-s-tie" : now ? "cb-s-now" : "cb-s-wait";
-          return (
-            <li key={i} className={`cb-s ${state}${played ? ` cb-f-${played.mine.finish}` : ""}`}>
-              <span className="cb-s-pos">{f.spot === "FLEX" ? "Flex" : f.spot}</span>
-              <span className="cb-s-nm">{c ? c.name.split(" ").slice(-1)[0] : "—"}</span>
-              <span className="cb-s-res">{res === "me" ? "Won" : res === "foe" ? "Lost" : res === "tie" ? "Tied" : now ? "Up now" : `${i + 1}`}</span>
-            </li>
-          );
-        })}
-      </ol>
       {inHand.length > 0 && !over && (
         <p className="cb-bench"><b>Still in your hand:</b> {inHand.map((e) => CARDS.get(e.id)?.name).filter(Boolean).join(", ")}</p>
       )}
@@ -921,21 +942,34 @@ export const CARD_BATTLE_CSS = `
 .cb-lost .cb-stamp{background:var(--ink);color:var(--bg)}
 .cb-verdict{margin:8px 0 0;font-weight:800;font-size:17px;line-height:1.3;color:var(--ink);font-variant-numeric:tabular-nums}
 .cb-margin{margin:0;color:var(--muted);font-size:15px;line-height:1.4}
-/* Your six, as a strip: the active one lit, a won round filled, a lost one struck. */
-.cb-strip{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px}
-.cb-s{display:grid;justify-items:center;gap:2px;border:2px solid var(--line2);border-radius:10px;padding:6px 2px;background:var(--surface);min-width:0;text-align:center}
-.cb-s-pos{font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--muted)}
-.cb-s-nm{font-size:11.5px;font-weight:800;color:var(--ink);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cb-s-res{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-.cb-s-now{border-color:var(--ink);box-shadow:3px 3px 0 var(--hard);transform:translateY(-3px)}
-.cb-s-now .cb-s-res{color:var(--ink)}
-.cb-s-won{background:var(--accent);border-color:var(--on-accent)}
-.cb-s-won .cb-s-pos,.cb-s-won .cb-s-nm,.cb-s-won .cb-s-res{color:var(--on-accent)}
-.cb-s-lost{background:var(--surface2)}
-.cb-s-lost .cb-s-nm{text-decoration:line-through}
-.cb-s.cb-f-gold{border-bottom-color:#c9952b;border-bottom-width:4px}
-.cb-s.cb-f-silver{border-bottom-color:#8b98a6;border-bottom-width:4px}
-.cb-s.cb-f-prism{border-bottom-color:var(--violet);border-bottom-width:4px}
+/* The field: a night pitch. It carries the dark class, so every token inside it is the navy scoreboard
+   scope's wherever the screen around it is drawn - the same way .result-hero and .reel are always dark. It has
+   no colour of its own: the floodlights and yard lines are white laid over that scope's navy. */
+.cb-field{display:grid;gap:8px;border-radius:16px;padding:14px 10px 14px;color:var(--ink);overflow:hidden;
+  background:repeating-linear-gradient(180deg,transparent 0 54px,rgba(255,255,255,.08) 54px 56px),radial-gradient(ellipse 130% 75% at 50% -10%,rgba(255,255,255,.18),transparent 70%),var(--surface2)}
+.cb-field-h{margin:0;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);text-align:center}
+/* Their six: a row of small face-down cards along the far side, turned over as each is played. */
+.cb-them{list-style:none;margin:0 0 6px;padding:0;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px}
+.cb-t{display:grid;justify-items:center;align-content:center;gap:2px;min-width:0;min-height:52px;border:1.5px solid var(--ink);border-radius:8px;padding:5px 2px;background:var(--bg);color:var(--ink);text-align:center}
+.cb-t-back{border-style:dashed;background:repeating-linear-gradient(135deg,rgba(255,255,255,.08) 0 6px,transparent 6px 12px),var(--bg)}
+.cb-t-pos{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.cb-t-nm{font-size:11.5px;font-weight:800;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cb-t-back .cb-t-nm{font-family:var(--display);font-weight:400;font-size:18px;line-height:1}
+.cb-t-beat .cb-t-nm{text-decoration:line-through}
+.cb-t-won{background:var(--ink);color:var(--bg)}
+/* Your six: real cards, three across and two down. */
+.cb-strip{--cb-w:min(172px,calc((100vw - 96px) / 3));list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));justify-items:center;gap:12px 6px}
+.cb-s{display:grid;justify-items:center;gap:6px;min-width:0;text-align:center}
+.cb-s .cd-card{--cd-w:var(--cb-w);margin-bottom:calc(var(--cd-u) * 6);animation:cb-pop .35s cubic-bezier(.2,1.4,.4,1) both;transition:filter .3s}
+.cb-slot{display:grid;align-content:center;justify-items:center;gap:4px;width:var(--cb-w);height:calc(var(--cb-w) * 252 / 172);margin-bottom:calc(var(--cb-w) * 6 / 172);border:2px dashed var(--ink);border-radius:calc(var(--cb-w) * 12 / 172);background:rgba(0,0,0,.22);color:var(--ink)}
+.cb-slot b{font-family:var(--display);font-weight:400;text-transform:uppercase;font-size:clamp(22px,7vw,30px);line-height:1}
+.cb-slot i{font-style:normal;font-size:11px;font-weight:700;letter-spacing:.04em}
+.cb-s-res{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--ink);border-radius:999px;padding:2px 8px;line-height:1.3}
+.cb-s-pos{font-weight:800}
+.cb-s-now .cb-slot{border-style:solid;border-color:var(--accent);background:rgba(0,0,0,.3);box-shadow:0 0 0 3px var(--accent)}
+.cb-s-now .cb-s-res,.cb-s-won .cb-s-res{background:var(--accent);color:var(--on-accent)}
+.cb-s-won .cd-card{box-shadow:0 0 0 3px var(--accent),0 calc(var(--cd-u) * 6) 0 rgba(0,0,0,.35)}
+.cb-s-lost .cd-card{filter:grayscale(1) brightness(.75)}
 .cb-bench{margin:0;font-size:13px;line-height:1.4;color:var(--muted)}
 .cb-bench b{color:var(--ink)}
 .cb-log{display:grid;gap:8px;border-top:2px solid var(--ink);padding-top:12px}
@@ -970,7 +1004,7 @@ export const CARD_BATTLE_CSS = `
 @keyframes cb-shake{0%,100%{transform:translateX(0) scale(.94)}20%{transform:translateX(-7px) rotate(-3deg) scale(.94)}40%{transform:translateX(6px) rotate(3deg) scale(.94)}60%{transform:translateX(-4px) scale(.94)}80%{transform:translateX(3px) scale(.94)}}
 @media (max-width:360px){
   .cb-cats dt{font-size:9.5px}
-  .cb-s-nm{font-size:10.5px}
+  .cb-t-nm{font-size:10.5px}
 }
 @media (pointer:coarse){
   .cb-row .btn.sm{min-height:44px;min-width:44px}
@@ -978,7 +1012,7 @@ export const CARD_BATTLE_CSS = `
   .cb-spd::after{content:"";position:absolute;inset:-8px -2px}
 }
 @media (prefers-reduced-motion:reduce){
-  .cb-cat,.cb-side .cd-card,.cb-vsbig,.cb-burst,.cb-stats2,.cb-real,.cb-trig,.cb-call,.cb-stamp{animation:none}
-  .cb-side .cd-card{transition:none}
+  .cb-cat,.cb-side .cd-card,.cb-s .cd-card,.cb-vsbig,.cb-burst,.cb-stats2,.cb-real,.cb-trig,.cb-call,.cb-stamp{animation:none}
+  .cb-side .cd-card,.cb-s .cd-card{transition:none}
 }
 `;

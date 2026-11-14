@@ -559,6 +559,9 @@ await runTest("the ladder: a round at a time - see the spot and who you face, pl
   assert(options.length >= 2 && options.every((b) => fits(CARDS.get(Number(b.dataset.playCard)).pos, run.foe[0].spot) && run.hand.some((h) => h.card === Number(b.dataset.playCard))), "the cards offered are the ones in the hand that fit the spot, and there is a choice: " + options.length);
   assert(qa("[data-choose] .cb-list .cb-cats").length === options.length, "each with its category scores on show");
   assert(qa(".cb-strip .cb-s").length === 6 && /Up now/.test(q(".cb-strip .cb-s").textContent) && /Flex/.test(qa(".cb-strip .cb-s")[5].textContent), "the six rounds are in the strip: the first up now, the last a Flex");
+  // The field: your six as six spots, three across, empty until played; theirs face down along the top.
+  assert(q("[data-field]").classList.contains("dark") && qa(".cb-strip .cb-slot").length === 6 && !q(".cb-strip [data-card]"), "the field is the navy scope, and your six start as six empty spots");
+  assert(qa(".cb-them .cb-t").length === 6 && qa(".cb-them .cb-t-back").length === 6 && qa(".cb-them .cb-t").every((li, i) => li.textContent.trim().toUpperCase().startsWith(run.foe[i].spot) && li.textContent.trim().endsWith("?")), "their six are face down: a spot and a question mark each");
 
   run.foe = foeAt(20); // beatable whatever the hand
   await remount(); await openTabOf("run");
@@ -572,6 +575,8 @@ await runTest("the ladder: a round at a time - see the spot and who you face, pl
   assert(log().length === 1 && /beat|lost to|tied/.test(log()[0].textContent) && log()[0].querySelector(".cb-round-cat").textContent === categoryLabel(liveRun(bea).rounds[0].cat), "the log says how round one went, and now names its category: " + log()[0].textContent.slice(0, 80));
   assert(!q("[data-left]").textContent.includes(categoryLabel(liveRun(bea).rounds[0].cat) + ",") && q("[data-left]").textContent.split(",").length === 5, "that category is no longer among those to come: " + q("[data-left]").textContent);
   assert(q("[data-you]").textContent === "1" && q("[data-cpu]").textContent === "0" && /Won/.test(q(".cb-strip .cb-s").textContent), "the score moved, in the scoreboard and in words on the strip");
+  assert(Number(q(".cb-strip .cb-s [data-card]").dataset.card) === played && qa(".cb-strip .cb-slot").length === 5, "the card just played stands in its spot on the field as a real card, and five spots are still empty");
+  assert(qa(".cb-them .cb-t-back").length === 5 && q(".cb-them .cb-t").textContent.includes(CARDS.get(liveRun(bea).rounds[0].foe.id).name.split(" ").slice(-1)[0]), "and theirs for that round is turned over, the other five still down");
   assert(!qa("[data-play-card]").some((b) => Number(b.dataset.playCard) === played), "and the card just played is not offered again");
 
   await playRounds(5);
@@ -715,6 +720,7 @@ await runTest("the gauntlet: twelve real teams, one open at a time, their six in
   assert(area().dataset.phase === "play" && row().stage === 0 && arena() && /points short each round/.test(q("[data-head-start]").textContent), "an attempt at stage one, with its head start said in words");
   const foe = gauntletFoe(0);
   assert(Number(q("[data-facing] [data-card]").dataset.card) === foe[0].id && !q("[data-facing-hidden]"), "here their card IS shown - a real team is the point");
+  assert(qa(".cb-them .cb-t-back").length === 0 && qa(".cb-them .cb-t").every((li, i) => li.textContent.includes(CARDS.get(foe[i].id).name.split(" ").slice(-1)[0])), "and all six of theirs are face up on the field");
   assert(!container.textContent.includes(row().cats.join()), "but the category order is not");
   // Leave and come back mid-way: the same attempt, the same hand.
   auth._cards.nextRolls = rolls(true);

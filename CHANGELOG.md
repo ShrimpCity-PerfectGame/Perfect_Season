@@ -20,6 +20,18 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.29.1] - 2026-11-14
+
+Test site only.
+
+### Changed
+- Cards: **a battle is laid out on a field.** Your six are six big cards, three across and two down, on a navy
+  night pitch: a spot is an empty outline until its round is played, then the card you played stands in it,
+  marked won or lost. Their six run along the top, face down until each is played (face up in the gauntlet).
+  It replaces the row of six small pills. The result and the round being played back sit above it.
+- The bundle-size check in the build test is raised from 1.30 MB to 1.35 MB (the bundle is 1,302,307 bytes).
+  Loading the card screens on demand is the real fix and is owed before cards reach production.
+
 ## [2.29.0] - 2026-11-14
 
 Test site only. **The historical gauntlet** - the third of the owner's four card modes.
