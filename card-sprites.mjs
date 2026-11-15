@@ -165,15 +165,21 @@ export const packArt = (pack) => `${spriteBase()}${pack.art.replace(/^\/cards/, 
 // it, and a card that has been painted before starts painted (card-face.jsx asks paintedSprite first) instead
 // of flashing the neutral blue every time a grid re-draws.
 //
-// BOUNDED, oldest out first. Each entry is a data URL - 80 KB or so where the browser can write a WebP, and
-// several times that where it cannot (Safari answers a PNG whatever it is asked for) - and there are fourteen
-// poses times thirty-two teams times a handful of skin tones of them to be had; a collection screen scrolled
-// for an evening must not hold them all.
-export const PAINT_CACHE_MAX = 96;
+// BOUNDED, oldest out first. Each entry is a PNG data URL of about 180 KB (see paintSprite for why a PNG), and
+// there are fourteen poses times thirty-two teams times a handful of skin tones of them to be had; a collection
+// screen scrolled for an evening must not hold them all. 64 of them is under twelve megabytes - about what 96
+// of the old full-size WebPs came to. A sprite that has fallen out is simply painted again, which is cheap now.
+export const PAINT_CACHE_MAX = 64;
 const painted = new Map();
 const paintKey = (path, colours) => `${path}|${colours.jersey}|${colours.metal}|${colours.skin}`;
 export const paintedSprite = (path, colours) => painted.get(paintKey(path, colours)) || null;
 export const paintedCount = () => painted.size;
+
+// HOW TALL A SPRITE IS PAINTED (v2.31.1). The sprites are 640 rows; a card's figure is 118/172 of its width, the
+// widest card is 172px, and the densest phones have three pixels to one - 354 rows is the most anybody ever
+// sees. Painting all 640 was three times the pixels: three times the recolouring, and three times the ENCODING,
+// which a profile of the owner's 600-card collection ("it lags super bad") showed was two thirds of the cost.
+export const PAINT_HEIGHT = 360;
 
 // Paint a loaded neutral sprite in a card's colours: a data URL, or null if this browser cannot do it (no
 // canvas, or a canvas that will not hand its pixels back). `path` is the sprite's own address as spriteFor gave
@@ -184,13 +190,18 @@ export function paintSprite(img, colours, path = img.src) {
   let url = null;
   try {
     const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    const scale = Math.min(1, PAINT_HEIGHT / (img.naturalHeight || 1)); // never blown up
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
     const g = canvas.getContext("2d", { willReadFrequently: true });
-    g.drawImage(img, 0, 0);
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, 0, 0, canvas.width, canvas.height);
     const image = g.getImageData(0, 0, canvas.width, canvas.height);
     image.data.set(recolourPixels(image.data, colours, canvas.width));
     g.putImageData(image, 0, 0);
-    url = canvas.toDataURL("image/webp", 0.92); // a browser that cannot answers a PNG, which is fine
+    // A PNG, not a WebP (v2.31.1). Measured in Chrome at this size: a WebP takes 30ms to write and a PNG 4 - and
+    // writing it was the largest part of painting a card. The PNG is six times the bytes (180 KB against 32),
+    // which is what the smaller store above pays for. Safari wrote a PNG whatever it was asked for anyway.
+    url = canvas.toDataURL("image/png");
   } catch {
     url = null;
   }
@@ -199,4 +210,39 @@ export function paintSprite(img, colours, path = img.src) {
     while (painted.size > PAINT_CACHE_MAX) painted.delete(painted.keys().next().value);
   }
   return url;
+}
+
+// ONE PAINT A FRAME (v2.31.1). A grid of cards asks for its sprites together - their images are in the browser's
+// cache, so they all "load" at once - and each paint is tens of milliseconds on a desktop and far more on a
+// phone. Done one after another in the same breath they froze the page: 1.7 seconds for 24 cards measured on a
+// desktop, for a collection of 600 a minute and more. So a card asks, and is called back:
+//   paintSoon(img, colours, path, done) -> a function that withdraws the request
+// One sprite is PAINTED a frame. A request for something already painted - by an earlier card, or by the one in
+// front of it in the queue - is answered at once and costs no frame, and a card that has left the screen before
+// its turn is skipped. Where there are no frames (a test, a hidden tab) a timer stands in.
+const waitingPaints = [];
+let framePending = false;
+const nextFrame = (fn) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, 0));
+function paintOne() {
+  framePending = false;
+  let paintedOne = false;
+  while (waitingPaints.length) {
+    const job = waitingPaints[0];
+    if (!job.live) { waitingPaints.shift(); continue; }
+    const ready = paintedSprite(job.path, job.colours);
+    if (!ready && paintedOne) break; // the next new one waits for the next frame
+    waitingPaints.shift();
+    if (ready) { job.done(ready); continue; }
+    paintedOne = true;
+    job.done(paintSprite(job.img, job.colours, job.path));
+  }
+  if (waitingPaints.length && !framePending) { framePending = true; nextFrame(paintOne); }
+}
+export function paintSoon(img, colours, path, done) {
+  const ready = paintedSprite(path, colours);
+  if (ready) { done(ready); return () => {}; }
+  const job = { img, colours, path, done, live: true };
+  waitingPaints.push(job);
+  if (!framePending) { framePending = true; nextFrame(paintOne); }
+  return () => { job.live = false; };
 }

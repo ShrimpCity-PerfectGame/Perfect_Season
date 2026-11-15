@@ -20,6 +20,26 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.31.1] - 2026-11-15
+
+Two things the owner hit on the test site with a collection of 600 cards. Cards are still on the test site only.
+
+### Fixed
+- **"We couldn't confirm that purchase" showed under every pack being opened.** Nothing had failed: the
+  database shows 180 packs in an hour, every one bought. The shop called a purchase unanswered from the moment
+  it was SENT, so the warning was on screen for as long as each pack took to open, and the count on the shelf
+  fell back to one while a batch of ten was going. It now means what it says - a purchase whose answer was
+  lost - and still offers Try again for that. No test had looked at the screen while a pack was on its way.
+- **The collection lagged badly with hundreds of cards.** It drew every card it held. It now draws
+  **twenty-four at a time**, best first, with "Show 24 more" under them; a filter, or leaving the tab and
+  coming back, starts at twenty-four again.
+- **Drawing a card was itself slow, which is what the lag really was.** Every card painted its 546x640 figure
+  at full size and wrote it out as an image, and a grid's cards were all painted in one unbroken stretch that
+  froze the page. A figure is now painted at the size a card shows it (360 rows - sharp on the densest
+  phones), written in a format seven times quicker to write, and **one a frame**, so cards colour in over a
+  moment instead of the page stopping. Adding 24 cards to a 634-card collection, in a Chrome slowed four
+  times: 9.6 seconds before, 0.9 after. This is every screen that shows cards - opening ten packs draws thirty.
+
 ## [2.31.0] - 2026-11-14
 
 Card battles, on the test site only: **the category is called before you pick**, the lineup has no Flex, and

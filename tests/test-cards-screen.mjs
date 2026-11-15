@@ -88,8 +88,24 @@ await runTest("a new account opens a starter deck, once", async () => {
   await remount(); await openCards();
   assert(!button("Open your starter deck") && container.querySelector("#cd-coll-h")?.textContent === "30 cards", "coming back shows the collection, not the button");
   assert(!container.querySelector(".cd-fresh"), "and the just-dealt section was for the moment it was dealt");
-  const ratings = [...container.querySelectorAll("section[aria-labelledby='cd-coll-h'] [data-card]")].map((el) => CARDS.get(Number(el.dataset.card)).rating);
-  assert(ratings.every((r, i) => i === 0 || ratings[i - 1] >= r), "best card first");
+  // TWENTY-FOUR AT A TIME (v2.31.1). The owner's collection reached 600 cards on the test site and the screen
+  // drew every one of them - each a painted sprite, many with a moving sheen - and "it lags super bad".
+  const grid = () => [...container.querySelectorAll("section[aria-labelledby='cd-coll-h'] [data-card]")];
+  assert(grid().length === 24 && /Showing 24 of 30\./.test(container.querySelector("[data-window]")?.textContent || ""), "twenty-four of the thirty are drawn, and it says so: " + grid().length + " " + container.querySelector("[data-window]")?.textContent);
+  const more = container.querySelector("[data-more]");
+  assert(more && /Show 6 more/.test(more.textContent), "with a button for the rest that says how many: " + more?.textContent);
+  const best = Math.min(...grid().map((el) => CARDS.get(Number(el.dataset.card)).rating));
+  assert(auth._cards.owned(ann).map((o) => CARDS.get(o.card_id).rating).filter((r) => r > best).length < 24, "and the twenty-four are the best ones, not any twenty-four");
+  more.focus();
+  await click(more); await flush();
+  assert(grid().length === 30 && !container.querySelector("[data-more]"), "pressing it draws the rest, and the button goes when there is nothing more");
+  assert(/All 30 shown\./.test(container.querySelector("[data-window]").textContent) && document.activeElement === container.querySelector("[data-window]"), "it says all of them are shown, and the keyboard's focus is on that line rather than lost with the button");
+  const ratings = grid().map((el) => CARDS.get(Number(el.dataset.card)).rating);
+  assert(ratings.length === 30 && ratings.every((r, i) => i === 0 || ratings[i - 1] >= r), "best card first");
+  // Leaving the collection and coming back starts at twenty-four again - not at however many were asked for.
+  await click(container.querySelector('.cd-tabs [data-tab="packs"]')); await settle();
+  await click(container.querySelector('.cd-tabs [data-tab="collection"]')); await settle();
+  assert(grid().length === 24 && container.querySelector("[data-more]"), "coming back to the collection draws twenty-four again");
 });
 
 await runTest("the position filter", async () => {
@@ -101,7 +117,14 @@ await runTest("the position filter", async () => {
   assert(shown.every((el) => el.getAttribute("aria-label").includes("quarterback")), "and each one says so aloud");
   assert(chip("QB").getAttribute("aria-pressed") === "true" && chip("All").getAttribute("aria-pressed") === "false", "the pressed state moved");
   assert(container.querySelector("#cd-coll-h").textContent === "30 cards", "the count is the collection's, not the filter's");
+  assert(!container.querySelector("[data-more]") && !container.querySelector("[data-window]"), "a filter that leaves fewer than twenty-four draws them all, with nothing about more");
+  // A filter starts the window again: show everything, narrow, widen - and it is twenty-four once more.
   await click(chip("All")); await flush();
+  await click(container.querySelector("[data-more]")); await flush();
+  assert(cardsOnScreen().length === 30, "all thirty asked for");
+  await click(chip("QB")); await flush();
+  await click(chip("All")); await flush();
+  assert(cardsOnScreen().length === 24 && container.querySelector("[data-more]"), "after a filter the collection is back to twenty-four");
 });
 
 await runTest("the finish and team filters narrow the same grid", async () => {
@@ -110,9 +133,9 @@ await runTest("the finish and team filters narrow the same grid", async () => {
   auth._cards.grantCards(ann, "gift", [{ ref: "filter-gold", card: gold.id, finish: "gold" }]);
   await openCards();
   const finishChip = (f) => container.querySelector(`[data-finish-filter="${f}"]`);
-  assert(finishChip("All").getAttribute("aria-pressed") === "true" && cardsOnScreen().length === 31, "thirty-one cards, any finish");
+  assert(finishChip("All").getAttribute("aria-pressed") === "true" && cardsOnScreen().length === 24 && /Showing 24 of 31\./.test(container.querySelector("[data-window]").textContent), "thirty-one cards, any finish - twenty-four of them drawn");
   await click(finishChip("gold")); await flush();
-  assert(cardsOnScreen().length === 1 && cardsOnScreen()[0].dataset.finish === "gold" && /Showing 1 of 31\./.test(container.querySelector("[data-shown]").textContent), "Gold shows the one Gold card, and says how many of how many");
+  assert(cardsOnScreen().length === 1 && cardsOnScreen()[0].dataset.finish === "gold" && /1 of 31 match\./.test(container.querySelector("[data-shown]").textContent), "Gold shows the one Gold card, and says how many of how many match");
   await click(finishChip("prism")); await flush();
   assert(cardsOnScreen().length === 0 && /No cards match those filters/.test(container.textContent), "a finish nobody holds says so, not 'no cards yet'");
   await click(finishChip("All")); await flush();
@@ -122,7 +145,7 @@ await runTest("the finish and team filters narrow the same grid", async () => {
   setter.call(select, gold.team); select.dispatchEvent(new window.Event("change", { bubbles: true })); await flush();
   assert(cardsOnScreen().length >= 1 && cardsOnScreen().every((el) => CARDS.get(Number(el.dataset.card)).team === gold.team), "a team shows only that team's cards");
   setter.call(select, "All"); select.dispatchEvent(new window.Event("change", { bubbles: true })); await flush();
-  assert(cardsOnScreen().length === 31, "and Every team brings them all back");
+  assert(cardsOnScreen().length === 24 && /Showing 24 of 31\./.test(container.querySelector("[data-window]").textContent), "and Every team brings them all back - twenty-four at a time");
   auth._cards.tables.card_owned.splice(auth._cards.tables.card_owned.findIndex((o) => o.user_id === ann && o.card_id === gold.id && o.finish === "gold"), 1);
   await openCards();
 });
@@ -153,7 +176,7 @@ await runTest("a catalog that will not load is the same honest failure", async (
 await runTest("a card the catalog does not know is skipped, and the rest still show", async () => {
   auth._cards.tables.card_owned.push({ user_id: ann, card_id: 999999, finish: "gold", count: 1 });
   await remount(); await openCards();
-  assert(cardsOnScreen().length === 30, "thirty real cards are drawn");
+  assert(cardsOnScreen().length === 24 && /Showing 24 of 30\./.test(container.querySelector("[data-window]").textContent), "thirty real cards are there to draw, twenty-four at a time");
   assert(container.querySelector("#cd-coll-h").textContent === "30 cards", "and counted - the unknown one is not");
   assert(/out of date/i.test(container.querySelector(".cd-area").textContent), "and the screen says the page is out of date, rather than leaving a card silently missing");
   auth._cards.tables.card_owned.pop();
@@ -1028,6 +1051,47 @@ await runTest("several packs at once: one confirm, each its own purchase, and a 
   await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
   assert(spent(mo) === 800 && container.querySelectorAll(".cd-fresh [data-card]").length === 3 && /already bought/.test(container.querySelector(".cd-fresh").textContent), "Try again shows that one pack's cards and charges nothing more");
   assert(packBtn("pack-standard", "Open 5") && !qty(5).disabled, "and the shop is back to normal");
+});
+
+await runTest("a pack that is still opening is not called unconfirmed", async () => {
+  // On the owner's phone every purchase showed "We couldn't confirm that purchase" - while 180 packs in an hour
+  // all went through. The shop called a purchase unanswered from the moment it was SENT, so the warning was on
+  // screen for as long as each pack took to open, and the count fell back to one. Nothing looked at the screen
+  // while a pack was in flight: every test waited for the answer first.
+  const ivy = await signUp("ivy@cards.test", "ivy");
+  auth._wallet.apply(ivy, 500, "season", "inflight"); // 750 with the welcome coins: exactly five Standard packs
+  await openShop();
+  const qty = (n) => packEl("pack-standard").querySelector('[data-qty="' + n + '"]');
+  const buy = () => packEl("pack-standard").querySelector("[data-buy]");
+  await click(qty(5)); await flush();
+  await click(packBtn("pack-standard", "Open 5")); await flush();
+  // Hold each purchase's answer until the test lets it go.
+  const real = auth._cards.claimStarter.bind(auth._cards);
+  const held = [];
+  auth._cards.claimStarter = (body) => (body?.action === "open_pack" ? new Promise((resolve) => held.push(() => resolve(real(body)))) : real(body));
+  await click(packBtn("pack-standard", "Confirm")); await flush();
+  assert(held.length === 1 && /Opening/.test(buy().textContent) && buy().disabled, "the first pack is on its way: " + buy().textContent);
+  assert(packAlert("pack-standard") === "", "and a pack on its way is NOT 'we couldn't confirm that purchase': " + packAlert("pack-standard"));
+  assert(qty(5).getAttribute("aria-pressed") === "true" && qty(1).getAttribute("aria-pressed") === "false", "the count on the shelf is still five");
+  held.shift()(); await settle(); await settle();
+  // The second pack is in flight, and the wallet (600) now holds less than five packs cost (750).
+  assert(held.length === 1 && auth._wallet.balanceOf(ivy) === 600 && /Opening 2 of 5/.test(buy().textContent), "one opened, the second on its way: " + buy().textContent);
+  assert(packAlert("pack-standard") === "" && !/couldn't confirm/i.test(packEl("pack-standard").textContent), "still nothing unconfirmed: " + packAlert("pack-standard"));
+  assert(!/You need/.test(packEl("pack-standard").textContent), "and a batch that is being opened is not told it cannot be afforded");
+  assert(qty(5).getAttribute("aria-pressed") === "true", "the count is still five");
+  for (let n = 0; n < 4; n++) { held.shift()(); await settle(); await settle(); }
+  auth._cards.claimStarter = real;
+  assert(held.length === 0 && auth._wallet.balanceOf(ivy) === 0 && /5 packs opened\./.test(container.querySelector("[data-batch]").textContent), "all five were opened");
+  assert(packAlert("pack-standard") === "" || /You need/.test(packAlert("pack-standard")), "and nothing was ever unconfirmed: " + packAlert("pack-standard"));
+  // A purchase whose answer really IS lost still says so, and still offers Try again.
+  auth._wallet.apply(ivy, 150, "season", "inflight-2");
+  await remount(); await openShop();
+  auth._cards.openFails = true;
+  await click(packBtn("pack-standard", "Open")); await flush();
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
+  assert(packBtn("pack-standard", "Try again") && /couldn't confirm that purchase/.test(packAlert("pack-standard")), "a lost answer is still called what it is: " + packAlert("pack-standard"));
+  await click(packBtn("pack-standard", "Try again")); await settle(); await settle();
+  assert(packBtn("pack-standard", "Open") && packAlert("pack-standard") !== undefined && auth._wallet.balanceOf(ivy) === 0, "and Try again settles it without a second charge");
 });
 
 await runTest("a copy pulled from a pack is sold as it arrives, and the screen shows it going", async () => {

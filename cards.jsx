@@ -225,11 +225,19 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
         {onSale.map((pack) => {
           const row = rows.get(pack.id);
           const soldOut = row.stockLeft != null && row.stockLeft <= 0;
-          const waiting = pending.has(pack.id); // sent, and not answered for certain
+          // BEING SENT RIGHT NOW is not the same as SENT AND NOT ANSWERED. A purchase is in `pending` from the
+          // moment it is sent - that is what lets Try again ask about the same one - so until v2.31.1 the shop
+          // called every pack unanswered for as long as it took to open: "We couldn't confirm that purchase"
+          // under each one, and the count fallen back to one, while the database shows them all going through.
+          // The owner saw it on every purchase. Every test had waited for the answer before it looked.
+          const inFlight = busy && asking === pack.id;
+          const waiting = pending.has(pack.id) && !inFlight; // sent, and its answer was lost
           const many = waiting ? 1 : qty[pack.id] || 1;
           const cost = row.price * many;
-          const short = balance != null && balance < cost ? cost - balance : 0;
-          const tooMany = row.stockLeft != null && row.stockLeft > 0 && many > row.stockLeft;
+          // Not while a batch is opening: the wallet falls a pack at a time, and "you need 150 more for 5" under
+          // a batch that was paid for when it began would be the same kind of false alarm.
+          const short = !inFlight && balance != null && balance < cost ? cost - balance : 0;
+          const tooMany = !inFlight && row.stockLeft != null && row.stockLeft > 0 && many > row.stockLeft;
           const going = progress?.pack === pack.id ? progress : null;
           const isAsking = asking === pack.id || waiting;
           const open = inside === pack.id;
@@ -264,7 +272,7 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
                       : many > 1 ? `Confirm: ${cost.toLocaleString("en-US")} coins for ${many}` : `Confirm: ${row.price.toLocaleString("en-US")} coins`}
                   </button>
                   {/* No Cancel on a purchase that may already have happened: it cannot be cancelled, only asked about. */}
-                  {isAsking && !waiting && (
+                  {isAsking && !waiting && !inFlight && (
                     <button className="btn" disabled={busy} onClick={(e) => {
                       const main = e.currentTarget.parentElement.querySelector("[data-buy]");
                       setAsking(null); setNotice(null); main?.focus();
@@ -332,6 +340,10 @@ export function PulledCard({ row }) {
 }
 
 const POSITIONS = ["All", "QB", "RB", "WR", "TE"];
+// HOW MANY CARDS THE COLLECTION DRAWS AT A TIME (v2.31.1). A card is a painted sprite and, in three finishes of
+// four, a moving edge or sheen; the collection drew every one it held. The owner's reached 600 on the test site
+// and "it lags super bad" - their ask was about 25 and then load more. 24 fills rows of two, three and four.
+const COLLECTION_PAGE = 24;
 const FINISH_ORDER = { prism: 0, gold: 1, silver: 2, base: 3 };
 // Owned rows as cards to draw: best first. A row whose card is not in the catalog this browser loaded is
 // skipped rather than drawn as a blank - it means the catalog is older than the collection, and the rest of the
@@ -364,6 +376,12 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
   const [fin, setFin] = useState("All");   // a finish, or "All"
   const [team, setTeam] = useState("All"); // a team code, or "All"
   const [stale, setStale] = useState(false); // an owned card this page's catalog does not know
+  // How far down the collection is drawn: { key, n }. The key is the filters it was asked under, so narrowing
+  // or widening them starts again at one page WITHOUT a render of the old, longer list in between.
+  const [win, setWin] = useState({ key: "", n: COLLECTION_PAGE });
+  const firstPage = () => setWin({ key: "", n: COLLECTION_PAGE }); // every change of filter, and every return to the tab
+  const windowLine = useRef(null);
+  const sawAll = useRef(false);
   const lastBattle = useRef(isBattle(initialTab) ? initialTab : "run"); // which way to play Battle opens on
   const [swept, setSwept] = useState(null); // { copies, coins }: stacked copies just sold, said once
   const sweeping = useRef(false);
@@ -443,6 +461,11 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
   const shown = owned.filter((r) => (pos === "All" || r.card.pos === pos) && (fin === "All" || r.finish === fin) && (teamOn === "All" || r.card.team === teamOn));
   const filtered = pos !== "All" || fin !== "All" || teamOn !== "All";
   const total = owned.reduce((n, r) => n + r.count, 0);
+  const winKey = `${pos}|${fin}|${teamOn}`;
+  const limit = win.key === winKey ? win.n : COLLECTION_PAGE;
+  const drawn = shown.slice(0, limit);
+  // The button that showed the last of them is gone once they are shown: focus goes to the line that says so.
+  useEffect(() => { if (sawAll.current) { sawAll.current = false; windowLine.current?.focus({ preventScroll: true }); } });
 
   return (
     <div className="cd-area">
@@ -480,7 +503,7 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
             const on = id === "battle" ? isBattle(tab) : tab === id;
             return (
               <button key={id} className="cd-seg" data-tab={id} aria-pressed={on}
-                onClick={() => { if (on) return; setTab(id === "battle" ? lastBattle.current : id); if (id === "collection") load(true); }}>{name}</button>
+                onClick={() => { if (on) return; setTab(id === "battle" ? lastBattle.current : id); if (id === "collection") { load(true); firstPage(); } }}>{name}</button>
             );
           })}
         </div>
@@ -539,30 +562,42 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
             <p className="cd-rule">You keep one of each card in each finish. Pull one you already have and it is sold for half its value.</p>
             <div className="cd-filter" role="group" aria-label="Show a position">
               {POSITIONS.map((p) => (
-                <button key={p} className="cd-chip" aria-pressed={pos === p} onClick={() => setPos(p)}>{p}</button>
+                <button key={p} className="cd-chip" aria-pressed={pos === p} onClick={() => { setPos(p); firstPage(); }}>{p}</button>
               ))}
             </div>
             <div className="cd-filter" role="group" aria-label="Show a finish">
               {["All", ...FINISHES].map((f) => (
-                <button key={f} className="cd-chip" data-finish-filter={f} aria-pressed={fin === f} onClick={() => setFin(f)}>{f === "All" ? "Any finish" : FINISH_NAME[f]}</button>
+                <button key={f} className="cd-chip" data-finish-filter={f} aria-pressed={fin === f} onClick={() => { setFin(f); firstPage(); }}>{f === "All" ? "Any finish" : FINISH_NAME[f]}</button>
               ))}
             </div>
             {teams.length > 1 && (
               <label className="cd-team">
                 <span>Team</span>
-                <select value={teamOn} onChange={(e) => setTeam(e.target.value)} data-team-filter>
+                <select value={teamOn} onChange={(e) => { setTeam(e.target.value); firstPage(); }} data-team-filter>
                   <option value="All">Every team</option>
                   {teams.map((t) => <option key={t} value={t}>{TEAMS[t] ? `${TEAMS[t][1]} ${TEAMS[t][0]}` : t}</option>)}
                 </select>
               </label>
             )}
-            {filtered && shown.length > 0 && <p className="note" data-shown>Showing {shown.reduce((n, r) => n + r.count, 0)} of {total}.</p>}
+            {filtered && shown.length > 0 && <p className="note" data-shown>{shown.reduce((n, r) => n + r.count, 0)} of {total} match.</p>}
             {shown.length === 0
               ? <p className="note">{owned.length === 0 ? (stale ? "Reload the page to see your cards." : "No cards yet. Finish today's daily draft to earn one.") : (fin === "All" && teamOn === "All" ? `No ${pos} cards yet.` : "No cards match those filters.")}</p>
               : (
-                <div className="cd-grid">
-                  {shown.map((r) => <CardFace key={`${r.id}:${r.finish}`} card={r.card} finish={r.finish} count={r.count} />)}
-                </div>
+                <>
+                  <div className="cd-grid">
+                    {drawn.map((r) => <CardFace key={`${r.id}:${r.finish}`} card={r.card} finish={r.finish} count={r.count} />)}
+                  </div>
+                  {shown.length > COLLECTION_PAGE && (
+                    <div className="cd-more">
+                      <p className="note" data-window tabIndex={-1} ref={windowLine}>{drawn.length < shown.length ? `Showing ${drawn.length} of ${shown.length}.` : `All ${shown.length} shown.`}</p>
+                      {drawn.length < shown.length && (
+                        <button className="btn" data-more onClick={() => { const n = limit + COLLECTION_PAGE; if (n >= shown.length) sawAll.current = true; setWin({ key: winKey, n }); }}>
+                          Show {Math.min(COLLECTION_PAGE, shown.length - drawn.length)} more
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
           </section>
         </>
@@ -607,6 +642,9 @@ export const CARDS_CSS = CARD_FACE_CSS + CARD_BATTLE_CSS + `
 .cd-chip:focus-visible{outline:3px solid var(--accent-ink);outline-offset:2px}
 .cd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:26px 12px;justify-items:center;padding:8px 0 4px}
 .cd-grid .cd-card{--cd-w:160px}
+.cd-more{display:grid;justify-items:center;gap:10px;margin-top:18px}
+.cd-more .note{margin:0}
+.cd-more .note:focus{outline:none}
 .cd-fresh{padding-bottom:8px;border-bottom:2px solid var(--line)}
 .cd-earned{display:grid;justify-items:center;gap:10px;margin:18px 0 6px}
 .cd-earned-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:18px;margin:0;color:var(--ink)}

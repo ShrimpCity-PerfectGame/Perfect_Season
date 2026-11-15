@@ -301,6 +301,10 @@ With the client's off there is no tile and `data/cards.json` is not copied to th
   not remembered. The service worker fetches it network-first (`DATA` in sw-rules.mjs).
 - `cards.jsx`: one state on screen - loading, error, account, starter, collection. A card earned before the
   starter deck is opened shows beside the starter offer. `SeasonCard` is the daily card on the result screen.
+- **The collection draws twenty-four cards at a time** (`COLLECTION_PAGE`, v2.31.1), best first, with "Show 24
+  more" and "Showing 24 of 634." under them. A filter, or leaving the tab and coming back, starts at one page
+  again - by resetting the window in the same event, so the old, longer list is never drawn once more on the
+  way. The owner's collection reached 600 on the test site and the screen drew them all.
 - `ps-cards-hidden` hides the tile and the daily card's reveal on that device. Cards are still banked.
 
 ### 8.5 Drawing a card
@@ -322,6 +326,24 @@ with a ? on the review page. It is written by `node tools/cards/build-card-skin.
 name between lists there and re-run; `--review` also writes `build/card-skin-review.html`, everyone grouped
 by tone. A photo's lighting can move a measurement by a step, and t3 is the default's own colour. The owner's review of it is a launch gate for production. No canvas, or a sprite that will not load, leaves the neutral drawing or none - the card
 still shows its name, rating and stats.
+
+**What a card costs to draw, measured (v2.31.1).** A profile of a 634-card collection in Chrome: painting ONE
+card's figure took about 70ms on a desktop, two thirds of it writing the painted canvas out as an image - and
+a grid's cards were all painted in one stretch, which is the page freezing. Three things changed, in
+`card-sprites.mjs`:
+
+- **`PAINT_HEIGHT` (360).** A figure is 118/172 of its card, the widest card is 172px, and the densest phones
+  have three pixels to one: 354 rows is the most anybody sees. Painting all 640 was three times the pixels.
+- **A PNG, not a WebP.** At that size Chrome writes a WebP in 30ms and a PNG in 4. The PNG is six times the
+  bytes (180 KB), so `PAINT_CACHE_MAX` fell from 96 to 64 to hold about the same memory. Safari wrote a PNG
+  whatever it was asked for.
+- **`paintSoon`: one paint a frame.** A card asks and is called back; a request for something already painted
+  costs no frame, and a card that has left before its turn is skipped. `useCardSprite` (card-face.jsx) is the
+  only caller - `paintSprite` is still the function that paints.
+
+Twenty-four more cards, in a Chrome slowed four times: 9.6 seconds before, 0.9 after. Scrolling 24 cards is
+about 35 frames a second there; scrolling all 634 is about 2 to 5, whatever a card costs to paint - which is
+why the window stays.
 
 `card-face.jsx`'s colours are data (`CARD_PAINT`), not theme tokens, because a card looks the same on every
 surface. `CARD_TEXT_PAIRS` lists every text colour and what it sits on; the test holds each to AA.
@@ -436,6 +458,15 @@ dropped. After a purchase the cards appear under "You pulled", which takes focus
 on what happened. The shop reads the wallet itself on opening: the app only loads it for a profile or the
 cosmetic shop, so a player arriving from Modes had no balance on screen. A price that went up, a sell-out or a pack taken off sale re-reads the shelf, so the screen
 stops offering what it cannot sell.
+
+**Being sent is not being unanswered (v2.31.1).** A purchase is in the card area's `pending` map from the
+moment it is sent - that is what lets Try again ask about the same one. Until v2.31.1 the shelf read that map
+alone, so every pack on its way was drawn as one whose answer was lost: "We couldn't confirm that purchase"
+under it, the count fallen back to one, for as long as it took to open. The owner saw it on every purchase
+while every purchase went through. `inFlight` (this pack, busy) is now told apart from `waiting` (in the map
+and NOT in flight), and the "you need N more coins" and "only N left" lines are held back during a batch,
+whose wallet falls a pack at a time. `tests/test-cards-screen.mjs` holds a purchase's answer and reads the
+screen while it is on its way, which nothing did before.
 
 ### 9.4 What they cost, measured
 

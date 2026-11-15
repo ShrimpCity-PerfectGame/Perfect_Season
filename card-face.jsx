@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { TEAMS } from "./game-logic.mjs";
 import { FINISH_BONUS, archetypeLabel, ROLE_PLAYER } from "./card-logic.mjs";
-import { cardColours, spriteFor, paintSprite, paintedSprite } from "./card-sprites.mjs";
+import { cardColours, spriteFor, paintSoon, paintedSprite } from "./card-sprites.mjs";
 
 export const CARD_PAINT = {
   paper: "#f4efe2", ink: "#14213d", muted: "#4d566d", line: "#c9c2b0",
@@ -72,17 +72,19 @@ export function useCardSprite(card) {
   // A sprite painted before starts painted: no second load, and no flash of the neutral blue when a grid re-draws.
   const [src, setSrc] = useState(() => paintedSprite(neutral, colours) || neutral);
   useEffect(() => {
-    let live = true;
+    let live = true, withdraw = null;
     const ready = paintedSprite(neutral, colours);
     setSrc(ready || neutral);
     if (ready || typeof Image === "undefined") return undefined;
     const img = new Image();
     // A sprite that fails to load, or a canvas that will not paint it, leaves the card on the neutral drawing
     // (or on none) - the name, rating and stats do not depend on it.
-    img.onload = () => { const url = paintSprite(img, colours, neutral); if (live && url) setSrc(url); };
+    // The paint is ASKED FOR, not done here: card-sprites.mjs paints one sprite a frame, so a grid of cards
+    // colours in over a few frames instead of freezing the page while every one of them is painted.
+    img.onload = () => { if (live) withdraw = paintSoon(img, colours, neutral, (url) => { if (live && url) setSrc(url); }); };
     img.onerror = () => {};
     img.src = neutral;
-    return () => { live = false; };
+    return () => { live = false; withdraw?.(); };
   }, [neutral, colours.jersey, colours.metal, colours.skin]);
   return { src, colours };
 }

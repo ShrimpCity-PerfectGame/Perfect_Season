@@ -173,6 +173,73 @@ await runTest("in a browser that can paint: the sprite is recoloured once, and r
   }
 });
 
+await runTest("a sprite is painted no bigger than a card draws it, and a grid's sprites one a frame", async () => {
+  // The owner's collection reached 600 cards on a phone and "it lags super bad". Profiled in Chrome: every card
+  // painted its 546x640 sprite at full size and encoded it (two thirds of the time was the encoding), and a
+  // grid's paints all ran in one unbroken stretch - 1.7 seconds for 24 cards on a desktop, with the page frozen.
+  const React = (await import("react")).default;
+  const act = React.act;
+  const drawn = [];
+  let paints = 0;
+  const RealImage = window.Image, realGet = window.HTMLCanvasElement.prototype.getContext, realUrl = window.HTMLCanvasElement.prototype.toDataURL;
+  const realFrame = globalThis.requestAnimationFrame;
+  let size = [546, 640];
+  window.Image = globalThis.Image = class { constructor() { [this.naturalWidth, this.naturalHeight] = size; } set src(v) { this._src = v; queueMicrotask(() => this.onload?.()); } get src() { return this._src; } };
+  window.HTMLCanvasElement.prototype.getContext = function () { const canvas = this; return { drawImage(img, x, y, w, h) { drawn.push([canvas.width, canvas.height, w, h]); }, getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData() {} }; };
+  window.HTMLCanvasElement.prototype.toDataURL = () => "data:image/png;base64,P" + (++paints);
+  const frames = [];
+  globalThis.requestAnimationFrame = window.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+  const frame = () => act(async () => { const run = frames.splice(0); for (const fn of run) fn(); await Promise.resolve(); });
+  try {
+    // THE SIZE. A figure is 118/172 of its card, the widest card is 172px, and the densest phones have three
+    // pixels to one: 354. Painting all 640 rows was three times the pixels anybody would ever see.
+    assert(sprites.PAINT_HEIGHT >= 354 && sprites.PAINT_HEIGHT <= 400, "tall enough for the largest card on a three-to-one screen, and no taller: " + sprites.PAINT_HEIGHT);
+    sprites.paintSprite(new window.Image(), { jersey: "#123456", metal: "#111111", skin: "#222222" }, "/cards/size-big.webp");
+    const [cw, ch, dw, dh] = drawn.at(-1);
+    assert(ch === sprites.PAINT_HEIGHT && cw === Math.round(546 * sprites.PAINT_HEIGHT / 640) && dw === cw && dh === ch, "a 546x640 sprite is painted " + cw + "x" + ch + ", drawn to fill it");
+    size = [170, 200];
+    sprites.paintSprite(new window.Image(), { jersey: "#123457", metal: "#111111", skin: "#222222" }, "/cards/size-small.webp");
+    assert(drawn.at(-1)[0] === 170 && drawn.at(-1)[1] === 200, "and a sprite smaller than that is not blown up: " + drawn.at(-1));
+    size = [546, 640];
+
+    // ONE A FRAME. Twelve role players of twelve teams, mounted together like a grid.
+    const twelve = [];
+    for (const c of all) { if (c.archetype === "role" && c.pos === "WR" && !twelve.some((x) => x.team === c.team) && !sprites.paintedSprite(sprites.spriteFor(c), sprites.cardColours(c))) twelve.push(c); if (twelve.length === 12) break; }
+    assert(twelve.length === 12, "twelve cards that need twelve different paints");
+    const Grid = ({ cards }) => React.createElement("div", null, cards.map((c) => React.createElement(face.CardFace, { key: c.id, card: c })));
+    paints = 0; frames.length = 0;
+    const g = await renderComponent(Grid, { cards: twelve });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const painted = () => [...g.container.querySelectorAll("img.cd-fig")].filter((img) => img.getAttribute("src").startsWith("data:")).length;
+    assert(paints === 0 && painted() === 0 && frames.length === 1, "the images have loaded and nothing is painted yet - it waits for a frame: " + paints + " " + frames.length);
+    await frame();
+    assert(paints === 1 && painted() === 1, "the first frame paints ONE, and that card has it: " + paints + " " + painted());
+    await frame(); await frame();
+    assert(paints === 3 && painted() === 3, "one more each frame: " + paints);
+    for (let n = 0; n < 12 && frames.length; n++) await frame();
+    assert(paints === 12 && painted() === 12 && frames.length === 0, "until all twelve are painted, and then it stops asking for frames: " + paints + " " + frames.length);
+    await act(async () => { g.reactRoot.unmount(); });
+
+    // The same sprite in the same colours is painted once however many cards wear it, and a card that has gone
+    // before its turn is not painted for nobody.
+    const fresh = all.filter((c) => c.archetype === "role" && c.pos === "TE" && !twelve.some((x) => x.team === c.team) && !sprites.paintedSprite(sprites.spriteFor(c), sprites.cardColours(c)));
+    const same = fresh.filter((c) => c.team === fresh[0].team && sprites.cardColours(c).skin === sprites.cardColours(fresh[0]).skin).slice(0, 2);
+    const other = fresh.find((c) => c.team !== fresh[0].team);
+    assert(same.length === 2 && other, "two cards that share a paint, and one that does not");
+    paints = 0; frames.length = 0;
+    const h = await renderComponent(Grid, { cards: [...same, other] });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { h.reactRoot.render(React.createElement(Grid, { cards: same })); }); // the third card leaves
+    for (let n = 0; n < 6 && frames.length; n++) await frame();
+    assert(paints === 1, "two cards in one sprite and colours are one paint, and the card that left is none: " + paints);
+    assert([...h.container.querySelectorAll("img.cd-fig")].every((img) => img.getAttribute("src").startsWith("data:")), "and both cards wear it");
+    await act(async () => { h.reactRoot.unmount(); });
+  } finally {
+    window.Image = globalThis.Image = RealImage; window.HTMLCanvasElement.prototype.getContext = realGet; window.HTMLCanvasElement.prototype.toDataURL = realUrl;
+    globalThis.requestAnimationFrame = window.requestAnimationFrame = realFrame;
+  }
+});
+
 await runTest("painting a sprite with no canvas answers null and never throws", async () => {
   const none = sprites.paintSprite({ src: "http://localhost/cards/role.png", naturalWidth: 10, naturalHeight: 10 }, { jersey: "#0a0b0c", metal: "#111111", skin: "#222222" }, "/cards/nocanvas.png");
   assert(none === null, "no canvas, no painted sprite: " + none);

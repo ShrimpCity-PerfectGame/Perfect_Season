@@ -519,7 +519,7 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.31.0 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+**Cards (in progress, v2.31.1 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
 five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck of thirty, a
 card a day from the daily draft, a collection screen, packs bought with coins, a ladder of CPU teams and a
 daily battle. **The battle was rebuilt in v2.27.0 as offense against offense** (the owner's redesign: "a fast
@@ -570,6 +570,11 @@ The parts unlike everything else:
   error state of its own. Collapsing them offers a player with fifty cards a starter deck they already opened.
 - **Grey and tan are recoloured a REGION at a time** (v2.24.2): a helmet's highlight is the same grey as a white
   glove's shadow, so judging one pixel scrubbed helmets and bled colour onto gloves. `card-sprites.mjs` says how.
+- **Drawing a card is not free, and a grid of them is the page** (v2.31.1, CARDS.md 8.5). The owner's
+  collection reached 600 cards and "it lags super bad". The collection draws 24 at a time
+  (`COLLECTION_PAGE`); a figure is painted at `PAINT_HEIGHT` (360 rows, not the sprite's 640), written as a
+  PNG (seven times quicker to write than a WebP at that size) and **one a frame** through `paintSoon`. Any new
+  screen that shows many cards gets all of that by using `CardFace` - and should still not draw hundreds.
 - **Sprites are recoloured in the browser**, so fourteen neutral WebPs serve every card and there is no file per
   team. `data/card-skin.json`'s player list is a **first pass awaiting the owner's correction** (v2.24.1), and
   that review is a launch gate for production. It is written by `tools/cards/build-card-skin.mjs` from lists
@@ -587,7 +592,10 @@ The parts unlike everything else:
   purchase; `buy_pack` answers a repeat with the first time's cards and charges nothing. None of those three
   sentences may say nothing was charged, and a test holds that. **The ids live in `CardsScreen`, one per pack**,
   not in the shop component: review found the first version lost the id on a tab switch, which made Try again
-  a second purchase. Only buy_pack's own four refusals are a certain no on a retry.
+  a second purchase. Only buy_pack's own four refusals are a certain no on a retry. **And SENT is not
+  UNANSWERED** (v2.31.1): a purchase is in that map while it is on its way too, so the shelf must also ask
+  whether it is in flight - reading the map alone showed "we couldn't confirm that purchase" under every pack
+  as it opened, for a release, because every test waited for the answer before it looked at the screen.
 - **The migration replaces `wallet_ledger`'s kind check by what it is, not by its name** - a DO block drops any
   check on that table listing the kinds. The name is confirmed on PGlite and staging only; on a database that
   called it something else, a drop-by-name would leave the old list in force and every purchase a 500.
@@ -1554,6 +1562,7 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.31.1's (the pack shop's false warning, the collection 24 at a time, cheaper card painting): client only.
   v2.31.0's (the category is called, no Flex): **deploy the Edge Functions**, then the client. **No migration.**
   `card-logic.mjs` changed - the 2,000-battle checksum moved - so `card-claim` and the client ship together:
   an old client against the new function is refused `bad_cat` on every round it calls (it sends no category),

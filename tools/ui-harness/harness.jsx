@@ -755,6 +755,8 @@ async function setUpGuess(howMany, finish) {
 // next choice is THEIR call. On a choice: &chosen=1 picks a category and a card, &hand=1 opens the rest of the
 // hand; on a result, &why=1 opens the maths. &tab=daily is the daily battle (&dealt=1 with the hand dealt,
 // &played=1 once it is played), &tab=deck the deck builder, &tab=boards the two boards.
+// &big=N adds N more cards in mixed finishes - the owner's collection reached 600 and the screen that drew them
+// all "lags super bad"; this is how that is looked at and measured.
 // ?starter=0 is an account that has not opened its deck (the starter panel); the default is a collection with
 // a starter deck and one showpiece in each finish, so every edge and the count badge are on screen at once.
 function CardsPreview({ userId }) {
@@ -795,6 +797,12 @@ async function setUpCards(withDeck) {
     // it sells the two copies and says so. Otherwise a copy is priced, and sold as it arrives.
     const stacked = params.get("stacked") === "1";
     show.forEach(([card, finish], i) => card && mock._cards.grantCards(uid, "daily", [{ ref: `2026-10-${String(i + 1).padStart(2, "0")}`, card: card.id, finish, ...(stacked ? {} : { sell: mock._cards.sellFor({ id: card.id, finish }) }) }]));
+    const big = Math.max(0, Math.min(3000, Number(params.get("big")) || 0));
+    if (big) {
+      const held = new Set(mock._cards.owned(uid).map((o) => o.card_id));
+      const extra = all.filter((c) => !held.has(c.id)).sort((a, b) => (a.id * 7919) % 1009 - (b.id * 7919) % 1009).slice(0, big);
+      for (let i = 0; i < extra.length; i += 20) mock._cards.grantCards(uid, "gift", extra.slice(i, i + 20).map((c, k) => ({ ref: `big:${i + k}`, card: c.id, finish: ["base", "base", "silver", "gold", "prism"][(i + k) % 5] })));
+    }
   }
   if (withDeck && params.get("tab") !== "gauntlet" && (params.get("run") === "1" || params.get("battle") || params.get("rounds"))) {
     await mock._cards.battle(uid, { action: "run_start" });
