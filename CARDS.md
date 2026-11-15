@@ -2,8 +2,9 @@
 
 **Status: in progress, and on the test site only** (v2.31.0, four parts of five). A player there can open a
 starter deck, earn a card a day from the daily draft, buy packs with coins, and battle: a ladder of CPU teams,
-a daily battle and a gauntlet of twelve real offenses. The draft arena, badges and the profile spot are not
-built. Production has cards switched off: no tile, no catalog file, and the functions grant nothing. Sections
+a daily battle and a gauntlet of twelve real offenses. Badges and the profile spot are not built. **The draft
+arena - once a fourth mode - was dropped by the owner on 2026-11-14: do not build it or offer it.** Production
+has cards switched off: no tile, no catalog file, and the functions grant nothing. Sections
 1 to 7 are the rules; section 8 is owning cards; 9 packs; 11 to 15 battles and how the screens load.
 
 The design is `docs/superpowers/specs/2026-11-13-card-collection-design.md`, and for the battle as it is
@@ -463,8 +464,8 @@ thing loot-box rules are written about, and that question goes to the owner's la
 
 ## 11. Battles: who runs them, and what is written down (v2.28.0, on the test site)
 
-The rules are sections 3 to 7. Stage one of the owner's four modes is here - the **ladder** and the **daily
-battle**; the historical gauntlet and the draft arena are not built.
+The rules are sections 3 to 7. Two of the three modes are here - the **ladder** and the **daily battle**; the
+historical gauntlet is section 13. (There were to be four: the draft arena was dropped, 2026-11-14.)
 
 ### 11.1 Who decides what
 
@@ -586,7 +587,10 @@ A ladder win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run alre
 
 ### 11.7 Not built, and known gaps
 
-- The **draft arena** (the fourth of the owner's four modes). The gauntlet is section 13. No badge, nothing on the profile.
+- No badge, nothing on the profile. The gauntlet is section 13.
+- **Dropped, not owed:** the **draft arena**, once the fourth of the owner's four modes. The owner scrapped it
+  on 2026-11-14, after the battle itself was rebuilt (section 4.1). The ladder, the daily battle and the
+  gauntlet are the modes.
 - A battle is now six requests rather than one. Each is small, and a lost one is recovered from the state.
 - Two accounts are two collections; nothing stops one person climbing twice.
 
@@ -681,7 +685,7 @@ Twelve real offenses, weakest first. `GAUNTLET` in card-logic.mjs is the list: `
   is free and retries are unlimited, so that buys nothing a patient player did not already have.
 - **Runbook:** see somebody's progress - `select cleared, stage, last_stage from card_gauntlets where user_id = '<uuid>';`.
   Put a stage back - `update card_gauntlets set cleared = <n> where user_id = '<uuid>';` (the coins already paid stay paid).
-- **Not built:** the draft arena (the fourth mode). No badge for running the gauntlet.
+- **Not built:** a badge for running the gauntlet. (The draft arena, once a fourth mode, was dropped on 2026-11-14.)
 
 ## 12. Copies (v2.26.0, on the test site)
 

@@ -529,7 +529,8 @@ one lineup spot - **QB, RB, RB, WR, WR, TE since v2.31.0, in a random order; the
 plays one card from the hand without seeing the card across from it (v2.28.1). **Since v2.31.0 the category is
 CALLED before the pick**: you call round one, then whoever won the last round; each category is used once.
 **The historical gauntlet (v2.29.0)** is twelve real offenses in
-order, a stage at a time, with their six in view. The draft arena, badges and the profile spot are not built. **Production has cards switched off** in two
+order, a stage at a time, with their six in view. Badges and the profile spot are not built. **The draft arena,
+once a fourth mode, was dropped by the owner on 2026-11-14 - do not build it or offer it.** **Production has cards switched off** in two
 places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
 `card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
 with the client off banks daily cards nobody can see, which is a launch order and not a state to leave things in. **`CARDS.md` is the reference** and
