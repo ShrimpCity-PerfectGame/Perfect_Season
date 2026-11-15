@@ -75,7 +75,11 @@ the highest rating won 45%.
   the next one, so a reloaded page knows it without asking.
 - A play carries the category you call. On your call a missing, made-up or spent one is refused
   (`bad_cat`) and plays nothing; on their call what the browser sends is not looked at.
-- A battle begun before this release finishes under the new call rule with its old spots.
+- A battle begun before this release finishes under the new call rule with its old spots. **That includes a
+  ladder battle already DEALT and not yet started**, which is stored with its team: on the test site the owner
+  had one, opened it minutes after the deploy and met a Flex round with ten cards - the thing this release
+  removed. The pre-deploy check had only counted battles with a round played. That one battle's team was
+  re-fielded by hand (CARDS.md 11.6).
 
 ## [2.30.0] - 2026-11-14
 

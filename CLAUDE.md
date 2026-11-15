@@ -1556,8 +1556,12 @@ suite and still broke the live Leaderboard for every existing account.
   v2.31.0's (the category is called, no Flex): **deploy the Edge Functions**, then the client. **No migration.**
   `card-logic.mjs` changed - the 2,000-battle checksum moved - so `card-claim` and the client ship together:
   an old client against the new function is refused `bad_cat` on every round it calls (it sends no category),
-  and a new client against the old function has its category ignored and a hidden one played instead. A
-  battle in flight finishes under the new call rule with its old spots; the day's daily battle is re-fielded.
+  and a new client against the old function has its category ignored and a hidden one played instead. The
+  daily and gauntlet teams are worked out when asked for, so they are re-fielded at once. **A ladder battle is
+  STORED with its team (`card_runs.foe`), so one already dealt keeps its old spots - including one with no
+  round played yet**, which the pre-deploy check missed: it counted battles with a round down, and the owner
+  opened a run sitting on six wins and met a ten-card Flex round. When a release changes `SPOTS`, look for
+  `status = 'live'` runs whatever their rounds, and re-field or end them (CARDS.md 11.6).
   v2.30.0's (card screens on demand): client only. The deploy now serves a second script, `/cards.js`; nothing
   per-environment. Re-run `npm run app:sync` when the Android app is next built.
   v2.29.1's (the battle's field): client only.

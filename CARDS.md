@@ -575,6 +575,14 @@ A ladder win pays `cardWin` (3) plus `cardWinStep` (1) for each win the run alre
 - **End somebody's stuck run:** `select card_run_end('<user uuid>');`
 - **See a run:** `select id, wins, status, hand, foe, cats, rounds, last from card_runs where user_id = '<uuid>' order by id desc;`
 - **Give a day's battle back:** `delete from card_dailies where date = '<date>' and user_id = '<uuid>';`
+- **Re-field a live run's battle** (after a release that changes `SPOTS` or how a team is built). A ladder
+  battle is stored with its team, so one dealt before the release keeps the old one - v2.31.0 left a run on
+  the test site with two Flex spots. Find them: `select id, wins, jsonb_array_length(rounds) from card_runs
+  where status = 'live';`. For one with NO round played, work the team out with the release's own code -
+  `ladderFoe(seed, wins)`, as `[{ card, finish, spot }]` - and write it:
+  `update card_runs set foe = '<json>'::jsonb where id = <id> and status = 'live' and wins = <wins> and
+  jsonb_array_length(rounds) = 0;`. The hand stays - twelve cards fit any lineup of these positions. One with
+  rounds already played is better ended (`select card_run_end('<user uuid>');`) than re-fielded mid-battle.
 
 ### 11.7 Not built, and known gaps
 
