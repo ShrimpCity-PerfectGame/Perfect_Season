@@ -17,8 +17,11 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
 // for a staging setup is not knowing which of the two sites you're looking at.
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 const appEnv = process.env.APP_ENV || "production";
-// Cards (CARDS.md): on for the test site, off for production, CARDS_ON overriding either way.
-const cardsOn = (process.env.CARDS_ON ?? (appEnv === "staging" ? "1" : "")) === "1";
+// Cards (CARDS.md), three settings: "1" on for everybody, "testers" on for the accounts the database lists
+// (card_testers), "" off. Production is built for testers since v2.32.0 - the test site's database is gone, so
+// the real site is where the owner plays them. CARDS_ON overrides either way; an unknown word is off.
+const cardsAsked = process.env.CARDS_ON ?? (appEnv === "staging" ? "1" : "testers");
+const cardsSetting = cardsAsked === "1" ? "1" : cardsAsked === "testers" ? "testers" : "";
 
 // A Turnstile SECRET key in CAPTCHA_SITE_KEY would be baked into the public bundle and served to every
 // visitor, because that is what this variable is for - the site key is public by design. The two are easy to
@@ -76,9 +79,8 @@ const define = {
   // sends no token, which is exactly the behaviour before it existed - see the note at the top of that file
   // about shipping the client BEFORE the project setting. Checked above for the secret-key shape.
   CAPTCHA_SITE_KEY: JSON.stringify(captchaKey),
-  // Cards (CARDS.md): "1" switches the card area on. On for the test site, off for production until the owner
-  // says otherwise; CARDS_ON in the environment overrides either way. cards-switch.mjs is the only reader.
-  CARDS_ON: JSON.stringify(cardsOn ? "1" : ""),
+  // Cards (CARDS.md): "1", "testers" or "" - see above. cards-switch.mjs is the only reader.
+  CARDS_ON: JSON.stringify(cardsSetting),
 };
 
 // The card screens are a file of their own, public/cards.js, fetched when Cards is first opened (cards-lazy.jsx,
@@ -161,7 +163,7 @@ cpSync("data/versus-pool.json", "public/data/versus-pool.json");
 // The card catalog, fetched like the guess pool (card-data.mjs) - but ONLY where cards are switched on. With
 // them off the file is not shipped at all: nothing would read it, and a catalog sitting on production ahead of
 // the feature is a thing somebody finds.
-if (cardsOn) cpSync("data/cards.json", "public/data/cards.json");
+if (cardsSetting) cpSync("data/cards.json", "public/data/cards.json");
 else rmSync("public/data/cards.json", { force: true });
 rmSync("public/data/card-defense.json", { force: true }); // served for v2.25.0's battles against a defense; nothing asks for it now
 

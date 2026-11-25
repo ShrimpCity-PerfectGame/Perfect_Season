@@ -20,6 +20,25 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.32.0] - 2026-11-25
+
+The test site's database was deleted on 2026-11-25 and the owner chose not to replace it. From this release
+there is one site, and updates go to it directly.
+
+### Added
+- **Cards for testers only.** Cards are unfinished and were only ever on the test site, so the real site now
+  has a third setting between on and off: the card area is drawn, and cards are granted, **only for accounts
+  listed in a new table, `card_testers`**. Everybody else sees no tile and is granted nothing, exactly as
+  before. Both switches learned it - the build's `CARDS_ON` and the server's `CARDS_ENABLED` secret each take
+  `1`, `testers` or nothing - and a production build is set to `testers`. Nobody but the SQL editor writes
+  the list; an account reads only its own row.
+
+### Changed
+- **The release process.** No staging step exists any more. The full test suite and the UI harness are what
+  stand between a change and real players; CLAUDE.md's Releasing section says what replaces the click-through.
+- A production build now ships the card catalog (`/data/cards.json`) and the card screens, since its testers
+  need them. Nothing links to either for anybody else.
+
 ## [2.31.1] - 2026-11-15
 
 Two things the owner hit on the test site with a collection of 600 cards. Cards are still on the test site only.

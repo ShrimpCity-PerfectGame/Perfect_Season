@@ -23,7 +23,7 @@ const ME = "11111111-1111-4111-8111-111111111111";
 const GUEST = "22222222-2222-4222-8222-222222222222";
 const NAMELESS = "33333333-3333-4333-8333-333333333333"; // signed in with Google, no profile yet
 
-function store({ on = true } = {}) {
+function store({ on = true, mode = "1" } = {}) {
   const profiles = new Map([
     [ME, { id: ME, username: "someone", guest: false }],
     [GUEST, { id: GUEST, username: "Guest_ab12c", guest: true }],
@@ -31,12 +31,14 @@ function store({ on = true } = {}) {
   const state = { profiles, currentUserId: () => null };
   const wallet = makeWallet(state);
   const cards = makeCards(state, { wallet });
-  globalThis.__edge_env__ = on ? { CARDS_ENABLED: "1" } : {};
+  globalThis.__edge_env__ = on ? { CARDS_ENABLED: mode } : {};
+  const testers = []; // card_testers rows: { user_id }
   const s = {
+    testers,
     users: { has: (id) => id === ME || id === GUEST || id === NAMELESS },
     readFails: {}, writeFails: {}, rpcFails: {}, throwOn: {}, beforeWrite: null, rpcCalls: [],
     profiles, cards, wallet,
-    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : table === "card_runs" ? cards.runs : table === "card_dailies" ? cards.dailies : table === "card_gauntlets" ? [...cards.gauntlets].map(([user_id, g]) => ({ user_id, ...g })) : []),
+    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : table === "card_testers" ? testers : table === "card_runs" ? cards.runs : table === "card_dailies" ? cards.dailies : table === "card_gauntlets" ? [...cards.gauntlets].map(([user_id, g]) => ({ user_id, ...g })) : []),
     insert: (_table, row) => ({ row }),
     remove() {},
     rpcs: {
@@ -81,6 +83,31 @@ await runTest("who is asking, and what for", async () => {
   const none = await claim(ME, {});
   assert(none.status === 400 && none.body.reason === "malformed", "no action at all");
   assert(s.cards.owned(ME).length === 0, "and nothing was granted along the way");
+});
+
+await runTest("set to testers, cards are on for the list and off for everybody else", async () => {
+  // v2.32.0: the test database is gone, so the owner plays cards on the real site and nobody else may.
+  const s = store({ mode: "testers" });
+  const out = await claim(ME);
+  assert(out.status === 403 && out.body.reason === "cards_off", "an account not on the list is told cards are off: " + JSON.stringify(out));
+  assert(s.rpcCalls.length === 0 && s.cards.owned(ME).length === 0, "and nothing was asked of the card functions or granted");
+  for (const body of [{ action: "open_pack", pack: "pack-standard", open: "open-0001-abcd", price: 150 }, { action: "run_start" }, { action: "daily_deal" }, { action: "gauntlet_start", stage: 0 }, { action: "sell_copies" }]) {
+    const r = await claim(ME, body);
+    assert(r.status === 403 && r.body.reason === "cards_off", body.action + " is cards_off for a non-tester: " + JSON.stringify(r.body));
+  }
+  assert(s.rpcCalls.length === 0, "not one rpc for any of them");
+  s.testers.push({ user_id: ME });
+  const inn = await claim(ME);
+  assert(inn.status === 200 && inn.body.ok === true && s.cards.owned(ME).length > 0, "the same account on the list gets its starter deck: " + JSON.stringify(inn.body).slice(0, 120));
+  // A list that cannot be read is a fault, said as one - never "you are on it".
+  const broken = store({ mode: "testers" });
+  broken.testers.push({ user_id: ME });
+  broken.readFails.card_testers = true;
+  const bad = await claim(ME);
+  assert(bad.status === 500 && bad.body.reason === "server" && broken.cards.owned(ME).length === 0, "a list that cannot be read grants nothing: " + JSON.stringify(bad));
+  // And a value nobody defined is off, not on.
+  store({ mode: "yes" });
+  assert((await claim(ME)).body.reason === "cards_off", "an unknown setting is off");
 });
 
 await runTest("with the server's switch off it grants nothing and says why", async () => {

@@ -756,6 +756,10 @@ begin
   if to_regclass('public.card_dailies') is not null then
     execute 'delete from public.card_dailies where user_id = $1' using v_uid;
   end if;
+  -- ...and the testers' list (v2.32.0): a closed account is no longer somebody cards are switched on for.
+  if to_regclass('public.card_testers') is not null then
+    execute 'delete from public.card_testers where user_id = $1' using v_uid;
+  end if;
   -- Reports they filed and reports about them: both name a person, and a closed account cannot answer one.
   delete from public.reports where reporter_id = v_uid or target_id = v_uid;
 

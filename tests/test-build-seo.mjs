@@ -170,8 +170,12 @@ check("every other page says when its own words last changed",
 
 // Cards (CARDS.md) are switched on for the test site and off for production. Off means OFF: the catalog is not
 // shipped, and the switch the bundle carries is empty. Checked before the staging build below overwrites public/.
-check("production does not ship the card catalog", prod.cards === null);
-check("production's bundle has cards switched off", !/CARDS_ON/.test(prod.js) && !/"1"===""/.test(prod.js));
+// v2.32.0: production is built for TESTERS - the catalog ships, and the tile is drawn only for an account the
+// database lists (card_testers). CARDS_ON= still means off, catalog and all.
+check("production ships the card catalog, for its testers", prod.cards !== null && JSON.parse(prod.cards).cards.length === 3124);
+check("production's bundle is set to testers, not to on", !/CARDS_ON/.test(prod.js) && /"testers"/.test(prod.js));
+const prodOff = build({ CARDS_ON: "" });
+check("CARDS_ON= turns them off for a production build, and takes the catalog out", prodOff.cards === null);
 const forced = build({ CARDS_ON: "1" });
 check("CARDS_ON=1 turns them on for a production build, catalog included", forced.cards !== null && JSON.parse(forced.cards).cards.length === 3124);
 

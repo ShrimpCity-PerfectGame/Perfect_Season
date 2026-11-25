@@ -641,7 +641,7 @@ export function makeMockAuth() {
     }
     // The daily card, as submit-run grants it: one a day under the date alone, and never at the season's cost.
     let card = null;
-    if (mode.kind === "daily" && cards.enabled) {
+    if (mode.kind === "daily" && cards.enabled && (!cards.testers || cards.testers.has(userId))) {
       try {
         const pick = dailyCard(history, Math.random);
         const got = pick ? cards.grantCards(userId, "daily", [{ ref: mode.date, card: pick.id, finish: pick.finish, sell: cards.sellFor(pick) }]).granted[0] : null;

@@ -52,6 +52,9 @@ export function makeCards(state, { wallet = null } = {}) {
   const byName = (a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0);
   const api = {
     enabled: true,
+    // The CARDS_ENABLED secret set to "testers" (v2.32.0): null is "everybody" (when enabled), a Set of user
+    // ids is "only these". Also what a browser's own-row read of card_testers answers from.
+    testers: null,
     // ---------- battles (v2.27.0): supabase/migration-cards.sql, raise for raise and in its order ----------
     runs, dailies, decks, gauntlets,
     today: utcDay,
@@ -337,7 +340,7 @@ export function makeCards(state, { wallet = null } = {}) {
       if (api.packsReadFail) return { data: null, error: { message: "mock: the read failed", code: "XX000" } };
       return { data: [...packs.values()].map((p) => ({ ...p })), error: null };
     },
-    tables: { card_owned: owned, card_grants: grants },
+    tables: { card_owned: owned, card_grants: grants, card_testers: true },
 
     // public.grant_cards. Throws an Error whose message is the reason, the way the mock's rpc layer expects.
     grantCards(userId, kind, list) {
@@ -376,12 +379,15 @@ export function makeCards(state, { wallet = null } = {}) {
     // What a signed-in client's own-rows-only select returns.
     select(table, userId) {
       if (api.readFails) return { data: null, error: { message: "mock: the read failed", code: "XX000" } };
+      // card_testers: a signed-in account reads its own row and nobody else's.
+      if (table === "card_testers") return { data: userId && api.testers?.has(userId) ? [{ user_id: userId }] : [], error: null };
       return { data: (table === "card_owned" ? owned : grants).filter((r) => userId && r.user_id === userId).map((r) => ({ ...r })), error: null };
     },
     // delete_account's cards arm.
     forget(userId) {
       for (const list of [owned, grants, runs, dailies]) for (let i = list.length - 1; i >= 0; i--) if (list[i].user_id === userId) list.splice(i, 1);
       decks.delete(userId); gauntlets.delete(userId);
+      api.testers?.delete(userId);
     },
     clear() { owned.length = 0; grants.length = 0; runs.length = 0; dailies.length = 0; decks.clear(); gauntlets.clear(); },
 
@@ -395,6 +401,7 @@ export function makeCards(state, { wallet = null } = {}) {
       if ((body.action === "gauntlet_start" || body.action === "gauntlet_round") && (!Number.isInteger(body.stage) || body.stage < 0 || body.stage >= GAUNTLET.length)) return cardHttpError("malformed", 400);
       if (body.action === "open_pack" && (typeof body.pack !== "string" || typeof body.open !== "string" || !Number.isInteger(body.price) || body.price < 1 || body.price > 1000000)) return cardHttpError("malformed", 400);
       if (!api.enabled) return cardHttpError("cards_off", 403);
+      if (api.testers && !api.testers.has(uid)) return cardHttpError("cards_off", 403);
       const profile = state.profiles.get(uid);
       if (!profile) return cardHttpError("no_profile", 400);
       if (profile.guest) return cardHttpError("guest_not_allowed", 403);

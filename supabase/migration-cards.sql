@@ -1185,3 +1185,23 @@ end;
 $$;
 revoke all on function public.card_sell_copies(uuid, jsonb, text) from public, anon, authenticated;
 grant execute on function public.card_sell_copies(uuid, jsonb, text) to service_role;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- Testers (v2.32.0). The test site's database was deleted on 2026-11-25 and the owner chose not to replace it,
+-- so cards - still unfinished - are played on the real site by the accounts listed here and by nobody else.
+-- card-claim and submit-run read this with the service role when the CARDS_ENABLED secret is "testers"; the
+-- browser reads its OWN row, to decide whether to draw the tile. Nobody but the SQL editor writes it:
+--   insert into card_testers (user_id, note) select id, 'the owner' from profiles where lower(username) = 'admin';
+-- Launching cards to everybody is the secret set to "1" and a client built with CARDS_ON=1; this table is then
+-- read by nothing and can stay.
+create table if not exists public.card_testers (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  note text,
+  added_at timestamptz not null default now()
+);
+alter table public.card_testers enable row level security;
+drop policy if exists "a tester reads their own row" on public.card_testers;
+create policy "a tester reads their own row" on public.card_testers
+  for select using (auth.uid() = user_id);
+revoke all on public.card_testers from anon, authenticated;
+grant select on public.card_testers to authenticated;

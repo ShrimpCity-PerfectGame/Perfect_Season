@@ -9,7 +9,8 @@
 // The order it answers in matters more than usual, because each answer is a different sentence on screen:
 //   401 signed_out          nobody is signed in
 //   400 malformed           no JSON, or an action that is not one
-//   403 cards_off           this environment has not switched cards on (the CARDS_ENABLED secret)
+//   403 cards_off           this environment has not switched cards on (the CARDS_ENABLED secret) - or has
+//                           set it to "testers" and this account is not in card_testers (v2.32.0)
 //   500 server              the profile could not be read - never mistaken for "no profile"
 //   400 no_profile          signed in with Google and has not picked a name yet
 //   403 guest_not_allowed   a guest account. Cards are for accounts, like the shop
@@ -113,7 +114,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // Read per request, not once at load: a secret set after a deploy should not need a second deploy to be seen.
-const cardsEnabled = () => Deno.env.get("CARDS_ENABLED") === "1";
+// THREE settings (v2.32.0): "1" is everybody, "testers" is the accounts listed in card_testers and nobody else,
+// and anything else - unset included - is off. An unknown word is off, never on.
+const cardsSetting = () => { const v = Deno.env.get("CARDS_ENABLED"); return v === "1" ? "on" : v === "testers" ? "testers" : "off"; };
 
 // A [0, 1) draw from the platform's cryptographic generator. Never Math.random: which cards a player is dealt
 // must not be something a patient person can predict.
@@ -168,9 +171,22 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     return json({ error: "a pack, an open id and the price shown are all needed", reason: "malformed" }, 400);
   }
 
-  if (!cardsEnabled()) return json({ error: "cards are not switched on here", reason: "cards_off" }, 403);
+  const setting = cardsSetting();
+  if (setting === "off") return json({ error: "cards are not switched on here", reason: "cards_off" }, 403);
 
   const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+  // Testers only: one read of a table the browser cannot write, before the profile and before any card
+  // function. Somebody not on the list is told exactly what an environment with cards off says. A list that
+  // cannot be read is a fault and is said as one - it is never taken as "on the list".
+  if (setting === "testers") {
+    const { data: tester, error: testerError } = await service
+      .from("card_testers").select("user_id").eq("user_id", user.id).maybeSingle();
+    if (testerError) {
+      console.error("card-claim testers read:", testerError);
+      return json({ error: "failed", reason: "server" }, 500);
+    }
+    if (!tester) return json({ error: "cards are not switched on here", reason: "cards_off" }, 403);
+  }
   const { data: profile, error: profileError } = await service
     .from("profiles").select("id, guest").eq("id", user.id).maybeSingle();
   if (profileError) {

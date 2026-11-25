@@ -62,6 +62,28 @@ await runTest("nobody writes the card tables from a browser", async () => {
   assert((await ownedBy(BOB))[0].count === 1, "and Bob's card was not touched");
 });
 
+await runTest("the testers' list: you can ask whether you are on it, and nobody writes it", async () => {
+  await owner("insert into card_testers (user_id, note) values ($1, 'the owner')", [ALICE]);
+  const mine = await attempt(ALICE, "select user_id from card_testers");
+  assert(mine.rows?.length === 1 && mine.rows[0].user_id === ALICE, "a tester sees their own row: " + JSON.stringify(mine).slice(0, 120));
+  const bobs = await attempt(BOB, "select user_id from card_testers");
+  assert(bobs.rows?.length === 0, "somebody else sees nothing - not even who the testers are: " + JSON.stringify(bobs).slice(0, 120));
+  const anon = await attempt(null, "select user_id from card_testers");
+  assert(anon.error || anon.rows.length === 0, "and a visitor sees nothing");
+  for (const who of [BOB, ALICE, null]) {
+    for (const [what, statement, params] of [
+      ["add themselves", "insert into card_testers (user_id) values ($1)", [BOB]],
+      ["remove a tester", "delete from card_testers", []],
+      ["rewrite one", "update card_testers set note = 'mine'", []],
+    ]) {
+      const r = await attempt(who, statement, params);
+      assert(r.error || r.affected === 0, `${who || "a visitor"} cannot ${what}: ${JSON.stringify(r).slice(0, 120)}`);
+    }
+  }
+  assert((await owner("select count(*)::int as n from card_testers"))[0].n === 1, "the list is as the owner left it");
+  await owner("delete from card_testers");
+});
+
 await runTest("a player reads their own cards and nobody else's", async () => {
   const mine = await attempt(BOB, "select card_id from card_owned");
   const theirs = await attempt(ALICE, "select card_id from card_owned");
@@ -134,10 +156,12 @@ await runTest("who and what grant_cards refuses, with nothing written", async ()
 await runTest("closing an account erases its cards and nobody else's", async () => {
   await grant(GOING, "starter", [{ ref: "starter:0", card: 3, finish: "base" }]);
   await grant(GOING, "daily", [{ ref: "2026-11-13", card: 4, finish: "silver" }]);
+  await owner("insert into card_testers (user_id) values ($1)", [GOING]);
   const bobBefore = JSON.stringify(await ownedBy(BOB));
   const res = (await owner("select delete_account($1) as r", [GOING]))[0].r;
   assert(res.ok === true, "the account closed: " + JSON.stringify(res));
   assert((await ownedBy(GOING)).length === 0 && (await grantsOf(GOING)).length === 0, "its cards and its grants are gone - they were the person's, not a board's");
+  assert((await owner("select count(*)::int as n from card_testers where user_id = $1", [GOING]))[0].n === 0, "and it is off the testers' list");
   assert(JSON.stringify(await ownedBy(BOB)) === bobBefore, "and Bob's are where they were");
 });
 

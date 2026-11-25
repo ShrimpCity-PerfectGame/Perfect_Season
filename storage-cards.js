@@ -19,6 +19,23 @@ export const CARD_REFUSALS = ["signed_out", "no_profile", "guest_not_allowed", "
   // the gauntlet (v2.29.0)
   "locked", "no_battle"];
 
+// Is the signed-in account on the testers' list (card_testers, v2.32.0)? Asked only where the build is set to
+// "testers" (cards-switch.mjs). TWO answers on purpose, and a failed read is "no": this decides whether a tile
+// is DRAWN and nothing else - what is granted is the server's decision, made from the same table with the
+// service role - so the cost of a wrong "no" is a tester reloading, and a wrong "yes" would cost nothing either.
+export async function fetchCardTester() {
+  try {
+    const client = getClient();
+    const { data: sessionData } = await client.auth.getSession();
+    const uid = sessionData?.session?.user?.id;
+    if (!uid) return false;
+    const { data, error } = await client.from("card_testers").select("user_id").eq("user_id", uid).maybeSingle();
+    return !error && !!data;
+  } catch {
+    return false;
+  }
+}
+
 // A player's collection, and whether they have claimed their starter deck.
 //   { status: "ok", cards: [{ id, finish, count }], starter: boolean }
 //   { status: "signed_out" }

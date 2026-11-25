@@ -38,7 +38,9 @@ try { initCardData(cardCatalog); cardsReady = true; } catch (e) { console.error(
 const CARD_GRANT_MS = 2500;
 // Cards (CARDS.md). Read per request, so a secret set after a deploy is seen without a second one. With it
 // unset this function chooses no card and calls nothing: shipping it ahead of the feature is inert.
-const cardsEnabled = () => Deno.env.get("CARDS_ENABLED") === "1";
+// THREE settings (v2.32.0), as in card-claim: "1" everybody, "testers" only the accounts in card_testers, and
+// anything else off.
+const cardsSetting = () => { const v = Deno.env.get("CARDS_ENABLED"); return v === "1" ? "on" : v === "testers" ? "testers" : "off"; };
 // A [0, 1) draw from the platform's cryptographic generator - which card a daily earns must not be predictable.
 const secureRand = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
 
@@ -467,9 +469,19 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
   // share one card a day - grant_cards answers the second with nothing new, and that is `card: null` too.
   // A guest never reaches here (a guest's daily is refused far above), and grant_cards refuses one anyway.
   let card: unknown = null;
-  if (mode.kind === "daily" && cardsEnabled() && cardsReady) {
+  const cardSetting = cardsSetting();
+  if (mode.kind === "daily" && cardSetting !== "off" && cardsReady) {
     try {
-      const pick = dailyCard(history, secureRand);
+      // Testers only: is this account on the list? Inside the try, so a list that cannot be read costs the
+      // card and nothing else - the season is saved and paid by now.
+      let allowed = cardSetting === "on";
+      if (!allowed) {
+        const { data: tester, error: testerError } = await service
+          .from("card_testers").select("user_id").eq("user_id", user.id).maybeSingle();
+        if (testerError) throw new Error(`card_testers: ${testerError.message}`);
+        allowed = !!tester;
+      }
+      const pick = allowed ? dailyCard(history, secureRand) : null;
       if (pick) {
         // Raced against a short timer. If the timer wins the grant may still land a moment later - then the
         // card is in the collection and this answer simply did not show it, which is the right way round.

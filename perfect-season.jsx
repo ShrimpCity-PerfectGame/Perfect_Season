@@ -10,7 +10,7 @@ import {
   fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, deleteAccount, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
   versusPath, parseVersusPath, fetchVersusTop,
-  submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY,
+  submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY, fetchCardTester,
 } from "./storage.js";
 import gameData from "./data/players.json";
 import seasonPool from "./data/season-2025.json";
@@ -45,7 +45,7 @@ import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
 import { loadVersusData } from "./versus-data.mjs";
 import { CENTURY_CSS, CenturyScreen, CENTURY_DONE } from "./century.jsx";
 import { LazyCardsScreen, LazySeasonCard } from "./cards-lazy.jsx";
-import { cardsOn } from "./cards-switch.mjs";
+import { cardsOn, cardsMode } from "./cards-switch.mjs";
 import { initCenturyData, CENTURY_GOAL, centuryReservedSeed } from "./century-logic.mjs";
 import { drainOne } from "./pending-daily.mjs";
 import { GUESS_CSS, GuessScreen, GUESS_DONE } from "./guess.jsx";
@@ -2618,6 +2618,15 @@ export default function PerfectSeason() {
   // way `view === "play"` does for a draft: a run in progress is stadium-dark, its menu and boards are not.
   const [centuryStage, setCenturyStage] = useState("menu");
   const [cardsHidden, setCardsHidden] = useState(false);
+  // Cards for testers only (v2.32.0, cards-switch.mjs): production's setting while cards are unfinished. The
+  // build cannot know who is on the list, so the account is asked about once it is known; no account, no tile.
+  const [cardTester, setCardTester] = useState(false);
+  useEffect(() => {
+    if (cardsMode() !== "testers" || !userId) { setCardTester(false); return undefined; }
+    let live = true;
+    fetchCardTester().then((yes) => { if (live) setCardTester(yes === true); });
+    return () => { live = false; };
+  }, [userId]);
   const [guessDone, setGuessDone] = useState(null);   // today's game, if played on this device
   const [guessStage, setGuessStage] = useState("menu");
   // A Century link waiting to be dealt: { seed, score }. Cleared by the screen as it takes it.
@@ -3139,7 +3148,7 @@ export default function PerfectSeason() {
     // screen, so opening Modes in its place doesn't count as leaving the shop and push an entry mid-traversal.
     // stats?.guest rather than isGuest: this handler is written during render, before the derived values.
     // The card area the same way: Back or Forward to it in a build with cards off, or after hiding them, is Modes.
-    if (s.ps === "view" && s.view === "cards" && !(cardsOn() && !cardsHidden)) {
+    if (s.ps === "view" && s.view === "cards" && !(cardsOn(cardTester) && !cardsHidden)) {
       s = { ps: "view", view: "home" };
       writeHistory("replaceState", s);
     }
@@ -4839,7 +4848,7 @@ export default function PerfectSeason() {
   // An account made for a visitor who finished a season (v1.17.0): on the boards like anyone else, but with
   // no profile screen, no shop and never the daily, until it keeps its seasons under a name of its own.
   const isGuest = !!stats?.guest;
-  const showCards = cardsOn() && !cardsHidden;
+  const showCards = cardsOn(cardTester) && !cardsHidden;
   // Duel's defenses and kickers, fetched once the page is up (versus-data.mjs). "loading" | "ready" | "error".
   const [versusData, setVersusData] = useState("loading");
   const fetchVersusData = useCallback(() => {
@@ -6447,7 +6456,7 @@ export default function PerfectSeason() {
           <footer className="sitefoot">
             <p><b>Gridspin</b> is a free football draft game — spin an era, draft the greats, go <span className="nowrap">20–0</span>.</p>
             {/* The way back for somebody who hid the card area: the one place that says it exists. */}
-            {cardsOn() && cardsHidden && <p><button className="linkbtn" onClick={() => hideCards(false)}>Show cards</button></p>}
+            {cardsOn(cardTester) && cardsHidden && <p><button className="linkbtn" onClick={() => hideCards(false)}>Show cards</button></p>}
             <p className="sitelinks">
               {SITE_PAGES.map((p) => (
                 <a key={p.id} className="btn sm" href={p.path}

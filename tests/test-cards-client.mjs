@@ -9,9 +9,9 @@ window.storage = makeStorage();
 const auth = makeMockAuth();
 window.__ps_supabase__ = auth;
 
-const { cardsOn } = await loadModule("cards-switch.mjs");
+const { cardsOn, cardsMode } = await loadModule("cards-switch.mjs");
 const { loadCardData, CARD_DATA_URL, _resetCardData } = await loadModule("card-data.mjs");
-const { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId } = await loadModule("storage-cards.js");
+const { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId, fetchCardTester } = await loadModule("storage-cards.js");
 
 const catalog = JSON.parse(readFileSync(new URL("../data/cards.json", import.meta.url), "utf8"));
 async function signUp(email, username) {
@@ -26,7 +26,30 @@ await runTest("the switch follows the build, and a test can decide", async () =>
   window.__ps_cards__ = false; assert(cardsOn() === false, "forced off");
   window.__ps_cards__ = true; assert(cardsOn() === true, "forced on");
   window.__ps_cards__ = 0; assert(cardsOn() === false, "anything falsy is off");
+  // TESTERS (v2.32.0): the third setting. The build is on for nobody until the account is known to be on the
+  // list, and then for that account only.
+  window.__ps_cards__ = "testers";
+  assert(cardsMode() === "testers", "the mode is its own word: " + cardsMode());
+  assert(cardsOn() === false && cardsOn(false) === false, "in testers mode cards are off for anybody not known to be a tester");
+  assert(cardsOn(true) === true, "and on for a tester");
+  window.__ps_cards__ = true; assert(cardsMode() === "on" && cardsOn(false) === true, "fully on needs no list");
+  window.__ps_cards__ = false; assert(cardsMode() === "off" && cardsOn(true) === false, "and off is off for a tester too");
   delete window.__ps_cards__;
+});
+
+await runTest("am I on the testers' list has two answers, and a failed read is no", async () => {
+  await auth.auth.signOut();
+  assert((await fetchCardTester()) === false, "signed out: no");
+  const tia = await signUp("tia@example.test", "tia");
+  auth._cards.testers = new Set();
+  assert((await fetchCardTester()) === false, "an account that is not on the list: no");
+  auth._cards.testers = new Set([tia]);
+  assert((await fetchCardTester()) === true, "an account that is: yes");
+  auth._cards.readFails = true;
+  assert((await fetchCardTester()) === false, "a read that failed shows no tile - the server decides what is granted, not this");
+  auth._cards.readFails = false;
+  auth._cards.testers = null;
+  await auth.auth.signOut();
 });
 
 await runTest("the catalog loads once, and a failed load is tried again", async () => {

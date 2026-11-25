@@ -66,6 +66,27 @@ await runTest("the tile follows the switch", async () => {
   assert(container.querySelector("h1.vh")?.textContent === "Cards", "and it opens the card area, which names itself");
 });
 
+await runTest("set to testers, the tile is there for the list and for nobody else", async () => {
+  // v2.32.0. The real site is the only site now, and cards are not launched: the owner's account sees them.
+  window.__ps_cards__ = "testers";
+  auth._cards.testers = new Set();
+  await auth.auth.signOut(); await remount(); await settle();
+  assert(!tile(), "signed out there is no Cards tile");
+  const pat = await signUp("tessa@cards.test", "tessa"); await settle();
+  await goHome();
+  assert(!tile(), "an account that is not on the list sees no tile");
+  auth._cards.testers = new Set([pat]);
+  await remount(); await settle(); await settle();
+  assert(tile(), "the same account on the list does");
+  await click(tile()); await settle();
+  assert(container.querySelector("h1.vh")?.textContent === "Cards" && button("Open your starter deck"), "and the card area opens and offers the starter deck");
+  await auth.auth.signOut(); await settle();
+  await goHome();
+  assert(!tile(), "signing out takes the tile away again");
+  auth._cards.testers = null;
+  window.__ps_cards__ = true; await remount();
+});
+
 await runTest("signed out, cards are for accounts", async () => {
   await auth.auth.signOut(); await flush();
   await openCards();

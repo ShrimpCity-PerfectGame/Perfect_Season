@@ -34,7 +34,7 @@ function legitTrace(seed) {
   return { history, seq };
 }
 
-function store({ on = true } = {}) {
+function store({ on = true, mode = "1" } = {}) {
   const profiles = new Map([[ME, {
     id: ME, username: "someone", guest: false, rev: 0, created_at: "2026-11-01T00:00:00.000Z",
     runs: 4, dnf: 1, wins: 30, losses: 38, champs: 0, perfect: 0, playoffs: 1,
@@ -45,12 +45,13 @@ function store({ on = true } = {}) {
   }]]);
   const cards = makeCards({ profiles, currentUserId: () => null });
   const tables = { runs: [], daily_runs: [], finished_codes: [], profile_details: [] };
-  globalThis.__edge_env__ = on ? { CARDS_ENABLED: "1" } : {};
+  globalThis.__edge_env__ = on ? { CARDS_ENABLED: mode } : {};
+  const testers = [];
   const s = {
     users: { has: (id) => profiles.has(id) },
     readFails: {}, writeFails: {}, rpcFails: {}, throwOn: {}, beforeWrite: null, rpcCalls: [],
-    profiles, cards, tables,
-    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : tables[table] || []),
+    profiles, cards, tables, testers,
+    rowsOf: (table) => (table === "profiles" ? [...profiles.values()] : table === "card_testers" ? testers : tables[table] || []),
     insert(table, row) {
       // daily_runs' primary key is (date, format, user_id): one daily per format per day.
       if (table === "daily_runs" && tables.daily_runs.some((r) => r.date === row.date && (r.format || "fantasy") === (row.format || "fantasy") && r.user_id === row.user_id)) {
@@ -94,6 +95,23 @@ await runTest("finishing the daily earns one card off that day's boards", async 
   assert(owned.length === 1 && owned[0].card_id === card.id && owned[0].finish === card.finish && owned[0].count === 1, "the account now owns it");
   const g = s.cards.grants(ME);
   assert(g.length === 1 && g[0].kind === "daily" && g[0].ref === d.date, "granted under the day, and nothing else: " + JSON.stringify(g));
+});
+
+await runTest("set to testers, only the list earns a daily card - and everybody's season is saved", async () => {
+  const s = store({ mode: "testers" });
+  const out = await daily("fantasy").send();
+  assert(out.status === 200 && out.body.ok === true && out.body.coins, "a player not on the list still has the daily saved and paid");
+  assert(out.body.card === null && s.cards.owned(ME).length === 0 && called(s, "grant_cards").length === 0, "and is granted no card: " + JSON.stringify(out.body.card));
+  const t = store({ mode: "testers" });
+  t.testers.push({ user_id: ME });
+  const inn = await daily("fantasy").send();
+  assert(inn.status === 200 && inn.body.card && t.cards.owned(ME).length === 1, "a tester earns the day's card: " + JSON.stringify(inn.body.card));
+  // The list failing to read costs the card and nothing else.
+  const b = store({ mode: "testers" });
+  b.testers.push({ user_id: ME });
+  b.readFails.card_testers = true;
+  const bad = await daily("fantasy").send();
+  assert(bad.status === 200 && bad.body.ok === true && bad.body.card === null && b.profiles.get(ME).runs === 5, "a list that cannot be read: the season is saved, and there is no card");
 });
 
 await runTest("one card a day, whichever scoring format's daily was played", async () => {

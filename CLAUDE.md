@@ -519,7 +519,7 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.31.1 - ON THE TEST SITE ONLY).** A card-collecting and auto-battler mode is being built in
+**Cards (in progress, v2.32.0 - FOR TESTERS ONLY, on the real site; see Releasing).** A card-collecting and auto-battler mode is being built in
 five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck of thirty, a
 card a day from the daily draft, a collection screen, packs bought with coins, a ladder of CPU teams and a
 daily battle. **The battle was rebuilt in v2.27.0 as offense against offense** (the owner's redesign: "a fast
@@ -1477,10 +1477,35 @@ shadow, and navy "scoreboard" moments.
 
 ## Releasing
 
-**Nothing reaches production without going through staging first, getting a changelog entry, and
-shipping as a version.** This is a hard rule, not a preference — it applies to one-line fixes too.
-It exists because the Championship-scoring launch went straight to production with a green test
-suite and still broke the live Leaderboard for every existing account.
+**THERE IS NO TEST SITE ANY MORE (2026-11-25), and everything below this box that says "staging" is
+history.** The staging Supabase project (`ndelisxdxjmvcdezzecu`) was deleted - Supabase has no undelete - and
+the free plan's second slot went to another project of the owner's. The owner was offered a paid third
+project and chose instead: **updates go straight to gridspin.app.** What that means in practice:
+
+- **Every release still ships as a version with a changelog entry.** That half of the old rule stands.
+- **`node tests/run-all.mjs` green and the changed screens driven in `tools/ui-harness` are the whole gate
+  now**, so neither may be skipped, and "the suite passed" is known to be insufficient (see the old rule
+  below). Say plainly in the release note what could not be checked without a real signed-in session.
+- **Production's database and deploys were the owner's to run and still need the owner's word each time**:
+  a migration, an Edge Function deploy and a merge to `master` each change the live site at once. Ask, with
+  the exact steps, before any of them. Order is unchanged: migration, then functions, then client.
+- **A migration that DROPS or that validates existing rows gets a read-only look at production first**
+  (what rows exist, what would be touched), because there is no longer anywhere else to find out.
+- **Cards are on for testers only** (v2.32.0): production's build is `CARDS_ON=testers` and its secret is
+  `CARDS_ENABLED=testers`, and the owner's account is in `card_testers`. That is where card work is played.
+  Launching cards to everybody is still gated on the skin-tone review, `/privacy` and `/terms`.
+- The `staging` branch and the staging Vercel site still exist and point at a database that is gone; the
+  site loads and every sign-in, board and save fails. Work happens on `staging` as a working branch and
+  merges to `master` to ship. `deploy:fn:staging` and every `--project-ref ndelisxdxjmvcdezzecu` command
+  now fail - there is nothing there.
+- If a test database ever comes back, it is rebuilt from `schema.sql` plus the migration list in
+  `tests/test-migrations.mjs`, the seven functions, and the dashboard settings this file lists (anonymous
+  sign-ins, email confirmation off, Google, the Turnstile TEST keys, the redirect URL).
+
+**The old rule, kept because its reason has not gone away:** nothing reached production without going
+through staging first, getting a changelog entry, and shipping as a version. It existed because the
+Championship-scoring launch went straight to production with a green test suite and still broke the live
+Leaderboard for every existing account. That risk is now accepted by the owner, not removed.
 
 - **`master` is production. `staging` is the test site.** Work lands on `staging`, gets verified on
   the staging URL, and only then merges to `master`. Never push a feature branch straight to
@@ -1562,6 +1587,13 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.32.0's (cards for testers, no test site): production had NONE of cards when this was written - it was
+  at 2.22.1 - so this is the whole card stack at once: run **`migration-client-errors.sql`** if 2.22.0's never
+  ran there (check first), then **`migration-cards.sql`**, then re-run **`migration-profiles.sql`**; put the
+  owner on the list (`insert into card_testers (user_id, note) select id, 'the owner' from profiles where
+  lower(username) = 'admin';`); set the secret **`CARDS_ENABLED=testers`**; **deploy the Edge Functions**
+  (seven); then merge to `master`. A function ahead of the migration answers `server` to a tester and
+  `cards_off` to nobody, since the list cannot be read; a client ahead of both shows no tile to anybody.
   v2.31.1's (the pack shop's false warning, the collection 24 at a time, cheaper card painting): client only.
   v2.31.0's (the category is called, no Flex): **deploy the Edge Functions**, then the client. **No migration.**
   `card-logic.mjs` changed - the 2,000-battle checksum moved - so `card-claim` and the client ship together:

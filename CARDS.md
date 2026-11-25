@@ -761,3 +761,27 @@ node tests/test-card-packs.mjs     # what is in a pack: the odds add up, and 20,
 # Battles ride in the same files: test-cards-sql (runs, the showdown, the boards, SQL == mock), test-cards-edge
 # (the function plays them), test-cards-screen (the buttons), test-card-logic (runDefense, the projection).
 ```
+
+## 16. Testers (v2.32.0)
+
+The test site's database was deleted on 2026-11-25 and not replaced, so the real site is where cards are
+played while they are unfinished - by the accounts in `card_testers` and nobody else.
+
+- **Both switches have three settings**: `1` (everybody), `testers`, and anything else (off). The build's is
+  `CARDS_ON`, read by `cards-switch.mjs` (`cardsMode()`, `cardsOn(tester)`); the server's is the
+  `CARDS_ENABLED` secret, read per request by `card-claim` and `submit-run`. An unknown word is off.
+- **`card_testers`** (migration-cards.sql): RLS on, an own-row select for a signed-in account, no write
+  policy. The SQL editor is the only writer. `delete_account` takes a closed account off it.
+- **The server decides what is granted.** `card-claim` reads the list with the service role before the
+  profile and before any card function; somebody not on it gets `cards_off`, the same answer an environment
+  with cards off gives. A list that cannot be read is `server`, never "on the list". `submit-run` asks inside
+  the daily card's own try, so a failed read costs the card and never the season.
+- **The browser decides only whether to draw the tile**: `fetchCardTester()` reads the account's own row once
+  it is signed in. A failed read is "no" - no tile until a reload - because nothing rests on it.
+- **What a non-tester can still reach**: `/data/cards.json` and `/cards.js` are public files on a testers
+  build, and `card_battle_state()` / `card_boards()` answer anybody signed in (with nothing in them). None of
+  that grants or stores anything.
+- **Runbook**: add a tester -
+  `insert into card_testers (user_id, note) select id, 'why' from profiles where lower(username) = 'NAME';`
+  Remove one - delete the row; their cards stay, unseen. Launch to everybody - the secret to `1`, then a
+  build with `CARDS_ON=1`, after the gates in CLAUDE.md.
