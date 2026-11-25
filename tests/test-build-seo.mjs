@@ -5,6 +5,7 @@
 // Runs the real build.mjs, which writes public/ (gitignored); it's left holding the staging build.
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SITE_PAGES } from "../site-pages.mjs";
@@ -23,6 +24,10 @@ function build(env) {
   return {
     html: read("page.html"), robots: read("robots.txt"), sitemap: read("sitemap.xml"), js: read("page.js"),
     pool: read(path.join("data", "guess-pool.json")),
+    versus: read(path.join("data", "versus-pool.json")),
+    cards: read(path.join("data", "cards.json")),
+    cardsJs: read("cards.js"),
+    env,
     pages: Object.fromEntries(SITE_PAGES.map((p) => [p.id, read(p.file)])),
   };
 }
@@ -76,7 +81,27 @@ check("the share link people see stays gridspin.app", prod.js.includes('"https:/
 // THE NEXT RECLAIM IS NAMED AND UNCHANGED: data/versus-pool.json, 67 KB of defenses and kickers that only the
 // duel screen reads, still shipped to everybody at startup. Doing to it what was done to the guess pool would
 // give back more than this release took. Do that before raising this number again.
+//
+// DONE in v2.25.0 (versus-data.mjs): the card battle screens took the bundle to 1,328,187, and instead of raising
+// this the duel pool was moved out, as written above. The ceiling stays where it was. The next thing to ask of a
+// release that reaches it is whether a SCREEN can load on demand - there is no data file left to move.
+//
+// v2.29.1 raised it to 1,350,000 for one release, at 1,302,307 bytes, when the card battle's field went over.
+// DONE in v2.30.0 (cards-lazy.jsx, CARDS.md 15): the card screens are a file of their own, public/cards.js,
+// fetched when Cards is first opened. The page fell to about 1,193,000 and the ceiling is back where it was.
+// The next screen to move, when this is reached again, is whichever mode is largest and least opened - the
+// table in cards-shared.mjs and the two plugins in build.mjs are written to be copied.
 check("the bundle is minified", prod.js.length < 1_300_000, `${prod.js.length} bytes`);
+// The card screens are not in the page any more, and the page asks for them by the fingerprint of the file that
+// was actually built - the two halves that make "on demand" true rather than merely intended.
+const asked = (prod.js.match(/import\("\/cards\.js\?v=([0-9a-f]{8})"\)/) || [])[1];
+check("the page fetches the card screens on demand, by fingerprint", asked === createHash("sha256").update(prod.cardsJs || "").digest("hex").slice(0, 8), `asked for ${asked}`);
+check("and does not carry them", !prod.js.includes("cb-field") && !prod.js.includes("cd-card") && (prod.cardsJs || "").includes("cb-field") && prod.cardsJs.includes("cd-card"));
+// cards.js borrows React and the rest from the page (cards-shared.mjs). A second React in it would be about
+// 130 KB on its own and would break every hook; a second game-logic would carry data/players.json, 225 KB.
+check("the card screens carry no second copy of React or the game data", (prod.cardsJs || "").length > 60_000 && prod.cardsJs.length < 200_000 && !prod.cardsJs.includes("react.element") && !prod.cardsJs.includes("Minified React error"), `${(prod.cardsJs || "").length} bytes`);
+check("and borrow what they need from the page", (prod.cardsJs.match(/__ps_shared__/g) || []).length === 6 && ["react/jsx-runtime", "./storage.js", "./game-logic.mjs", "./rewards.mjs", "./cosmetics.jsx"].every((k) => prod.cardsJs.includes(`__ps_shared__["${k}"]`)) && prod.js.includes("__ps_shared__"), "six modules, each asked for by name");
+check("Duel's pool is served from the site root, not carried in the bundle", (prod.versus || "").length > 50_000, `${(prod.versus || "").length} bytes`);
 // Guess the Player's pool is the one data file the bundle does NOT carry (guess-pool.mjs), because page.js sits
 // a few KB under the ceiling above. Its SIZE moves with the football season - the pool is the men currently
 // taking snaps, so it grows every week and starts again each September - hence a floor rather than a range.
@@ -143,8 +168,23 @@ check("every other page says when its own words last changed",
   SITE_PAGES.every((p) => stamp(p.path) === p.updated),
   SITE_PAGES.map((p) => `${p.path} sitemap=${stamp(p.path)} declared=${p.updated}`).join(" | "));
 
+// Cards (CARDS.md) are switched on for the test site and off for production. Off means OFF: the catalog is not
+// shipped, and the switch the bundle carries is empty. Checked before the staging build below overwrites public/.
+// v2.32.0: production is built for TESTERS - the catalog ships, and the tile is drawn only for an account the
+// database lists (card_testers). CARDS_ON= still means off, catalog and all.
+check("production ships the card catalog, for its testers", prod.cards !== null && JSON.parse(prod.cards).cards.length === 3124);
+check("production's bundle is set to testers, not to on", !/CARDS_ON/.test(prod.js) && /"testers"/.test(prod.js));
+const prodOff = build({ CARDS_ON: "" });
+check("CARDS_ON= turns them off for a production build, and takes the catalog out", prodOff.cards === null);
+const forced = build({ CARDS_ON: "1" });
+check("CARDS_ON=1 turns them on for a production build, catalog included", forced.cards !== null && JSON.parse(forced.cards).cards.length === 3124);
+
 console.log("staging build");
 const stg = build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app" });
+check("staging ships the card catalog", stg.cards !== null && JSON.parse(stg.cards).cards.length === 3124);
+const stgOff = build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app", CARDS_ON: "" });
+check("CARDS_ON= turns them off for a staging build, and takes the catalog back out", stgOff.cards === null);
+build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app" });
 check("noindex", /<meta name="robots" content="noindex, nofollow" \/>/.test(stg.html));
 check("canonical points at staging itself", attr(stg.html, /<link rel="canonical" href="([^"]+)"/) === "https://perfect-season-staging.vercel.app/");
 check("robots.txt doesn't block crawling (a crawler must fetch a page to see its noindex)", !/Disallow/.test(stg.robots || "x"), stg.robots);

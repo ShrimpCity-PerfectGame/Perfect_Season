@@ -16,9 +16,11 @@ import { readFileSync } from "node:fs";
 import { assert, runTest, makeMockAuth, setupDom, loadModule, renderComponent } from "./helpers.mjs";
 import { freshDb, addAccount, asUser, asAnon, uuid, sql, RENAME_MIGRATIONS } from "./pg-fixture.mjs";
 import * as GL from "../game-logic.mjs";
-import { COIN_RULES, coinsForRun, seasonReward } from "../rewards.mjs";
+import { COIN_RULES, coinsForRun, seasonReward, cardSellCoins } from "../rewards.mjs";
 import { BADGES, BADGE_BY_ID } from "../badges.mjs";
 import { SHOP_ITEMS, LAUNCH_PRICES, AVATAR_PACKS, SHOWCASE_MAX } from "../shop-catalog.mjs";
+import * as CL from "../card-logic.mjs";
+import { PACKS, PACK_BY_ID, packOdds } from "../card-packs.mjs";
 
 const ch = (...codes) => String.fromCodePoint(...codes);
 // PGlite hands back a bigint past 2^53 as a BigInt, which JSON.stringify can't write.
@@ -1473,6 +1475,53 @@ await runTest("10. the economy from real seasons graded as submit-run grades the
     + ` every badge once ${oneTimeBadges.toLocaleString("en-US")}; the whole catalog ${catalog.toLocaleString("en-US")}`);
 });
 
+// ---------- Card packs (CARDS.md 9) ----------
+// Packs are bought with the same coins as the shop, so their prices are part of this economy. The prices are read
+// out of the migration's own seed - the thing a new database starts from - and what they buy is measured against
+// the earning rates the test above has just worked out from real seasons.
+await runTest("11. what packs cost: a casual day opens a pack or two, the starting cap is not a collection, and the certain pack is never the cheap way to a great card", async () => {
+  const seed = sql("migration-cards.sql");
+  const price = Object.fromEntries([...seed.matchAll(/\('(pack-[a-z-]+)',\s*(\d+),\s*(\d+),/g)].map((m) => [m[1], { price: Number(m[2]), size: Number(m[3]) }]));
+  assert(JSON.stringify(Object.keys(price).sort()) === JSON.stringify(PACKS.map((p) => p.id).sort()), "the seed prices exactly the packs card-packs.mjs defines: " + Object.keys(price));
+  for (const p of PACKS) assert(price[p.id].size === p.size, `${p.id}: the seed's size is the module's`);
+  assert(economy.casual > 0 && economy.heavy > 0, "the earning rates were measured first");
+  const std = price["pack-standard"].price;
+
+  // What a card rated 100 or better costs, in coins, by each route: the price over the chance a pack holds one.
+  const route = {};
+  for (const p of PACKS) {
+    const high = packOdds(p).filter((o) => CL.CARDS.get(o.id).rating >= 100).reduce((s, o) => s + o.chance, 0);
+    route[p.id] = price[p.id].price / (1 - (1 - high) ** p.size);
+  }
+  const casualPacks = economy.casual / std, heavyPacks = economy.heavy / std, capPacks = COIN_RULES.startingCap / std;
+  assert(casualPacks >= 1 && casualPacks <= 4, `a casual day opens ${casualPacks.toFixed(1)} Standard packs: at least one, no more than four`);
+  assert(capPacks <= 70, `the most a starting balance can hold opens ${Math.floor(capPacks)} Standard packs (${Math.floor(capPacks) * 3} cards of ${CL.CARDS.size}): a head start, not a collection`);
+  assert(COIN_RULES.welcome >= std && COIN_RULES.welcome < 2 * price["pack-air-raid"].price, "a new account's welcome coins open a pack, and not a stack of them");
+  // THE ONE THAT MOVED A PRICE. Legends is certain to hold a 100+ card. If it were also the cheapest route to
+  // one, nobody would ever have a reason to open anything else - and at its first price, 1,500, it was, by 40%.
+  const others = Math.min(route["pack-standard"], route["pack-air-raid"]);
+  assert(route["pack-legends"] >= others, `Legends (${Math.round(route["pack-legends"])}) is not cheaper per 100+ card than the cheapest other route (${Math.round(others)})`);
+  assert(route["pack-legends"] <= 1.5 * route["pack-standard"], "nor priced out of reach of what Standard already charges for one");
+  assert(economy.ceiling / price["pack-legends"].price < 5, "and no day's coins, however earned, buy more than a handful of Legends packs");
+  // Stock: the limited pack's whole run, in coins, is far more than any one account's starting balance.
+  assert(PACK_BY_ID["pack-legends"].limited && /\('pack-legends',\s*\d+,\s*1,\s*5000,\s*5000,/.test(seed), "Legends is the limited one: 5,000 in all");
+  // COPIES SELL FOR COINS (v2.26.0, CARDS.md 12), so a pack is also a way to turn coins into coins - and it
+  // must always be a losing one. The worst case is an account that already holds every card in every finish:
+  // everything it pulls is a copy. Even then the pack has to return clearly less than it cost, or a full
+  // collection is a coin printer.
+  const sellBack = {};
+  for (const p of PACKS) {
+    const perCard = packOdds(p).reduce((s, o) => s + o.chance * Object.entries(p.finish).reduce((t, [f, c]) => t + c * cardSellCoins(CL.CARDS.get(o.id).rating, f), 0), 0);
+    sellBack[p.id] = (p.size * perCard) / price[p.id].price;
+    assert(sellBack[p.id] < 0.8, `${p.id}: a pack of nothing but copies returns ${Math.round(100 * sellBack[p.id])}% of its price, which must stay well under all of it`);
+  }
+  console.log(`    A pack of nothing but copies returns ${PACKS.map((p) => `${Math.round(100 * sellBack[p.id])}% (${p.name})`).join(", ")} of its price.`);
+  economy.packs = { std, heavyPacks, legends: price["pack-legends"].price };
+  console.log(`    Standard ${std}, Air raid ${price["pack-air-raid"].price}, Legends ${price["pack-legends"].price}. A casual day opens ${casualPacks.toFixed(1)} Standard packs, a heavy day ${heavyPacks.toFixed(1)};`
+    + ` the starting cap opens ${Math.floor(capPacks)}. A card rated 100+ costs about ${Math.round(route["pack-standard"]).toLocaleString("en-US")} coins through Standard,`
+    + ` ${Math.round(route["pack-air-raid"]).toLocaleString("en-US")} through Air raid, ${Math.round(route["pack-legends"]).toLocaleString("en-US")} through Legends (and that one is Gold or better).`);
+});
+
 // ---------- Known gaps ----------
 // Printed, not asserted: each closes outside these files, or is a gap CLAUDE.md accepts. What each is worth is measured.
 {
@@ -1506,6 +1555,7 @@ await runTest("10. the economy from real seasons graded as submit-run grades the
   lines.push("the Genius flag is the client's word (it only hides stats on screen): a Genius title pays Big Brain's 300 coins and counts on the Genius ladder, unverifiable");
   lines.push(`Over/Under and Build-a-player rows are browser-written, so claim_minigame pays ${2 * COIN_RULES.minigame} coins a day without a game played (${6 * COIN_RULES.minigame} at once, claiming the three days a time zone could call today) - no more than an honest player's claims over time`);
   lines.push(`codes are the client's choice and a lineup's season is known before it's sent, so searching codes offline for 20-0 seasons pays at most about ${economy.ceiling ?? "?"} coins a day (a Legendary in ${economy.ceiling ? (LAUNCH_PRICES.legendary / economy.ceiling).toFixed(1) : "?"} days)`);
+  if (economy.packs) lines.push(`coins farmed through any gap above buy cards now as well as cosmetics: the code-searching ceiling is about ${Math.floor((economy.ceiling || 0) / economy.packs.std)} Standard packs or ${Math.floor((economy.ceiling || 0) / economy.packs.legends)} Legends packs a day - cards change nothing in a draft, a score or a board, and plan 4's battles will have to be priced against this`);
   console.log(`  known gaps still open (${lines.length}):`);
   for (const line of lines) console.log(`    - ${line}`);
 }

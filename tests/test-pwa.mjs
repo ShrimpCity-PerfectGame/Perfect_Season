@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setupDom, makeStorage, mount, flush, click, text, assert, runTest, makeMockAuth } from "./helpers.mjs";
-import { planFor, pageKey, BUNDLE, DATA, FONT_HOSTS } from "../sw-rules.mjs";
+import { planFor, pageKey, BUNDLE, CARDS_BUNDLE, DATA, FONT_HOSTS } from "../sw-rules.mjs";
 import { SITE_PAGE_PATHS } from "../site-paths.mjs";
 import { SITE_PAGES } from "../site-pages.mjs";
 import { THEME } from "../theme.mjs";
@@ -24,6 +24,10 @@ await runTest("the worker touches this site's own files and nothing else", async
   assert(planFor(req(`${SITE}/c/ABC123?beat=12-5`, { mode: "navigate" }), SITE) === "page", "a challenge link");
   assert(planFor(req(`${SITE}/how-to-play`, { mode: "navigate" }), SITE) === "page", "a page of its own");
   assert(planFor(req(`${SITE}${BUNDLE}`), SITE) === "bundle", "the bundle");
+  // The card screens are code the page fetches later (cards-lazy.jsx): network-first like the bundle, with or
+  // without the fingerprint the page asks for them by, and never an "asset" served stale from the store.
+  assert(CARDS_BUNDLE === "/cards.js" && planFor(req(`${SITE}/cards.js?v=0123abcd`), SITE) === "bundle" && planFor(req(`${SITE}/cards.js`), SITE) === "bundle", "the card screens are fetched like the bundle");
+  assert(planFor(req(`${SITE}/cards.js`, { mode: "navigate" }), SITE) === null, "and opened in a tab of their own they are the browser's, like the bundle");
   // The page counter, which is same-origin and therefore the one third-party-ish thing that could slip
   // into the store. /privacy says its requests are not kept by the site; this is what makes that true.
   assert(planFor(req(`${SITE}/_vercel/insights/script.js`), SITE) === null, "the counter script is never stored");

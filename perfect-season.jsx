@@ -10,10 +10,9 @@ import {
   fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, deleteAccount, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
   versusPath, parseVersusPath, fetchVersusTop,
-  submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY,
+  submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY, fetchCardTester,
 } from "./storage.js";
 import gameData from "./data/players.json";
-import versusPool from "./data/versus-pool.json";
 import seasonPool from "./data/season-2025.json";
 import { cssVars, PALETTE, THEME } from "./theme.mjs";
 import {
@@ -43,8 +42,10 @@ import { BACK_EVENT } from "./app-shell.mjs";
 import { COSMETICS_CSS, FramedAvatar, Coin, WinCelebration, NameInk, NameLink } from "./cosmetics.jsx";
 import { SHOP_CSS, ShopScreen } from "./shop.jsx";
 import { VERSUS_CSS, VersusScreen } from "./versus.jsx";
-import { initVersusData } from "./versus-logic.mjs";
+import { loadVersusData } from "./versus-data.mjs";
 import { CENTURY_CSS, CenturyScreen, CENTURY_DONE } from "./century.jsx";
+import { LazyCardsScreen, LazySeasonCard } from "./cards-lazy.jsx";
+import { cardsOn, cardsMode } from "./cards-switch.mjs";
 import { initCenturyData, CENTURY_GOAL, centuryReservedSeed } from "./century-logic.mjs";
 import { drainOne } from "./pending-daily.mjs";
 import { GUESS_CSS, GuessScreen, GUESS_DONE } from "./guess.jsx";
@@ -54,8 +55,8 @@ import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
 import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, DATA_CREDIT, parseSitePath } from "./site-pages.mjs";
 initGameData(gameData.players, gameData.opponents);
-// 1v1's defenses and kickers (VERSUS.md 6). Only versus.jsx reads them; single player never does.
-initVersusData(versusPool);
+// 1v1's defenses and kickers (VERSUS.md 6) are FETCHED, not carried here (versus-data.mjs): only a duel and a
+// card battle read them. The component asks for them once it has mounted and the duel screen waits on that.
 // Century's one-season touchdown pool (v2.9.0). Only century.jsx and the submit-century Edge Function read it,
 // and it is NOT interchangeable with data/players.json - see the header of tools/data/build-season-pool.mjs.
 initCenturyData(seasonPool);
@@ -751,10 +752,12 @@ button.pill{font-family:inherit;transition:border-color .12s}
 .mode.m-mini{--mode:var(--win)}
 /* Guess the Player takes --qb, the last colour in the palette nothing else had claimed. */
 .mode.m-guess{--mode:var(--qb)}
-.mode.m-genius,.mode.m-gm,.mode.m-bap,.mode.m-mini,.mode.m-guess{
+/* Cards takes the game blue: the one mode that is a collection rather than a game to play through. */
+.mode.m-cards{--mode:var(--accent-ink)}
+.mode.m-genius,.mode.m-gm,.mode.m-bap,.mode.m-mini,.mode.m-guess,.mode.m-cards{
   background:linear-gradient(135deg,color-mix(in srgb,var(--mode) 14%,var(--surface)),var(--surface));
   border-color:color-mix(in srgb,var(--mode) 45%,var(--ink))}
-.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon,.mode.m-mini .icon,.mode.m-guess .icon{
+.mode.m-genius .icon,.mode.m-gm .icon,.mode.m-bap .icon,.mode.m-mini .icon,.mode.m-guess .icon,.mode.m-cards .icon{
   background:color-mix(in srgb,var(--mode) 26%,var(--surface));
   border-color:color-mix(in srgb,var(--mode) 55%,var(--ink))}
 .mode .go{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--bg);background:var(--ink);
@@ -1341,7 +1344,7 @@ p.gamecoins .earned{display:flex}
 // The whole stylesheet the app renders, for previewing one screen on its own (the UI harness).
 // The screens in their own files bring their own rules, each scoped to its class prefix (pf-, av-, ap-,
 // md-), after the base stylesheet so they can reuse its tokens and classes.
-export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS + GUESS_CSS;
+export const APP_CSS = CSS + PROFILE_CSS + AVATAR_CSS + PICKER_CSS + MODERATION_CSS + COSMETICS_CSS + SHOP_CSS + VERSUS_CSS + CENTURY_CSS + GUESS_CSS; // the card screens bring their own (cards-lazy.jsx)
 
 // reducedMotion now lives in ui-common.jsx - century.jsx starts its reel from the same check.
 // Screens share one page, so the browser would otherwise open a new screen at the old screen's
@@ -1530,7 +1533,7 @@ export function authErrorFromAddress(loc = typeof window === "undefined" ? null 
 // gave Century's and Guess's boards profile links, since until then there was no way to leave one of those
 // screens for somewhere that pushes an entry and come back. A view that has a screen belongs on this list.
 const HISTORY_VIEWS = ["home", "play", "profile", "players", "board", "stats", "statsou", "buildplayer",
-  "reports", "shop", "versus", "minigames", "century", "guess"];
+  "reports", "shop", "versus", "minigames", "century", "guess", "cards"];
 function screenOf(state, pathname) {
   if (state?.ps === "profile" && typeof state.name === "string" && state.name) return state;
   if (state?.ps === "view" && HISTORY_VIEWS.includes(state.view)) return state;
@@ -2079,6 +2082,9 @@ const FREE_PROGRESS = "ps-free-wip";
 const UNSENT_KEY = "ps-unsent-run";
 const UNSENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FORMAT_KEY = "ps-format";
+// Cards (CARDS.md): a per-device "I don't want to see this", like the scoring format - so it works signed out
+// too. It hides the tile and the daily card's reveal and nothing else: cards a player earns are still banked.
+const CARDS_HIDDEN_KEY = "ps-cards-hidden";
 // Which saved-progress slot a mode occupies. Free-mode variants (genius/gm/format) all share one
 // slot the way they always have; the two dailies genuinely coexist, so they don't.
 const slotId = (m) => (m.kind === "daily" ? `daily:${normFormat(m.format)}` : "free");
@@ -2611,6 +2617,16 @@ export default function PerfectSeason() {
   // Which stage the Century screen is on, reported up by CenturyScreen. It decides the ROOT scope, the same
   // way `view === "play"` does for a draft: a run in progress is stadium-dark, its menu and boards are not.
   const [centuryStage, setCenturyStage] = useState("menu");
+  const [cardsHidden, setCardsHidden] = useState(false);
+  // Cards for testers only (v2.32.0, cards-switch.mjs): production's setting while cards are unfinished. The
+  // build cannot know who is on the list, so the account is asked about once it is known; no account, no tile.
+  const [cardTester, setCardTester] = useState(false);
+  useEffect(() => {
+    if (cardsMode() !== "testers" || !userId) { setCardTester(false); return undefined; }
+    let live = true;
+    fetchCardTester().then((yes) => { if (live) setCardTester(yes === true); });
+    return () => { live = false; };
+  }, [userId]);
   const [guessDone, setGuessDone] = useState(null);   // today's game, if played on this device
   const [guessStage, setGuessStage] = useState("menu");
   // A Century link waiting to be dealt: { seed, score }. Cleared by the screen as it takes it.
@@ -2835,6 +2851,7 @@ export default function PerfectSeason() {
     (async () => {
       const savedFormat = await sget(FORMAT_KEY, false);
       if (savedFormat) setFormat(normFormat(savedFormat));
+      if (await sget(CARDS_HIDDEN_KEY, false)) setCardsHidden(true);
       await readDay.current();
       const saved = await sget(DRAFT_KEY, false);
       const ok = saved && saved.spin && BOARDS[`${saved.spin.team}|${saved.spin.w}`] && Array.isArray(saved.history)
@@ -3130,6 +3147,11 @@ export default function PerfectSeason() {
     // shop signed out - is Modes instead, and its entry says so. Decided before it's recorded as the current
     // screen, so opening Modes in its place doesn't count as leaving the shop and push an entry mid-traversal.
     // stats?.guest rather than isGuest: this handler is written during render, before the derived values.
+    // The card area the same way: Back or Forward to it in a build with cards off, or after hiding them, is Modes.
+    if (s.ps === "view" && s.view === "cards" && !(cardsOn(cardTester) && !cardsHidden)) {
+      s = { ps: "view", view: "home" };
+      writeHistory("replaceState", s);
+    }
     if (s.ps === "view" && ((s.view === "reports" && !isMod) || ((s.view === "shop" || (s.view === "versus" && !s.code)) && (!userId || stats?.guest)))) {
       s = { ps: "view", view: "home" };
       writeHistory("replaceState", s);
@@ -3258,6 +3280,16 @@ export default function PerfectSeason() {
   // account - which is why there is no userId gate here.
   function openCentury() {
     openTab("century");
+  }
+  // Cards (v2.23.0, CARDS.md). The screen owns its own state; this is the door, and the hide switch. A signed-out
+  // visitor is let in - the screen says cards are for accounts - which is why there is no userId gate here.
+  function openCards() {
+    openTab("cards");
+  }
+  function hideCards(hidden) {
+    setCardsHidden(hidden);
+    if (hidden) { sset(CARDS_HIDDEN_KEY, true, false); if (view === "cards") openTab("home"); }
+    else sdel(CARDS_HIDDEN_KEY, false);
   }
   function leaveCentury() {
     openTab("minigames");
@@ -3603,7 +3635,7 @@ export default function PerfectSeason() {
   // record this time, so it loses the sitewide and personal best that finish() worked out before the answer.
   function showSaveAnswer(runId, res) {
     if (!runId || !res) return;
-    const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [], payer: res.uid }
+    const extras = res.ok ? { coins: res.coins ?? null, newBadges: Array.isArray(res.newBadges) ? res.newBadges : [], payer: res.uid, card: res.card ?? null }
       : res.reason === "duplicate" ? { duplicate: true, payer: res.uid, newSiteBest: false, newBestScore: false } : null;
     if (extras) setResult((r) => (r && r.runId === runId ? { ...r, ...extras } : r));
   }
@@ -4816,6 +4848,14 @@ export default function PerfectSeason() {
   // An account made for a visitor who finished a season (v1.17.0): on the boards like anyone else, but with
   // no profile screen, no shop and never the daily, until it keeps its seasons under a name of its own.
   const isGuest = !!stats?.guest;
+  const showCards = cardsOn(cardTester) && !cardsHidden;
+  // Duel's defenses and kickers, fetched once the page is up (versus-data.mjs). "loading" | "ready" | "error".
+  const [versusData, setVersusData] = useState("loading");
+  const fetchVersusData = useCallback(() => {
+    setVersusData("loading");
+    loadVersusData().then(() => setVersusData("ready"), () => setVersusData("error"));
+  }, []);
+  useEffect(() => { fetchVersusData(); }, [fetchVersusData]);
 
   // Back from Google, at the site root, with the 1v1 invite that was put aside before leaving. Taken once -
   // read and cleared together, whatever happens next - and only while it is fresh, so a code left behind by a
@@ -5234,6 +5274,19 @@ export default function PerfectSeason() {
                   keep boards of their own and never touch your season stats.</p>
                 <span className="go">Open</span>
               </button>
+              {/* Cards (CARDS.md): its own area, off the drafts entirely. Only where the build has them switched
+                  on, and only for somebody who has not hidden them. */}
+              {showCards && (
+                <button className="mode m-cards" onClick={openCards}>
+                  <div className="mt">
+                    <span className="icon" aria-hidden="true">🃏</span>
+                    <span className="mn">Cards</span>
+                  </div>
+                  <p>Collect real player seasons. Open a starter deck, then earn a card a day for finishing the daily
+                    draft. Nothing here touches your drafts or your season stats.</p>
+                  <span className="go">Open</span>
+                </button>
+              )}
             </div>
 
             <div className="hometiles">
@@ -5529,6 +5582,10 @@ export default function PerfectSeason() {
                       <SeasonStrip result={result} ladderName={LADDER_LABEL[modeKey({ mode: mode.kind, gm: mode.gm, genius: mode.genius })]} />
                       <SeasonMoments result={result} formatLabel={FORMAT_LABEL[normFormat(result.format)]} />
                       {userId && result.payer === userId && <SeasonCoins result={result} onOpenShop={isGuest ? null : openShop} />}
+                      {/* The card this daily earned (CARDS.md). Same payer check as the coins, so one account's card
+                          is never shown to whoever is signed in when the answer lands. Hidden cards hide this too -
+                          the card is still banked. */}
+                      {userId && result.payer === userId && showCards && result.card && <LazySeasonCard card={result.card} onOpenCards={openCards} />}
                       {/* In place of the save-error panel: nothing from this season counted. */}
                       {userId && result.payer === userId && result.duplicate && <p className="sc-note sc-dup">This draft was already recorded, so it didn't count again.</p>}
                     </>
@@ -5724,6 +5781,14 @@ export default function PerfectSeason() {
                 <button className="btn" onClick={leaveVersus}>Back</button>
               </div>
             ) : (
+            versusData !== "ready" ? (
+              <div className="panel" role={versusData === "error" ? "alert" : "status"} data-versus-data={versusData}>
+                {versusData === "error"
+                  ? <><p><b>Couldn't load the duel.</b> This is a connection problem - your match, if you have one going, is still there.</p>
+                    <button className="btn" onClick={fetchVersusData}>Try again</button> <button className="btn" onClick={leaveVersus}>Back</button></>
+                  : <p>Loading the duel…</p>}
+              </div>
+            ) :
             <VersusScreen
               key={versusCode || "lobby"} userId={userId} username={user} code={versusCode}
               format={format} onBack={leaveVersus} onCode={setVersusCode}
@@ -5767,6 +5832,23 @@ export default function PerfectSeason() {
         )}
 
         {/* ---------------- CENTURY (v2.9.0) ---------------- */}
+        {view === "cards" && (
+          <>
+            <h1 className="vh">Cards</h1>
+            <LazyCardsScreen
+              key={userId || "anon"} userId={userId} isGuest={!!stats?.guest}
+              onBack={() => openTab("home")} onHide={() => hideCards(true)}
+              balance={wallet?.balance ?? null} onBalance={onShopBalance}
+              onNeedsAccount={(why) => {
+                setNotice(why === "guest"
+                  ? "Cards are for accounts - a guest can be made again and again. Keep your seasons and they open up."
+                  : "Cards belong to an account. Sign in and your starter deck is waiting.");
+                openTab("profile");
+              }}
+            />
+          </>
+        )}
+
         {view === "century" && (
           <>
             {/* Names itself for a screen reader, as every screen does; the headings inside are the board's and
@@ -6373,6 +6455,8 @@ export default function PerfectSeason() {
         {view === "home" && (
           <footer className="sitefoot">
             <p><b>Gridspin</b> is a free football draft game — spin an era, draft the greats, go <span className="nowrap">20–0</span>.</p>
+            {/* The way back for somebody who hid the card area: the one place that says it exists. */}
+            {cardsOn(cardTester) && cardsHidden && <p><button className="linkbtn" onClick={() => hideCards(false)}>Show cards</button></p>}
             <p className="sitelinks">
               {SITE_PAGES.map((p) => (
                 <a key={p.id} className="btn sm" href={p.path}

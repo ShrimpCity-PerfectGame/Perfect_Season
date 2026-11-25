@@ -55,12 +55,20 @@ export function pageKey(request, origin) {
 // a season played on last week's bundle can be scored differently by submit-run, which ships with the current
 // one (CLAUDE.md, "the client and the Edge Function must ship together").
 export const BUNDLE = "/page.js";
+// The card screens, which the page fetches when Cards is first opened (cards-lazy.jsx). The same rule as the
+// bundle and for the same reason: it is code that has to agree with the page that asked for it and with the
+// deployed functions, so it is fetched whenever there is a network and stored only for when there is none.
+export const CARDS_BUNDLE = "/cards.js";
 
 // Guess the Player's pool (v2.13.0), fetched by the game rather than carried in the bundle (guess-pool.mjs). Its
 // name never changes either, and it is treated exactly like the bundle for the same reason: the daily's answer is
 // a walk through a permutation of THIS file and submit-guess walks its own copy, so a browser holding last
 // release's pool would play one player and hand in another. Network first, the store only when there is none.
-export const DATA = new Set(["/data/guess-pool.json"]);
+//
+// The card catalog (v2.23.0) is here for the same reason: card-claim and submit-run choose cards out of THEIR copy
+// of it, so a browser holding last release's would be told it owns a card it cannot draw. It exists only where
+// cards are switched on; this is a rule about how to fetch it, never a file the worker fetches for itself.
+export const DATA = new Set(["/data/guess-pool.json", "/data/versus-pool.json", "/data/cards.json"]);
 
 // "page" and "bundle" are fetched first and only fall back to what's stored; "asset" and "font" are served
 // from store and refreshed behind the player's back; null means the worker never touches the request.
@@ -80,7 +88,7 @@ export function planFor(request, origin) {
   // it is a top-level navigation, so answering it from the store would be answering the wrong question,
   // and offline it is the browser's own error page rather than the shell.
   if (request.mode === "navigate") return isFile(url.pathname) ? null : "page";
-  if (url.pathname === BUNDLE || DATA.has(url.pathname)) return "bundle";
+  if (url.pathname === BUNDLE || url.pathname === CARDS_BUNDLE || DATA.has(url.pathname)) return "bundle";
   if (ASSET.test(url.pathname)) return "asset";
   return null;
 }

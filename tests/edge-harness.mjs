@@ -104,7 +104,13 @@ export function createClient(url, key, opts) {
     if (!fn) throw new Error("the edge stub has no function " + name);
     if (store.rpcFails?.[name]) return { data: null, error: { message: name + " failed" } };
     store.rpcCalls?.push({ name, args, opts: rpcOpts });
-    return { data: fn(args), error: null };
+    // awaited, so a store function may be async - including one that never answers, which is how a hung
+    // database call is modelled
+    // A store function answers { __rpcError: { message } } for a database function that RAISED - which the real
+    // client reports as an error object rather than by throwing.
+    const out = await fn(args);
+    if (out && out.__rpcError) return { data: null, error: out.__rpcError };
+    return { data: out, error: null };
   };
   return { auth, from, rpc };
 }
@@ -129,7 +135,9 @@ export async function loadEdgeFunction(name) {
 
   let handler = null;
   globalThis.Deno = {
-    env: { get: (k) => ({ SUPABASE_URL: "http://edge.test", SUPABASE_ANON_KEY: "anon-key", SUPABASE_SERVICE_ROLE_KEY: "service-role-key" })[k] },
+    // globalThis.__edge_env__ adds to these per test, read at the moment of the call - which is how a function
+    // behind a secret (CARDS_ENABLED) is run with it set and with it missing.
+    env: { get: (k) => ({ SUPABASE_URL: "http://edge.test", SUPABASE_ANON_KEY: "anon-key", SUPABASE_SERVICE_ROLE_KEY: "service-role-key", ...(globalThis.__edge_env__ || {}) })[k] },
     serve: (h) => { handler = h; },
   };
   // A fresh module each time, so initGameData and Deno.serve run against this test's globals.

@@ -23,10 +23,46 @@ export const COIN_RULES = Object.freeze({
   // now, not the two this line named - claim_minigame's own `p_game not in (...)` check is the real list, and
   // it accepts 'over_under', 'build', 'century' and 'guess' (SQL: supabase/migration-wallet.sql).
   minigame: 15,
+  // Card battles (CARDS.md 11): a win in a run pays cardWin, plus cardWinStep for every win the run already
+  // had, up to cardWinStepMax of them - so the tenth win of a run pays 12 and nothing pays more than that.
+  cardWin: 3,
+  cardWinStep: 1,
+  cardWinStepMax: 9,
+  paidCardWinsPerDay: 15, // wins that pay per UTC day; past it runs still play and still count
+  // The historical gauntlet (CARDS.md 13): a stage pays ONCE, the first time it is beaten - gauntletWin for the
+  // first and gauntletStep more for each one after it. Twelve stages come to 900 coins, ever.
+  gauntletWin: 20,
+  gauntletStep: 10,
   paidSeasonsPerDay: 20, // Unlimited/Genius/GM seasons that pay per UTC day; Dailies don't count toward it
   welcome: 250, // a new account (SQL: create_wallet)
   startingCap: 10000, // the one-time starting balance's cap (SQL: the backfill)
 });
+
+// What the win that takes a run to `wins` wins pays (1 for the first). Nothing for anything that is not a win.
+// What clearing a gauntlet stage (0-based) pays, the first time.
+export function gauntletCoins(stage) {
+  if (!Number.isInteger(stage) || stage < 0) return 0;
+  return COIN_RULES.gauntletWin + COIN_RULES.gauntletStep * stage;
+}
+export function cardWinCoins(wins) {
+  const n = Number(wins);
+  if (!Number.isFinite(n) || n < 1) return 0;
+  return COIN_RULES.cardWin + COIN_RULES.cardWinStep * Math.min(COIN_RULES.cardWinStepMax, Math.floor(n) - 1);
+}
+
+// What a card is WORTH in coins, and what a copy of one sells for (CARDS.md 12). A player never holds two of the
+// same card in the same finish: the second is sold the moment it arrives, for half its value.
+// The value is the card's rating band times its finish. Owner's scale, 2026-11-14; tests/test-economy-security.mjs
+// holds the promise it rests on - that a pack of nothing but copies still returns less than the pack cost.
+export const CARD_VALUE_BANDS = Object.freeze([[120, 1500], [100, 400], [80, 100], [60, 40], [-Infinity, 20]]);
+export const CARD_FINISH_VALUE = Object.freeze({ base: 1, silver: 2, gold: 5, prism: 20 });
+export const CARD_SELL_SHARE = 0.5;
+export function cardValue(rating, finish) {
+  const r = Number(rating);
+  if (!Number.isFinite(r) || !Object.hasOwn(CARD_FINISH_VALUE, finish)) return 0;
+  return CARD_VALUE_BANDS.find(([min]) => r >= min)[1] * CARD_FINISH_VALUE[finish];
+}
+export const cardSellCoins = (rating, finish) => Math.floor(cardValue(rating, finish) * CARD_SELL_SHARE);
 
 // A count from something that may be missing, fractional or negative.
 const count = (v) => {

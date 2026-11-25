@@ -290,7 +290,11 @@ await runTest("an item bought elsewhere reloads the shop", async () => {
 
 await runTest("showcase: earned badges only, at most three, saved in order, and the card shows them", async () => {
   const { auth, uid } = await player("showoff");
-  Object.assign(auth._profiles.get(uid), { runs: 100, champs: 10, perfect: 1 });
+  // A join date inside the first month, stated. This test used to take the account's real "now", which earned
+  // Day One only while the suite happened to be run before DAY_ONE_BEFORE (2026-10-14) - so it passed for a
+  // month and then failed for ever, with nothing in the code having changed. A test must not read the clock
+  // for a rule that has a date in it.
+  Object.assign(auth._profiles.get(uid), { runs: 100, champs: 10, perfect: 1, created_at: "2026-09-20T12:00:00.000Z" });
   const { c, props } = await openShop("showoff", uid);
   await openTab(c, "Showcase");
   const boxes = () => [...c.querySelectorAll('input[name="showcase"]')];

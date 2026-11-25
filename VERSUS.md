@@ -283,6 +283,10 @@ email address each, the boards are seeded so nothing about the result is free, a
 affected — but it is a gap, and the answer if it is ever abused is a rate limit on `create_match` plus ignoring
 matches between accounts that only ever play each other.
 
+> **Since v2.25.0 the browser FETCHES `data/versus-pool.json`** (`versus-data.mjs`, served at
+> `/data/versus-pool.json`) rather than carrying it in the bundle. The duel screen is not mounted until it
+> has loaded. `match-pick` still bundles its own copy, so the two ship together exactly as before.
+
 ## 6. Defenses, kickers, and how a match is decided
 
 1v1 drafts a **real defense and a real kicker**, not a stand-in. An earlier draft of this document proposed the

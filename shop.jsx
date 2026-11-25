@@ -254,6 +254,7 @@ export function ledgerLabel(entry) {
     return { build: "Build-a-player", over_under: "Over/Under", century: "Century", guess: "Guess the Player" }[game] || "Minigame";
   }
   if (kind === "purchase") return itemName(ref);
+  if (kind === "pack") return "Card pack"; // its ref is the purchase's open id, which names no pack
   return kind || "";
 }
 

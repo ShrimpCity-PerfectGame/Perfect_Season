@@ -20,12 +20,29 @@
 // supabase/migration-wallet.sql).
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as GL from "../../../game-logic.mjs";
-import { seasonReward, badgeRewards, coinsSummary } from "../../../rewards.mjs";
+import { seasonReward, badgeRewards, coinsSummary, cardSellCoins } from "../../../rewards.mjs";
 import { badgeProgress } from "../../../badges.mjs";
 import { mapPlayerStats } from "../../../profile-rules.mjs";
+import { CARDS, initCardData, dailyCard } from "../../../card-logic.mjs";
 import gameData from "../../../data/players.json" with { type: "json" };
+import cardCatalog from "../../../data/cards.json" with { type: "json" };
 
 GL.initGameData(gameData.players, gameData.opponents);
+// The card catalog is loaded for ONE optional thing, the daily card - so a catalog that will not load must cost
+// that and nothing else. Unguarded, a bad data/cards.json would throw at module load and take every season on
+// the site down with it, for the sake of a feature that is switched off in production.
+let cardsReady = false;
+try { initCardData(cardCatalog); cardsReady = true; } catch (e) { console.error("card catalog failed to load:", e); }
+// How long a finished season's answer will wait for its card. The season is saved and paid by then; a database
+// call that hangs must not leave the player looking at a result that never confirms.
+const CARD_GRANT_MS = 2500;
+// Cards (CARDS.md). Read per request, so a secret set after a deploy is seen without a second one. With it
+// unset this function chooses no card and calls nothing: shipping it ahead of the feature is inert.
+// THREE settings (v2.32.0), as in card-claim: "1" everybody, "testers" only the accounts in card_testers, and
+// anything else off.
+const cardsSetting = () => { const v = Deno.env.get("CARDS_ENABLED"); return v === "1" ? "on" : v === "testers" ? "testers" : "off"; };
+// A [0, 1) draw from the platform's cryptographic generator - which card a daily earns must not be predictable.
+const secureRand = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -444,6 +461,48 @@ async function handle(req: Request, json: (body: unknown, status?: number) => Re
     newBadges = [];
   }
 
-  // `coins` and `newBadges` are new; a client from before them reads `ok` and `run` as it always did.
-  return json({ ok: true, run, coins, newBadges });
+  // The daily card (v2.23.0): finishing the daily draft earns a card of one of the six players drafted.
+  //
+  // IT CAN NEVER COST THE SEASON. Everything above has already been written and paid, so this is its own
+  // try/catch, exactly as logRun and the coins are: a grant that fails or throws is logged and answered as
+  // `card: null`. The ref is the DATE ALONE, not the date and the format, so the two scoring formats' dailies
+  // share one card a day - grant_cards answers the second with nothing new, and that is `card: null` too.
+  // A guest never reaches here (a guest's daily is refused far above), and grant_cards refuses one anyway.
+  let card: unknown = null;
+  const cardSetting = cardsSetting();
+  if (mode.kind === "daily" && cardSetting !== "off" && cardsReady) {
+    try {
+      // Testers only: is this account on the list? Inside the try, so a list that cannot be read costs the
+      // card and nothing else - the season is saved and paid by now.
+      let allowed = cardSetting === "on";
+      if (!allowed) {
+        const { data: tester, error: testerError } = await service
+          .from("card_testers").select("user_id").eq("user_id", user.id).maybeSingle();
+        if (testerError) throw new Error(`card_testers: ${testerError.message}`);
+        allowed = !!tester;
+      }
+      const pick = allowed ? dailyCard(history, secureRand) : null;
+      if (pick) {
+        // Raced against a short timer. If the timer wins the grant may still land a moment later - then the
+        // card is in the collection and this answer simply did not show it, which is the right way round.
+        const grant = service.rpc("grant_cards", {
+          // "sell": what a copy is worth, should the account already hold this card in this finish (CARDS.md 12)
+          p_user: user.id, p_kind: "daily", p_grants: [{ ref: mode.date, card: pick.id, finish: pick.finish, sell: cardSellCoins(CARDS.get(pick.id)?.rating, pick.finish) }],
+        });
+        let timer: number | undefined;
+        const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("grant_cards: timed out")), CARD_GRANT_MS); });
+        const { data: granted, error: grantError } = await Promise.race([grant, late]).finally(() => clearTimeout(timer));
+        if (grantError) throw new Error(`grant_cards: ${grantError.message}`);
+        const got = Array.isArray(granted?.granted) ? granted.granted[0] : null;
+        if (got) card = got.sold != null ? { id: got.card, finish: got.finish, sold: got.sold } : { id: got.card, finish: got.finish };
+      }
+    } catch (e) {
+      console.error("daily card failed:", e instanceof Error ? e.message : e);
+      card = null;
+    }
+  }
+
+  // `coins`, `newBadges` and `card` are each newer than the client that may be reading this; one from before
+  // them reads `ok` and `run` as it always did.
+  return json({ ok: true, run, coins, newBadges, card });
 }

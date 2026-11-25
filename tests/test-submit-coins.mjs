@@ -104,7 +104,10 @@ await runTest("a finished season pays its lines and the badges it earned, and th
   const fan = await signUp("coinfan");
   const res = await season("COINS-ONE");
   assert(res.ok === true, `the season counts: ${show(res)}`);
-  assert(same(Object.keys(res).sort(), ["coins", "newBadges", "ok", "run"]), `ok and run as before, plus coins and newBadges: ${show(Object.keys(res))}`);
+  // `card` (v2.23.0) is the daily card a finished Daily earns; on any other season it is null. Like coins and
+  // newBadges it is an addition: a client from before it reads ok and run as it always did.
+  assert(same(Object.keys(res).sort(), ["card", "coins", "newBadges", "ok", "run"]), `ok and run as before, plus coins, newBadges and card: ${show(Object.keys(res))}`);
+  assert(res.card === null, `an Unlimited season earns no card: ${show(res.card)}`);
   assert(res.run.mode === "free" && res.run.code === "COINS-ONE" && Number.isFinite(res.run.score) && res.run.roster.length === 6, `the run: ${show(res.run)}`);
 
   const reward = seasonReward(res.run, {});

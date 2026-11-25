@@ -10,6 +10,8 @@ import { makeShop } from "./mock-shop.mjs";
 import { makeVersus } from "./mock-versus.mjs";
 import { makeCentury } from "./mock-century.mjs";
 import { makeGuess } from "./mock-guess.mjs";
+import { makeCards } from "./mock-cards.mjs";
+import { dailyCard } from "../card-logic.mjs";
 import { seasonReward, badgeRewards, coinsSummary } from "../rewards.mjs";
 import { badgeProgress } from "../badges.mjs";
 import { mapPlayerStats } from "../profile-rules.mjs";
@@ -80,6 +82,7 @@ export function makeMockAuth() {
     for (const m of [runs, dailyRuns, souRuns, builds]) {
       for (const row of m.values()) if (row.user_id === id) row.username = name;
     }
+    cards.forget(id); // delete_account erases cards: they are the person's, not a board's
     for (const [key, u] of [...authUsers]) if (u.id === id) authUsers.delete(key);
     return { data: { ok: true, name }, error: null };
   };
@@ -152,6 +155,10 @@ export function makeMockAuth() {
   // Guess the Player (v2.13.0), the same way: one table nobody writes from a client, two boards, one function.
   const guess = makeGuess(state);
   state.guessRuns = guess.table;
+  // Cards (v2.23.0): two tables with an own-rows-only select and no client write, one grant function only the
+  // service role may call, and the card-claim Edge Function. Their reads are per-user, which no other table
+  // here is, so `from` hands them to cardsFrom below rather than to fromStore.
+  const cards = makeCards(state, { wallet });
   const extraTables = { ...profileData.tables, ...moderation.tables, ...wallet.tables, ...shop.tables, ...century.tables, ...guess.tables };
   // These have no client write policy at all - the app changes them only through database functions -
   // so a direct write gets the error RLS would give.
@@ -171,7 +178,49 @@ export function makeMockAuth() {
     return query;
   }
 
+  function cardsFrom(table) {
+    const filters = [];
+    const orders = [];
+    let limit = null, range = null;
+    const rows = () => {
+      const res = cards.select(table, state.currentUserId());
+      if (res.error) return res;
+      let out = res.data.filter((r) => filters.every((f) => f(r)));
+      for (const col of [...orders].reverse()) out = out.slice().sort((a, b) => (a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0));
+      // PostgREST's own ceiling: a select answers at most 1,000 rows however many match, unless a range asks
+      // for a different window. Modelled because the bug it guards is silent - a truncated read is still "ok".
+      if (range) out = out.slice(range[0], range[1] + 1);
+      out = out.slice(0, Math.min(limit ?? 1000, 1000));
+      return { data: out, error: null };
+    };
+    const query = {
+      eq(col, val) { filters.push((r) => r[col] === val); return query; },
+      order(col) { orders.push(col); return query; },
+      range(from, to) { range = [from, to]; return query; },
+      limit(n) { limit = n; return query; },
+      maybeSingle: () => Promise.resolve(rows()).then((r) => (r.error ? r : { data: r.data[0] ?? null, error: null })),
+      then: (resolve, reject) => Promise.resolve(rows()).then(resolve, reject),
+    };
+    return { select: () => query, insert: rlsDenied, upsert: rlsDenied, update: () => ({ eq: rlsDenied }), delete: () => ({ eq: rlsDenied }) };
+  }
+
+  // card_packs: public select, no write. Every row, ordered as asked.
+  function packsFrom() {
+    const orders = [];
+    const rows = () => {
+      const res = cards.packRows();
+      if (res.error) return res;
+      let out = res.data;
+      for (const col of [...orders].reverse()) out = out.slice().sort((a, b) => (a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0));
+      return { data: out, error: null };
+    };
+    const query = { order(col) { orders.push(col); return query; }, then: (resolve, reject) => Promise.resolve(rows()).then(resolve, reject) };
+    return { select: () => query, insert: rlsDenied, upsert: rlsDenied, update: () => ({ eq: rlsDenied }), delete: () => ({ eq: rlsDenied }) };
+  }
+
   function from(table) {
+    if (table === "card_packs") return packsFrom();
+    if (cards.tables[table]) return cardsFrom(table);
     const store = table === "profiles" ? profiles : table === "sou_runs" ? souRuns : table === "builds" ? builds : table === "runs" ? runs : extraTables[table] || dailyRuns;
     if (extraTables[table]) {
       const base = fromStore(HIDDEN_ROWS.has(table) ? new Map() : store);
@@ -590,7 +639,16 @@ export function makeMockAuth() {
       coins = null;
       newBadges = [];
     }
-    return { data: { ok: true, run, coins, newBadges } };
+    // The daily card, as submit-run grants it: one a day under the date alone, and never at the season's cost.
+    let card = null;
+    if (mode.kind === "daily" && cards.enabled && (!cards.testers || cards.testers.has(userId))) {
+      try {
+        const pick = dailyCard(history, Math.random);
+        const got = pick ? cards.grantCards(userId, "daily", [{ ref: mode.date, card: pick.id, finish: pick.finish, sell: cards.sellFor(pick) }]).granted[0] : null;
+        if (got) card = got.sold != null ? { id: got.card, finish: got.finish, sold: got.sold } : { id: got.card, finish: got.finish };
+      } catch { card = null; }
+    }
+    return { data: { ok: true, run, coins, newBadges, card } };
   }
 
   // Mirrors index.ts's logRun: after the profile write, and a duplicate of the unique key is a no-op.
@@ -720,6 +778,10 @@ export function makeMockAuth() {
   const rpcs = {
     site_totals: siteTotals, site_stats: siteStats, ladder_best: ladderBest,
     ...century.rpcs, ...guess.rpcs,
+    // Cards' two read-only functions (v2.25.0). A failed read is thrown as a code, which rpc() below hands back
+    // as an error object the way PostgREST would.
+    card_battle_state: () => { if (cards.stateFails) throw new Error("read_failed"); return cards.battleState(); },
+    card_boards: ({ p_limit } = {}) => { if (cards.stateFails) throw new Error("read_failed"); return cards.boards(p_limit); },
     player_stats: ({ p_user_id } = {}) => playerStats(state, p_user_id),
     ...profileData.rpcs, ...moderation.rpcs, ...wallet.rpcs, ...shop.rpcs, ...versus.rpcs,
   };
@@ -733,6 +795,7 @@ export function makeMockAuth() {
         if (name === "match-pick") return versus.invokeMatchPick(opts?.body, { now: opts?.now });
         if (name === "submit-century") return century.submitCentury(opts?.body);
         if (name === "submit-guess") return guess.submitGuessRun(opts?.body);
+        if (name === "card-claim") return cards.claimStarter(opts?.body);
         if (name === "delete-account") return Promise.resolve(closeAccount());
         return Promise.resolve({ error: { message: "unknown function" } });
       },
@@ -773,6 +836,7 @@ export function makeMockAuth() {
     _pauseBeforeProfileWrite: (fn) => { beforeProfileWrite = fn; },
     // test-only: hold the anonymous sign-in on `gate` for the next call only.
     _holdAnonSignIn: (gate) => { holdAnonSignIn = gate; },
+    _cards: cards, // test-only: who owns which cards, the grant function, and the server's own switch
     _century: century, // test-only: Century's runs, and the two boards over them
     _guess: guess,     // test-only: Guess the Player's runs and boards
     _versus: versus, // test-only: 1v1's matches, and the state of one as versus-logic sees it

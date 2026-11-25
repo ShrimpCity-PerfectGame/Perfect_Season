@@ -70,6 +70,37 @@ const SCREENS = [
   ["Guess the Player", "?as=player", { tile: "Guess the Player" }],
   ["the Guess the Player grid", "?screen=guess", null],
   ["the Guess the Player result", "?screen=guess&finish=1", null],
+  // Cards (CARDS.md): the collection - a grid of cards that are each one labelled image - and the starter panel.
+  ["the card collection", "?screen=cards", null],
+  ["the card area before a starter deck", "?screen=cards&starter=0", null],
+  // The pack shop, with a pack's contents open: three tables of odds, and a pack nobody can afford.
+  ["the pack shop", "?screen=cards&tab=packs&inside=1&coins=300", null],
+  ["the pack shop with five chosen", "?screen=cards&tab=packs&coins=3000&qty=5", null],
+  ["the pack shop with a pack sold out", "?screen=cards&tab=packs&soldout=1&coins=9000", null],
+  // Battles (CARDS.md 11): the dark panel of the other side's six and the rows of category scores (a strong one
+  // is a lime FILL with its own ink, never lime text), the arena mid-battle - two card images, a scoreboard,
+  // chips whose sign is in the text as well as the colour - a finished battle with its log, the deck, the boards.
+  ["the ladder before a run", "?screen=cards&tab=run", null],
+  ["the ladder: round one, choosing a card", "?screen=cards&tab=run&run=1", null],
+  ["the ladder: two rounds in", "?screen=cards&tab=run&run=1&rounds=2", null],
+  ["the ladder: a round's result, which stays", "?screen=cards&tab=run&run=1&rounds=2&anim=1", null],
+  // v2.31.0: the category is called. The rack of six, the hand as stat cards side by side (buttons, each one
+  // labelled as a sentence), a category lit on every card, their call named before the pick, and the maths.
+  ["the ladder: a category and a card chosen", "?screen=cards&tab=run&run=1&chosen=1&hand=1", null],
+  ["the ladder: their call", "?screen=cards&tab=run&run=1&rounds=1&theirs=1", null],
+  ["the ladder: a result with the maths open", "?screen=cards&tab=run&run=1&rounds=1&anim=1&why=1", null],
+  ["a card battle being played", "?screen=cards&tab=run&battle=win", null],
+  ["a card battle that was lost", "?screen=cards&tab=run&battle=loss", null],
+  ["the gauntlet, three stages in", "?screen=cards&tab=gauntlet&cleared=3", null],
+  ["the gauntlet: a stage being played", "?screen=cards&tab=gauntlet&cleared=3&stage=1&rounds=1", null],
+  ["the gauntlet: a stage beaten", "?screen=cards&tab=gauntlet&stage=1&battle=win", null],
+  ["the deck builder", "?screen=cards&tab=deck", null],
+  ["the daily battle, dealt", "?screen=cards&tab=daily&dealt=1", null],
+  ["the daily battle, played", "?screen=cards&tab=daily&played=1", null],
+  ["the card boards", "?screen=cards&tab=boards&played=1", null],
+  // Copies (CARDS.md 12): a pulled copy drawn as sold with its coin badge, and the notice after old stacks are sold.
+  ["a pack with a copy that was sold", "?screen=cards&tab=packs&copy=1", null],
+  ["a collection whose old copies were just sold", "?screen=cards&stacked=1", null],
 ];
 
 for (const [name, query, tab] of SCREENS) {

@@ -54,6 +54,24 @@ import * as C from "../../century-logic.mjs";
 import { GuessScreen, GUESS_WIP } from "../../guess.jsx";
 import * as G from "../../guess-logic.mjs";
 import guessPool from "../../data/guess-pool.json";
+import { CardsScreen, CARDS_CSS } from "../../cards.jsx";
+import * as CL from "../../card-logic.mjs";
+import cardCatalog from "../../data/cards.json";
+import harnessVersusPool from "../../data/versus-pool.json";
+import { primeVersusData } from "../../versus-data.mjs";
+// Cards (CARDS.md). The app FETCHES the catalog and loads its sprites from /cards; the harness has neither a
+// /data nor a /cards, so the fetch is answered from the import and the sprites are found beside the repo's own
+// static/ folder. The recolouring needs a canvas it can read back, which a file:// page will not give - open
+// the harness over http (the "harness" entry in .claude/launch.json) to see cards in their team colours.
+CL.initCardData(cardCatalog);
+// Duel's pool is fetched by the app (versus-data.mjs); here it is handed over before anything mounts.
+primeVersusData(harnessVersusPool);
+window.__ps_cards__ = true;
+window.__ps_card_base__ = "../../static/cards";
+const realFetch = window.fetch ? window.fetch.bind(window) : null;
+window.fetch = (url, opts) => (String(url).endsWith("/data/cards.json")
+  ? Promise.resolve({ ok: true, status: 200, json: async () => cardCatalog })
+  : realFetch(url, opts));
 // The app FETCHES this file in the browser (guess-pool.mjs); the harness is opened over file:// and has no
 // server to fetch it from, so it is imported and initialised here before anything mounts. Everything downstream
 // - the menu, the grid, tests/test-a11y.mjs's three entries - then sees a pool that is already there, which is
@@ -729,7 +747,130 @@ async function setUpGuess(howMany, finish) {
   return { uid: data.user.id, username: "shrimpcity", answer };
 }
 
+// ---------- screen=cards: the card area ----------
+// &tab=packs is the pack shop (&coins=N for the wallet, &inside=1 with a pack's odds open, &soldout=1).
+// &tab=run is the ladder: &run=1 with a run going (the arena on its first round's choice); &rounds=N to play N
+// rounds of it and stop on the next choice; &anim=1 to play one more and leave its RESULT on screen (it stays
+// until passed); &battle=win|loss to play all six and land on the ending. &theirs=1 loses those rounds, so the
+// next choice is THEIR call. On a choice: &chosen=1 picks a category and a card, &hand=1 opens the rest of the
+// hand; on a result, &why=1 opens the maths. &tab=daily is the daily battle (&dealt=1 with the hand dealt,
+// &played=1 once it is played), &tab=deck the deck builder, &tab=boards the two boards.
+// &big=N adds N more cards in mixed finishes - the owner's collection reached 600 and the screen that drew them
+// all "lags super bad"; this is how that is looked at and measured.
+// ?starter=0 is an account that has not opened its deck (the starter panel); the default is a collection with
+// a starter deck and one showpiece in each finish, so every edge and the count badge are on screen at once.
+function CardsPreview({ userId }) {
+  const [balance, setBalance] = useState(Number(params.get("coins") ?? 2000));
+  return (
+    <div className="ps">
+      <style>{APP_CSS + CARDS_CSS}</style>
+      <main id="content">
+        <div className="wrap">
+          <h1 className="vh">Cards</h1>
+          <CardsScreen userId={userId} isGuest={false} onBack={() => console.log("back")}
+            onNeedsAccount={(why) => console.log("needs account", why)} onHide={() => console.log("hide")}
+            balance={balance} onBalance={setBalance} initialTab={params.get("tab") || "collection"} />
+        </div>
+      </main>
+    </div>
+  );
+}
+const seededRand = (seed) => { let a = seed; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+async function setUpCards(withDeck) {
+  const { data } = await mock.auth.signUp({ email: "cards@harness.test", password: "harness-only", options: { data: { username: "shrimpcity" } } });
+  const uid = data.user.id;
+  // &coins=N: what the wallet holds for the pack shop (default 2,000). The account arrives with 250.
+  const extra = Math.max(0, Math.floor(Number(params.get("coins") ?? 2000)) || 0) - mock._wallet.balanceOf(uid);
+  if (extra > 0) mock._wallet.apply(uid, extra, "season", "HARNESS-CARDS");
+  if (params.get("soldout") === "1") mock._cards.packs.get("pack-legends").stock_left = 0;
+  if (withDeck) {
+    const seeded = (() => { let a = 20261113; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();
+    // The starter cards fill a deck of thirty; they go in as two grants because one is at most forty entries and
+    // it reads better than a magic number.
+    const fill = CL.starterFill([], seeded).map((c) => ({ ref: c.ref, card: c.id, finish: c.finish }));
+    mock._cards.grantCards(uid, "starter", fill);
+    const all = [...CL.CARDS.values()];
+    const pick = (name, season) => all.find((c) => c.name === name && c.season === season);
+    const show = [[pick("Tom Brady", 2007), "prism"], [pick("Adrian Peterson", 2012), "gold"], [pick("Antonio Gates", 2005), "silver"],
+      [pick("Devery Henderson", 2011), "base"], [pick("Devery Henderson", 2011), "base"], [pick("Devery Henderson", 2011), "base"]];
+    // &stacked=1 leaves Devery Henderson three deep, the way a collection from before v2.26.0 can be - opening
+    // it sells the two copies and says so. Otherwise a copy is priced, and sold as it arrives.
+    const stacked = params.get("stacked") === "1";
+    show.forEach(([card, finish], i) => card && mock._cards.grantCards(uid, "daily", [{ ref: `2026-10-${String(i + 1).padStart(2, "0")}`, card: card.id, finish, ...(stacked ? {} : { sell: mock._cards.sellFor({ id: card.id, finish }) }) }]));
+    const big = Math.max(0, Math.min(3000, Number(params.get("big")) || 0));
+    if (big) {
+      const held = new Set(mock._cards.owned(uid).map((o) => o.card_id));
+      const extra = all.filter((c) => !held.has(c.id)).sort((a, b) => (a.id * 7919) % 1009 - (b.id * 7919) % 1009).slice(0, big);
+      for (let i = 0; i < extra.length; i += 20) mock._cards.grantCards(uid, "gift", extra.slice(i, i + 20).map((c, k) => ({ ref: `big:${i + k}`, card: c.id, finish: ["base", "base", "silver", "gold", "prism"][(i + k) % 5] })));
+    }
+  }
+  if (withDeck && params.get("tab") !== "gauntlet" && (params.get("run") === "1" || params.get("battle") || params.get("rounds"))) {
+    await mock._cards.battle(uid, { action: "run_start" });
+    // A loss needs a team that can beat a deck holding 2007 Brady: the top of the ladder, met in battle one.
+    if (params.get("battle") === "loss" || params.get("theirs") === "1") mock._cards.runs[0].foe = CL.buildTeam(seededRand(7), 126).map((e) => ({ card: e.id, finish: e.finish, spot: e.spot }));
+  }
+  // &tab=gauntlet: &cleared=N stages already beaten; &stage=1 with an attempt going at the stage that is up
+  // (then &rounds=N / &battle=win|loss play it, exactly as they do a ladder battle).
+  if (withDeck && params.get("tab") === "gauntlet") {
+    const cleared = Math.max(0, Math.min(CL.GAUNTLET.length, Number(params.get("cleared")) || 0));
+    if (cleared) mock._cards.gauntlets.set(uid, { cleared, stage: null, hand: null, cats: null, rounds: [], last: null, last_stage: null, cleared_at: new Date().toISOString() });
+    if (params.get("stage") === "1") await mock._cards.battle(uid, { action: "gauntlet_start", stage: Math.min(cleared, CL.GAUNTLET.length - 1) });
+  }
+  if (withDeck && (params.get("dealt") === "1" || params.get("played") === "1")) {
+    const dealt = await mock._cards.battle(uid, { action: "daily_deal" });
+    if (params.get("played") === "1") {
+      const hand = dealt.data.daily.hand, foe = CL.dailyFoe(mock._cards.today());
+      let log = [];
+      for (let round = 0; round < 6; round++) {
+        const card = CL.autoPick(hand, foe, log);
+        log = (await mock._cards.battle(uid, { action: "daily_round", round, card, cat: CL.callerOf(log) === "me" ? CL.bestCategory(card, log) : undefined })).data.daily.log;
+      }
+    }
+  }
+  return uid;
+}
+
 (async () => {
+  if (params.get("screen") === "cards") {
+    const uid = await setUpCards(params.get("starter") !== "0");
+    createRoot(document.getElementById("root")).render(<CardsPreview userId={uid} />);
+    // &tab=packs&copy=1: open a Standard pack whose first card is one already held, so a sold copy is on screen.
+    if (params.get("copy") === "1") {
+      const held = mock._cards.owned(uid).find((o) => o.finish === "gold") || mock._cards.owned(uid)[0];
+      const fresh = [...CL.CARDS.values()].filter((c) => !mock._cards.owned(uid).some((o) => o.card_id === c.id)).slice(100, 102);
+      mock._cards.nextPull = [{ id: held.card_id, finish: held.finish }, { id: fresh[0].id, finish: "base" }, { id: fresh[1].id, finish: "silver" }];
+      const press = () => document.querySelector('[data-pack="pack-standard"] [data-buy]')?.click();
+      setTimeout(press, 900); setTimeout(press, 1100);
+    }
+    // &battle=win|loss plays all six rounds; &rounds=N plays N and stops on the next choice; &anim=1 then plays
+    // one more and leaves its result up. The luck is pinned (four draws a round: your card's two, then theirs).
+    const dress = () => {
+      if (params.get("chosen") === "1") { document.querySelector("[data-rack] button[data-cat]")?.click(); setTimeout(() => document.querySelector("[data-choose] [data-pick]")?.click(), 150); }
+      if (params.get("hand") === "1") document.querySelector("[data-whole-hand]")?.click();
+      if (params.get("why") === "1") document.querySelector("[data-why]")?.click();
+    };
+    if (params.get("battle") || params.get("rounds")) {
+      const [you, them] = params.get("battle") === "loss" || params.get("theirs") === "1" ? [0.05, 0.95] : [0.95, 0.05];
+      mock._cards.nextRolls = Array(6).fill([you, you, them, them]).flat();
+      const want = params.get("battle") ? 6 : Math.max(0, Math.min(5, Number(params.get("rounds")) || 0));
+      const reveal = params.get("anim") === "1" && want < 6;
+      const target = want + (reveal ? 1 : 0);
+      const tick = setInterval(() => {
+        const arena = document.querySelector(".cb-arena");
+        if (!arena) return;
+        const played = Number(arena.dataset.rounds);
+        const go = document.querySelector("[data-continue]"), pick = document.querySelector("[data-best]");
+        if (played >= target) { if (go && !reveal) go.click(); else { clearInterval(tick); setTimeout(dress, 200); } return; }
+        if (go) { go.click(); return; }
+        if (pick && !pick.disabled) pick.click();
+      }, 150);
+    } else if (params.get("run") === "1" || params.get("stage") === "1" || params.get("dealt") === "1") setTimeout(dress, 700);
+    // &tab=packs&inside=1 also opens the first pack's contents, so the odds tables are on screen.
+    // &tab=packs&qty=5 chooses five of the first pack and presses Open, so the batch's confirm is on screen.
+    if (params.get("qty")) setTimeout(() => { document.querySelector(`.cd-pack [data-qty="${params.get("qty")}"]`)?.click(); setTimeout(() => document.querySelector(".cd-pack [data-buy]")?.click(), 200); }, 900);
+    if (params.get("inside") === "1") setTimeout(() => [...document.querySelectorAll(".cd-pack .linkbtn")][0]?.click(), 900);
+    return;
+  }
   if (params.get("screen") === "guess") {
     const finish = params.get("finish") === "1";
     const { uid, username, answer } = await setUpGuess(Number(params.get("guesses") || 4), finish);

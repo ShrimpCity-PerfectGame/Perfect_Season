@@ -20,6 +20,437 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.32.0] - 2026-11-25
+
+The test site's database was deleted on 2026-11-25 and the owner chose not to replace it. From this release
+there is one site, and updates go to it directly.
+
+### Added
+- **Cards for testers only.** Cards are unfinished and were only ever on the test site, so the real site now
+  has a third setting between on and off: the card area is drawn, and cards are granted, **only for accounts
+  listed in a new table, `card_testers`**. Everybody else sees no tile and is granted nothing, exactly as
+  before. Both switches learned it - the build's `CARDS_ON` and the server's `CARDS_ENABLED` secret each take
+  `1`, `testers` or nothing - and a production build is set to `testers`. Nobody but the SQL editor writes
+  the list; an account reads only its own row.
+
+### Changed
+- **The release process.** No staging step exists any more. The full test suite and the UI harness are what
+  stand between a change and real players; CLAUDE.md's Releasing section says what replaces the click-through.
+- A production build now ships the card catalog (`/data/cards.json`) and the card screens, since its testers
+  need them. Nothing links to either for anybody else.
+
+## [2.31.1] - 2026-11-15
+
+Two things the owner hit on the test site with a collection of 600 cards. Cards are still on the test site only.
+
+### Fixed
+- **"We couldn't confirm that purchase" showed under every pack being opened.** Nothing had failed: the
+  database shows 180 packs in an hour, every one bought. The shop called a purchase unanswered from the moment
+  it was SENT, so the warning was on screen for as long as each pack took to open, and the count on the shelf
+  fell back to one while a batch of ten was going. It now means what it says - a purchase whose answer was
+  lost - and still offers Try again for that. No test had looked at the screen while a pack was on its way.
+- **The collection lagged badly with hundreds of cards.** It drew every card it held. It now draws
+  **twenty-four at a time**, best first, with "Show 24 more" under them; a filter, or leaving the tab and
+  coming back, starts at twenty-four again.
+- **Drawing a card was itself slow, which is what the lag really was.** Every card painted its 546x640 figure
+  at full size and wrote it out as an image, and a grid's cards were all painted in one unbroken stretch that
+  froze the page. A figure is now painted at the size a card shows it (360 rows - sharp on the densest
+  phones), written in a format seven times quicker to write, and **one a frame**, so cards colour in over a
+  moment instead of the page stopping. Adding 24 cards to a 634-card collection, in a Chrome slowed four
+  times: 9.6 seconds before, 0.9 after. This is every screen that shows cards - opening ten packs draws thirty.
+
+## [2.31.0] - 2026-11-14
+
+Card battles, on the test site only: **the category is called before you pick**, the lineup has no Flex, and
+the result of a round stays on screen until you move on.
+
+The owner played 2.30.0 and said picking felt random, that the result flashed past, and that the hand read as
+a list with one big number. The game's own balance test agreed about the first: with the category hidden
+until the card was down, choosing as well as the screen allowed won 48% of even battles and always playing
+the highest rating won 45%.
+
+### Changed
+- **You always know the category before you pick.** You call round one: pick a category, then a card. After
+  that, whoever won the last round calls the next. When they call, they name the category first - their
+  card's best of the ones left - and you choose who answers it. Their card stays face down until yours is
+  played. Each category is used once a battle.
+- **No Flex.** A lineup is a quarterback, two backs, two receivers and a tight end, so a round offers two to
+  four cards. The hand is still twelve.
+- **The hand is cards side by side**, in the order dealt, each with its six stats listed down the card. The
+  category in play is lit on every card, a spent one is struck through, and a row is marked where the card's
+  ability fires. Nothing is sorted by rating and no total is shown in advance.
+- **One panel does everything, and it comes before the field.** You choose in it, and the round's result takes
+  its place: both cards, the real stat, one number a side, who took the round and who calls next. It stays
+  until you press Next round. "Why?" opens the breakdown. Nothing runs on a timer and the page does not move
+  when a card is played. The speed and skip controls are gone with the timer.
+- **"See the rest of your hand"** opens the cards for the other spots, to look at - calling a category spends
+  it for them too.
+- The ladder says how strong their cards are ("their cards rate about 66").
+- **The gauntlet:** its teams field the new lineup. Baltimore 1999-2005 moves from sixth to fourth, because
+  without Flex spots it is weaker than the two teams that were ahead of it - the one time that list is
+  reordered. The head start is 24 points at stage one, not 32: calling the category with their six in view
+  made the early stages much easier than they were built to be.
+
+### Fixed
+- **Pressing Try again after losing a gauntlet stage took the whole screen down.** The lost battle and the new
+  try at the same stage were one battle to the screen - still on its sixth round, and handed no rounds. It had
+  been there since 2.29.0: the test checked the button existed and then pressed Back. A fresh review of this
+  release found it; the smaller head start would have made it the common path.
+- "Pick for me" plays the category you have already chosen, instead of picking another and spending that.
+- Passing a result puts the keyboard's focus on the next round's heading rather than losing it to the page.
+- The card screen's tests failed about one run in five by chance - a pack rolled a card already owned, which
+  is sold on the spot, and the tests counted cards. 2.30.0 fixed half of it. A pack those tests do not pin now
+  holds nothing already owned.
+
+### What it measures at now
+- At even strength, a player who reads the screen wins 73% of battles, "Pick for me" 62%, and tapping at
+  random 8%. Before: 48%, 45%, 12%.
+- Winning the call does not run away with a battle: 5% of even battles are 6-0 either way, you win 67% of the
+  rounds you call and they win 53% of theirs.
+- No scoring number changed. The ladder's run lengths are inside the bands they were held to before.
+
+### Under it
+- No database change. Who calls follows from the rounds played, and each stored round carries the call for
+  the next one, so a reloaded page knows it without asking.
+- A play carries the category you call. On your call a missing, made-up or spent one is refused
+  (`bad_cat`) and plays nothing; on their call what the browser sends is not looked at.
+- A battle begun before this release finishes under the new call rule with its old spots. **That includes a
+  ladder battle already DEALT and not yet started**, which is stored with its team: on the test site the owner
+  had one, opened it minutes after the deploy and met a Flex round with ten cards - the thing this release
+  removed. The pre-deploy check had only counted battles with a round played. That one battle's team was
+  re-fielded by hand (CARDS.md 11.6).
+
+## [2.30.0] - 2026-11-14
+
+Nothing a player can see changes. The site's main download is about 110 KB smaller.
+
+### Changed
+- **The card screens are fetched when Cards is first opened**, instead of being part of the page every visitor
+  downloads. They are a file of their own, `/cards.js` (about 123 KB), and the page fell from 1,302,307 bytes
+  to about 1,193,000. On production, where cards are off, nobody downloads them at all.
+- While they load the screen says "Loading cards…"; if the fetch fails it says so and offers Try again, which
+  really does fetch again. The daily card under a finished season simply appears once they have loaded.
+- The bundle-size check is back at 1.30 MB (2.29.1 had raised it to 1.35 MB for one release).
+
+### Fixed
+- `tests/test-cards-screen.mjs` failed about one run in three by chance: a pack is rolled at random, a card
+  already owned is sold for coins on the spot, and several assertions pinned the wallet to the coin. They allow
+  for sold copies now. One more compared their six against the hand by card rather than by name, and failed
+  when the same man was in both as two different seasons.
+
+## [2.29.1] - 2026-11-14
+
+Test site only.
+
+### Changed
+- Cards: **a battle is laid out on a field.** Your six are six big cards, three across and two down, on a navy
+  night pitch: a spot is an empty outline until its round is played, then the card you played stands in it,
+  marked won or lost. Their six run along the top, face down until each is played (face up in the gauntlet).
+  It replaces the row of six small pills. The result and the round being played back sit above it.
+- The bundle-size check in the build test is raised from 1.30 MB to 1.35 MB (the bundle is 1,302,307 bytes).
+  Loading the card screens on demand is the real fix and is owed before cards reach production.
+
+## [2.29.0] - 2026-11-14
+
+Test site only. **The historical gauntlet** - the third of the owner's four card modes.
+
+### Added
+- Cards: **the gauntlet.** Twelve real offenses in order, weakest first, from the 2016-20 Jets to the 1999-2005
+  Chiefs. Each is one franchise's best card at every spot from one of the game's five-year eras. Beat one to
+  open the next. Here you CAN see who you are facing - a real team is the point.
+- A stage can be tried as often as it takes, with a new hand each time, and losing costs nothing. Each stage
+  pays once, the first time it is beaten: 20 coins for the first and 10 more for each after it, 900 in all.
+- The early stages give a head start - their cards play points short, 32 at stage one, shrinking to nothing by
+  stage nine - because the weakest real offense is still better than a starter deck. It is shown on their card.
+- A third board: stages cleared.
+
+## [2.28.2] - 2026-11-14
+
+Test site only.
+
+### Added
+- Cards: **open one, five or ten packs at once.** One confirm for the whole price; every card is shown
+  together. Each pack is still its own purchase, so a batch that stops part-way keeps what it opened and only
+  the one unanswered pack is asked about again.
+
+### Fixed
+- The cards migration could not be re-run once anybody had won a battle: it replaces the wallet ledger's list
+  of kinds twice, and the first replacement still held the list from when packs shipped, which a 'card_win'
+  row fails. That stopped 2.28.1's migration on the test site for a few minutes. Both lists are the same now,
+  and a test re-runs the file over a ledger holding every card kind.
+
+## [2.28.1] - 2026-11-14
+
+Test site only. Three things the owner found playing 2.28.0.
+
+### Changed
+- Cards: **their card is hidden until you play yours.** A round shows the spot and nothing about who is across
+  from you; both cards and the category are revealed together. The server no longer sends the cards of a
+  ladder team that have not been played, so this is not only the screen being polite.
+- Cards: **the reveal says what the category is about.** Under each card is the real number the category
+  ranks - "11 TD in 17 games" for Touchdown threat, "13.7 yards a completion" for Big play - then that
+  category's score out of 99, the card's rating, the points the two make, bonuses, luck and the round total,
+  with one line saying how they add up. Before, it read "Category 93, Base 113.3" under a card showing yards.
+- Cards: **the daily card is one of the six players you drafted**, not anybody from one of those teams.
+- Cards: **a finish now matters in a battle.** Silver, Gold and Prism add 5, 10 and 15 points to every round the
+  card plays, shown as a bonus of its own. It was 1, 2 and 3 added to the rating, of which 40% reached a round -
+  Silver was worth less than half a point.
+
+### Fixed
+- Cards: the VS burst no longer sits on top of the numbers on a phone.
+
+### Under the hood
+- The database and function for the historical gauntlet are in place (twelve real offenses, a stage at a time)
+  with no screen yet; nothing on the site reaches them.
+
+## [2.28.0] - 2026-11-14
+
+Test site only. **A battle is played a round at a time.**
+
+### Changed
+- Cards: **you play one card a round, and learn the category after it is down.** Before, the six and their
+  order were set up front with every score on show - so given two tight ends and told which scores more,
+  there was nothing to choose. Now each round shows the spot, the card you are facing and the categories
+  still to come; you play a card from your hand; then the category is revealed and the round is called.
+- Cards: **the rounds are lineup spots in a random order, and the last is always a Flex.** Quarterback, back,
+  receiver and tight end come up in any order with one Flex among them; the final pick is the open one.
+- Cards: **synergies build as you play.** A card is lifted by the cards of yours already down, so an early
+  pick sets up a later one.
+- Cards: "Pick for me" plays the highest-rated card that fits.
+
+### Under the hood
+- The category order is stored with the battle and never sent to the browser; a round is written by its
+  number, so a double tap or a retry cannot play one twice or roll it again.
+- Leaving mid-battle and coming back is the same hand, the same rounds and the same score.
+- Any ladder run left in progress from 2.27.0 is ended by the migration.
+
+## [2.27.0] - 2026-11-14
+
+Test site only. **The battle is rebuilt: offense against offense.** The owner's redesign - "a fast collectible
+strategy game powered by historical NFL seasons" - and stage one of four modes.
+
+### Changed
+- Cards: **you play a CPU team made of the same cards you collect**, not a defense. Defenses, their traits and
+  the bar are gone.
+- Cards: **a deck of thirty** - 5 quarterbacks, 10 backs, 10 receivers, 5 tight ends. Each battle deals you
+  twelve of them (2, 4, 4, 2) and you field six, **in an order you choose**. An unsaved deck is your best thirty.
+- Cards: **six rounds, each on a category** - Production, Touchdown threat, Big play, Workload, Efficiency,
+  Star power. Every card has a 0-99 score in each, from how its real season ranked at its position in its era.
+  Each category comes up once, in an order nobody knows. Win more rounds than the other side.
+- Cards: **every archetype has an ability** (a Workhorse gains after a win, a Deep threat once your quarterback
+  has played, a Safety valve cancels the card across from him...) and a lineup earns **synergies** for
+  teammates, a shared season, and the archetype pairs.
+- Cards: **the arena.** Your active card on the left, theirs on the right, a big VS, the stat comparison, the
+  round's winner called; your six below with the active one lit and the bench named; the score, the round, a
+  speed control and a battle log.
+- Cards: **the starter deck is thirty cards**, a full deck. An account that opened the old eight-card starter
+  is offered a top-up to thirty.
+- Cards: the ladder (runs against stronger and stronger CPU teams) and the daily battle (one team a day, the
+  same for everyone) replace runs against defenses and the daily showdown. A **Deck** tab joins Ladder, Daily
+  and Boards under Battle.
+
+### Removed
+- `card_showdowns`, `card_runs.defense` and the functions around them, which only ever reached the test site.
+  `migration-cards.sql` clears them from a database that has them, once. `data/card-defense.json` is no longer
+  served or bundled.
+
+### Not built yet
+- The historical gauntlet and the draft arena - stages two and three.
+
+## [2.26.0] - 2026-11-14
+
+Test site only. All three asked for by the owner, from their phone.
+
+### Added
+- Cards: **you keep one of each card in each finish, and a copy is sold.** Pull a card you already hold -
+  from a pack, the daily draft or a starter deck - and it turns into coins on the spot, for half its value,
+  with the card tipping over and a coin landing on it. A card's value is its rating band (20, 40, 100, 400
+  or 1,500) times its finish (Base 1, Silver 2, Gold 5, Prism 20). Copies already stacked in a collection
+  are sold the first time it is opened, and the screen says how many and for how much.
+- Cards: **a battle plays out.** A scoreboard counts your offense up against the bar while the six cards take
+  their turns - each steps forward, shows its game and what the matchup did to it - then the result lands,
+  with the player of the game called out. Skip to the result at any time; reduced motion shows it finished.
+  The heading, the coins and the next button wait for it, so the ending is not given away above it.
+
+### Changed
+- Cards: the card area's tabs are two levels - **Collection, Packs, Battle** across the top, and **Run,
+  Showdown, Boards** under Battle - instead of five chips wrapping onto two rows. The Runs screen opens on
+  your best run and the day's paid wins left, the button, then four short rules.
+- `grant_cards` takes an optional `sell` on each entry and `buy_pack` passes it through;
+  `card_copies` and `card_sell_copies` are new; the wallet's ledger gains the kind `card_sell`;
+  `card-claim` gains the action `sell_copies`, and it and `submit-run` price every card they grant.
+
+## [2.25.0] - 2026-11-13
+
+Test site only. Part 4 of 5 of the card update: battles.
+
+### Added
+- Cards: **runs**. Start a run and defenses come one after another until one stops you. You see each defense
+  and what its traits do before you pick your six, the bar goes up with every win, and each battle plays out
+  card by card - a football line, the luck, the matchups - against the bar. A win pays 3 coins and one more
+  for every win the run already has, up to 12, for the first 15 wins of a day; past that wins still count.
+  A run left half-way is still there when you come back.
+- Cards: **the daily showdown**. One defense a day, the same for everyone, and one go at it for a score.
+  Every card has the same game that day whoever plays it, so the board is about the six you pick.
+- Cards: **two boards** in the card area - longest runs, and today's showdown.
+- The battle is played by the server: the browser sends six cards and is told what happened. A battle whose
+  answer is lost on the way back is shown as it was played, never played again.
+
+- Cards: the collection can be narrowed by **finish** and by **team** as well as by position, and says how
+  many of your cards are showing.
+
+### Fixed
+- Cards: the gleam on a Silver or Gold card no longer cuts off half-way across. Its gradient was tiling, so
+  the loop restarted with a second band in the middle of the card. Reported from the owner's phone.
+
+### Changed
+- `card_battle_state`, `card_boards` and five service-only functions in `migration-cards.sql`; the
+  wallet's ledger gains the kind `card_win`; `delete_account` erases an account's runs and showdowns.
+  The `card-claim` function gains four actions and now bundles the defense data.
+- **Duel's defenses and kickers are fetched, not carried in the page** (`versus-data.mjs`,
+  `/data/versus-pool.json`). The battle screens took the bundle 28 KB over the ceiling
+  `tests/test-build-seo.mjs` holds it to, and that ceiling has named this file as the next thing to move
+  out since v2.14.0. The page asks for it as soon as it loads; the duel screen waits on it and says so if it
+  could not be fetched. The bundle is about 40 KB smaller than before this release. This part reaches
+  production with the next promotion, cards or no cards.
+
+## [2.24.7] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: no colour outside the black outline. Enlarging the drawings left a hairline of light pixels round
+  every player, which the recolouring painted in the helmet colour as a dotted fringe. The rim of each sprite
+  is now pulled down to the outline's black when it is built.
+- Cards: the face masks 2.24.6 left unfinished. It whitened a square of helmet beside the mask on some poses
+  and left a helmet-coloured knot where bars cross on others; the bars are found more tightly now and the
+  knots go with them, and the sideways catch's single bar is whitened too. Both reported from the owner's
+  phone.
+
+## [2.24.6] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: every pose wears a white face mask. Eight of the fourteen drew it in the helmet's grey, joined to the
+  helmet, so it took the team's second colour while the other six stayed white. The bars are picked out by
+  being thin and whitened when the sprites are built (`tools/cards/poses.json`, "mask"). Asked for by the
+  owner.
+
+## [2.24.5] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: every pose wears the team's pants. The thrower's were drawn white on the sheet and the pointing
+  receiver's faded most of the way to white, so those two stood out from the other twelve. Both are darkened
+  to the helmet's grey when the sprites are built (`tools/cards/poses.json`, "grey"). Reported from the
+  owner's phone.
+
+## [2.24.4] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: gloves, wristbands and shoes no longer pick up a patch of the helmet colour. The shaded part of a
+  white glove is drawn in the helmet's own grey, and where the outline closed round it the recolouring could
+  not tell the two apart - most visibly on the pointing player's fist. Fourteen such patches across nine
+  poses are now whitened when the sprites are built (`tools/cards/poses.json`, "white").
+
+## [2.24.3] - 2026-11-13
+
+Test site only.
+
+### Changed
+- Cards: sharper players. The drawings were 300 pixels tall and a phone draws one at about 750, so every
+  outline showed its stairs. They are 640 tall now, enlarged with the outline smoothed and the lines
+  re-sharpened, and saved as WebP so each is about 45 KB. Recolouring a card was also made about three times
+  faster, since there are four times the pixels to do. Reported from the owner's phone.
+
+## [2.24.2] - 2026-11-13
+
+Test site only.
+
+### Fixed
+- Cards: a player's colours no longer scrub or bleed. Helmets kept grey patches where their highlights were,
+  the helmet colour ran onto white gloves and cleats, and darker skin had a pale dotted rim. The recolouring
+  decided each pixel alone, and a helmet's highlight is the same grey as a glove's shadow; it decides a whole
+  outlined region at a time now. Reported from the owner's phone.
+
+## [2.24.1] - 2026-11-13
+
+Test site only.
+
+- Cards: a first pass at each player's skin tone, for the owner to correct. 1,555 of the 1,639 players have
+  one; the 84 nobody was sure of keep the default. 967 were measured from the headshot on the player's public
+  Sleeper profile (no photo is kept or shipped, only the tone); 588, mostly retired before about 2009, are
+  from memory alone. Nothing was decided from a name. The list is built from names in
+  `tools/cards/build-card-skin.mjs`; correct it there and re-run. Client only: no migration, no Edge Function
+  change. Production still shows no cards, and the owner's review of this list is a gate before it does.
+
+## [2.24.0] - 2026-11-13
+
+**On the test site only**, like 2.23.0: production builds have cards switched off.
+
+### Added
+- **Cards: a pack shop.** The card area has a Packs tab. Three packs, bought with the same coins as the shop:
+  Standard (three cards from anywhere, 150), Air raid (three passers and receivers, 250) and Legends (one card
+  rated 100 or better, always Gold or Prism, 3,000, with 5,000 in existence). **Who is inside** shows every
+  card a pack can hold and its exact chance before you buy, and the finish odds beside it - what the screen
+  prints and what the server rolls are one piece of code, so they cannot disagree.
+- Opening asks you to confirm with the price in the button, and the cards you pulled are shown straight away.
+- **A purchase can never charge twice.** If the answer is lost on the way back, the screen says it does not
+  know rather than guessing, and Try again asks about the same purchase: you get that pack's cards and are
+  not charged again.
+- A pack whose price has gone up since you looked is refused, not charged at the new price.
+
+### Changed
+- Pack art is cut from the owner's three pictures by `tools/cards/build-pack-art.mjs`.
+
+### For the record
+- The Legends pack was first priced at 1,500. Measured, that made the one pack certain to hold a top card
+  also the cheapest way to get one, so it is 3,000. `tests/test-economy-security.mjs` prints what every pack
+  is worth and holds the prices to it.
+- An independent review before release found three ways the first version could have charged twice or lost
+  a purchase from the screen's side (the purchase's id died on a tab switch; one slot was shared by every
+  pack; an answer arriving after the shop was left was dropped). All three are fixed and tested. Nothing was
+  found that could take coins without cards inside the database.
+- Rollout order: re-run `migration-cards.sql`, deploy the Edge Functions, then the client - and the client
+  and the functions together, because both carry `card-packs.mjs`.
+
+## [2.23.0] - 2026-11-13
+
+**On the test site only.** Production builds have cards switched off: no tile, no catalog file, and the two
+Edge Functions that grant cards do nothing without the `CARDS_ENABLED` secret. See CARDS.md.
+
+### Added
+- **Cards: a starter deck, a card a day, and a collection.** A Cards tile on Modes opens a card area of its
+  own, apart from the drafts. A signed-in player opens a starter deck - eight low-rated cards that always make
+  a playable lineup - and from then on finishing the daily draft earns one card off that day's boards, shown
+  on the result screen. The collection draws every card with the owner's toy sprites, recoloured in the
+  browser for the card's team, with a position filter. Anyone who does not want it can hide it, per device.
+- **Nobody can give themselves a card.** `card_owned` and `card_grants` have an own-rows read and no client
+  write policy. `grant_cards` is the only writer, only the service role may call it, and it grants once per
+  (player, kind, ref) - so two tabs claiming a starter deck leave eight cards, and the two scoring formats'
+  dailies share one card a day. `card-claim` is the seventh Edge Function.
+- **The daily card can never cost a season.** It is chosen after the season is saved and paid, in its own
+  try/catch: a grant that fails or throws answers `card: null` and nothing else changes.
+- **The card catalog and the battle rules** (built earlier, unreleased until now): 3,124 frozen cards,
+  thirteen archetypes, six defense traits including Run stopper, lineup rules, battle scoring with a bar that
+  rises with every win in a run, and a balance test that plays about 6,000 battles. Nothing plays a battle yet.
+
+### Fixed
+- **The shop's showcase test read the clock.** It expected a brand-new account to hold Day One, which is only
+  earned by joining in the first month, so it passed until 2026-10-14 and failed ever since with nothing in
+  the code changing. It states its join date now. The badge itself was always right.
+
+### Not done
+- Packs, battles, badges, the profile's best card and the boards are plans 3 to 5.
+- **Every card wears one default skin tone.** The per-player list is a manual job and is empty.
+- The sprites are cut from the owner's first two sheets (20 poses); the full 50-pose set arrived too small to
+  use and is wanted at full size.
+- `/privacy` and `/terms` are unchanged. They change in the release that switches cards on for production.
+
 ## [2.22.1] - 2026-10-06
 
 ### Fixed

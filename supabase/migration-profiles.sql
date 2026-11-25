@@ -733,6 +733,33 @@ begin
   delete from public.finished_codes where user_id = v_uid;
   delete from public.supporters     where user_id = v_uid;
   delete from public.moderators     where user_id = v_uid;
+  -- Cards (migration-cards.sql). They are the person's, not a board's: nobody else's game is made of them, so
+  -- they are erased rather than kept under the tombstone. Through to_regclass + EXECUTE because this file is
+  -- re-run BEFORE migration-cards.sql exists on a database being brought up to v2.23.0, and a plain statement
+  -- naming a missing table would fail every account closure in that gap.
+  if to_regclass('public.card_owned') is not null then
+    execute 'delete from public.card_owned where user_id = $1' using v_uid;
+    execute 'delete from public.card_grants where user_id = $1' using v_uid;
+  end if;
+  -- Their battles (v2.25.0) go with the cards: a showdown row is a list of six cards they owned, and a board
+  -- that reads names live would otherwise show the tombstone holding a streak.
+  if to_regclass('public.card_runs') is not null then
+    execute 'delete from public.card_runs where user_id = $1' using v_uid;
+  end if;
+  -- ...and the deck and the daily battles of v2.27.0. Each its own guard: these tables arrived in different releases.
+  if to_regclass('public.card_decks') is not null then
+    execute 'delete from public.card_decks where user_id = $1' using v_uid;
+  end if;
+  if to_regclass('public.card_gauntlets') is not null then
+    execute 'delete from public.card_gauntlets where user_id = $1' using v_uid;
+  end if;
+  if to_regclass('public.card_dailies') is not null then
+    execute 'delete from public.card_dailies where user_id = $1' using v_uid;
+  end if;
+  -- ...and the testers' list (v2.32.0): a closed account is no longer somebody cards are switched on for.
+  if to_regclass('public.card_testers') is not null then
+    execute 'delete from public.card_testers where user_id = $1' using v_uid;
+  end if;
   -- Reports they filed and reports about them: both name a person, and a closed account cannot answer one.
   delete from public.reports where reporter_id = v_uid or target_id = v_uid;
 

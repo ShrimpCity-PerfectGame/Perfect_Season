@@ -320,6 +320,13 @@ parts that are unlike every other mode:
   harmless rewrite; the source-text assertion it replaced caught two and fired on the harmless one.
   **Prefer adding to those over asserting on a file's characters.** The stub throws by name on a query shape it
   does not know, so a new call in a function is a loud failure rather than a silent `undefined`.
+- **The pool is fetched, not bundled** (v2.25.0, `versus-data.mjs`). `/data/versus-pool.json` is asked for
+  once the page is up, and the app shows "Loading the duel…" or a Try again panel instead of `VersusScreen`
+  until it is there. It left the bundle because the bundle hit the ceiling in `tests/test-build-seo.mjs`,
+  which had named this file as the next reclaim since v2.14.0. The service worker fetches it network-first
+  (`DATA`), for the guess pool's reason: `match-pick` replays against its own copy. `tests/helpers.mjs`'s
+  `setupDom` answers the fetched data files from disk, so a jsdom test never reaches the real network; a
+  suite that replaces `fetch` has to serve `/data/versus-pool.json` itself if it opens a duel or a battle.
 - **Eight boards, sixteen picks**, and every board offers that team's players, its defense in each year of the
   era and its kicker - a defense can go fifth and a kicker first. A board that cannot serve *both* players is
   skipped before it is dealt (VERSUS.md 8): 31 of the 160 boards hold one quarterback or one tight end, so two
@@ -511,6 +518,137 @@ parts unlike everything else:
   per-device - so because the answer is already on screen, a failed save converts into a *better* score.
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
+
+**Cards (in progress, v2.32.0 - FOR TESTERS ONLY, on the real site; see Releasing).** A card-collecting and auto-battler mode is being built in
+five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck of thirty, a
+card a day from the daily draft, a collection screen, packs bought with coins, a ladder of CPU teams and a
+daily battle. **The battle was rebuilt in v2.27.0 as offense against offense** (the owner's redesign: "a fast
+collectible strategy game powered by historical NFL seasons"): a deck of thirty, a hand of twelve dealt by the
+server, six rounds each on a category. **Since v2.28.0 a battle is played a round at a time**: each round is
+one lineup spot - **QB, RB, RB, WR, WR, TE since v2.31.0, in a random order; there is no Flex** - and the player
+plays one card from the hand without seeing the card across from it (v2.28.1). **Since v2.31.0 the category is
+CALLED before the pick**: you call round one, then whoever won the last round; each category is used once.
+**The historical gauntlet (v2.29.0)** is twelve real offenses in
+order, a stage at a time, with their six in view. Badges and the profile spot are not built. **The draft arena,
+once a fourth mode, was dropped by the owner on 2026-11-14 - do not build it or offer it.** **Production has cards switched off** in two
+places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
+`card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
+with the client off banks daily cards nobody can see, which is a launch order and not a state to leave things in. **`CARDS.md` is the reference** and
+`docs/superpowers/specs/2026-11-13-card-collection-design.md` is the design - read both before touching any of it.
+The parts unlike everything else:
+
+- **`data/cards.json` is FROZEN.** Every other file in `data/` is regenerated from source; this one is only ever
+  appended to by `tools/data/build-card-catalog.mjs`, because a card is something a player will own. A card keeps
+  its id, its `pid` and its stats for ever, even when `data/players.json` is rebuilt and its row changes or leaves.
+  `players.json`'s own player `id` is a position in a name array and must never become an ownership key. The builder
+  REFUSES a rebuild that would corrupt it - old seasons re-keyed (a team code changing would duplicate every card it
+  touched), two players under one name index, a namesake it cannot place - and prints what left the pool.
+- **A card has one roll a day in the daily battle**, seeded from the day and the card and nothing else. Seeding it
+  from the whole lineup made the finish and the order a luck re-roll worth far more than the finish itself.
+- **A category score is the player's own season, ranked at his position in his era** (`cats`, 0-99, six of
+  them). There is no Clutch and no Deep ball because the catalog has no such column - do not add a category
+  the data cannot back. Per-touch ones are shrunk, or eight catches for 203 yards tops Big play.
+- **A hand is stored before it is shown, never derived.** A hand that followed from the deck could be re-dealt
+  by editing the deck; `card_run_start`, `card_run_battle` and `card_daily_deal` each keep the first one.
+- **`card-logic.mjs` owns every rule** - archetypes, defense traits, lineup legality, battle scoring - for the
+  reason game-logic.mjs and versus-logic.mjs do. It never calls `Math.random`: every draw comes from a `rand` the
+  caller passes, exactly two a card and twelve a battle, so the browser and Deno walk the generator in step.
+- **The ladder gets stronger with every win**, and past the best cards the game holds it plays the top team
+  harder instead (`ladderEdge`) - without that the best collections never met a team that could stop them.
+- **The numbers are tuned, not chosen - and only loosely held.** `tests/test-card-balance.mjs` plays thousands of battles and holds the
+  game as a whole to bands (run length, and whether reading the defense pays). It does NOT pin any single counter
+  or pair: review deleted six of seven pairs and one band moved, by less than seed noise. Its bands are
+  the builder's reading of the design - nobody has played a battle yet.
+- **There are no defenses any more.** `data/card-defense.json` and `tools/data/build-card-defense.mjs` are left
+  in the repo and read by nothing.
+- **No browser writes a card.** `card_owned` and `card_grants` have an own-rows select and no write policy;
+  `grant_cards` is the only writer, service role only, and grants once per (player, kind, ref). A starter deck is
+  the refs `starter:0`-`starter:7`; a daily card's ref is the DATE ALONE, so the two scoring formats share one a day.
+- **The daily card can never cost a season.** `submit-run` chooses it after the season is saved and paid, in its
+  own try/catch, and answers `card: null` on any failure. Do not move it earlier or let it throw.
+- **A read that failed is not an empty collection** - `fetchMyCards` has three answers and `cards.jsx` has an
+  error state of its own. Collapsing them offers a player with fifty cards a starter deck they already opened.
+- **Grey and tan are recoloured a REGION at a time** (v2.24.2): a helmet's highlight is the same grey as a white
+  glove's shadow, so judging one pixel scrubbed helmets and bled colour onto gloves. `card-sprites.mjs` says how.
+- **Drawing a card is not free, and a grid of them is the page** (v2.31.1, CARDS.md 8.5). The owner's
+  collection reached 600 cards and "it lags super bad". The collection draws 24 at a time
+  (`COLLECTION_PAGE`); a figure is painted at `PAINT_HEIGHT` (360 rows, not the sprite's 640), written as a
+  PNG (seven times quicker to write than a WebP at that size) and **one a frame** through `paintSoon`. Any new
+  screen that shows many cards gets all of that by using `CardFace` - and should still not draw hundreds.
+- **Sprites are recoloured in the browser**, so fourteen neutral WebPs serve every card and there is no file per
+  team. `data/card-skin.json`'s player list is a **first pass awaiting the owner's correction** (v2.24.1), and
+  that review is a launch gate for production. It is written by `tools/cards/build-card-skin.mjs` from lists
+  of NAMES in that file - correct it there and re-run, never in the JSON. Anybody the drafter was not sure of is
+  absent and wears the default, because a wrong tone on a named real person is worse than a neutral one; and it
+  was never decided from a name. 967 players were measured from their public Sleeper headshot (nothing of the
+  photo is kept); the other 588 are memory alone, listed as `FROM_MEMORY` in that file and the likeliest to be wrong.
+- **What is in a pack is `card-packs.mjs`; what it costs is a `card_packs` row** (v2.24.0). The browser prints
+  the odds from the module and `card-claim` rolls from the same module, so what is read is what is rolled - and
+  **the client and the functions must ship together whenever it changes**. `buy_pack` does the stock, the coins
+  and the grant in one transaction, charges the ROW's price, and refuses a pack that got dearer than the price
+  the buyer's screen showed.
+- **A purchase carries an open id, and three failures mean "unknown", not "no".** `offline`, `network` and
+  `server` may each follow a pack that WAS bought, so the screen keeps the id and asks again about the same
+  purchase; `buy_pack` answers a repeat with the first time's cards and charges nothing. None of those three
+  sentences may say nothing was charged, and a test holds that. **The ids live in `CardsScreen`, one per pack**,
+  not in the shop component: review found the first version lost the id on a tab switch, which made Try again
+  a second purchase. Only buy_pack's own four refusals are a certain no on a retry. **And SENT is not
+  UNANSWERED** (v2.31.1): a purchase is in that map while it is on its way too, so the shelf must also ask
+  whether it is in flight - reading the map alone showed "we couldn't confirm that purchase" under every pack
+  as it opened, for a release, because every test waited for the answer before it looked at the screen.
+- **The migration replaces `wallet_ledger`'s kind check by what it is, not by its name** - a DO block drops any
+  check on that table listing the kinds. The name is confirmed on PGlite and staging only; on a database that
+  called it something else, a drop-by-name would leave the old list in force and every purchase a 500.
+- **Pack prices are measured** by test 11 in `tests/test-economy-security.mjs`. Legends was first written at
+  1,500, which made the one pack CERTAIN to hold a 100+ card also the cheapest route to one.
+- **The server plays the battle** (CARDS.md 11). The browser sends six cards in an order; `card-claim` checks
+  them against the hand it dealt, draws the luck and the category order and calls `card_run_battle`, which
+  checks the run's step under a lock, so a double tap cannot count twice. `card_decks`, `card_runs` and
+  `card_dailies` have RLS on and **no policy and no client grant at all** - the seed says which teams are
+  coming - and are read through `card_battle_state()` and `card_boards()`. Their boards carry **no name snapshot**: they join `profiles` when read, so `mod_act` and
+  `claim_username` know nothing of them.
+- **A failed play is not "not played".** The battle screen never replays after a lost answer: it reads the
+  state, which carries the rounds played, and shows that. Same family as the pack shop's open id.
+- **The category is CALLED, and three versions are why** (v2.31.0, CARDS.md 4.1). Everything on show was
+  "read off the bigger number" (v2.27.0); the category hidden until the card was down was a guess - the owner
+  said the picks felt random, and the balance test measured reading the screen at three battles in a hundred
+  over "Pick for me". A choice needs something you know and something you give up: the category is known, a
+  category spent is gone for the rest of the hand, and a round won is the next call. **Do not hide the
+  category again, and do not show a projected total or sort the hand by rating** - each is one of the two
+  failures. `playRound` decides whose category a round is on, so no caller can; `roundProblem` refuses
+  `bad_cat` on your call and ignores what is sent on theirs.
+- **A stored round carries the call for the next one** (`next: { by, cat }`). The ladder hides their cards, so
+  the browser cannot work their call out; this is how it learns it, reload included, and why v2.31.0 had no
+  migration. `card_runs.cats` and `card_gauntlets.cats` are still written (the SQL requires six) and read by
+  nothing.
+- **The battle screen is one panel, before the field, and nothing in it runs on a timer** (CARDS.md 11.5). The
+  owner's words for the version it replaced: "by the time you read them it disappears and goes back to the
+  bottom". A result stays until Next round is pressed; the page never scrolls itself.
+- **Their cards are hidden until played, by the server** (`maskFoe`): a ladder answer and `card_battle_state`
+  carry the spots to come and not the cards. A new answer that carries a run's `foe` has to go through it.
+- **The daily card is one of the six players drafted** (`dailyCard(history, rand)`), falling back to the day's
+  boards only when none of the six has a card.
+- **The card screens are not in the page** (v2.30.0, CARDS.md 15). `build.mjs` builds them into
+  `public/cards.js`, fetched when Cards is first opened through `cards-lazy.jsx`. They borrow React, storage,
+  game-logic, rewards and cosmetics from the page at run time (`cards-shared.mjs`), and **a card file importing
+  anything not in that table fails the build**. Never import a card file statically from `perfect-season.jsx`,
+  and note their stylesheet is no longer part of `APP_CSS`.
+- **The gauntlet's list is written out and append-only** (`GAUNTLET`, CARDS.md 13): progress is a count of
+  stages cleared, so reordering or recomputing the list silently changes which team stage five is. It was
+  reordered ONCE, in v2.31.0 (Baltimore sixth to fourth, when the Flex spots went), while only the owner had
+  progress on it. Not again.
+- **A round is written by its number** (`card_run_round`, `card_daily_round`): anything but the next one is
+  `stale`, under the row's lock, so a retry can never re-roll a round's luck.
+- **One of a card in a finish; a copy is sold** (v2.26.0, CARDS.md 12). The database has no catalog and cannot
+  price a card, so every grant an Edge Function makes carries `sell` and `grant_cards` applies it only when
+  the card is already held. A grant with no `sell` (the SQL editor's) still stacks. Card values are
+  `rewards.mjs`'s; `tests/test-economy-security.mjs` holds a pack of nothing but copies under 80% of its
+  price, which is the promise that a full collection is not a coin printer.
+- **A battle's playback hides the ending until it is over**: `Arena` reports `onDone` and the
+  parent tracks WHICH battle finished, not a flag - a flag reset in an effect on the parent runs after the
+  child's effect has already reported, and sticks at false.
+- **A card's printed rating plays in every slot.** `flexRating`/`effectiveRating` are the draft's and are not
+  used; the number on the card face is always the number in the battle.
 
 **Signing in with Google (v1.16.0).** The Account panel offers "Continue with Google" beside the email form.
 Google has no username to give, so such an account arrives with **no profile row at all** (`handle_new_user`
@@ -742,6 +880,20 @@ node tests/test-guess-logic.mjs        # every rule and refusal, that five green
 node tests/test-guess-edge.mjs         # the real submit-guess, executed: who is asking, the daily's clock, the duplicate, and that the result is the server's
 node tests/test-guess-sql.mjs          # the migration in PGlite: nobody writes the table, the daily's unique index, both boards == the mock, a rename, the coin claim
 node tests/test-guess-screen.mjs       # the buttons: the tile, both variants, guesses typed, the colours IN WORDS, resume, the boards, the guest, the refusal map
+
+# Cards (in progress - rules only, 2026-11-13). See CARDS.md. card-logic.mjs is pure, so none of these needs a database or a browser.
+node tests/test-card-catalog.mjs       # data/cards.json: every pool row is a card, and a rebuild of players.json never rewrites one
+node tests/test-card-logic.mjs         # archetypes, category scores, decks/hands/teams, synergies, abilities, a battle, CPU teams, a pinned checksum
+node tests/test-card-balance.mjs       # climbs the ladder a few thousand times with three players and PRINTS the balance the game is held to (about three minutes)
+node tests/test-cards-sql.mjs          # migration-cards.sql in PGlite: nobody writes the tables, a grant happens once, guests refused, SQL == mock
+node tests/test-cards-edge.mjs         # the real card-claim, executed: the order it refuses in, eight cards, and only once
+node tests/test-cards-daily-edge.mjs   # the real submit-run: a daily earns one card a day, and a failed grant never costs the season
+node tests/test-cards-client.mjs       # the switch, the catalog load that retries, and a collection read with three answers
+node tests/test-card-sprites.mjs       # the fourteen neutral sprites: one per archetype plus role, the size a card draws
+node tests/test-card-face.mjs          # the recolouring maths, a card's spoken label, every text colour at AA, a card with no sprite
+node tests/test-cards-screen.mjs       # the tile and the switch, the starter deck, the collection, hiding it, the pack shop, the daily card on the result
+node tests/test-card-packs.mjs         # what is in a pack: the odds add up, 20,000 rolls match what is stated, the art exists
+# Battles (v2.25.0) ride in test-cards-sql, test-cards-edge, test-cards-screen and test-card-logic.
 
 # Coins and the shop (v1.12.0). The SQL ones run the real migrations in PGlite and compare against the mock too.
 node tests/test-rewards.mjs            # every coin rule and line, the starting balance, badge rewards
@@ -1325,10 +1477,35 @@ shadow, and navy "scoreboard" moments.
 
 ## Releasing
 
-**Nothing reaches production without going through staging first, getting a changelog entry, and
-shipping as a version.** This is a hard rule, not a preference — it applies to one-line fixes too.
-It exists because the Championship-scoring launch went straight to production with a green test
-suite and still broke the live Leaderboard for every existing account.
+**THERE IS NO TEST SITE ANY MORE (2026-11-25), and everything below this box that says "staging" is
+history.** The staging Supabase project (`ndelisxdxjmvcdezzecu`) was deleted - Supabase has no undelete - and
+the free plan's second slot went to another project of the owner's. The owner was offered a paid third
+project and chose instead: **updates go straight to gridspin.app.** What that means in practice:
+
+- **Every release still ships as a version with a changelog entry.** That half of the old rule stands.
+- **`node tests/run-all.mjs` green and the changed screens driven in `tools/ui-harness` are the whole gate
+  now**, so neither may be skipped, and "the suite passed" is known to be insufficient (see the old rule
+  below). Say plainly in the release note what could not be checked without a real signed-in session.
+- **Production's database and deploys were the owner's to run and still need the owner's word each time**:
+  a migration, an Edge Function deploy and a merge to `master` each change the live site at once. Ask, with
+  the exact steps, before any of them. Order is unchanged: migration, then functions, then client.
+- **A migration that DROPS or that validates existing rows gets a read-only look at production first**
+  (what rows exist, what would be touched), because there is no longer anywhere else to find out.
+- **Cards are on for testers only** (v2.32.0): production's build is `CARDS_ON=testers` and its secret is
+  `CARDS_ENABLED=testers`, and the owner's account is in `card_testers`. That is where card work is played.
+  Launching cards to everybody is still gated on the skin-tone review, `/privacy` and `/terms`.
+- The `staging` branch and the staging Vercel site still exist and point at a database that is gone; the
+  site loads and every sign-in, board and save fails. Work happens on `staging` as a working branch and
+  merges to `master` to ship. `deploy:fn:staging` and every `--project-ref ndelisxdxjmvcdezzecu` command
+  now fail - there is nothing there.
+- If a test database ever comes back, it is rebuilt from `schema.sql` plus the migration list in
+  `tests/test-migrations.mjs`, the seven functions, and the dashboard settings this file lists (anonymous
+  sign-ins, email confirmation off, Google, the Turnstile TEST keys, the redirect URL).
+
+**The old rule, kept because its reason has not gone away:** nothing reached production without going
+through staging first, getting a changelog entry, and shipping as a version. It existed because the
+Championship-scoring launch went straight to production with a green test suite and still broke the live
+Leaderboard for every existing account. That risk is now accepted by the owner, not removed.
 
 - **`master` is production. `staging` is the test site.** Work lands on `staging`, gets verified on
   the staging URL, and only then merges to `master`. Never push a feature branch straight to
@@ -1410,6 +1587,80 @@ suite and still broke the live Leaderboard for every existing account.
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.32.0's (cards for testers, no test site): production had NONE of cards when this was written - it was
+  at 2.22.1 - so this is the whole card stack at once: run **`migration-client-errors.sql`** if 2.22.0's never
+  ran there (check first), then **`migration-cards.sql`**, then re-run **`migration-profiles.sql`**; put the
+  owner on the list (`insert into card_testers (user_id, note) select id, 'the owner' from profiles where
+  lower(username) = 'admin';`); set the secret **`CARDS_ENABLED=testers`**; **deploy the Edge Functions**
+  (seven); then merge to `master`. A function ahead of the migration answers `server` to a tester and
+  `cards_off` to nobody, since the list cannot be read; a client ahead of both shows no tile to anybody.
+  v2.31.1's (the pack shop's false warning, the collection 24 at a time, cheaper card painting): client only.
+  v2.31.0's (the category is called, no Flex): **deploy the Edge Functions**, then the client. **No migration.**
+  `card-logic.mjs` changed - the 2,000-battle checksum moved - so `card-claim` and the client ship together:
+  an old client against the new function is refused `bad_cat` on every round it calls (it sends no category),
+  and a new client against the old function has its category ignored and a hidden one played instead. The
+  daily and gauntlet teams are worked out when asked for, so they are re-fielded at once. **A ladder battle is
+  STORED with its team (`card_runs.foe`), so one already dealt keeps its old spots - including one with no
+  round played yet**, which the pre-deploy check missed: it counted battles with a round down, and the owner
+  opened a run sitting on six wins and met a ten-card Flex round. When a release changes `SPOTS`, look for
+  `status = 'live'` runs whatever their rounds, and re-field or end them (CARDS.md 11.6).
+  v2.30.0's (card screens on demand): client only. The deploy now serves a second script, `/cards.js`; nothing
+  per-environment. Re-run `npm run app:sync` when the Android app is next built.
+  v2.29.1's (the battle's field): client only.
+  v2.29.0's (the gauntlet's screen): client only on a database that took 2.28.1's migration and functions -
+  the table, the four functions and `card-claim`'s three actions shipped then, dormant.
+  v2.28.2's (several packs at once): client only - but **re-run `migration-cards.sql`** if 2.28.1's did not
+  finish. **The file replaces `wallet_ledger_kind_check` in two places and BOTH must hold the whole list**:
+  each replacement is validated against every row, so a first list missing 'card_win' fails the whole file on
+  any database where a battle has been won. A new ledger kind goes in both.
+  v2.28.1's (their card hidden, the reveal, the daily card): re-run **`migration-cards.sql`** (it replaces
+  `card_battle_state` and adds the gauntlet's table and functions, which nothing calls yet) and
+  **`migration-profiles.sql`** (`delete_account` learns the gauntlet), then **deploy the Edge Functions**
+  (`card-claim` and `submit-run` both changed), then the client.
+  v2.28.0's (a round at a time, on the test site): re-run **`migration-cards.sql`**, then **deploy the Edge
+  Functions**, then the client. The migration adds `card_runs.cats` and `rounds` and `card_dailies.log`, adds
+  `card_run_round` and `card_daily_round`, and **ends any run left live from v2.27.0** (it has no category
+  order to play on). `card-logic.mjs` changed, so the 2,000-battle checksum moved and **the client and the
+  functions ship together**: an old client against the new function gets `malformed` on every play, and a new
+  client against the old function likewise.
+  v2.27.0's (the battle rebuilt, on the test site): re-run **`migration-cards.sql`**, re-run
+  **`migration-profiles.sql`** (`delete_account` learns the deck and the daily battles), then **deploy the Edge
+  Functions**, then the client. **This migration DROPS**, the second in the repo to: the v2.25.0 shape of
+  `card_runs` (recognised by its `defense` column) and `card_showdowns`, with the functions around them. They
+  only ever existed on the test site, and any run in flight there is lost. It is safe to re-run - a run of the
+  new shape is never dropped, and a test holds that. Out of order: the old `card-claim` against the new tables
+  answers `server` to every battle, and a new client against the old function gets `malformed`. The 2,000-battle
+  checksum in `tests/test-card-logic.mjs` moves with any rule change, and then client and functions ship together.
+  v2.26.0's (copies are sold, on the test site): re-run **`migration-cards.sql`**, then **deploy the Edge
+  Functions**, then the client. The migration replaces `grant_cards` and `buy_pack`, adds two functions and
+  replaces `wallet_ledger_kind_check` again (`card_sell`). **Migration first is not optional here**: the
+  new `card-claim` and `submit-run` send `sell` on every grant, which the OLD `grant_cards` ignores (so a
+  copy simply stacks, harmless), but a copy sold by the new one needs the new ledger kind. A client ahead of
+  the function gets `malformed` on the copies sweep and nothing else changes.
+  v2.25.0's (battles, on the test site): re-run **`migration-cards.sql`**, re-run **`migration-profiles.sql`**
+  (`delete_account` learns to erase runs and showdowns), then **deploy the Edge Functions**, then the client.
+  The migration adds two tables and seven functions and replaces `wallet_ledger_kind_check` again (it gains
+  `card_win`); it only adds. `card-claim` now bundles `rewards.mjs`, `data/versus-pool.json` and
+  `data/card-defense.json` as well as `card-logic.mjs`, so **the client and the functions ship together**:
+  a client ahead of the function gets `malformed` on Start a run, and a function ahead of the migration
+  answers `server`. Production takes the same migration and functions and stays off.
+  v2.24.0's (the pack shop, on the test site): re-run **`migration-cards.sql`**, then **deploy the Edge
+  Functions**, then the client. The migration adds `card_packs` and `buy_pack`, and replaces two constraints by
+  name - `card_grants_kind_check` and **`wallet_ledger_kind_check`, which belongs to migration-wallet.sql's
+  table** and gains the kind `pack`; it only adds, so the site works between the steps. `card-claim` changed and
+  bundles the new `card-packs.mjs`, which the browser also carries, so **the client and the functions ship
+  together**: a client ahead of the function gets `malformed` on every Open, and a function ahead of the
+  migration answers `server`. Production takes the same migration and functions and stays off - `card-claim`
+  answers `cards_off` before touching the database, and a production build carries no tile.
+  v2.23.0's (cards, on the test site): run **`migration-cards.sql`**, re-run **`migration-profiles.sql`**
+  (`delete_account` learns to erase cards), **set the secret `CARDS_ENABLED=1` on the STAGING project only**
+  (`npx supabase secrets set CARDS_ENABLED=1 --project-ref <staging ref>`), **deploy the Edge Functions**
+  (`node deploy-function.mjs <env>` deploys **SEVEN** now - `card-claim` is new, and `submit-run` changed), then
+  the client. Out of order: a client ahead of the function gets a 404 on the starter button; a function ahead
+  of the migration answers 500 `server`; a missing secret answers `cards_off`, which the screen says in words.
+  **Production takes the same migration and functions and stays off**: with no secret `card-claim` answers
+  before touching the database and `submit-run` chooses no card, and a production build carries no tile and
+  ships no catalog. Do NOT set the secret on production until `/privacy` and `/terms` say what cards store.
   v2.22.0's (the crash sink): run **`migration-client-errors.sql`**, then **deploy the Edge Functions**
   (`node deploy-function.mjs <env>` deploys **SIX** now), then the client. **The order is not optional
   here**: a client ahead of the function POSTs at a 404 and silently drops every report, which is
