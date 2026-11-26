@@ -1148,6 +1148,27 @@ await runTest("a copy pulled from a pack is sold as it arrives, and the screen s
   assert(!container.querySelector("[data-swept]"), "nothing was stacked, so there was nothing to sweep");
 });
 
+// v2.35.0: the card badges pay, and the screen says which one and what it paid.
+await runTest("a pack that brings the hundredth card says the badge it earned, and the wallet shows the coins", async () => {
+  const eli = await signUp("pia@cards.test", "piapia");
+  auth._wallet.apply(eli, 1000, "season", "test-coins");
+  const some = [...CARDS.values()].slice(0, 98);
+  for (let i = 0; i < some.length; i += 20) auth._cards.grantCards(eli, "gift", some.slice(i, i + 20).map((c) => ({ ref: "eli:" + c.id, card: c.id, finish: "base" })));
+  auth._cards.freshPulls = true;
+  await openCards();
+  const before = auth._wallet.balanceOf(eli);
+  await click(shopTab()); await settle();
+  await click(packBtn("pack-standard", "Open")); await flush();
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
+  auth._cards.freshPulls = false;
+  const line = container.querySelector(".cd-fresh [data-badge-won]");
+  assert(line && line.dataset.badgeWon === "collector" && /Collector badge unlocked/.test(line.textContent) && /\+100 coins/.test(line.textContent), "the badge, by name, and what it paid: " + line?.textContent);
+  assert(auth._wallet.balanceOf(eli) === before - 150 + 100 && container.querySelector(".cd-bal").textContent.includes((before - 50).toLocaleString("en-US")), "and the balance on the shelf is the one after the badge: " + container.querySelector(".cd-bal").textContent);
+  await click(packBtn("pack-standard", "Open")); await flush();
+  await click(packBtn("pack-standard", "Confirm")); await settle(); await settle();
+  assert(!container.querySelector("[data-badge-won]"), "the next pack says nothing - a badge is earned once");
+});
+
 await runTest("a daily card the account already holds is sold, and the result says so", async () => {
   // LAST in the file: it renders the component on its own, in place of the app.
   const helpers = await import("./helpers.mjs");

@@ -26,7 +26,7 @@ import {
 } from "./card-logic.mjs";
 import { COIN_RULES, cardWinCoins, gauntletCoins } from "./rewards.mjs";
 import { Coins, NameLink } from "./cosmetics.jsx";
-import { CardFace, useCardSprite, CARD_PAINT as P } from "./card-face.jsx";
+import { CardFace, useCardSprite, CARD_PAINT as P, BadgeLine } from "./card-face.jsx";
 
 // A deck's, a team's and a run's own refusals, as sentences. cards.jsx folds these into CARD_SENTENCES, so the
 // test that holds that map to storage-cards.js's CARD_REFUSALS holds these too.
@@ -710,7 +710,8 @@ export function BattleArea({ mode, rows, onBalance, onShare, siteUrl }) {
       if (!res.done) { setSt((s) => ({ ...s, run: { ...s.run, rounds: res.run.rounds } })); return; }
       if (typeof res.coins?.balance === "number") onBalance?.(res.coins.balance);
       // The sixth round: the battle is over. Keep it on screen; the state already holds the next hand.
-      setShown({ id: run.id, step: run.wins, hand: run.hand, battle: res.battle, coins: res.coins, wins: res.run.wins, over: res.run.status !== "live" });
+      if (typeof res.badge?.balance === "number") onBalance?.(res.badge.balance);
+      setShown({ id: run.id, step: run.wins, hand: run.hand, battle: res.battle, coins: res.coins, badge: res.badge, wins: res.run.wins, over: res.run.status !== "live" });
       setSt((s) => ({ ...s, run: { ...res.run, last: res.battle }, best: Math.max(s.best, res.run.wins), paidToday: s.paidToday + (res.coins?.credited > 0 ? 1 : 0) }));
       return;
     }
@@ -784,7 +785,8 @@ export function BattleArea({ mode, rows, onBalance, onShare, siteUrl }) {
       setBusy(false);
       if (!res.done) { setSt((s) => ({ ...s, gauntlet: { ...s.gauntlet, rounds: res.gauntlet.rounds } })); return; }
       if (typeof res.coins?.balance === "number") onBalance?.(res.coins.balance);
-      setShownG({ stage, hand: g.hand, battle: res.battle, coins: res.coins, first: res.first, cleared: res.gauntlet.cleared });
+      if (typeof res.badge?.balance === "number") onBalance?.(res.badge.balance);
+      setShownG({ stage, hand: g.hand, battle: res.battle, coins: res.coins, badge: res.badge, first: res.first, cleared: res.gauntlet.cleared });
       setSt((s) => ({ ...s, gauntlet: { cleared: res.gauntlet.cleared, stage: null, hand: [], rounds: [], last: res.battle, lastStage: stage } }));
       return;
     }
@@ -838,6 +840,7 @@ export function BattleArea({ mode, rows, onBalance, onShare, siteUrl }) {
           <Arena key={attempt(shownG.stage, shownG.hand)} hand={shownG.hand} foe={shownG.battle.foe} rounds={shownG.battle.rounds} edge={shownG.battle.edge} foeName={gauntletName(shownG.stage)}
             onDone={() => { setSeenBattle(shownG.battle); top.current?.focus({ preventScroll: true }); }} />
           {seen && won && shownG.first === true && <p className="cb-lead" data-paid>You beat {gauntletName(shownG.stage)}.{shownG.coins?.credited > 0 && <> You earned <Coins amount={shownG.coins.credited} size={16} />.</>}</p>}
+          {seen && <BadgeLine badge={shownG.badge} />}
           {seen && won && shownG.first === false && <p className="cb-lead" data-again>You beat {gauntletName(shownG.stage)} again. A stage pays the first time only.</p>}
           {seen && won && shownG.cleared >= total && <p className="cb-lead" data-all>That's all {total}. You've run the gauntlet.</p>}
           {seen && !won && <p className="cb-lead" data-over>{gauntletName(shownG.stage)} held. Try it again whenever you like - you get a new hand each time.</p>}
@@ -955,6 +958,7 @@ export function BattleArea({ mode, rows, onBalance, onShare, siteUrl }) {
             ? <>You earned <Coins amount={shown.coins.credited} size={16} />.</>
             : "That win counts for your run. It paid no coins - today's paid wins are used up."}</p>
         )}
+        {seen && <BadgeLine badge={shown.badge} />}
         {seen && shown.over && <p className="cb-lead" data-over>The run ends at <b>{shown.wins}</b> {shown.wins === 1 ? "win" : "wins"}. Your best is {st.best}.</p>}
         {seen && (
           <div className="cb-acts">

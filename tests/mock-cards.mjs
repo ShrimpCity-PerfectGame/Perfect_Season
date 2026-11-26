@@ -9,6 +9,7 @@
 import { CARDS, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, CATEGORY_IDS, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey, maskFoe, GAUNTLET, gauntletFoe, gauntletEdge, gauntletRound } from "../card-logic.mjs";
 import { COIN_RULES, cardWinCoins, cardSellCoins, gauntletCoins } from "../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../card-packs.mjs";
+import { BADGE_BY_ID, cardBadgesEarned } from "../badges.mjs";
 
 const FINISHES = ["base", "silver", "gold", "prism"];
 const KINDS = ["starter", "daily", "gift", "pack"];
@@ -435,7 +436,7 @@ export function makeCards(state, { wallet = null } = {}) {
           return status ? cardHttpError(e.message, status) : cardHttpError("server", 500);
         }
         if (api.openFails) { api.openFails = false; return { data: null, error: { name: "FunctionsFetchError", message: "Failed to send" } }; }
-        return { data: { ok: true, cards: bought.cards.map((c) => (c.sold != null ? { id: c.card, finish: c.finish, sold: c.sold } : { id: c.card, finish: c.finish })), balance: bought.balance, stockLeft: bought.stock_left ?? null, duplicate: bought.duplicate }, error: null };
+        return { data: { ok: true, cards: bought.cards.map((c) => (c.sold != null ? { id: c.card, finish: c.finish, sold: c.sold } : { id: c.card, finish: c.finish })), balance: bought.balance, stockLeft: bought.stock_left ?? null, duplicate: bought.duplicate, badge: payBadges(uid) }, error: null };
       }
       if (["deck_save", "run_start", "run_round", "run_end", "daily_deal", "daily_round", "gauntlet_start", "gauntlet_round", "gauntlet_quit"].includes(body.action)) return api.battle(uid, body);
       if (body.action === "sell_copies") {
@@ -454,6 +455,19 @@ export function makeCards(state, { wallet = null } = {}) {
       if (res.duplicate) return cardHttpError("duplicate", 409);
       return { data: { ok: true, cards: res.granted.map((g) => (g.sold != null ? { id: g.card, finish: g.finish, sold: g.sold } : { id: g.card, finish: g.finish })) }, error: null };
     },
+  };
+  // card-claim's payCardBadges: null unless a card badge was newly awarded. badgeFails: the award errors, and
+  // the pack or battle it rode on is untouched.
+  api.badgeFails = false;
+  const payBadges = (uid) => {
+    try {
+      if (api.badgeFails) throw new Error("award failed");
+      const earned = cardBadgesEarned(api.profile(uid));
+      if (!earned.length || !wallet?.server?.award_badges) return null;
+      const got = wallet.server.award_badges({ p_user: uid, p_badges: earned.map((id) => ({ id, coins: BADGE_BY_ID[id]?.coins ?? 0 })) });
+      if (!got.awarded.length) return null;
+      return { awarded: got.awarded.map((id) => ({ id, name: BADGE_BY_ID[id]?.name ?? id, emoji: BADGE_BY_ID[id]?.emoji ?? "" })), credited: got.credited, balance: got.balance };
+    } catch { return null; }
   };
   // What a copy of a card sells for: rewards.mjs's, from the catalog's rating - as card-claim works it out.
   const sellFor = (c) => cardSellCoins(CARDS.get(c.id)?.rating, c.finish);
@@ -523,7 +537,7 @@ export function makeCards(state, { wallet = null } = {}) {
       let rec;
       try { rec = api.gauntletFinish(uid, stage, toSql(played(rounds)), result.win, last, result.win ? gauntletCoins(stage) : 0); } catch (e) { return refuse(e); }
       if (api.battleFails) { api.battleFails = false; return lost(); }
-      return { data: { ok: true, round, done: true, battle: last, gauntlet: { cleared: rec.cleared, stage: null, hand: [], rounds: [] }, first: rec.first, coins: { credited: rec.credited, balance: rec.balance } }, error: null };
+      return { data: { ok: true, round, done: true, battle: last, gauntlet: { cleared: rec.cleared, stage: null, hand: [], rounds: [] }, first: rec.first, coins: { credited: rec.credited, balance: rec.balance }, badge: payBadges(uid) }, error: null };
     }
     if (body.action === "run_start") {
       if (!deck) return said("no_deck", 409);
@@ -588,7 +602,7 @@ export function makeCards(state, { wallet = null } = {}) {
         last, result.win ? cardWinCoins(run.wins + 1) : 0, COIN_RULES.paidCardWinsPerDay);
     } catch (e) { return refuse(e); }
     if (api.battleFails) { api.battleFails = false; return lost(); }
-    return { data: { ok: true, round, done: true, battle: last, run: { id: run.id, wins: rec.wins, status: rec.status, hand: fromSql(rec.hand), foe: maskFoe(foeFrom(rec.foe), 0), rounds: [] }, coins: { credited: rec.credited, capped: rec.capped, balance: rec.balance } }, error: null };
+    return { data: { ok: true, round, done: true, battle: last, run: { id: run.id, wins: rec.wins, status: rec.status, hand: fromSql(rec.hand), foe: maskFoe(foeFrom(rec.foe), 0), rounds: [] }, coins: { credited: rec.credited, capped: rec.capped, balance: rec.balance }, badge: payBadges(uid) }, error: null };
   };
   return api;
 }

@@ -774,9 +774,14 @@ node tests/test-card-packs.mjs     # what is in a pack: the odds add up, and 20,
   `{ cards, best_run, gauntlet, dailies }`. It is not a block in `player_stats` because that function is
   `language sql` in migration-runs-log.sql and the card tables do not exist when it is created.
   `fetchPlayerProfile` makes it a second, optional read: a failure leaves `extra.cards` null, "not known".
-- **The three card badges** read `extra.cards` and pay nothing yet (`UNPAID` in badges.mjs, 0 in
-  `badge_rewards`). submit-run works badges out from `player_stats`, which has no cards, so it never sees
-  them earned. Paying them means `card-claim` calling `award_badges`.
+- **The three card badges** read `extra.cards` on a profile, and **pay since v2.35.0** (100 / 300 / 1,000,
+  their tiers). submit-run works badges out from `player_stats`, which has no cards, so **`card-claim` pays
+  them** (`payCardBadges`): after a pack is opened and after a ladder battle or a gauntlet stage ends it
+  reads `card_profile`, asks badges.mjs's `cardBadgesEarned` and calls `award_badges`. The answer's
+  `badge` is null unless something was newly awarded, and it carries the badge's NAME, because a card file
+  may not import badges.mjs; `BadgeLine` in card-face.jsx prints it. A failed award never fails the pack or
+  the battle - the next one asks again. A hundredth card that arrives as the daily card (submit-run's grant)
+  is paid on the next pack or battle, not at once.
 
 ## 16. Testers (v2.32.0)
 

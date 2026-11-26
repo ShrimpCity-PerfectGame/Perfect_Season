@@ -209,5 +209,5 @@ export async function openPack(packId, openId, price) {
   if (!res.ok) return res;
   const d = res.data;
   if (typeof d.balance !== "number") return { ok: false, reason: "server" };
-  return { ok: true, cards: d.cards, balance: d.balance, stockLeft: d.stockLeft ?? null, duplicate: d.duplicate === true };
+  return { ok: true, cards: d.cards, balance: d.balance, stockLeft: d.stockLeft ?? null, duplicate: d.duplicate === true, badge: d.badge ?? null };
 }

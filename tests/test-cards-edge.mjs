@@ -12,6 +12,7 @@ import { makeWallet } from "./mock-wallet.mjs";
 import { PACK_BY_ID, packCards } from "../card-packs.mjs";
 import { GAUNTLET, gauntletFoe, gauntletEdge } from "../card-logic.mjs";
 import { gauntletCoins } from "../rewards.mjs";
+import { BADGE_BY_ID } from "../badges.mjs";
 import { initCardData, CARDS, CATEGORY_IDS, STARTER_MAX_RATING, deckProblem, bestDeck, autoPick, spotFits, ladderFoe, dailyFoe, dailyBattle, callerOf, foeCall, bestCategory, nextCall, LUCK_SPREAD, LUCK_WIDE } from "../card-logic.mjs";
 import { COIN_RULES, cardWinCoins, cardSellCoins } from "../rewards.mjs";
 import { CARD_REFUSALS } from "../storage-cards.js";
@@ -43,6 +44,9 @@ function store({ on = true, mode = "1" } = {}) {
     remove() {},
     rpcs: {
       grant_cards: (args) => cards.grantCards(args.p_user, args.p_kind, args.p_grants),
+      // The card badges (v2.35.0): the counts, and the wallet's own award function.
+      card_profile: (args) => cards.profile(args.p_user),
+      award_badges: (args) => wallet.server.award_badges(args),
       // A raise comes back as an error object, the way PostgREST reports one.
       // The battle functions, the same way: a raise is an error object carrying the reason.
       ...Object.fromEntries(Object.entries({
@@ -144,6 +148,37 @@ await runTest("who may not collect, and what a failure is called", async () => {
 
 const open = (userId, pack = "pack-standard", id = "open-0001", price = 5000) => invoke({ action: "open_pack", pack, open: id, price }, { userId });
 const bought = (s) => s.rpcCalls.filter((c) => c.name === "buy_pack");
+
+// v2.35.0: the function that witnessed the cards pays their badges - once, by the wallet's amount, and never
+// at the cost of the pack it rode in on.
+await runTest("a card badge is paid when it is earned, once, and a failed award never costs the pack", async () => {
+  const s = store();
+  s.wallet.apply(ME, 5000, "season", "seed");
+  const calls = (name) => s.rpcCalls.filter((c) => c.name === name);
+  const first = await open(ME);
+  assert(first.status === 200 && first.body.badge === null && calls("card_profile").length === 1 && calls("award_badges").length === 0, "three cards is no badge, and nothing is awarded: " + JSON.stringify(first.body.badge));
+  // Ninety-seven more, so the account holds a hundred - and the award errors the first time it is tried.
+  const have = new Set(s.cards.owned(ME).map((o) => o.card_id));
+  const more = [...CARDS.values()].filter((c) => !have.has(c.id)).slice(0, 97);
+  for (let i = 0; i < more.length; i += 20) s.cards.grantCards(ME, "gift", more.slice(i, i + 20).map((c) => ({ ref: "badge:" + c.id, card: c.id, finish: "base" })));
+  assert(s.cards.profile(ME).cards >= 100, "a hundred cards: " + s.cards.profile(ME).cards);
+  s.rpcFails.award_badges = true;
+  const failed = await open(ME, "pack-standard", "open-b002");
+  assert(failed.status === 200 && failed.body.ok === true && failed.body.cards.length === 3 && failed.body.badge === null, "the award failing leaves the pack whole: " + JSON.stringify(failed.body).slice(0, 160));
+  s.rpcFails.award_badges = false;
+  const before = s.wallet.balanceOf(ME);
+  const paid = await open(ME, "pack-standard", "open-b003");
+  const b = paid.body.badge;
+  assert(b && JSON.stringify(b.awarded) === JSON.stringify([{ id: "collector", name: BADGE_BY_ID.collector.name, emoji: BADGE_BY_ID.collector.emoji }]), "the next pack pays it, and names it: " + JSON.stringify(b));
+  assert(b.credited === 100 && BADGE_BY_ID.collector.coins === 100 && s.wallet.balanceOf(ME) === before - 150 + 100 && b.balance === s.wallet.balanceOf(ME) && paid.body.balance === before - 150, "a hundred coins, on top of the purchase, with the later balance: " + JSON.stringify(b));
+  assert(calls("award_badges").at(-1).args.p_user === ME && JSON.stringify(calls("award_badges").at(-1).args.p_badges) === JSON.stringify([{ id: "collector", coins: 100 }]), "awarded to the session's user");
+  const again = await open(ME, "pack-standard", "open-b004");
+  assert(again.status === 200 && again.body.badge === null && s.wallet.balanceOf(ME) === before - 300 + 100, "and never twice");
+  // A card_profile that cannot be read is the same: no badge, and the pack untouched.
+  s.rpcFails.card_profile = true;
+  const blind = await open(ME, "pack-standard", "open-b005");
+  assert(blind.status === 200 && blind.body.ok === true && blind.body.badge === null, "a failed read of the counts costs nothing either");
+});
 
 await runTest("opening a pack: three cards from that pack, paid for once", async () => {
   const s = store();
@@ -398,6 +433,7 @@ await runTest("the ladder: a hand dealt by the function, a battle played a round
   assert(b.win === true && b.rounds.length === 6 && b.wins > b.losses && b.rounds.map((x) => x.cat).sort().join() === [...CATEGORY_IDS].sort().join(), "sixty of the best cards beat the bottom of the ladder, on the six categories, each called once");
   assert(b.rounds.every((x, i) => x.call === callerOf(b.rounds.slice(0, i))) && b.rounds[5].next === null, "each round called by whoever the rounds before it say, and the last has no next");
   assert(b.rounds.map((x) => x.spot).join() === run.foe.map((e) => e.spot).join() && b.team.length === 6, "one round a spot, and the six that were played");
+  assert(end.badge === null && s.rpcCalls.some((c) => c.name === "card_profile"), "a battle's end asks whether a card badge was earned - one win is not ten");
   const call = battleCalls(s, "card_run_battle")[0].args;
   assert(call.p_user === ME && call.p_coins === cardWinCoins(1) && call.p_cap === COIN_RULES.paidCardWinsPerDay && call.p_win === true, "the caller, the first win's pay and the day's cap are the function's own");
   assert(JSON.stringify(end.run.foe) === JSON.stringify(ladderFoe(row.seed, 1).map((e) => ({ spot: e.spot }))) && JSON.stringify(row.foe.map((e) => e.card)) === JSON.stringify(ladderFoe(row.seed, 1).map((e) => e.id)) && end.run.wins === 1 && end.run.status === "live" && end.run.rounds.length === 0, "the next team follows from the same seed, with no rounds played");
@@ -566,6 +602,7 @@ await runTest("the gauntlet: a real team a stage, a round at a time, paid once f
   assert(last.body.done === true && last.body.battle.win === true && last.body.battle.stage === 0 && last.body.first === true, "six rounds and a win: " + JSON.stringify(last.body).slice(0, 160));
   assert(last.body.gauntlet.cleared === 1 && last.body.coins.credited === gauntletCoins(0) && s.wallet.balanceOf(ME) === had + gauntletCoins(0), "stage one cleared and paid what rewards.mjs says: " + JSON.stringify(last.body.coins) + " " + had + " " + s.wallet.balanceOf(ME));
   assert(row().stage === null && row().last.win === true, "the attempt is over, and kept to be shown");
+  assert(last.body.badge === null && s.rpcCalls.some((c) => c.name === "card_profile"), "a stage's end asks about the card badges too - one stage is not twelve");
   // Again: it plays, and pays nothing. Then give up one, which is not an error either way.
   await post({ action: "gauntlet_start", stage: 0 });
   rounds = [];
@@ -602,7 +639,8 @@ await runTest("a copy from a pack is sold at the catalog's price, which the func
     if (c.sold != null) { assert(c.sold === cardSellCoins(CARDS.get(c.id).rating, c.finish), "a sold copy went for that price"); back += c.sold; }
     else assert(c.finish !== "base", "a kept card is one that was not held - here, anything but a Base");
   }
-  assert(res.body.balance === 1000 - 150 + back && s.wallet.balanceOf(ME) === res.body.balance, "and the balance is the price out and the copies in: " + res.body.balance);
+  // Holding every card the pack can give is past a hundred, so this pack also pays Collector - on top, and apart.
+  assert(res.body.balance === 1000 - 150 + back && res.body.badge?.credited === 100 && s.wallet.balanceOf(ME) === res.body.balance + 100, "and the balance is the price out and the copies in: " + res.body.balance);
   assert(s.cards.owned(ME).every((o) => o.count === 1), "nothing stacked");
 });
 

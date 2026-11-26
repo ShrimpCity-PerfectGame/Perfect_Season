@@ -92,11 +92,12 @@ insert into public.badge_rewards (badge, coins) values
   ('loyal-fan', 100),
   ('stat-nerd', 0),
   ('mad-scientist', 0),
-  -- The three card badges (v2.34.0). Nothing pays them yet: badges are paid by submit-run from player_stats,
-  -- and what these are worked out from is card_profile, which that function does not read.
-  ('collector', 0),
-  ('on-a-roll', 0),
-  ('gauntlet-runner', 0),
+  -- The three card badges. They pay from v2.35.0, and card-claim is what awards them (from card_profile):
+  -- submit-run pays badges from player_stats, which has no cards. RUN THIS BEFORE DEPLOYING card-claim - an
+  -- award made while these read 0 is recorded at 0 and never pays again.
+  ('collector', 100),
+  ('on-a-roll', 300),
+  ('gauntlet-runner', 1000),
   ('day-one', 500)
 on conflict (badge) do update set coins = excluded.coins;
 

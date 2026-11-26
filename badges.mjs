@@ -62,9 +62,9 @@ export const GAUNTLET_STAGES = 12;
 
 // `coins` is paid once, from v1.12.0. Over/Under and Build-a-player scores are saved by the browser
 // rather than checked by the server, so their badges pay nothing.
-// The card badges are verified - the server plays every battle - but nothing pays them YET: submit-run pays
-// badges from player_stats, and these are worked out from card_profile, which it does not read.
-const UNPAID = new Set(["stat-nerd", "mad-scientist", "collector", "on-a-roll", "gauntlet-runner"]);
+// The card badges PAY (v2.35.0): the server plays every battle and rolls every pack, so they are verified,
+// and card-claim awards them itself from card_profile - submit-run cannot, since player_stats has no cards.
+const UNPAID = new Set(["stat-nerd", "mad-scientist"]);
 export const BADGES = [
   { id: "first-down", name: "First Down", emoji: "🏈", tier: "bronze", how: "Finish your first season" },
   { id: "starter", name: "Starter", emoji: "🏈", tier: "bronze", how: "Finish 25 seasons" },
@@ -105,6 +105,18 @@ const count = (have, need) => {
   return { have: Math.min(Math.max(0, n), need), need, earned: n >= need };
 };
 const flag = (earned) => ({ have: earned ? 1 : 0, need: 1, earned: !!earned });
+
+// Which card badges a card_profile row has earned: ids, in catalog order. card-claim and its mock both ask
+// this, so the thresholds the profile shows are the thresholds that pay.
+export function cardBadgesEarned(profile) {
+  const p = profile || {};
+  const n = (v) => Number(v) || 0;
+  return [
+    n(p.cards) >= COLLECTOR_CARDS && "collector",
+    n(p.best_run) >= ROLL_WINS && "on-a-roll",
+    n(p.gauntlet) >= GAUNTLET_STAGES && "gauntlet-runner",
+  ].filter(Boolean);
+}
 
 // Every badge with whether it's earned and how far along it is: [{ id, earned, have, need }], in
 // BADGES order. Yes/no badges report have 0 or 1 of need 1. Missing inputs count as nothing done.
