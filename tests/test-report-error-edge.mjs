@@ -258,4 +258,25 @@ await runTest("a full table of RECENT rows drops, but is still pruned when they 
     `once they age out the sink recovers by itself: ${s._rows.client_errors.length}`);
 });
 
+// v2.34.0: a sign-in the anti-robot check turned away is a second kind. It is NOT a thrown string, so what is
+// stored is held to a fixed vocabulary - the thing the migration's comment on `kind` asks of any new one.
+await runTest("an auth report is stored as its own kind, in a fixed vocabulary", async () => {
+  const { res, row } = await send({ kind: "auth", version: "2.34.0", message: "captcha: server invalid-input-response", stack: "at somewhere", component: "at Form", before: [{ kind: "x", message: "y" }], ua: "", path: "/" });
+  assert(res.status === 200 && row.kind === "auth" && row.message === "captcha: server invalid-input-response", "kept as said: " + JSON.stringify(row));
+  assert(row.stack === null && row.component === null && row.before === null, "and it carries no stack, no component and no ring");
+  for (const good of ["captcha: blocked", "captcha: refused 600010", "captcha: misconfigured 110200", "captcha: server timeout-or-duplicate"]) {
+    assert((await send({ kind: "auth", version: "v", message: good })).row.message === good, good + " is in the vocabulary");
+  }
+  for (const bad of ["captcha: server someone@example.com", "sign-in failed for Pat", "captcha: refused 600010 and more", "captcha: SERVER x", "", null, 7, "captcha: server " + "a".repeat(41)]) {
+    const got = await send({ kind: "auth", version: "v", message: bad });
+    assert(got.res.status === 200 && got.row.kind === "auth" && got.row.message === "captcha: other", "anything else is 'other', never itself: " + JSON.stringify(bad) + " -> " + got.row.message);
+  }
+});
+
+await runTest("a kind nobody defined is a crash, as every older client's report is", async () => {
+  assert((await send({ ...ok, kind: "silent" })).row.kind === "crash", "an unknown kind is stored as a crash");
+  assert((await send(ok)).row.kind === "crash", "and so is a report that names none");
+  assert((await send({ ...ok, kind: "auth", version: "" })).res.status === 400, "an auth report still needs a version");
+});
+
 console.log("test-report-error-edge.mjs done");

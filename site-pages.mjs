@@ -99,7 +99,7 @@ const PRIVACY_SECTIONS = [
     // Cards (v2.33.0, the release that switched them on for everybody). Every clause is a table: card_owned
     // and card_grants, card_decks, card_runs / card_dailies / card_gauntlets. The last sentence is what
     // delete_account does - cards are the person's, so unlike a season they go when the account does.
-    "If you play Cards: the cards you own and how each one was come by - the starter deck, the day's card from the daily, a pack, a win - the deck you have built, and the battles you have played with their results. Your username appears on the card leaderboards beside your record. Nobody else can see which cards you own.",
+    "If you play Cards: the cards you own and how each one was come by - the starter deck, the day's card from the daily, a pack, a win - the deck you have built, and the battles you have played with their results. Your username appears on the card leaderboards beside your record, and your profile shows how many cards you hold and how far you have got. Nobody else can see which cards you own.",
   ]],
   ["Pictures", [
     "A profile picture is cropped to 256 by 256 in your own browser before it is uploaded, and every piece of metadata the file carried - where and when it was taken, what took it - is removed in the process. What reaches the server is the picture and nothing else.",
@@ -121,7 +121,7 @@ const PRIVACY_SECTIONS = [
     // the code does rather than a reassurance. The screen name is the load-bearing one: the browser sends
     // the address it crashed on, and /u/<name> is a username, so the server replaces it with a name like
     // "profile" before anything is stored. supabase/functions/report-error/index.ts is where that happens.
-    "If the game crashes, your browser sends a report so the fault can be found and fixed. It carries the version of the game, the error and where in the code it happened, which screen you were on and which browser you are using - never your name, your account, your email address or your IP address. The screen is a name like \"profile\" rather than the address you were at, so a report sent from somebody's profile page cannot say whose. Reports are kept no longer than 90 days, and are removed as later ones arrive. This page and the terms cannot send one at all: they carry none of the game's code.",
+    "If the game crashes, your browser sends a report so the fault can be found and fixed. It carries the version of the game, the error and where in the code it happened, which screen you were on and which browser you are using - never your name, your account, your email address or your IP address. The screen is a name like \"profile\" rather than the address you were at, so a report sent from somebody's profile page cannot say whose. A shorter report is sent if the anti-robot check turns a sign-in away: it says only that it happened and the check's own code for why, and nothing you typed. Reports are kept no longer than 90 days, and are removed as later ones arrive. This page and the terms cannot send one at all: they carry none of the game's code.",
     "There are no adverts, no tracking pixels and nothing from an advertising network. Nothing else on the site is loaded from anywhere else.",
     "Nothing is sold, rented or handed to anyone else.",
   ]],

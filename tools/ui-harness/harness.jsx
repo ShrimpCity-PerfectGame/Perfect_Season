@@ -768,6 +768,7 @@ function CardsPreview({ userId }) {
         <div className="wrap">
           <h1 className="vh">Cards</h1>
           <CardsScreen userId={userId} isGuest={false} onBack={() => console.log("back")}
+            onShare={async (text) => { console.log("share:\n" + text); return "manual"; }} siteUrl="https://gridspin.test"
             onNeedsAccount={(why) => console.log("needs account", why)} onHide={() => console.log("hide")}
             balance={balance} onBalance={setBalance} initialTab={params.get("tab") || "collection"} />
         </div>

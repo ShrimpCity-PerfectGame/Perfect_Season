@@ -66,7 +66,9 @@ export const clearErrorLog = () => { recent.length = 0; };
 const SINK = typeof SUPABASE_URL !== "undefined" ? SUPABASE_URL : "";
 const SINK_KEY = typeof SUPABASE_ANON_KEY !== "undefined" ? SUPABASE_ANON_KEY : "";
 
-export function sendReport(err, info, own) {
+// `kind` is "crash" unless a caller says "auth" (v2.34.0, storage.js: a sign-in the anti-robot check turned
+// away). The server holds an auth report to a fixed vocabulary, so nothing typed into a form can ride in.
+export function sendReport(err, info, own, kind) {
   // The tests and tools/ui-harness build with no Supabase environment, so both defines are "". Without this
   // guard the whole suite POSTs at a relative URL on every caught render error.
   if (!SINK || !SINK_KEY) return;
@@ -80,6 +82,7 @@ export function sendReport(err, info, own) {
       keepalive: true,
       headers: { "Content-Type": "application/json", apikey: SINK_KEY },
       body: JSON.stringify({
+        kind: kind === "auth" ? "auth" : "crash",
         version: VERSION,
         message,
         stack: firstLines(stack, 6),

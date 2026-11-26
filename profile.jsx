@@ -429,6 +429,7 @@ function ProfileView({ profile, isOwner, userId, rank, moderator, onShare, onDet
       {FORMATS.filter((f) => runOf(s, f)).map((f) => <BestLineup key={f} format={f} run={runOf(s, f)} />)}
       <GoToPlayers players={x.goToPlayers} teams={x.teamCounts} />
       <Records s={s} x={x} />
+      <CardsLine x={x} />
       <Minigames x={x} />
       <RecentDrafts recent={s.recent} />
       {isOwner && (
@@ -818,6 +819,25 @@ function Records({ s, x }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// Cards (v2.34.0): counts, never which cards - a collection is its owner's to see. Nothing at all for a
+// player who has none, or when the card read did not come back.
+function CardsLine({ x }) {
+  const c = x.cards;
+  if (!c || !(c.owned > 0)) return null;
+  const tiles = [{ k: "owned", n: num(c.owned), l: "Cards owned" }];
+  if (c.bestRun > 0) tiles.push({ k: "run", n: num(c.bestRun), l: "Best ladder run" });
+  if (c.gauntlet > 0) tiles.push({ k: "gauntlet", n: num(c.gauntlet), l: "Gauntlet stages cleared" });
+  if (c.dailies > 0) tiles.push({ k: "dailies", n: num(c.dailies), l: "Daily battles played" });
+  return (
+    <div className="pf-sec" data-cards>
+      <h2 className="h">Cards</h2>
+      <div className="tiles">
+        {tiles.map((t) => <div className="tile" key={t.k} data-card-stat={t.k}><div className="n">{t.n}</div><div className="l">{t.l}</div></div>)}
+      </div>
     </div>
   );
 }

@@ -18,15 +18,16 @@ const fromProfile = (p) => ({ stats: p.stats, extra: p.extra, details: p.details
 const ids = (badges) => badges.map((b) => b.id);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-await runTest("the catalog: 24 badges in the contract's shape, coins by tier", async () => {
-  assert(BADGES.length === 24, `expected 24 badges, got ${BADGES.length}`);
+await runTest("the catalog: 27 badges in the contract's shape, coins by tier", async () => {
+  assert(BADGES.length === 27, `expected 27 badges, got ${BADGES.length}`);
   assert(new Set(BADGES.map((b) => b.id)).size === BADGES.length, "badge ids must be unique");
   for (const b of BADGES) {
     assert(same(Object.keys(b).sort(), ["coins", "emoji", "how", "id", "name", "tier"]), `${b.id} has keys ${Object.keys(b)}`);
     assert(BADGE_TIERS.includes(b.tier), `${b.id}: unknown tier ${b.tier}`);
     assert(BADGE_BY_ID[b.id] === b, `BADGE_BY_ID is missing ${b.id}`);
     assert(b.name && b.emoji && b.how, `${b.id} needs a name, emoji and how`);
-    const unpaid = b.id === "stat-nerd" || b.id === "mad-scientist"; // browser-saved scores pay nothing
+    // Browser-saved scores pay nothing; the three card badges are verified but nothing pays them yet.
+    const unpaid = ["stat-nerd", "mad-scientist", "collector", "on-a-roll", "gauntlet-runner"].includes(b.id);
     assert(b.coins === (unpaid ? 0 : TIER_COINS[b.tier]), `${b.id}: coins ${b.coins}`);
   }
   assert(Object.keys(BADGE_BY_ID).length === BADGES.length, "BADGE_BY_ID has exactly the catalog");
@@ -47,7 +48,10 @@ await runTest("badges.mjs is pure: no imports, so it loads on its own anywhere",
   const source = readFileSync(new URL("../badges.mjs", import.meta.url), "utf8");
   assert(!/^\s*import\b|\bimport\s*\(|\brequire\s*\(|^\s*export\s*(\*|\{[^}]*\})\s*from\s/m.test(source), "badges.mjs must not import anything");
   const alone = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-  assert(alone.badgeProgress({}).length === 24, "it should work loaded with nothing around it");
+  assert(alone.badgeProgress({}).length === 27, "it should work loaded with nothing around it");
+  // The gauntlet badge is a COPY of the gauntlet's length, for the reason the Century badge's number is one.
+  const { GAUNTLET } = await import("../card-logic.mjs");
+  assert(alone.GAUNTLET_STAGES === GAUNTLET.length, `badges.mjs says ${alone.GAUNTLET_STAGES} stages, card-logic.mjs has ${GAUNTLET.length}`);
 });
 
 // [badge, need, input carrying a value]. Each is checked at need - 1, need and need + 1.
@@ -173,13 +177,27 @@ await runTest("missing and partial inputs count as nothing done, and never throw
     "Unlimited fantasy titles earn none of Big Brain, Front Office, Daily Champion or Old School");
 });
 
+// v2.34.0. Worked out from card_profile, a read made beside the profile's - so "not known" has to be nothing
+// earned, which is also what submit-run's stats (no cards block at all) must give.
+await runTest("the card badges: a hundred cards, ten in a run, the whole gauntlet - and unknown is not earned", async () => {
+  const cards = (c) => ({ extra: { cards: c } });
+  const got = (id, input) => badgeProgress(input).find((p) => p.id === id);
+  for (const [id, field, need] of [["collector", "owned", 100], ["on-a-roll", "bestRun", 10], ["gauntlet-runner", "gauntlet", 12]]) {
+    assert(got(id, cards({ [field]: need - 1 })).earned === false, `${id}: ${need - 1} is not enough`);
+    assert(got(id, cards({ [field]: need })).earned === true, `${id}: ${need} is`);
+    assert(got(id, cards({ [field]: need + 5 })).earned === true && got(id, cards({ [field]: need + 5 })).have === need, `${id}: past it, and progress stops at the need`);
+    assert(got(id, cards(null)).earned === false && got(id, {}).earned === false && got(id, { extra: {} }).earned === false, `${id}: a card read that never came is nothing earned`);
+    assert(BADGE_BY_ID[id].coins === 0 && BADGE_BY_ID[id].how.includes(String(need)), `${id} pays nothing yet and says its number`);
+  }
+});
+
 await runTest("topBadges: gold, special, silver, bronze, then catalog order, up to n", async () => {
   const all = BADGES.map((b) => ({ id: b.id, have: 1, need: 1, earned: true }));
   const ORDER = [
-    "hall-of-famer", "undefeated", "every-single-day", "cinderella", "daily-winner", "century",
+    "hall-of-famer", "undefeated", "every-single-day", "cinderella", "daily-winner", "century", "gauntlet-runner",
     "day-one",
-    "veteran", "dynasty", "playoff-regular", "big-brain", "front-office", "daily-champion", "old-school", "week-warrior", "scout", "bullseye",
-    "first-down", "starter", "ring-bearer", "hot-streak", "loyal-fan", "stat-nerd", "mad-scientist",
+    "veteran", "dynasty", "playoff-regular", "big-brain", "front-office", "daily-champion", "old-school", "week-warrior", "scout", "bullseye", "on-a-roll",
+    "first-down", "starter", "ring-bearer", "hot-streak", "loyal-fan", "stat-nerd", "mad-scientist", "collector",
   ];
   assert(ORDER.length === BADGES.length, `every badge is in this order: ${BADGES.length} badges, ${ORDER.length} listed`);
   assert(same(ids(topBadges(all, ORDER.length)), ORDER), `full order: ${ids(topBadges(all, ORDER.length))}`);

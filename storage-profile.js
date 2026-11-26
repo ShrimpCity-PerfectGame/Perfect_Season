@@ -9,7 +9,7 @@
 import { getClient, READ, rowToProfile, callReason } from "./storage-core.js";
 import {
   AVATAR_BUCKET, AVATAR_TYPES, AVATAR_MAX_BYTES, avatarObjectPath, isOwnAvatarPath, cleanBio, bioLength, BIO_MAX,
-  TEAM_CODES, USERNAME_RE, mapPlayerStats,
+  TEAM_CODES, USERNAME_RE, mapPlayerStats, mapCardProfile,
 } from "./profile-rules.mjs";
 
 // A stored picture's public address, or null.
@@ -58,11 +58,19 @@ export async function fetchPlayerProfile(username) {
     if (data == null) return { status: "missing" };
     const row = data.profile;
     if (!row || typeof row !== "object" || !row.id) return { status: "error" };
+    // Cards (v2.34.0) are a second read, and an OPTIONAL one: a profile is whole without them. A read that
+    // failed - or a database that has no card_profile yet - leaves `cards` null, which the screen and the
+    // badges both read as "not known", never as "has none".
+    let cards = null;
+    try {
+      const got = await getClient().rpc("card_profile", { p_user: row.id }, READ);
+      if (!got.error) cards = mapCardProfile(got.data);
+    } catch (e) { /* not known */ }
     return {
       status: "ok",
       profile: {
         id: row.id, username: row.username, joined: row.created_at ?? null,
-        details: mapDetails(data.details), stats: rowToProfile(row), extra: mapPlayerStats(data.stats),
+        details: mapDetails(data.details), stats: rowToProfile(row), extra: { ...mapPlayerStats(data.stats), cards },
       },
     };
   } catch (e) {

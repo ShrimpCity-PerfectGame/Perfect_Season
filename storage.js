@@ -55,21 +55,53 @@ const CAPTCHA_SAID = {
 // v2.20.1 ship a sentence no screen ever showed.
 export const captchaSentence = (reason) => CAPTCHA_SAID[reason] || CAPTCHA_SAID.refused;
 const captchaFailure = (reason) => ({ message: captchaSentence(reason), __captcha: true, __captchaReason: reason });
-async function withCaptcha(options = {}) {
+// A SIGN-IN THE CHECK TURNED AWAY IS RECORDED (v2.34.0). From about 2026-10-02 to 2026-11-26 production's
+// auth server refused every token - the secret saved in Supabase was not the widget's - so no email
+// account could sign in or be made and no guest account was made for eight weeks, and nothing anywhere said
+// so: a refusal is a sentence on one person's screen, not a crash. It was found by the owner trying to log
+// in. So each kind of refusal goes into the crash net's ring, and ONCE a page load to the sink, as kind
+// "auth". The message is built here from a fixed vocabulary - the reason, and a code that is Cloudflare's
+// or the auth server's own word - and report-error holds it to that shape, so an address or a name typed
+// into the form cannot be carried.
+//
+// The crash net is HANDED IN (setCaptchaReporter, called once by perfect-season.jsx) rather than imported:
+// this file is loaded by plain Node in a dozen tests, and error-boundary.jsx is a .jsx file Node cannot read.
+const captchaReported = new Set();
+const CODE_OK = /^[a-z0-9-]{1,40}$/;
+let captchaReporter = null;
+// report(message, where, first): `first` is true the first time this page load has seen that message - the
+// one worth sending to the sink. Every one is worth the ring.
+export function setCaptchaReporter(report) { captchaReporter = typeof report === "function" ? report : null; }
+export function noteCaptcha(where, reason, code) {
+  const word = String(code == null ? "" : code).toLowerCase();
+  const message = `captcha: ${reason}${CODE_OK.test(word) ? ` ${word}` : ""}`;
+  const first = !captchaReported.has(message);
+  captchaReported.add(message);
+  try { captchaReporter?.(message, where, first); } catch (e) { /* a report must never fail a sign-in */ }
+  return message;
+}
+// The auth server's own refusal: "captcha protection: request disallowed (invalid-input-response)". The
+// bracketed word is Cloudflare's verdict on the token and is what tells a wrong secret from a spent token.
+function watched(where, result) {
+  const said = result?.error?.message || "";
+  if (/captcha/i.test(said)) noteCaptcha(where, "server", (/\(([a-z0-9-]{1,40})\)/i.exec(said) || [])[1]);
+  return result;
+}
+async function withCaptcha(options = {}, where = "auth") {
   if (!captchaConfigured()) return { ok: true, options };
-  const { token, reason } = await captchaToken();
-  if (!token) return { ok: false, error: captchaFailure(reason) };
+  const { token, reason, code } = await captchaToken();
+  if (!token) { noteCaptcha(where, reason, code); return { ok: false, error: captchaFailure(reason) }; }
   return { ok: true, options: { ...options, captchaToken: token } };
 }
 export async function authSignUp(email, password, username) {
-  const cap = await withCaptcha({ data: { username } });
+  const cap = await withCaptcha({ data: { username } }, "sign-up");
   if (!cap.ok) return { data: null, error: cap.error };
-  return getClient().auth.signUp({ email, password, options: cap.options });
+  return watched("sign-up", await getClient().auth.signUp({ email, password, options: cap.options }));
 }
 export async function authSignIn(email, password) {
-  const cap = await withCaptcha();
+  const cap = await withCaptcha({}, "sign-in");
   if (!cap.ok) return { data: null, error: cap.error };
-  return getClient().auth.signInWithPassword({ email, password, options: cap.options });
+  return watched("sign-in", await getClient().auth.signInWithPassword({ email, password, options: cap.options }));
 }
 // A guest: Supabase's anonymous sign-in, taken when a visitor finishes a season so it can go on the
 // leaderboard (migration-profiles.sql gives the account its profile and its name). Nothing is asked of
@@ -78,9 +110,9 @@ export async function authSignIn(email, password) {
 // has played a whole season, with no form on screen. Turnstile's interaction-only mode is what makes that
 // bearable - a plausible browser is never asked anything.
 export async function authSignInAsGuest() {
-  const cap = await withCaptcha();
+  const cap = await withCaptcha({}, "guest");
   if (!cap.ok) return { data: null, error: cap.error };
-  return getClient().auth.signInAnonymously({ options: cap.options });
+  return watched("guest", await getClient().auth.signInAnonymously({ options: cap.options }));
 }
 
 // Signing in with Google. The page leaves for Google and comes back to `redirectTo`, where supabase-js
@@ -104,9 +136,9 @@ export async function authAddEmail(email, password) {
 // setting this repo does not hold - the same drift CLAUDE.md warns about under Releasing. It is the site's
 // own origin, which is already allowed in both projects because Google sign-in has used it since v1.16.0.
 export async function authResetPassword(email, redirectTo) {
-  const cap = await withCaptcha({ redirectTo });
+  const cap = await withCaptcha({ redirectTo }, "reset");
   if (!cap.ok) return { data: null, error: cap.error };
-  return getClient().auth.resetPasswordForEmail(email, cap.options);
+  return watched("reset", await getClient().auth.resetPasswordForEmail(email, cap.options));
 }
 // The second half, called while that recovery session is live. It is the same updateUser authAddEmail uses,
 // with only the password - a guest trading up sets both at once, and this sets one on an account that

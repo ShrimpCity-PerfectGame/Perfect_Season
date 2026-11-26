@@ -218,4 +218,23 @@ await runTest("the real refusal Supabase sends is still translated", async () =>
   assert(/anti-robot/i.test(theirs) && !/Something went wrong/.test(theirs), `translated: ${theirs}`);
 });
 
+// v2.34.0. Production's auth server refused every token for eight weeks and nothing recorded it. A refusal is
+// now named in a fixed vocabulary for the sink. This holds the NAMING only: sendReport is inert in a test
+// build (no Supabase settings), and what the server then stores is tests/test-report-error-edge.mjs's.
+await runTest("a refused check is named for the sink in a fixed vocabulary", async () => {
+  assert(storage.noteCaptcha("sign-in", "server", "invalid-input-response") === "captcha: server invalid-input-response", "the auth server's verdict is kept");
+  assert(storage.noteCaptcha("guest", "refused", 600010) === "captcha: refused 600010", "and Cloudflare's code");
+  assert(storage.noteCaptcha("sign-up", "blocked", null) === "captcha: blocked", "no code is no code");
+  assert(storage.noteCaptcha("sign-in", "server", "someone@example.com") === "captcha: server", "a code that is not a code word is dropped, never carried");
+  assert(storage.noteCaptcha("sign-in", "server", "Invalid-Input-Secret") === "captcha: server invalid-input-secret", "case is folded");
+  // The crash net is handed in, and hears every refusal - but is told which is the first of its kind.
+  const heard = [];
+  storage.setCaptchaReporter((message, where, first) => heard.push([message, where, first]));
+  storage.noteCaptcha("guest", "refused", 300030); storage.noteCaptcha("sign-in", "refused", 300030);
+  assert(JSON.stringify(heard) === JSON.stringify([["captcha: refused 300030", "guest", true], ["captcha: refused 300030", "sign-in", false]]), "every refusal is reported, the first of a kind marked: " + JSON.stringify(heard));
+  storage.setCaptchaReporter(() => { throw new Error("the reporter broke"); });
+  assert(storage.noteCaptcha("sign-in", "blocked", null) === "captcha: blocked", "and a reporter that throws never fails the sign-in");
+  storage.setCaptchaReporter(null);
+});
+
 console.log("test-captcha.mjs done");

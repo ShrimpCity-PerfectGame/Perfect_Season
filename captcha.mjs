@@ -67,7 +67,8 @@ export function captchaReasonForCode(code) {
   return "refused";
 }
 
-// Answers `{ token, reason }`, never a bare string: `token` is null for every way of not having one, and
+// Answers `{ token, reason, code }`, never a bare string (`code` is Cloudflare's own, when it gave one - kept
+// for the sink, never shown): `token` is null for every way of not having one, and
 // `reason` says which way so the caller can say something true. `off` means no key is configured, which is
 // not a failure at all - it is how this ships before the switch is thrown, and the caller carries on.
 export async function captchaToken() {
@@ -90,16 +91,16 @@ export async function captchaToken() {
 
   return new Promise((resolve) => {
     let settled = false;
-    const done = (token, reason) => {
+    const done = (token, reason, code) => {
       if (settled) return;
       settled = true;
       cleanUp();
-      resolve({ token: token || null, reason: token ? null : reason });
+      resolve({ token: token || null, reason: token ? null : reason, code: token || code == null ? null : String(code) });
     };
     // The script loaded and the widget rendered, so a silent eight seconds is not an ad blocker: it is a
     // challenge that never answered. "refused" is the honest reading and the honest sentence.
     const timer = setTimeout(() => done(null, "refused"), TIMEOUT_MS);
-    const finish = (token, reason) => { clearTimeout(timer); done(token, reason); };
+    const finish = (token, reason, code) => { clearTimeout(timer); done(token, reason, code); };
     try {
       widgetId = turnstile.render(host, {
         sitekey: SITE_KEY,
@@ -114,7 +115,7 @@ export async function captchaToken() {
           // says it can't confirm my browser" is undiagnosable without one, and this goes nowhere but the
           // console - no third party, which is what the privacy policy promises.
           try { console.warn("[gridspin] anti-robot check failed:", code); } catch (e) { /* no console */ }
-          finish(null, captchaReasonForCode(code));
+          finish(null, captchaReasonForCode(code), code);
           return true;
         },
         "expired-callback": () => finish(null, "refused"),

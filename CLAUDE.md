@@ -158,6 +158,18 @@ component:
   the NEXT report rather than shown. The lost Guess daily on 2026-09-30 was diagnosed by inference precisely
   because nothing recorded the first failure.
 
+**A second kind, `auth` (v2.34.0).** A sign-in the anti-robot check turns away is not a crash, so for eight
+weeks production's auth server refused every token (a wrong secret in Supabase) and nothing recorded it.
+`storage.js`'s `noteCaptcha` names each refusal - `captcha: server invalid-input-response`,
+`captcha: refused 600010` - and the reporter is HANDED to storage.js (`setCaptchaReporter`, wired in
+perfect-season.jsx) because plain Node loads storage.js in a dozen tests and cannot read a .jsx.
+`report-error` rebuilds an auth message from a fixed vocabulary (`AUTH_SHAPE`); anything else is
+`captcha: other`. To look: `select created_at, message, browser from client_errors where kind = 'auth' order by 1 desc;`
+**Two words tell the two failures apart**: `invalid-input-secret` is not a Turnstile secret at all (the
+site key pasted in its place), and `invalid-input-response` on a real browser is a real secret for the
+wrong widget. A made-up token gets the second from a healthy server too, so only the first is provable
+from a shell.
+
 **The first-party sink is built (v2.22.0)** - `client_errors`, written only by the `report-error` Edge
 Function, and `/privacy` gained the paragraph it costs. The copy button stays: it is what a player uses
 when they want to tell you something, and the sink is what catches the ones who never would.
@@ -184,7 +196,7 @@ signed-in players first). The `beat` record is the sharer's own claim, shown onl
 
 **Profiles (v1.11.0).** Every account has a public profile at `/u/<username>`: a picture (an uploaded
 photo, one of 12 default avatars, or the initial), a bio checked by a blocked-word list, a favorite
-team, 24 badges, personal stats, and a Report button feeding a moderators' Reports queue. Every username
+team, 27 badges, personal stats, and a Report button feeding a moderators' Reports queue. Every username
 on the Leaderboard and Stats screens opens its profile. **`PROFILES.md` is the reference** for all of it
 (database functions and error codes, the player_stats shape, the storage modules, component props,
 addresses and history) - read it before touching any of the files below. See "Profiles" under
@@ -1591,6 +1603,12 @@ Leaderboard for every existing account. That risk is now accepted by the owner, 
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.34.0's (refused sign-ins recorded, card how-to, sharing, badges, profile): run
+  **`migration-client-errors.sql`** (the `auth` kind), **`migration-cards.sql`** (`card_profile`) and
+  **`migration-wallet.sql`** (three `badge_rewards` rows at 0), then **deploy the Edge Functions**
+  (`report-error` changed), then the client. All three only add or replace. Out of order is quiet rather
+  than broken: a client ahead of `card_profile` shows no Cards line (the read is optional and reads "not
+  known"), and a client ahead of `report-error` has its `auth` reports stored as crashes.
   v2.33.0's (cards for everybody): no migration, no function deploy. Set the secret **`CARDS_ENABLED=1`**
   (the functions read it per request), then merge the client - server first, so nobody sees a tile whose
   every button answers `cards_off`.

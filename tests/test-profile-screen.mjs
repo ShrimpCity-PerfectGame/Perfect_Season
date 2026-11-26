@@ -186,6 +186,23 @@ await runTest("sections with nothing to show are left out", async () => {
   assert(h.includes("Badges"), "badges always show");
 });
 
+// v2.34.0: a Cards line - counts, never the cards themselves - and the three badges worked out from them.
+await runTest("cards on a profile: counts when there are any, nothing when there are none or the read failed", async () => {
+  const withCards = (cards) => { const p = veteranProfile(); return { ...p, extra: { ...p.extra, cards } }; };
+  let c = await show(ProfileScreen, baseProps({ profile: withCards({ owned: 120, bestRun: 10, gauntlet: 3, dailies: 0 }) }));
+  const tiles = [...c.querySelectorAll("[data-cards] [data-card-stat]")].map((t) => `${t.dataset.cardStat}:${t.querySelector(".n").textContent}`);
+  assert(tiles.join() === "owned:120,run:10,gauntlet:3", "what there is to say, and no tile for a zero: " + tiles.join());
+  assert(headings(c).includes("Cards"), "under a heading of its own");
+  const earned = (id) => c.querySelector(`.pf-badge[data-badge="${id}"]`).dataset.earned;
+  assert(earned("collector") === "true" && earned("on-a-roll") === "true" && earned("gauntlet-runner") === "false", "a hundred cards and ten in a run are badges; three stages of twelve is not yet");
+  assert(c.querySelector('.pf-badge[data-badge="gauntlet-runner"] .pf-bp')?.textContent === "3/12", "and the gauntlet shows how far along it is");
+  for (const none of [null, undefined, { owned: 0, bestRun: 0, gauntlet: 0, dailies: 0 }]) {
+    c = await show(ProfileScreen, baseProps({ profile: withCards(none) }));
+    assert(!c.querySelector("[data-cards]") && !headings(c).includes("Cards"), "no Cards line for " + JSON.stringify(none));
+    assert(c.querySelector('.pf-badge[data-badge="collector"]').dataset.earned === "false", "and no card badge");
+  }
+});
+
 await runTest("the badge grid shows every badge, earned ones marked and locked ones with progress", async () => {
   const p = veteranProfile();
   const c = await show(ProfileScreen, baseProps({ profile: p }));

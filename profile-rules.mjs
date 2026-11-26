@@ -120,6 +120,14 @@ const num = (v) => (v == null ? null : Number(v));
 const int = (v) => Number(v) || 0;
 // player_stats() JSON as the app's camelCase shape. Postgres numerics can arrive as strings through
 // some drivers, so every number is coerced here rather than at each use.
+// card_profile() (migration-cards.sql) in the app's shape. Null in is null out: the read is a second one, made
+// beside player_profile, and one that failed must not turn into "this player has no cards".
+export function mapCardProfile(json) {
+  if (!json || typeof json !== "object") return null;
+  const n = (v) => Math.max(0, Math.trunc(Number(v)) || 0);
+  return { owned: n(json.cards), bestRun: n(json.best_run), gauntlet: n(json.gauntlet), dailies: n(json.dailies) };
+}
+
 export function mapPlayerStats(json) {
   const s = json || EMPTY_PLAYER_STATS;
   const byFormat = (f) => {

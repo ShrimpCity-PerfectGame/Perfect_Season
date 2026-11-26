@@ -40,3 +40,19 @@ alter table public.client_errors enable row level security;
 -- No policy is created, for either reading or writing. RLS with no policy denies everything to anon and
 -- authenticated, which is the whole point; the service role bypasses RLS.
 revoke all on table public.client_errors from anon, authenticated;
+
+-- v2.34.0: a second kind, 'auth' - a sign-in the anti-robot check turned away. For eight weeks production's
+-- auth server refused every token and nothing recorded it. The check above is inline and `create table if not
+-- exists` leaves an existing table's checks alone, so it is replaced by what it IS rather than by a name
+-- nobody chose: any check on this table that mentions 'crash' is dropped, and a named one is added.
+-- report-error holds an auth row's message to a fixed vocabulary; see AUTH_SHAPE there.
+do $$
+declare c record;
+begin
+  for c in select conname from pg_constraint
+            where conrelid = 'public.client_errors'::regclass and contype = 'c'
+              and pg_get_constraintdef(oid) like '%crash%' loop
+    execute format('alter table public.client_errors drop constraint %I', c.conname);
+  end loop;
+end $$;
+alter table public.client_errors add constraint client_errors_kind_check check (kind in ('crash', 'auth'));

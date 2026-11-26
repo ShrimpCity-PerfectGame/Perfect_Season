@@ -1205,3 +1205,28 @@ create policy "a tester reads their own row" on public.card_testers
   for select using (auth.uid() = user_id);
 revoke all on public.card_testers from anon, authenticated;
 grant select on public.card_testers to authenticated;
+
+-- ============================================================================================================
+-- card_profile(user) (v2.34.0): the four numbers a PROFILE shows about cards, and that the three card badges
+-- are worked out from. Anybody may ask about anybody, signed out included, the way player_profile may be -
+-- so it answers COUNTS and nothing else: never which cards. A guest, or nobody, is all zeros.
+--   { cards, best_run, gauntlet, dailies }
+-- It is a function of its own rather than a block in player_stats because that one is `language sql`, lives in
+-- migration-runs-log.sql and is validated when created - and these tables are not there yet when it is.
+create or replace function public.card_profile(p_user uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select jsonb_build_object(
+    'cards', (select count(*) from public.card_owned o where o.user_id = u.id),
+    'best_run', coalesce((select max(r.wins) from public.card_runs r where r.user_id = u.id), 0),
+    'gauntlet', coalesce((select g.cleared from public.card_gauntlets g where g.user_id = u.id), 0),
+    'dailies', (select count(*) from public.card_dailies d where d.user_id = u.id and d.played_at is not null)
+  )
+  from (select (select p.id from public.profiles p where p.id = p_user and not p.guest) as id) u;
+$$;
+revoke all on function public.card_profile(uuid) from public;
+grant execute on function public.card_profile(uuid) to anon, authenticated;

@@ -20,6 +20,32 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.34.0] - 2026-11-26
+
+### Fixed
+- **A sign-in the anti-robot check turns away is now recorded.** From about 2 October to 26 November the
+  real site's sign-in server refused every anti-robot token - the secret saved in Supabase was not the one
+  belonging to the site's widget - so nobody could sign in or sign up by email and **no guest account was
+  made for eight weeks**, which means signed-out visitors' seasons were not saved. Nothing recorded it; it was
+  found by the owner failing to log in. The setting is corrected, and each kind of refusal now goes to the
+  crash reports as its own kind (`auth`), once a page load, in a fixed vocabulary: which way it failed and
+  the check's own code word, never anything typed into the form. `/privacy` says so.
+
+### Added
+- **How cards work**: a five-line panel the first time anybody opens Cards, closed with Got it and one tap
+  away afterwards.
+- **Share a card battle**: a Share button after a ladder win, a cleared gauntlet stage and the daily battle.
+  Squares for the six rounds and a count; no card on either side is named.
+- **Three card badges** - Collector (own 100 cards), On a Roll (10 wins in one ladder run) and Gauntlet
+  Runner (beat all 12 offenses). They pay no coins yet.
+- **Cards on a profile**: how many cards a player holds, their best ladder run, gauntlet stages cleared and
+  daily battles played. Counts only - which cards somebody owns is still theirs alone to see.
+
+### Not checked
+- No real sign-in has been refused since this shipped, so the `auth` report has been exercised by tests and
+  not seen arrive from a real browser.
+- The profile's Cards line and the three badges were driven in tests, not looked at on the real site.
+
 ## [2.33.0] - 2026-11-26
 
 **Cards are live for everybody.** The owner's call on 2026-11-26, taken with the skin-tone list and the pack
