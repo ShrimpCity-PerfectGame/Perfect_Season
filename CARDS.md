@@ -762,6 +762,22 @@ node tests/test-card-packs.mjs     # what is in a pack: the odds add up, and 20,
 # (the function plays them), test-cards-screen (the buttons), test-card-logic (runDefense, the projection).
 ```
 
+## 17. The how-to, sharing, badges and the profile (v2.34.0)
+
+- **How cards work** is `CARDS_HOWTO` in cards.jsx: five lines, shown once a device (`ps-cards-howto`) in
+  every phase but loading and error, and behind a "How cards work" link after that.
+- **A battle's share card** is `battleShareText` in card-battle.jsx: a square a round and a count, and the
+  site's address. It names no card on either side - yours are your collection, and theirs would spoil the
+  day's team. `onShare` and `siteUrl` are handed down from the page, as Century's are; with no `onShare`
+  there is no button.
+- **`card_profile(user)`** (migration-cards.sql) is four counts for anybody who asks:
+  `{ cards, best_run, gauntlet, dailies }`. It is not a block in `player_stats` because that function is
+  `language sql` in migration-runs-log.sql and the card tables do not exist when it is created.
+  `fetchPlayerProfile` makes it a second, optional read: a failure leaves `extra.cards` null, "not known".
+- **The three card badges** read `extra.cards` and pay nothing yet (`UNPAID` in badges.mjs, 0 in
+  `badge_rewards`). submit-run works badges out from `player_stats`, which has no cards, so it never sees
+  them earned. Paying them means `card-claim` calling `award_badges`.
+
 ## 16. Testers (v2.32.0)
 
 The test site's database was deleted on 2026-11-25 and not replaced, so the real site is where cards are

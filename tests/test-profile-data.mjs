@@ -830,7 +830,13 @@ await runTest("fetchPlayerProfile: ok for an exact or unambiguous name, missing 
   assert(res.profile.joined === auth._profiles.get(ME).created_at && res.profile.joined, "joined is created_at");
   assert(same(res.profile.details, EMPTY_DETAILS), "no details row maps to empty details");
   assert(res.profile.stats.username === "shrimpcity" && res.profile.stats.id === ME && res.profile.stats.runs === 0, "stats is rowToProfile");
-  assert(same(res.profile.extra, mapPlayerStats(emptyPlayerStats())), "extra is mapPlayerStats(player_stats)");
+  // `cards` is a second read (card_profile, v2.34.0), mapped to the app's names. This account has no cards.
+  assert(same(res.profile.extra, { ...mapPlayerStats(emptyPlayerStats()), cards: { owned: 0, bestRun: 0, gauntlet: 0, dailies: 0 } }), "extra is mapPlayerStats(player_stats) plus the card counts: " + JSON.stringify(res.profile.extra.cards));
+  // And a card read that FAILS leaves the profile whole, with cards not known - never zeros, never an error.
+  auth._cards.stateFails = true;
+  const noCards = await P.fetchPlayerProfile("shrimpcity");
+  auth._cards.stateFails = false;
+  assert(noCards.status === "ok" && noCards.profile.extra.cards === null && noCards.profile.username === "shrimpcity", "a failed card read is 'not known', and the profile still loads: " + JSON.stringify(noCards.profile?.extra?.cards));
   res = await P.fetchPlayerProfile("ShrimpCity");
   assert(res.status === "ok" && res.profile.username === "shrimpcity", "a unique case-insensitive match gives the stored name");
   auth._profiles.set("twin-1", { id: "twin-1", username: "Twin", runs: 0 });

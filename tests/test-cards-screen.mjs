@@ -702,6 +702,17 @@ await runTest("the ladder: your call - a category, then a card, and a result tha
   assert(qa("[data-rack] [data-cat]").every((c) => c.dataset.used), "every category is spent");
   assert(qa(".cb-strip .cb-s").every((li) => /Won|Lost|Tied/.test(li.textContent)), "every round on the field is marked won or lost, in words");
   assert(q("[data-paid]") && auth._wallet.balanceOf(bea) === 253, "the win paid its three coins: " + auth._wallet.balanceOf(bea));
+  // SHARING (v2.34.0). jsdom has no share sheet and no clipboard, so the button falls through to "copy it by
+  // hand" - which puts the very text on the page. Squares and a count: no card of either side is named.
+  assert(q("[data-share]"), "a won battle can be shared");
+  await click(q("[data-share]")); await settle();
+  const card = q(".cb-share-text")?.value || "";
+  const won6 = liveRun(bea).last.rounds.filter((r) => r.win === "me").length;
+  assert(card.split("\n")[0] === "Gridspin Cards · Ladder" && card.includes("1 win in a row"), "the card says what it is and the run it is on: " + card);
+  assert([...card.split("\n")[1]].filter((ch) => ch === "🟩").length === won6 && [...card.split("\n")[1]].filter((ch) => ch === "🟩" || ch === "🟥").length === 6, "six squares, green for the rounds won: " + card);
+  assert(card.trim().endsWith("https://gridspin.test"), "and ends with the site's address: " + card);
+  const named = [...liveRun(bea).last.rounds.flatMap((r) => [r.mine, r.foe])].map((e) => CARDS.get(e.id ?? e.card)?.name).filter(Boolean);
+  assert(named.length >= 6 && named.every((n) => !card.includes(n)), "no card on either side is named");
 
   await click(q("[data-next]")); await settle();
   assert(area().dataset.phase === "play" && /1 win so far/.test(q(".cb-result-h").textContent) && q("[data-choose]").dataset.choose === "0" && arena().dataset.rounds === "0", "the next team, a NEW hand, and round one again");
@@ -1154,4 +1165,21 @@ await runTest("a daily card the account already holds is sold, and the result sa
 });
 
 void cardBoardKey;
+// v2.34.0, the release after cards opened to everybody: a stranger needs telling what a card is.
+await runTest("how cards work: shown once, closed for good, and always one tap away", async () => {
+  await window.storage.delete("ps-cards-howto", false);
+  await remount(); await openCards();
+  const panel = () => container.querySelector("[data-howto]");
+  assert(panel() && panel().querySelectorAll("li").length === 5 && /How cards work/.test(panel().querySelector("h2").textContent), "the first visit explains cards, in five lines");
+  assert(/one player's real season/.test(panel().textContent) && /six rounds/.test(panel().textContent) && /Ladder/.test(panel().textContent), "what a card is, what a battle is, and the ways to play");
+  assert(!container.querySelector("[data-howto-open]"), "and there is no second door while it is open");
+  await click(container.querySelector("[data-howto-close]")); await flush();
+  assert(!panel() && container.querySelector("[data-howto-open]"), "Got it closes it and leaves a way back");
+  await remount(); await openCards();
+  assert(!panel(), "it does not come back by itself");
+  await click(container.querySelector("[data-howto-open]")); await flush();
+  assert(panel(), "but How cards work brings it back");
+  await click(container.querySelector("[data-howto-close]")); await flush();
+});
+
 console.log("test-cards-screen.mjs done");

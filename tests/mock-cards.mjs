@@ -269,6 +269,17 @@ export function makeCards(state, { wallet = null } = {}) {
         gauntlet: (() => { const g = uid ? gauntlets.get(uid) : null; return g ? { cleared: g.cleared, stage: g.stage, hand: g.hand, rounds: g.rounds, last: g.last, last_stage: g.last_stage } : null; })(),
       };
     },
+    // public.card_profile
+    profile(userId) {
+      const p = userId ? state.profiles.get(userId) : null;
+      const id = p && !p.guest ? userId : null;
+      return {
+        cards: id ? owned.filter((o) => o.user_id === id).length : 0,
+        best_run: id ? runs.filter((r) => r.user_id === id).reduce((m, r) => Math.max(m, r.wins), 0) : 0,
+        gauntlet: id ? gauntlets.get(id)?.cleared ?? 0 : 0,
+        dailies: id ? dailies.filter((d) => d.user_id === id && d.played_at !== null).length : 0,
+      };
+    },
     // public.card_boards
     boards(limit = 25) {
       const n = Math.max(1, Math.min(limit ?? 25, 100));

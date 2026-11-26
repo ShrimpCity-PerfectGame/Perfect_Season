@@ -51,10 +51,20 @@ export const CENTURY_BADGE_SCORE = 100;
 // are allowed; doing it in two is the badge. A copy of nothing: this rule is its own, and guess-logic.mjs's
 // GUESS_TRIES is not it.
 export const GUESS_BADGE_TRIES = 2;
+// The three card badges (v2.34.0). A starter deck is 30 cards, so a hundred is a collection somebody built.
+// Ten wins in one ladder run is past what sixty random cards manage played carefully (7.4 on average,
+// CARDS.md 4) - it wants a deck that was put together. And the gauntlet is all of it: a COPY of
+// card-logic.mjs's GAUNTLET.length, not an import, for the reason CENTURY_BADGE_SCORE is one; the test holds
+// the two equal.
+export const COLLECTOR_CARDS = 100;
+export const ROLL_WINS = 10;
+export const GAUNTLET_STAGES = 12;
 
 // `coins` is paid once, from v1.12.0. Over/Under and Build-a-player scores are saved by the browser
 // rather than checked by the server, so their badges pay nothing.
-const UNPAID = new Set(["stat-nerd", "mad-scientist"]);
+// The card badges are verified - the server plays every battle - but nothing pays them YET: submit-run pays
+// badges from player_stats, and these are worked out from card_profile, which it does not read.
+const UNPAID = new Set(["stat-nerd", "mad-scientist", "collector", "on-a-roll", "gauntlet-runner"]);
 export const BADGES = [
   { id: "first-down", name: "First Down", emoji: "🏈", tier: "bronze", how: "Finish your first season" },
   { id: "starter", name: "Starter", emoji: "🏈", tier: "bronze", how: "Finish 25 seasons" },
@@ -79,6 +89,9 @@ export const BADGES = [
   { id: "mad-scientist", name: "Mad Scientist", emoji: "⚡", tier: "bronze", how: "Create 10 players in Build-a-player" },
   { id: "century", name: "Century", emoji: "💯", tier: "gold", how: `Reach ${CENTURY_BADGE_SCORE} in the daily Century` },
   { id: "bullseye", name: "Bullseye", emoji: "🎯", tier: "silver", how: `Name the daily player in ${GUESS_BADGE_TRIES} guesses` },
+  { id: "collector", name: "Collector", emoji: "🏈", tier: "bronze", how: `Own ${COLLECTOR_CARDS} cards` },
+  { id: "on-a-roll", name: "On a Roll", emoji: "🔥", tier: "silver", how: `Win ${ROLL_WINS} card battles in one ladder run` },
+  { id: "gauntlet-runner", name: "Gauntlet Runner", emoji: "🏆", tier: "gold", how: `Beat all ${GAUNTLET_STAGES} offenses in the card gauntlet` },
   { id: "day-one", name: "Day One", emoji: "👑", tier: "special", how: "Join in Gridspin's first month" },
 ].map((b) => ({ ...b, coins: UNPAID.has(b.id) ? 0 : TIER_COINS[b.tier] }));
 export const BADGE_BY_ID = Object.fromEntries(BADGES.map((b) => [b.id, b]));
@@ -140,6 +153,11 @@ export function badgeProgress(input) {
     // value() is NaN when nobody has solved one, and NaN <= 2 is false, which is what makes an empty career
     // fail this. A plain `<= 2` on a null would have earned it for everybody who never played.
     "bullseye": () => flag(value(x.guess?.dailyBest) <= GUESS_BADGE_TRIES),
+    // x.cards is null when the card read failed or was never made (submit-run's stats have none), and
+    // count() reads a missing number as nothing done - so these are simply not earned there, never wrongly so.
+    "collector": () => count(x.cards?.owned, COLLECTOR_CARDS),
+    "on-a-roll": () => count(x.cards?.bestRun, ROLL_WINS),
+    "gauntlet-runner": () => count(x.cards?.gauntlet, GAUNTLET_STAGES),
     "day-one": () => flag(joinedAt < Date.parse(DAY_ONE_BEFORE)),
   };
   return BADGES.map((b) => ({ id: b.id, ...rules[b.id]() }));

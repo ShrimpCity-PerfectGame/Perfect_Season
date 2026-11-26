@@ -580,7 +580,38 @@ function Boards() {
 }
 
 // mode: "run" (the ladder) | "gauntlet" | "daily" | "deck" | "boards". rows: the collection, [{ id, finish, count, card }].
-export function BattleArea({ mode, rows, onBalance }) {
+// A battle's share card (v2.34.0): squares, like the season's. It names no card on either side - yours are
+// your collection, which nobody else may see, and theirs would spoil the day's team for anybody yet to play
+// the daily. A square is a round: green won, red lost. The gauntlet names its stage, which is on the list for
+// everybody anyway. `rounds` is a battle's own (each has `win: "me" | "foe"`).
+export const BATTLE_SHARE_SAID = { shared: "", cancelled: "", copied: "Copied", manual: "Couldn't share - copy it by hand" };
+export function battleShareText({ kind, rounds, wins, stage, cleared, day, score, siteUrl }) {
+  const squares = (rounds || []).map((r) => (r.win === "me" ? "🟩" : "🟥")).join("");
+  const won = (rounds || []).filter((r) => r.win === "me").length;
+  const lines = [];
+  if (kind === "daily") {
+    lines.push(`Gridspin Cards · Daily battle ${day}`, `${squares} ${won} of 6`, `${fmt(score)} points`);
+  } else if (kind === "gauntlet") {
+    lines.push(`Gridspin Cards · Gauntlet stage ${stage + 1}: ${gauntletName(stage)}`, `${squares} ${cleared ? "cleared" : "held"}`);
+  } else {
+    lines.push("Gridspin Cards · Ladder", `${squares} ${wins} ${wins === 1 ? "win" : "wins"} in a row`);
+  }
+  if (siteUrl) lines.push(siteUrl);
+  return lines.join("\n");
+}
+function ShareBattle({ onShare, text }) {
+  const [how, setHow] = useState("");
+  if (!onShare) return null;
+  return (
+    <>
+      <button className="btn" data-share onClick={async () => setHow(await onShare(text()))}>Share</button>
+      {how && BATTLE_SHARE_SAID[how] && <span className="note" role="status" data-shared={how}>{BATTLE_SHARE_SAID[how]}</span>}
+      {how === "manual" && <textarea className="cb-share-text" readOnly rows={4} aria-label="Your result, to copy" value={text()} onFocus={(e) => e.target.select()} />}
+    </>
+  );
+}
+
+export function BattleArea({ mode, rows, onBalance, onShare, siteUrl }) {
   const [st, setSt] = useState(null); // null: loading. "error" | "signed_out". Or the battle state.
   // The ladder battle that just ENDED: { id, step, hand, battle, coins, wins, over }. Kept so the arena stays on
   // screen through its sixth round - the server has already dealt the next hand by then.
@@ -814,6 +845,7 @@ export function BattleArea({ mode, rows, onBalance }) {
             <div className="cb-acts">
               {won && next !== null && next > shownG.stage && <button className="btn solid xl" data-next disabled={busy} onClick={() => beginG(next)}>{busy ? "Dealing…" : `Next: ${gauntletName(next)}`}</button>}
               {!won && <button className="btn solid xl" data-retry disabled={busy} onClick={() => beginG(shownG.stage)}>{busy ? "Dealing…" : "Try again"}</button>}
+              {won && <ShareBattle key={attempt(shownG.stage, shownG.hand)} onShare={onShare} text={() => battleShareText({ kind: "gauntlet", rounds: shownG.battle.rounds, stage: shownG.stage, cleared: true, siteUrl })} />}
               <button className="linkbtn" data-back onClick={() => { setShownG(null); setNotice(""); }}>Back to the gauntlet</button>
             </div>
           )}
@@ -895,6 +927,9 @@ export function BattleArea({ mode, rows, onBalance }) {
           </>
         )}
         {day && day.played && <p className="cb-lead" data-played>You took <b>{day.rounds}</b> of 6 rounds for <b>{fmt(day.score)}</b> points. One go a day - the next opens at midnight UTC.</p>}
+        {day && day.played && day.shown?.rounds && (
+          <div className="cb-acts"><ShareBattle onShare={onShare} text={() => battleShareText({ kind: "daily", rounds: day.shown.rounds, day: st.today, score: day.score, siteUrl })} /></div>
+        )}
         {alert}
         {/* The day's team is the same for everyone and follows from the date, but it is still not SHOWN before it is played. */}
         {day && <Arena key={st.today} hand={day.hand} foe={day.played ? foe : maskFoe(foe, day.log.length)} rounds={day.played && day.shown?.rounds ? day.shown.rounds : day.log} foeName="CPU" busy={busy} onPlay={playDay} />}
@@ -926,6 +961,7 @@ export function BattleArea({ mode, rows, onBalance }) {
             {shown.over
               ? <button className="btn solid xl" data-start disabled={busy} onClick={begin}>{busy ? "Starting…" : "Start a new run"}</button>
               : <button className="btn solid xl" data-next onClick={() => { setShown(null); setNotice(""); }}>Next team</button>}
+            {shown.wins > 0 && <ShareBattle key={`${shown.id}:${shown.step}`} onShare={onShare} text={() => battleShareText({ kind: "run", rounds: shown.battle.rounds, wins: shown.wins, siteUrl })} />}
           </div>
         )}
       </div>
@@ -983,6 +1019,7 @@ export const CARD_BATTLE_CSS = `
 .cb-stats div{border-top:3px solid var(--ink);padding-top:8px;display:flex;flex-direction:column-reverse;gap:2px}
 .cb-stats dt{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .cb-stats dd{margin:0;font-family:var(--display);font-size:44px;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.cb-share-text{flex:1 1 100%;width:100%;font:inherit;font-size:16px;padding:8px;border:2px solid var(--ink);border-radius:8px;background:var(--panel);color:var(--ink)}
 .cb-how{margin:0;padding-left:20px;display:grid;gap:6px;color:var(--ink);line-height:1.45;font-size:15px}
 .cb-list,.cb-opts{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .cb-numbered{counter-reset:cb}

@@ -92,6 +92,11 @@ insert into public.badge_rewards (badge, coins) values
   ('loyal-fan', 100),
   ('stat-nerd', 0),
   ('mad-scientist', 0),
+  -- The three card badges (v2.34.0). Nothing pays them yet: badges are paid by submit-run from player_stats,
+  -- and what these are worked out from is card_profile, which that function does not read.
+  ('collector', 0),
+  ('on-a-roll', 0),
+  ('gauntlet-runner', 0),
   ('day-one', 500)
 on conflict (badge) do update set coins = excluded.coins;
 

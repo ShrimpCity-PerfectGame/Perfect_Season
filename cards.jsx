@@ -14,7 +14,7 @@
 // `error` is its own state on purpose. A read that failed is not an empty collection: collapsing the two would
 // offer a player with fifty cards a starter deck they opened last week (storage-cards.js says the same).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId, fetchWallet, sellCopies } from "./storage.js";
+import { fetchMyCards, claimStarter, CARD_REFUSALS, fetchPacks, openPack, newOpenId, fetchWallet, sellCopies, sget, sset } from "./storage.js";
 import { loadCardData } from "./card-data.mjs";
 import { CARDS, FINISHES, bestDeck, DECK_SIZE } from "./card-logic.mjs";
 import { TEAMS } from "./game-logic.mjs";
@@ -361,12 +361,42 @@ function toCards(rows) {
 // Two levels (v2.26.0): three things to do with cards across the top - look at them, get more, play them - and
 // the three ways to play under Battle. Five chips in one group wrapped onto two ragged rows on a phone.
 const TABS = [["collection", "Collection"], ["packs", "Packs"], ["run", "Ladder"], ["gauntlet", "Gauntlet"], ["daily", "Daily"], ["deck", "Deck"], ["boards", "Boards"]];
+// HOW CARDS WORK (v2.34.0, the release after cards opened to everybody). A stranger lands here with a tile's
+// worth of explanation; each way to play has rules of its own further in, and nothing said what a card IS or
+// how the pieces fit. Shown once a device, until Got it, and always one tap away after that. The flag is the
+// device's, like the rules dialog's: it decides only whether a panel opens by itself.
+const HOWTO_KEY = "ps-cards-howto";
+export const CARDS_HOWTO = [
+  "Every card is one player's real season. The big number is how good that season was for his position in his era.",
+  `You start with a deck of ${DECK_SIZE}. Finishing the daily draft earns a card a day, and packs are opened with coins.`,
+  "A battle is six rounds, one for each lineup spot. Each round is fought on one category: you call the first, then whoever won the last round calls the next.",
+  "There are three ways to battle: the Ladder (CPU teams that keep getting stronger), the Gauntlet (twelve real offenses, in order) and one Daily battle.",
+  "You keep one of each card. A copy is sold for coins as it arrives.",
+];
+function CardsHowTo({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <section className="panel cd-howto" aria-labelledby="cd-howto-h" data-howto>
+      <h2 className="cd-h" id="cd-howto-h">How cards work</h2>
+      <ul className="cd-howto-list">{CARDS_HOWTO.map((line) => <li key={line}>{line}</li>)}</ul>
+      <button className="btn solid" data-howto-close onClick={onClose}>Got it</button>
+    </section>
+  );
+}
+
 const TOP_TABS = [["collection", "Collection"], ["packs", "Packs"], ["battle", "Battle"]];
 const BATTLE_TABS = [["run", "Ladder"], ["gauntlet", "Gauntlet"], ["daily", "Daily"], ["deck", "Deck"], ["boards", "Boards"]];
 const isBattle = (tab) => BATTLE_TABS.some(([id]) => id === tab);
 // initialTab is the UI harness's, so the pack shop and the battle screens can be looked at and audited without a click.
-export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, balance = null, onBalance, initialTab = "collection" }) {
+export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, balance = null, onBalance, initialTab = "collection", onShare, siteUrl }) {
   const [phase, setPhase] = useState("loading");
+  const [howto, setHowto] = useState(false);
+  useEffect(() => {
+    let on = true;
+    sget(HOWTO_KEY, false).then((seen) => { if (on && !seen) setHowto(true); });
+    return () => { on = false; };
+  }, []);
+  const closeHowto = () => { setHowto(false); sset(HOWTO_KEY, true, false); };
   const [tab, setTab] = useState(TABS.some(([id]) => id === initialTab) ? initialTab : "collection");
   const [owned, setOwned] = useState([]);
   const [fresh, setFresh] = useState(null); // the eight just dealt, shown once above the collection
@@ -471,8 +501,13 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
     <div className="cd-area">
       <div className="cd-top">
         <button className="btn sm" onClick={onBack}>All modes</button>
-        {onHide && <button className="linkbtn" onClick={onHide}>Hide cards</button>}
+        <span className="cd-top-links">
+          {!howto && <button className="linkbtn" data-howto-open onClick={() => setHowto(true)}>How cards work</button>}
+          {onHide && <button className="linkbtn" onClick={onHide}>Hide cards</button>}
+        </span>
       </div>
+
+      {phase !== "loading" && phase !== "error" && <CardsHowTo open={howto} onClose={closeHowto} />}
 
       {phase === "loading" && <p className="note" role="status">Loading your cards…</p>}
       {/* A card this page's catalog does not know is one a newer build added. Say so: silently leaving it out
@@ -520,7 +555,7 @@ export function CardsScreen({ userId, isGuest, onBack, onNeedsAccount, onHide, b
                 onClick={() => { lastBattle.current = id; setTab(id); }}>{name}</button>
             ))}
           </div>
-          <BattleArea mode={tab} rows={owned} onBalance={onBalance} />
+          <BattleArea mode={tab} rows={owned} onBalance={onBalance} onShare={onShare} siteUrl={siteUrl} />
         </>
       )}
 
@@ -630,6 +665,9 @@ export function SeasonCard({ card, onOpenCards }) {
 export const CARDS_CSS = CARD_FACE_CSS + CARD_BATTLE_CSS + `
 .cd-area{display:grid;gap:16px}
 .cd-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cd-top-links{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px 18px}
+.cd-howto{display:grid;gap:12px;justify-items:start}
+.cd-howto-list{margin:0;padding-left:20px;display:grid;gap:8px;line-height:1.45;font-size:15px}
 .cd-h{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:.02em;font-size:clamp(22px,5vw,28px);line-height:1.1;margin:0 0 10px;color:var(--ink)}
 .cd-area .panel p{margin:0 0 12px}
 .cd-starter .note{margin-top:12px}

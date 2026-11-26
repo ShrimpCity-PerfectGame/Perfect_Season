@@ -10,7 +10,7 @@ import {
   fetchPlayerProfile, fetchProfileDetails, checkUsername, claimUsername, deleteAccount, isModerator, fetchModQueue,
   fetchWallet, claimMinigameCoins,
   versusPath, parseVersusPath, fetchVersusTop,
-  submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY, fetchCardTester,
+  submitGuess, submitCentury, GUESS_RETRY, CENTURY_RETRY, fetchCardTester, setCaptchaReporter,
 } from "./storage.js";
 import gameData from "./data/players.json";
 import seasonPool from "./data/season-2025.json";
@@ -32,7 +32,7 @@ import {
 // show at the time - it is kept so the NEXT Copy error details carries what led up to it. That ring is what
 // made the lost Guess daily on 2026-09-30 diagnosable only by inference, because nothing recorded the first
 // failure. error-boundary.jsx imports nothing but React, so importing FROM it adds no dependency to anything.
-import { recordError } from "./error-boundary.jsx";
+import { recordError, sendReport } from "./error-boundary.jsx";
 import { PROFILE_CSS, ProfileScreen } from "./profile.jsx";
 import { AVATAR_CSS } from "./avatars.jsx";
 import { PICKER_CSS } from "./avatar-picker.jsx";
@@ -55,6 +55,12 @@ import { COIN_RULES } from "./rewards.mjs";
 import { USERNAME_RE, profilePath, parseProfilePath } from "./profile-rules.mjs";
 import { HOWTO_STEPS, HOWTO_NOTE, BOARD_PATH, SITE_PAGES, DATA_CREDIT, parseSitePath } from "./site-pages.mjs";
 initGameData(gameData.players, gameData.opponents);
+// A sign-in the anti-robot check turned away (storage.js's noteCaptcha): every one into the crash net's ring,
+// and the first of each kind this page load to the sink. Wired here because storage.js cannot import a .jsx.
+setCaptchaReporter((message, where, first) => {
+  const own = recordError("auth", message, where);
+  if (first) sendReport(message, null, own, "auth");
+});
 // 1v1's defenses and kickers (VERSUS.md 6) are FETCHED, not carried here (versus-data.mjs): only a duel and a
 // card battle read them. The component asks for them once it has mounted and the duel screen waits on that.
 // Century's one-season touchdown pool (v2.9.0). Only century.jsx and the submit-century Edge Function read it,
@@ -5839,6 +5845,7 @@ export default function PerfectSeason() {
               key={userId || "anon"} userId={userId} isGuest={!!stats?.guest}
               onBack={() => openTab("home")} onHide={() => hideCards(true)}
               balance={wallet?.balance ?? null} onBalance={onShopBalance}
+              onShare={sendShare} siteUrl={APP_SITE_URL}
               onNeedsAccount={(why) => {
                 setNotice(why === "guest"
                   ? "Cards are for accounts - a guest can be made again and again. Keep your seasons and they open up."

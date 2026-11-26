@@ -197,7 +197,7 @@ await runTest("badgeRewards: every earned badge in catalog order with its coins,
   // Every badge, when all are earned: gold 1000, silver 300, bronze 100, special 500, and the two unpaid.
   const all = badgeRewards(BADGES.map((b) => ({ id: b.id, earned: true })));
   assert(all.length === BADGES.length && all.every((b, i) => b.id === BADGES[i].id && b.coins === BADGE_BY_ID[b.id].coins), "all 22 badges, each with its catalog coins");
-  assert(same(all.filter((b) => b.coins === 0).map((b) => b.id), ["stat-nerd", "mad-scientist"]), "only Stat Nerd and Mad Scientist pay nothing");
+  assert(same(all.filter((b) => b.coins === 0).map((b) => b.id), ["stat-nerd", "mad-scientist", "collector", "on-a-roll", "gauntlet-runner"]), "only the two browser-saved badges and the three card badges pay nothing");
 });
 
 await runTest("coinsSummary: a paid season's lines, then each new badge that pays", async () => {

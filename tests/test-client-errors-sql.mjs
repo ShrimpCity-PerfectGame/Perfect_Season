@@ -44,12 +44,18 @@ await runTest("an anon insert is refused", async () => {
   assert(refused, "anon cannot write the table");
 });
 
-await runTest("kind is crash and nothing else", async () => {
+await runTest("kind is crash or auth and nothing else", async () => {
   let refused = false;
   try {
     await db.query(`insert into public.client_errors (version, kind, message) values ('t', 'silent', 'x')`);
   } catch (e) { refused = true; }
-  assert(refused, "the check constraint holds kind to 'crash'");
+  assert(refused, "the check constraint refuses a kind nobody defined");
+  // v2.34.0: a sign-in the anti-robot check turned away. The inline check was replaced by a named one.
+  await db.query(`insert into public.client_errors (version, kind, message) values ('t', 'auth', 'captcha: server invalid-input-response')`);
+  await db.query(`insert into public.client_errors (version, kind, message) values ('t', 'crash', 'x')`);
+  const cons = (await db.query(`select conname from pg_constraint where conrelid = 'public.client_errors'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%crash%'`)).rows;
+  assert(cons.length === 1 && cons[0].conname === "client_errors_kind_check", "one kind check, and it is the named one: " + JSON.stringify(cons));
+  await db.query(`delete from public.client_errors where version = 't'`);
 });
 
 await runTest("each length bound accepts exactly at its limit and refuses one character past it", async () => {

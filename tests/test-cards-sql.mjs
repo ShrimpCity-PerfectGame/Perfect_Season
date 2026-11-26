@@ -685,6 +685,22 @@ await runTest("the gauntlet: a stage at a time, an attempt stored, each stage pa
   assert(tbl.a === false && tbl.b === false, "and nobody reads card_gauntlets from a browser");
 });
 
+// v2.34.0: what a profile says about cards. Counts only, for anybody who asks - and the same in the mock.
+await runTest("card_profile: four counts, the same in SQL and the mock, for anybody - and never the cards", async () => {
+  for (const [who, id] of [["runner", RUNNER], ["rival", RIVAL], ["quitter", QUITTER]]) {
+    const a = (await asUser(db, RUNNER, () => db.query("select card_profile($1) as r", [id]))).rows[0].r;
+    const b = battleMock.cards.profile(id);
+    assert(!differs(a, b), `card_profile(${who}): the SQL and the mock disagree - ${differs(a, b)} ${J(a)} ${J(b)}`);
+    assert(Object.keys(a).sort().join() === "best_run,cards,dailies,gauntlet", "four counts and nothing else: " + J(a));
+  }
+  const runner = (await asUser(db, RUNNER, () => db.query("select card_profile($1) as r", [RUNNER]))).rows[0].r;
+  assert(runner.cards > 0 && runner.best_run > 0, "a player who has battled has numbers: " + J(runner));
+  const anon = await attempt(null, "select card_profile($1) as r", [RUNNER]);
+  assert(anon.rows && !differs(anon.rows[0].r, runner), "a signed-out visitor reads the same counts - a profile is public: " + J(anon).slice(0, 160));
+  const nobody = (await asUser(db, RUNNER, () => db.query("select card_profile($1) as r", ["00000000-0000-4000-8000-00000000dead"]))).rows[0].r;
+  assert(!differs(nobody, { cards: 0, best_run: 0, gauntlet: 0, dailies: 0 }), "an id that is nobody's is all zeros: " + J(nobody));
+});
+
 await runTest("the two boards, in SQL and in the mock", async () => {
   await start(QUITTER, "seed-0004");
   await fill(QUITTER, 3, 0); await fight(QUITTER, 3, 0, true); await fill(QUITTER, 3, 1); await fight(QUITTER, 3, 1, true); // level with runner's best, and still live

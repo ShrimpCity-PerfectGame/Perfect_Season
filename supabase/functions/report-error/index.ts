@@ -84,6 +84,14 @@ function browserOf(ua: unknown): string {
   return cap(`${name} / ${os}`, MAX.browser)!;
 }
 
+// AN AUTH REPORT IS A FIXED VOCABULARY (v2.34.0). kind "auth" is a sign-in the anti-robot check turned away
+// (storage.js's noteCaptcha) - not a crash, so there is no stack and no thrown string, and what is stored is
+// rebuilt here from the two parts it may have: which way it failed, and one code word that is Cloudflare's or
+// the auth server's own. Anything else becomes "captcha: other". The migration's comment on `kind` warns that
+// every new kind widens what an arbitrary string can carry into this table; this is how this one does not.
+const AUTH_SHAPE = /^captcha: (blocked|refused|misconfigured|server)( [a-z0-9-]{1,40})?$/;
+const authMessage = (v: unknown) => (typeof v === "string" && AUTH_SHAPE.test(v) ? v : "captcha: other");
+
 Deno.serve(async (req) => {
   const cors = corsHeaders(req);
   const json = (body: unknown, status = 200) =>
@@ -94,15 +102,17 @@ Deno.serve(async (req) => {
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
 
+  // Two kinds, and an unknown one is a crash - the kind every client before v2.34.0 sends by saying nothing.
+  const isAuth = body?.kind === "auth";
   const version = cap(body?.version, MAX.version);
-  const message = cap(body?.message, MAX.message);
+  const message = isAuth ? authMessage(body?.message) : cap(body?.message, MAX.message);
   // The two fields without which a row says nothing. Everything else may be absent - a crash with no stack
   // is still worth recording.
   if (!version || !message) return json({ error: "malformed report" }, 400);
   if (body?.before != null && !Array.isArray(body.before)) return json({ error: "malformed report" }, 400);
   if (body?.path != null && typeof body.path !== "string") return json({ error: "malformed report" }, 400);
 
-  const before = Array.isArray(body.before)
+  const before = Array.isArray(body.before) && !isAuth
     ? body.before.slice(0, MAX.before).map((e: any) => ({
         kind: cap(e?.kind, MAX.kind), message: cap(e?.message, MAX.entry), extra: cap(e?.extra, MAX.extra),
       }))
@@ -133,9 +143,9 @@ Deno.serve(async (req) => {
   if ((count ?? 0) >= RATE_PER_HOUR || (total ?? 0) >= MAX_ROWS) return json({ ok: true, dropped: true });
 
   const { error } = await service.from("client_errors").insert({
-    version, kind: "crash", message,
-    stack: cap(body?.stack, MAX.stack),
-    component: cap(body?.component, MAX.component),
+    version, kind: isAuth ? "auth" : "crash", message,
+    stack: isAuth ? null : cap(body?.stack, MAX.stack),
+    component: isAuth ? null : cap(body?.component, MAX.component),
     before,
     // Capped BEFORE the regexes run: the Safari pattern backtracks badly over a long string full of
     // near-matches, and the body is whatever anyone cares to POST.
