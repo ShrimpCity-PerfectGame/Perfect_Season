@@ -783,5 +783,6 @@ played while they are unfinished - by the accounts in `card_testers` and nobody 
   that grants or stores anything.
 - **Runbook**: add a tester -
   `insert into card_testers (user_id, note) select id, 'why' from profiles where lower(username) = 'NAME';`
-  Remove one - delete the row; their cards stay, unseen. Launch to everybody - the secret to `1`, then a
+  Remove one - delete the row; their cards stay, unseen. **Launched to everybody in v2.33.0 (2026-11-26)**; the list is read by nothing while the secret is `1`.
+  To launch - the secret to `1`, then a
   build with `CARDS_ON=1`, after the gates in CLAUDE.md.

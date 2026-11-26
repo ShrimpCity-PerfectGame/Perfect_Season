@@ -519,7 +519,7 @@ parts unlike everything else:
   That happened on production on 2026-09-30, innocently, as a player recovering a run the site had lost.
 - **Not built:** nothing on the profile screen, no streak. GUESS.md 9 says so.
 
-**Cards (in progress, v2.32.0 - FOR TESTERS ONLY, on the real site; see Releasing).** A card-collecting and auto-battler mode is being built in
+**Cards (LIVE FOR EVERYBODY since v2.33.0, 2026-11-26; still being built).** A card-collecting and auto-battler mode is being built in
 five parts. **Four exist: the rules, owning cards, the pack shop, and battles** - a starter deck of thirty, a
 card a day from the daily draft, a collection screen, packs bought with coins, a ladder of CPU teams and a
 daily battle. **The battle was rebuilt in v2.27.0 as offense against offense** (the owner's redesign: "a fast
@@ -530,7 +530,7 @@ plays one card from the hand without seeing the card across from it (v2.28.1). *
 CALLED before the pick**: you call round one, then whoever won the last round; each category is used once.
 **The historical gauntlet (v2.29.0)** is twelve real offenses in
 order, a stage at a time, with their six in view. Badges and the profile spot are not built. **The draft arena,
-once a fourth mode, was dropped by the owner on 2026-11-14 - do not build it or offer it.** **Production has cards switched off** in two
+once a fourth mode, was dropped by the owner on 2026-11-14 - do not build it or offer it.** **Cards have two switches** (both set to everybody on production since v2.33.0), in two
 places: the build (`CARDS_ON`, read by `cards-switch.mjs`) and the server (the `CARDS_ENABLED` secret, read by
 `card-claim` and `submit-run`). SHOWING needs the client's; GRANTING follows the server's alone - so the secret set
 with the client off banks daily cards nobody can see, which is a launch order and not a state to leave things in. **`CARDS.md` is the reference** and
@@ -1491,9 +1491,13 @@ project and chose instead: **updates go straight to gridspin.app.** What that me
   the exact steps, before any of them. Order is unchanged: migration, then functions, then client.
 - **A migration that DROPS or that validates existing rows gets a read-only look at production first**
   (what rows exist, what would be touched), because there is no longer anywhere else to find out.
-- **Cards are on for testers only** (v2.32.0): production's build is `CARDS_ON=testers` and its secret is
-  `CARDS_ENABLED=testers`, and the owner's account is in `card_testers`. That is where card work is played.
-  Launching cards to everybody is still gated on the skin-tone review, `/privacy` and `/terms`.
+- **Cards are live for everybody** (v2.33.0, 2026-11-26, the owner's call): every build is `CARDS_ON=1` unless
+  told otherwise and production's secret is `CARDS_ENABLED=1`. `/privacy` and `/terms` say what cards store
+  and what a pack is. The owner accepted the skin-tone list and the pack question as they stood - the list
+  is still a first pass and correcting it is still worth doing. To pull cards back to the testers' list: the
+  secret to `testers`, then a build with `CARDS_ON=testers` (a Vercel env var; no code change).
+  **A card change now reaches real collections at once** - `data/cards.json` was always frozen; from here
+  a rule or pack change is felt by players who own cards.
 - The `staging` branch and the staging Vercel site still exist and point at a database that is gone; the
   site loads and every sign-in, board and save fails. Work happens on `staging` as a working branch and
   merges to `master` to ship. `deploy:fn:staging` and every `--project-ref ndelisxdxjmvcdezzecu` command
@@ -1587,6 +1591,9 @@ Leaderboard for every existing account. That risk is now accepted by the owner, 
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.33.0's (cards for everybody): no migration, no function deploy. Set the secret **`CARDS_ENABLED=1`**
+  (the functions read it per request), then merge the client - server first, so nobody sees a tile whose
+  every button answers `cards_off`.
   v2.32.0's (cards for testers, no test site): production had NONE of cards when this was written - it was
   at 2.22.1 - so this is the whole card stack at once: run **`migration-client-errors.sql`** if 2.22.0's never
   ran there (check first), then **`migration-cards.sql`**, then re-run **`migration-profiles.sql`**; put the

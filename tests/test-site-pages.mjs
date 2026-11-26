@@ -285,8 +285,24 @@ await runTest("the privacy page accounts for the crash sink in all three places"
   assert(/90 days/.test(sectionText), "and says how long one is kept");
 
   // The page's own date moves with its copy - the file says to change these together.
-  assert(page.updated === "2026-10-05" && /5 October 2026/.test(sectionText + whole),
+  assert(page.updated === "2026-11-26" && /26 November 2026/.test(sectionText + whole),
     `the page's date was bumped with its copy: ${page.updated}`);
+});
+
+// Cards went on for everybody in v2.33.0, and the two pages of words were the gate: a policy that does not
+// say cards are stored, and terms that do not say a pack is random and bought with a score, are both untrue
+// the moment the tile is drawn.
+await runTest("privacy and terms say what cards are, now that everybody has them", async () => {
+  const text = (id) => JSON.stringify(SITE_PAGES.find((p) => p.id === id).sections);
+  const privacy = text("privacy"), terms = text("terms");
+  assert(/the cards you own/.test(privacy) && /the deck you have built/.test(privacy) && /battles you have played/.test(privacy),
+    "the policy says cards, the deck and battles are recorded");
+  assert(/your cards with the deck and the battles/.test(privacy), "and that closing an account erases them");
+  assert(/hidden the Cards area/.test(privacy), "and names the one card thing kept on the device");
+  assert(/A card cannot be bought or sold for money/.test(terms) && /no cash value/.test(terms), "the terms say a card is not money");
+  assert(/Packs are opened with coins and with nothing else/.test(terms), "that a pack is bought with coins only");
+  assert(/What is in a pack is random/.test(terms) && /chances are printed on the pack before you open it/.test(terms), "and that it is random with the odds on show");
+  assert(SITE_PAGES.find((p) => p.id === "terms").updated === "2026-11-26" && /26 November 2026/.test(terms), "the terms' date moved with its copy");
 });
 
 console.log("test-site-pages.mjs done");

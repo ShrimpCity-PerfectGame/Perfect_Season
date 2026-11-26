@@ -20,7 +20,9 @@ const appEnv = process.env.APP_ENV || "production";
 // Cards (CARDS.md), three settings: "1" on for everybody, "testers" on for the accounts the database lists
 // (card_testers), "" off. Production is built for testers since v2.32.0 - the test site's database is gone, so
 // the real site is where the owner plays them. CARDS_ON overrides either way; an unknown word is off.
-const cardsAsked = process.env.CARDS_ON ?? (appEnv === "staging" ? "1" : "testers");
+// v2.33.0: cards are launched, so every build is on unless told otherwise. `CARDS_ON=testers` is how to pull
+// them back to the list without a code change, and `CARDS_ON=` is off.
+const cardsAsked = process.env.CARDS_ON ?? "1";
 const cardsSetting = cardsAsked === "1" ? "1" : cardsAsked === "testers" ? "testers" : "";
 
 // A Turnstile SECRET key in CAPTCHA_SITE_KEY would be baked into the public bundle and served to every

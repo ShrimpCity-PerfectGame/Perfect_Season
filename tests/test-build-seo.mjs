@@ -172,12 +172,16 @@ check("every other page says when its own words last changed",
 // shipped, and the switch the bundle carries is empty. Checked before the staging build below overwrites public/.
 // v2.32.0: production is built for TESTERS - the catalog ships, and the tile is drawn only for an account the
 // database lists (card_testers). CARDS_ON= still means off, catalog and all.
-check("production ships the card catalog, for its testers", prod.cards !== null && JSON.parse(prod.cards).cards.length === 3124);
-check("production's bundle is set to testers, not to on", !/CARDS_ON/.test(prod.js) && /"testers"/.test(prod.js));
+// v2.33.0: cards are LAUNCHED. A production build with nothing said is the same bundle as one told CARDS_ON=1,
+// and CARDS_ON=testers - the way back to the list - is a different one.
+check("production ships the card catalog", prod.cards !== null && JSON.parse(prod.cards).cards.length === 3124);
 const prodOff = build({ CARDS_ON: "" });
 check("CARDS_ON= turns them off for a production build, and takes the catalog out", prodOff.cards === null);
+const testers = build({ CARDS_ON: "testers" });
+check("CARDS_ON=testers still builds for the list, catalog included", testers.cards !== null && !/CARDS_ON/.test(testers.js));
 const forced = build({ CARDS_ON: "1" });
 check("CARDS_ON=1 turns them on for a production build, catalog included", forced.cards !== null && JSON.parse(forced.cards).cards.length === 3124);
+check("production's bundle is on for everybody: the same bundle as CARDS_ON=1, and not the testers' one", !/CARDS_ON/.test(prod.js) && prod.js === forced.js && prod.js !== testers.js);
 
 console.log("staging build");
 const stg = build({ APP_ENV: "staging", VERCEL_PROJECT_PRODUCTION_URL: "perfect-season-staging.vercel.app" });
