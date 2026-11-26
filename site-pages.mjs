@@ -56,7 +56,7 @@ const BOARDS = [
 // than a person's mailbox: it can be forwarded anywhere, and it doesn't put a personal address in front of
 // every crawler that reads this page.
 export const PRIVACY_CONTACT = "privacy@gridspin.app";
-export const PRIVACY_UPDATED = "5 October 2026";
+export const PRIVACY_UPDATED = "26 November 2026";
 
 // Who may play. Shared, because the privacy policy and the terms both state it and two live pages
 // disagreeing about it is worse than either alone.
@@ -96,6 +96,10 @@ const PRIVACY_SECTIONS = [
   ["What the game records as you play", [
     "Every finished season and every abandoned one: the boards you were dealt, the players you drafted, the score, the result and when it happened. The same for the daily, for Over/Under, Build-a-player, Century and Guess the Player, and for the picks either side of a duel.",
     "The coins a season earns, the badges it unlocks and anything bought in the shop. Coins are a game score - there is no real money anywhere in Gridspin and nothing to buy with real money.",
+    // Cards (v2.33.0, the release that switched them on for everybody). Every clause is a table: card_owned
+    // and card_grants, card_decks, card_runs / card_dailies / card_gauntlets. The last sentence is what
+    // delete_account does - cards are the person's, so unlike a season they go when the account does.
+    "If you play Cards: the cards you own and how each one was come by - the starter deck, the day's card from the daily, a pack, a win - the deck you have built, and the battles you have played with their results. Your username appears on the card leaderboards beside your record. Nobody else can see which cards you own.",
   ]],
   ["Pictures", [
     "A profile picture is cropped to 256 by 256 in your own browser before it is uploaded, and every piece of metadata the file carried - where and when it was taken, what took it - is removed in the process. What reaches the server is the picture and nothing else.",
@@ -122,11 +126,11 @@ const PRIVACY_SECTIONS = [
     "Nothing is sold, rented or handed to anyone else.",
   ]],
   ["What is kept on your device", [
-    "A draft in progress, a Century or Guess the Player game in progress, which dailies you have already played, the scoring format you last chose, whether you have seen the rules, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
+    "A draft in progress, a Century or Guess the Player game in progress, which dailies you have already played, the scoring format you last chose, whether you have seen the rules, whether you have hidden the Cards area, and - if you are signed in - the token that keeps you signed in. It lives in your browser's own storage rather than in advertising cookies, and clearing your browser data removes it.",
   ]],
   ["Your choices", [
     `You can change or clear your bio, your picture and your favourite team whenever you like, from your profile. To close your account, use Close my account on your profile - or write to ${PRIVACY_CONTACT} from the address the account uses and it will be done for you.`,
-    "Closing it erases the person: your name, your email address, your bio, your picture, your favourite team, your coins, the items you own and your badges. The seasons, dailies, duels and mini-games you played stay on the leaderboards, under a name that is nobody's and cannot be traced back to you. They are not kept to hold on to you - they are part of other players' leaderboards and other players' duels, and taking them away would quietly change somebody else's record.",
+    "Closing it erases the person: your name, your email address, your bio, your picture, your favourite team, your coins, the items you own, your badges, and your cards with the deck and the battles played with them. The seasons, dailies, duels and mini-games you played stay on the leaderboards, under a name that is nobody's and cannot be traced back to you. They are not kept to hold on to you - they are part of other players' leaderboards and other players' duels, and taking them away would quietly change somebody else's record.",
     "A guest account identifies nobody, so there is nothing to delete - stopping playing is enough. If you would rather its scores came off the leaderboard, write in and say which name it was.",
   ]],
   ["Children", [
@@ -150,7 +154,7 @@ const PRIVACY_SECTIONS = [
 // an account - which is also why moderation could rename and clear but not BAN. There was no document to
 // ban anyone under.
 
-export const TERMS_UPDATED = "2 October 2026";
+export const TERMS_UPDATED = "26 November 2026";
 // The US state whose law governs these terms. **Deliberately empty until the owner names it**, and
 // tests/test-site-pages.mjs is red while it is: a terms page that ships with a placeholder sentence in it
 // is worse than one that ships a day later.
@@ -177,8 +181,12 @@ const TERMS_SECTIONS = [
   ]],
   ["Coins, badges and the shop", [
     "Coins are a score, not money. They cannot be bought, sold, exchanged for anything outside the game, or moved between accounts, and they have no cash value. The same goes for badges, frames, titles and everything else the shop holds.",
+    // Cards (v2.33.0). The three things that have to be said before a pack is on sale to everybody: a card is
+    // not property, a pack is bought with the game's own score and never with money, and what is in one is
+    // random with the odds on show (card-packs.mjs is what the shop prints AND what the server rolls from).
+    "Cards work the same way. A card cannot be bought or sold for money, traded, given away or moved to another account, and it has no cash value. Packs are opened with coins and with nothing else. What is in a pack is random: the chances are printed on the pack before you open it, and they are the same chances the server uses. A copy of a card you already hold is turned into coins for you, at the amount shown.",
     "Nothing in Gridspin costs real money today. If that ever changes, these terms will say so before it does, and anything with a price will show it before you buy.",
-    "Prices, what is on sale and what an item looks like can change, and an item can be withdrawn. What you already own stays yours for as long as your account does, and goes with it if the account is closed.",
+    "Prices, what is on sale and what an item looks like can change, and an item can be withdrawn. So can the rules of a card battle, what a pack costs and what it holds. What you already own stays yours for as long as your account does, and goes with it if the account is closed.",
   ]],
   ["What you write and upload", [
     "Your bio and your picture stay yours. Putting them on Gridspin gives the site permission to show them to other players, which is the point of a profile, and nothing more. Do not upload a picture you do not have the right to use.",
@@ -254,7 +262,7 @@ export const SITE_PAGES = [
     path: PRIVACY_PATH,
     file: "privacy.html",
     // PRIVACY_UPDATED in words, and this in the sitemap: change both together.
-    updated: "2026-10-05",
+    updated: "2026-11-26",
     nav: "Privacy",
     title: "Gridspin privacy policy - what the game keeps",
     description: "What Gridspin records, what other players can see, where it is kept, and how to have an account and its data deleted. A visit counter and a crash report, both nameless. No adverts, no trackers, nothing sold.",
@@ -275,7 +283,7 @@ export const SITE_PAGES = [
     path: TERMS_PATH,
     file: "terms.html",
     // TERMS_UPDATED in words, and this in the sitemap: change both together.
-    updated: "2026-10-02",
+    updated: "2026-11-26",
     nav: "Terms",
     title: "Gridspin terms of use",
     description: "The rules for playing Gridspin: who can play, how to behave, what a moderator can do, and that coins are a score rather than money. Not affiliated with the NFL.",

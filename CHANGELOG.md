@@ -20,6 +20,29 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.33.0] - 2026-11-26
+
+**Cards are live for everybody.** The owner's call on 2026-11-26, taken with the skin-tone list and the pack
+question as they stand; the privacy and terms pages were the one gate that had to move in the same release.
+
+### Added
+- **Cards for every account**: the Cards tile, the starter deck, the pack shop, the ladder, the daily battle,
+  the gauntlet and a card from each day's daily draft. Guests are still refused, as they are the shop.
+- **`/privacy` says what cards store** - the cards you own and how each was come by, your deck, your battles -
+  that nobody else can see your collection, that closing an account erases all of it, and the one card
+  setting kept on the device.
+- **`/terms` says what a card and a pack are**: no cash value, not tradeable or transferable, packs opened
+  with coins and nothing else, contents random with the chances printed on the pack, copies turned into coins.
+
+### Changed
+- A build is on for cards unless told otherwise (`CARDS_ON=testers` pulls them back to the list, `CARDS_ON=`
+  is off), and production's `CARDS_ENABLED` secret is `1`. `card_testers` is read by nothing now and stays.
+
+### Not checked
+- Nobody but the owner has played cards, and on the real site only a starter deck had been opened when this
+  shipped: no pack, ladder battle, daily battle or gauntlet stage had been played there.
+- The skin-tone list is still the first pass (`FROM_MEMORY` in tools/cards/build-card-skin.mjs).
+
 ## [2.32.0] - 2026-11-25
 
 The test site's database was deleted on 2026-11-25 and the owner chose not to replace it. From this release
