@@ -1603,6 +1603,12 @@ Leaderboard for every existing account. That risk is now accepted by the owner, 
   client. No migration. `submit-century` and `submit-guess` both changed, and the client's outbox is built on
   the reasons they answer with, so a client ahead of the functions holds runs on reasons the deployed
   functions never send.
+  v2.35.0's (the card badges pay): re-run **`migration-wallet.sql`**, then **deploy the Edge Functions**
+  (`card-claim` changed), then the client. **Migration first is not optional**: `badge_rewards` holds the
+  three at 0 from v2.34.0, and `award_badges` RECORDS an award at whatever the table says - so a function
+  ahead of the migration pays nothing and the badge can never pay afterwards. If that ever happens:
+  `delete from badge_awards where badge in ('collector','on-a-roll','gauntlet-runner');` and the next pack
+  or battle pays. A client ahead of the function just shows no badge line.
   v2.34.0's (refused sign-ins recorded, card how-to, sharing, badges, profile): run
   **`migration-client-errors.sql`** (the `auth` kind), **`migration-cards.sql`** (`card_profile`) and
   **`migration-wallet.sql`** (three `badge_rewards` rows at 0), then **deploy the Edge Functions**

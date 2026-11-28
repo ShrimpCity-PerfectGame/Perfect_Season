@@ -96,6 +96,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { CARDS, initCardData, starterFill, deckProblem, bestDeck, dealHand, roundProblem, playRound, battleResult, CATEGORY_IDS, ladderFoe, ladderEdge, dailyFoe, dailyRound, dailyScore, ownKey, maskFoe, GAUNTLET, gauntletFoe, gauntletEdge, gauntletRound } from "../../../card-logic.mjs";
 import { COIN_RULES, cardWinCoins, cardSellCoins, gauntletCoins } from "../../../rewards.mjs";
 import { PACK_BY_ID, rollPack } from "../../../card-packs.mjs";
+import { BADGE_BY_ID, cardBadgesEarned } from "../../../badges.mjs";
 import catalog from "../../../data/cards.json" with { type: "json" };
 
 initCardData(catalog);
@@ -337,6 +338,7 @@ async function battle(service: any, userId: string, body: any, json: (body: unkn
     return json({
       ok: true, round, done: true, battle: last, gauntlet: { cleared: data.cleared, stage: null, hand: [], rounds: [] },
       first: data.first === true, coins: { credited: data.credited ?? 0, balance: data.balance ?? null },
+      badge: await payCardBadges(service, userId),
     });
   }
 
@@ -430,7 +432,37 @@ async function battle(service: any, userId: string, body: any, json: (body: unkn
     ok: true, round, done: true, battle: last,
     run: { id: run.id, wins: data.wins, status: data.status, hand: fromSql(data.hand), foe: maskFoe(foeFrom(data.foe), 0), rounds: [] },
     coins: { credited: data.credited ?? 0, capped: data.capped === true, balance: data.balance ?? null },
+    badge: await payCardBadges(service, userId),
   });
+}
+
+// THE CARD BADGES ARE PAID HERE (v2.35.0), after a pack is opened and after a ladder battle or a gauntlet
+// stage ends - the three moments their counts can move. submit-run pays every other badge from player_stats,
+// which has no cards; this function is what witnessed the cards, so it records them, as submit-guess does
+// Bullseye. award_badges is once per (user, badge) and badge_rewards decides the amount. A failure here never
+// fails the pack or the battle: the next one asks again. It answers null unless something was NEWLY awarded,
+// and names the badge, because a card file cannot import badges.mjs to look the name up.
+async function payCardBadges(service: any, userId: string) {
+  try {
+    const { data: counts, error: readError } = await service.rpc("card_profile", { p_user: userId });
+    if (readError || !counts) { console.error("card-claim card_profile:", readError); return null; }
+    const earned = cardBadgesEarned(counts);
+    if (!earned.length) return null;
+    const { data, error } = await service.rpc("award_badges", {
+      p_user: userId,
+      p_badges: earned.map((id: string) => ({ id, coins: (BADGE_BY_ID as any)[id]?.coins ?? 0 })),
+    });
+    if (error) { console.error("card-claim award_badges:", error); return null; }
+    if (!Array.isArray(data?.awarded) || !data.awarded.length) return null;
+    return {
+      awarded: data.awarded.map((id: string) => ({ id, name: (BADGE_BY_ID as any)[id]?.name ?? id, emoji: (BADGE_BY_ID as any)[id]?.emoji ?? "" })),
+      credited: data.credited ?? 0,
+      balance: data.balance ?? null,
+    };
+  } catch (e) {
+    console.error("card-claim award_badges:", e);
+    return null;
+  }
 }
 
 async function openPack(service: any, userId: string, body: any, json: (body: unknown, status?: number) => Response) {
@@ -463,5 +495,6 @@ async function openPack(service: any, userId: string, body: any, json: (body: un
     balance: data.balance,
     stockLeft: data.stock_left ?? null,
     duplicate: data.duplicate === true,
+    badge: await payCardBadges(service, userId),
   });
 }

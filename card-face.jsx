@@ -12,6 +12,20 @@ import { TEAMS } from "./game-logic.mjs";
 import { FINISH_BONUS, archetypeLabel, ROLE_PLAYER } from "./card-logic.mjs";
 import { cardColours, spriteFor, paintSoon, paintedSprite } from "./card-sprites.mjs";
 
+// A card badge the server just awarded (card-claim's `badge`, v2.35.0): named, because "+300 coins" with no
+// reason is a mystery. The names come with the answer - a card file may not import badges.mjs. Nothing is
+// drawn unless something was NEWLY awarded, and it styles itself, since two screens' stylesheets use it.
+export function BadgeLine({ badge }) {
+  const list = Array.isArray(badge?.awarded) ? badge.awarded.filter((b) => b && b.name) : [];
+  if (!list.length) return null;
+  return (
+    <p role="status" data-badge-won={list.map((b) => b.id).join(" ")}
+      style={{ margin: 0, padding: "10px 14px", border: "2px solid var(--btn-line)", borderRadius: 12, background: "var(--surface)", color: "var(--ink)", fontWeight: 700, lineHeight: 1.4 }}>
+      {list.map((b) => `${b.emoji ? b.emoji + " " : ""}${b.name}`).join(", ")} {list.length === 1 ? "badge" : "badges"} unlocked{badge.credited > 0 ? ` · +${Number(badge.credited).toLocaleString("en-US")} coins` : ""}
+    </p>
+  );
+}
+
 export const CARD_PAINT = {
   paper: "#f4efe2", ink: "#14213d", muted: "#4d566d", line: "#c9c2b0",
   artHi: "#fbf8ef", artLo: "#d6cdb6", goldHi: "#fff6d0", goldLo: "#dcb85a",

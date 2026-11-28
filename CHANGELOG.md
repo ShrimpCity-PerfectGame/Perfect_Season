@@ -20,6 +20,17 @@ CLAUDE.md.
 
 ## [Unreleased]
 
+## [2.35.0] - 2026-11-26
+
+### Added
+- **The three card badges pay coins**: Collector 100, On a Roll 300, Gauntlet Runner 1,000, each once. The
+  server pays them when a pack is opened or a ladder battle or gauntlet stage ends, and the screen says
+  which badge and what it paid. A player who already qualifies is paid by their next pack or battle. A
+  hundredth card that arrives as a daily card is paid the same way, on the next pack or battle.
+
+### Not checked
+- Driven in tests and against the mock only; nobody has earned one on the real site yet.
+
 ## [2.34.0] - 2026-11-26
 
 ### Fixed

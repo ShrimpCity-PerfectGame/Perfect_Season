@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { assert, runTest } from "./helpers.mjs";
 import {
   BADGES, BADGE_BY_ID, BADGE_TIERS, TIER_COINS, CINDERELLA_MAX_SCORE, SCOUT_MIN_POINTS, DAY_ONE_BEFORE, badgeProgress, topBadges, CENTURY_BADGE_SCORE, GUESS_BADGE_TRIES,
+  cardBadgesEarned,
 } from "../badges.mjs";
 import { mapPlayerStats, emptyPlayerStats } from "../profile-rules.mjs";
 import { rowToProfile } from "../storage-core.js";
@@ -26,8 +27,8 @@ await runTest("the catalog: 27 badges in the contract's shape, coins by tier", a
     assert(BADGE_TIERS.includes(b.tier), `${b.id}: unknown tier ${b.tier}`);
     assert(BADGE_BY_ID[b.id] === b, `BADGE_BY_ID is missing ${b.id}`);
     assert(b.name && b.emoji && b.how, `${b.id} needs a name, emoji and how`);
-    // Browser-saved scores pay nothing; the three card badges are verified but nothing pays them yet.
-    const unpaid = ["stat-nerd", "mad-scientist", "collector", "on-a-roll", "gauntlet-runner"].includes(b.id);
+    // Browser-saved scores pay nothing. The card badges are verified and pay (v2.35.0, card-claim awards them).
+    const unpaid = ["stat-nerd", "mad-scientist"].includes(b.id);
     assert(b.coins === (unpaid ? 0 : TIER_COINS[b.tier]), `${b.id}: coins ${b.coins}`);
   }
   assert(Object.keys(BADGE_BY_ID).length === BADGES.length, "BADGE_BY_ID has exactly the catalog");
@@ -187,8 +188,13 @@ await runTest("the card badges: a hundred cards, ten in a run, the whole gauntle
     assert(got(id, cards({ [field]: need })).earned === true, `${id}: ${need} is`);
     assert(got(id, cards({ [field]: need + 5 })).earned === true && got(id, cards({ [field]: need + 5 })).have === need, `${id}: past it, and progress stops at the need`);
     assert(got(id, cards(null)).earned === false && got(id, {}).earned === false && got(id, { extra: {} }).earned === false, `${id}: a card read that never came is nothing earned`);
-    assert(BADGE_BY_ID[id].coins === 0 && BADGE_BY_ID[id].how.includes(String(need)), `${id} pays nothing yet and says its number`);
+    assert(BADGE_BY_ID[id].coins === TIER_COINS[BADGE_BY_ID[id].tier] && BADGE_BY_ID[id].how.includes(String(need)), `${id} pays its tier and says its number`);
   }
+  // What card-claim pays from: card_profile's own names, at the same thresholds the profile shows.
+  assert(cardBadgesEarned({ cards: 99, best_run: 9, gauntlet: 11, dailies: 50 }).length === 0, "one short of each is nothing");
+  assert(cardBadgesEarned({ cards: 100, best_run: 0, gauntlet: 0 }).join() === "collector", "a hundred cards");
+  assert(cardBadgesEarned({ cards: 600, best_run: 10, gauntlet: 12 }).join() === "collector,on-a-roll,gauntlet-runner", "all three, in catalog order");
+  assert(cardBadgesEarned(null).length === 0 && cardBadgesEarned({ cards: "x" }).length === 0, "a read that is not one earns nothing");
 });
 
 await runTest("topBadges: gold, special, silver, bronze, then catalog order, up to n", async () => {

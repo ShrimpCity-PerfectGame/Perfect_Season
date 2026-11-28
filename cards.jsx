@@ -21,7 +21,7 @@ import { TEAMS } from "./game-logic.mjs";
 import { PACKS, packCards, packOdds } from "./card-packs.mjs";
 import { Coins } from "./cosmetics.jsx";
 import { packArt } from "./card-sprites.mjs";
-import { CardFace, CARD_FACE_CSS } from "./card-face.jsx";
+import { CardFace, CARD_FACE_CSS, BadgeLine } from "./card-face.jsx";
 import { BattleArea, CARD_BATTLE_CSS, LINEUP_SENTENCES } from "./card-battle.jsx";
 
 // Every reason claimStarter can answer with, as a sentence. A reason missing from here would reach the player
@@ -146,7 +146,7 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
     const wanted = retry ? 1 : qty[pack.id] || 1;
     setBusy(true); setNotice(null); setAsking(pack.id);
     const got = [];
-    let res = null, again = false, missing = false, opened = 0;
+    let res = null, again = false, missing = false, opened = 0, badge = null;
     for (let n = 0; n < wanted; n++) {
       if (!pending.has(pack.id)) pending.set(pack.id, { id: newOpenId(), price: row.price });
       const mine = pending.get(pack.id);
@@ -155,7 +155,9 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
       // What the purchase changed is the card area's and the app's to know WHETHER OR NOT this shop is still on
       // screen - a player who taps Collection while a pack is opening has still bought it.
       pending.delete(pack.id);
-      onBalance?.(res.balance);
+      // A badge paid on top of the purchase: its balance is the later one.
+      onBalance?.(typeof res.badge?.balance === "number" ? res.badge.balance : res.balance);
+      if (res.badge) badge = res.badge;
       onOpened?.();
       opened++;
       const cards = toCards(res.cards.map((c) => ({ ...c, count: 1 })));
@@ -167,7 +169,7 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
       }
     }
     if (live.current) setProgress(null);
-    if (opened > 0 && live.current) setPulled({ pack, cards: got, again, missing, opened, wanted });
+    if (opened > 0 && live.current) setPulled({ pack, cards: got, again, missing, opened, wanted, badge });
     if (res.ok) {
       if (!live.current) return;
       setBusy(false);
@@ -213,6 +215,7 @@ export function PackShop({ balance, onBalance, onOpened, pendingRef }) {
         <section className="cd-fresh" aria-labelledby="cd-pulled-h">
           <h2 className="cd-h" id="cd-pulled-h" tabIndex={-1} ref={pulledRef}>You pulled</h2>
           {pulled.wanted > 1 && <p className="note" data-batch>{pulled.opened === pulled.wanted ? `${pulled.opened} packs opened.` : `${pulled.opened} of ${pulled.wanted} packs opened. The rest were not bought.`}</p>}
+          <BadgeLine badge={pulled.badge} />
           {pulled.again && <p className="note">This pack was already bought — here are its cards again. You weren't charged twice.</p>}
           {pulled.missing && <p className="note">Some of these cards can't be shown because this page is out of date. They are yours — reload to see them.</p>}
           <div className="cd-grid">
